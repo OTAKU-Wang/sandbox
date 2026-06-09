@@ -1,0 +1,10 @@
+mirrors:
+  "registry.k8s.io":
+    endpoint:
+      - "https://registry.k8s.io.m.daocloud.io"
+  "quay.io":
+    endpoint:
+      - "https://quay.m.daocloud.io"
+  "ghcr.io":
+    endpoint:
+      - "https://ghcr.m.daocloud.io"

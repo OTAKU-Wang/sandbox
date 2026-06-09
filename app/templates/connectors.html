@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}连接器管理 - CDS{% endblock %}
+{% block nav_connector %}active{% endblock %}
+{% block header %}连接器管理{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat-card">
+        <div class="label">连接器总数</div>
+        <div class="value" id="total-connectors">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">活跃连接</div>
+        <div class="value" id="active-connectors">-</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>注册新连接器</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <input type="text" id="conn-name" placeholder="连接器名称">
+        <select id="conn-type">
+            <option value="postgres">PostgreSQL</option>
+            <option value="clickhouse">ClickHouse</option>
+            <option value="kafka">Kafka</option>
+            <option value="s3">S3/MinIO</option>
+        </select>
+        <input type="text" id="conn-url" placeholder="连接 URL (postgresql://...)" style="grid-column:span 2;">
+    </div>
+    <button class="btn btn-primary" style="margin-top:12px;" onclick="registerConnector()">注册</button>
+</div>
+
+<div class="card">
+    <h3>连接器列表</h3>
+    <table>
+        <thead>
+            <tr><th>名称</th><th>类型</th><th>状态</th><th>最后同步</th><th>操作</th></tr>
+        </thead>
+        <tbody id="connectors-table"></tbody>
+    </table>
+    <div id="connectors-empty" class="empty" style="display:none;">暂无连接器</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadConnectors() {
+    try {
+        const data = await API.get('/api/v1/connectors/');
+        const list = data.items || data.connectors || data || [];
+        if (!list.length) { $('#connectors-empty').style.display = 'block'; return; }
+        let active = 0;
+        $('#connectors-table').innerHTML = list.map(c => {
+            if (c.status === 'active') active++;
+            return `<tr>
+                <td>${c.space_name || c.name || '-'}</td>
+                <td>${c.space_type || c.connector_type || '-'}</td>
+                <td>${statusBadge(c.status || 'active')}</td>
+                <td>${formatDate(c.updated_at || c.created_at)}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="suspendConnector('${c.id}')">${c.status === 'suspended' ? '恢复' : '暂停'}</button>
+                </td>
+            </tr>`;
+        }).join('');
+        $('#total-connectors').textContent = list.length;
+        $('#active-connectors').textContent = active;
+    } catch (e) {
+        $('#connectors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${e.message}</td></tr>`;
+    }
+}
+
+async function registerConnector() {
+    const body = {
+        space_name: $('#conn-name').value,
+        space_type: $('#conn-type').value,
+        endpoint_url: $('#conn-url').value,
+    };
+    try {
+        await API.post('/api/v1/connectors/register', body);
+        loadConnectors();
+    } catch (e) { alert('注册失败: ' + e.message); }
+}
+
+async function suspendConnector(id) {
+    try {
+        await API.post(`/api/v1/connectors/${id}/suspend`, {});
+        loadConnectors();
+    } catch (e) { alert('操作失败: ' + e.message); }
+}
+
+loadConnectors();
+</script>
+{% endblock %}

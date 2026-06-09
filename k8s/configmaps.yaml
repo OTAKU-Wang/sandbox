@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-sql
+  namespace: cds-system
+data:
+  init.sql: |
+    -- CDS Database Initialization
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    -- Grant permissions
+    GRANT ALL PRIVILEGES ON DATABASE cds TO cds_admin;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-init-sql
+  namespace: cds-system
+data:
+  init.sql: |
+    -- CDS ClickHouse Audit Tables
+    CREATE DATABASE IF NOT EXISTS cds_audit;
+
+    CREATE TABLE IF NOT EXISTS cds_audit.audit_events (
+      id String,
+      user_id String,
+      action String,
+      resource_type String,
+      resource_id String,
+      detail String,
+      ip_address String,
+      created_at DateTime DEFAULT now()
+    ) ENGINE = MergeTree()
+    PARTITION BY toYYYYMM(created_at)
+    ORDER BY (created_at, user_id, action)
+    TTL created_at + INTERVAL 7 YEAR;
+
+    CREATE TABLE IF NOT EXISTS cds_audit.policy_decisions (
+      id String,
+      session_id String,
+      policy_id String,
+      decision String,
+      reason String,
+      created_at DateTime DEFAULT now()
+    ) ENGINE = MergeTree()
+    PARTITION BY toYYYYMM(created_at)
+    ORDER BY (created_at, session_id)
+    TTL created_at + INTERVAL 7 YEAR;

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}告警管理 - CDS{% endblock %}
+{% block nav_alert %}active{% endblock %}
+{% block header %}告警管理{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat-card">
+        <div class="label">活跃告警</div>
+        <div class="value" id="active-alerts">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">严重 (Critical)</div>
+        <div class="value" id="critical-alerts" style="color:var(--danger);">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">今日告警</div>
+        <div class="value" id="today-alerts">-</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>告警列表</h3>
+    <table>
+        <thead>
+            <tr><th>时间</th><th>级别</th><th>类型</th><th>消息</th><th>状态</th><th>操作</th></tr>
+        </thead>
+        <tbody id="alerts-table"></tbody>
+    </table>
+    <div id="alerts-empty" class="empty" style="display:none;">暂无告警</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAlerts() {
+    try {
+        const data = await API.get('/api/v1/monitoring/alerts');
+        const list = data.items || data.alerts || data || [];
+        if (!list.length) { $('#alerts-empty').style.display = 'block'; return; }
+        let active = 0, critical = 0, today = 0;
+        const todayStr = new Date().toISOString().slice(0, 10);
+        $('#alerts-table').innerHTML = list.map(a => {
+            const status = a.status || 'active';
+            if (status === 'active' || status === 'firing') active++;
+            if (a.severity === 'critical') critical++;
+            if ((a.created_at || a.timestamp || '').startsWith(todayStr)) today++;
+            const severityClass = a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warning' : 'info';
+            return `<tr>
+                <td>${formatDate(a.created_at || a.timestamp)}</td>
+                <td>${badge(a.severity || 'info', severityClass)}</td>
+                <td>${a.alert_type || a.type || '-'}</td>
+                <td>${truncate(a.message || a.description, 60)}</td>
+                <td>${statusBadge(status)}</td>
+                <td>-</td>
+            </tr>`;
+        }).join('');
+        $('#active-alerts').textContent = active;
+        $('#critical-alerts').textContent = critical;
+        $('#today-alerts').textContent = today;
+    } catch (e) {
+        $('#alerts-table').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${e.message}</td></tr>`;
+    }
+}
+
+loadAlerts();
+</script>
+{% endblock %}

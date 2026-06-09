@@ -1,0 +1,124 @@
+# CDS Helm Chart — Default Values
+replicaCount: 2
+
+image:
+  api:
+    repository: cds/api
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: cds/frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+# ─── API Service ───
+api:
+  port: 8000
+  workers: 4
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  env:
+    ENVIRONMENT: production
+    LOG_LEVEL: info
+
+# ─── Frontend Service ───
+frontend:
+  port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ─── PostgreSQL ───
+postgresql:
+  enabled: true
+  auth:
+    database: cds
+    username: cds
+    existingSecret: cds-db-credentials
+  primary:
+    persistence:
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+# ─── Redis ───
+redis:
+  enabled: true
+  auth:
+    existingSecret: cds-redis-credentials
+  master:
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+# ─── ClickHouse (audit) ───
+clickhouse:
+  enabled: true
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "24.3-alpine"
+  persistence:
+    size: 100Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# ─── OPA (policy engine) ───
+opa:
+  enabled: true
+  image:
+    repository: openpolicyagent/opa
+    tag: "0.68.0"
+  port: 8181
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# ─── Ingress ───
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+  hosts:
+    - host: cds.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls:
+    - secretName: cds-tls
+      hosts:
+        - cds.example.com
+
+# ─── Secrets (reference K8s secrets) ───
+secrets:
+  existingSecret: cds-secrets
+  # Keys expected in the secret:
+  # JWT_SECRET, KMS_MASTER_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD, CLICKHOUSE_PASSWORD
+
+# ─── Sandbox workspace ───
+sandbox:
+  workspaceSize: 20Gi
+  storageClass: ""

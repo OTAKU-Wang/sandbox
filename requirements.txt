@@ -1,0 +1,58 @@
+# === 核心框架 ===
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic[email]>=2.0
+pydantic-settings>=2.0
+email-validator>=2.0
+python-multipart>=0.0.7
+
+# === 数据库 ===
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
+alembic>=1.13.0
+
+# === 缓存 & Session ===
+redis>=5.0.0
+
+# === 国密算法 ===
+gmssl>=3.2.2
+
+# === JWT ===
+PyJWT>=2.8.0
+
+# === Password hashing ===
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0,<5.0
+
+# === HTTP 客户端 ===
+httpx>=0.27.0
+
+# === 日志 ===
+structlog>=24.0.0
+
+# === 测试 ===
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+httpx  # for TestClient
+aiosqlite>=0.20.0  # SQLite async for tests
+
+# === 任务队列 ===
+celery[redis]>=5.3.0
+
+# === KMS ===
+hvac>=2.0.0
+
+# === DuckDB ===
+duckdb>=1.0.0
+
+# === PII NER ML & CPU Training ===
+transformers>=4.36.0
+torch>=2.0.0
+peft>=0.7.0
+
+# === TLCP (国密 TLS) ===
+tongsuo>=1.0.0
+
+# === Kafka (CDC) ===
+aiokafka>=0.10.0

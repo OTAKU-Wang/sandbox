@@ -1,0 +1,139 @@
+version: "3.9"
+
+services:
+  # ─── 数据库层 ───
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cds
+      POSTGRES_USER: cds
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cds_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cds"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-cds_dev_redis} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-cds_dev_redis}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: cds_audit
+      CLICKHOUSE_USER: cds
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-cds_dev_ch}
+
+  # ─── 策略引擎 ───
+  opa:
+    image: openpolicyagent/opa:0.68.0
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+    volumes:
+      - ./policies:/policies
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── 密钥管理 ───
+  vault:
+    image: hashicorp/vault:1.15
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-cds_vault_dev_token}
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_LOCAL_CONFIG: |
+        {
+          "backend": {"file": {"path": "/vault/file"}},
+          "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": true}},
+          "ui": true
+        }
+    volumes:
+      - vault-data:/vault/file
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://localhost:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── 应用层 ───
+  cds-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD:-cds_dev_password}@postgres:5432/cds
+      REDIS_URL: redis://:${REDIS_PASSWORD:-cds_dev_redis}@redis:6379/0
+      CLICKHOUSE_URL: http://clickhouse:8123/cds_audit
+      OPA_URL: http://opa:8181
+      VAULT_URL: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN:-cds_vault_dev_token}
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_prod}
+      KMS_MASTER_KEY: ${KMS_MASTER_KEY:-dev_kms_key_change_in_prod}
+      ENVIRONMENT: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+      opa:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    volumes:
+      - sandbox-workspace:/tmp/cds_sandbox
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  cds-frontend:
+    build:
+      context: ./cds-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      cds-api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  vault-data:
+  sandbox-workspace:

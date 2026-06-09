@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}身份/密钥管理 - CDS{% endblock %}
+{% block nav_identity %}active{% endblock %}
+{% block header %}身份/密钥管理{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat-card">
+        <div class="label">密钥总数</div>
+        <div class="value" id="total-keys">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">活跃密钥</div>
+        <div class="value" id="active-keys">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">已吊销</div>
+        <div class="value" id="revoked-keys">-</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>SM2 密钥对生成</h3>
+    <div style="display:flex;gap:12px;margin-bottom:16px;">
+        <input type="text" id="key-product-id" placeholder="Product ID" style="flex:1;">
+        <button class="btn btn-primary" onclick="generateKey()">生成密钥</button>
+    </div>
+    <div id="key-result"></div>
+</div>
+
+<div class="card">
+    <h3>数据加密密钥 (DEK) 列表</h3>
+    <table>
+        <thead>
+            <tr><th>Key ID</th><th>Product</th><th>Algorithm</th><th>Status</th><th>Usage</th><th>Created</th><th>操作</th></tr>
+        </thead>
+        <tbody id="keys-table"></tbody>
+    </table>
+    <div id="keys-empty" class="empty" style="display:none;">暂无密钥</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadKeys() {
+    try {
+        const data = await API.get('/api/v1/kms/keys');
+        const tbody = $('#keys-table');
+        const list = data.items || data.keys || data || [];
+        if (!list.length) {
+            $('#keys-empty').style.display = 'block';
+            return;
+        }
+        let active = 0, revoked = 0;
+        tbody.innerHTML = list.map(k => {
+            if (k.status === 'active') active++;
+            if (k.status === 'revoked' || k.status === 'destroyed') revoked++;
+            return `<tr>
+                <td><code>${truncate(k.key_id, 30)}</code></td>
+                <td>${k.product_id || '-'}</td>
+                <td>${k.algorithm || 'SM4-GCM'}</td>
+                <td>${statusBadge(k.status)}</td>
+                <td>${k.usage_count || 0}/${k.max_usage || 10000}</td>
+                <td>${formatDate(k.created_at)}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="destroyKey('${k.key_id}')">销毁</button></td>
+            </tr>`;
+        }).join('');
+        $('#total-keys').textContent = list.length;
+        $('#active-keys').textContent = active;
+        $('#revoked-keys').textContent = revoked;
+    } catch (e) {
+        $('#keys-table').innerHTML = `<tr><td colspan="7" class="empty">加载失败: ${e.message}</td></tr>`;
+    }
+}
+
+async function generateKey() {
+    const productId = $('#key-product-id').value.trim();
+    if (!productId) { alert('请输入 Product ID'); return; }
+    try {
+        const result = await API.post('/api/v1/kms/keys', { product_id: productId });
+        $('#key-result').innerHTML = `<div class="card" style="background:var(--bg);">
+            <p><strong>Key ID:</strong> <code>${result.key_id}</code></p>
+            <p><strong>Key (hex):</strong> <code style="word-break:break-all;">${result.key_bytes || '(stored in KMS)'}</code></p>
+        </div>`;
+        loadKeys();
+    } catch (e) { alert('生成失败: ' + e.message); }
+}
+
+async function destroyKey(keyId) {
+    if (!confirm(`确认销毁密钥 ${keyId}？此操作不可逆。`)) return;
+    try {
+        await API.del(`/api/v1/kms/keys/${keyId}`);
+        loadKeys();
+    } catch (e) { alert('销毁失败: ' + e.message); }
+}
+
+loadKeys();
+</script>
+{% endblock %}

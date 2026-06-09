@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CDS 密态沙箱{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="logo">CDS Admin</div>
+        <ul>
+            <li><a href="/admin/identities" class="{% block nav_identity %}{% endblock %}">身份/密钥管理</a></li>
+            <li><a href="/admin/certificates" class="{% block nav_cert %}{% endblock %}">证书管理</a></li>
+            <li><a href="/admin/connectors" class="{% block nav_connector %}{% endblock %}">连接器管理</a></li>
+            <li><a href="/admin/alerts" class="{% block nav_alert %}{% endblock %}">告警管理</a></li>
+            <li><a href="/admin/blockchain" class="{% block nav_blockchain %}{% endblock %}">区块链验证</a></li>
+        </ul>
+    </nav>
+    <main class="content">
+        <header>
+            <h1>{% block header %}Dashboard{% endblock %}</h1>
+        </header>
+        <div id="app">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+    <script src="/static/js/admin.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

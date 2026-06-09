@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}证书管理 - CDS{% endblock %}
+{% block nav_cert %}active{% endblock %}
+{% block header %}证书管理{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat-card">
+        <div class="label">证书总数</div>
+        <div class="value" id="total-certs">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">有效证书</div>
+        <div class="value" id="valid-certs">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">已吊销</div>
+        <div class="value" id="revoked-certs">-</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>签发新证书</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <input type="text" id="cert-cn" placeholder="Common Name (如 CDS Provider)">
+        <input type="text" id="cert-org" placeholder="Organization">
+        <select id="cert-type">
+            <option value="root">Root CA</option>
+            <option value="intermediate">Intermediate CA</option>
+            <option value="endpoint">Endpoint</option>
+        </select>
+        <select id="cert-validity">
+            <option value="365">1 年</option>
+            <option value="730">2 年</option>
+            <option value="1095">3 年</option>
+        </select>
+    </div>
+    <button class="btn btn-primary" style="margin-top:12px;" onclick="issueCert()">签发证书</button>
+    <div id="cert-result"></div>
+</div>
+
+<div class="card">
+    <h3>证书列表</h3>
+    <table>
+        <thead>
+            <tr><th>Certificate ID</th><th>Subject</th><th>Type</th><th>Status</th><th>Expires</th><th>操作</th></tr>
+        </thead>
+        <tbody id="certs-table"></tbody>
+    </table>
+    <div id="certs-empty" class="empty" style="display:none;">暂无证书</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadCerts() {
+    try {
+        const data = await API.get('/api/v1/certificates/list');
+        const list = Array.isArray(data) ? data : (data.certificates || data.items || []);
+        if (!list.length) { $('#certs-empty').style.display = 'block'; return; }
+        let valid = 0, revoked = 0;
+        $('#certs-table').innerHTML = list.map(c => {
+            const status = c.status || 'valid';
+            if (status === 'valid' || status === 'active') valid++;
+            if (status === 'revoked') revoked++;
+            return `<tr>
+                <td><code>${truncate(c.cert_id || c.id, 20)}</code></td>
+                <td>${c.subject || c.subject_cn || '-'}</td>
+                <td>${c.cert_type || c.type || '-'}</td>
+                <td>${statusBadge(status)}</td>
+                <td>${formatDate(c.not_after || c.expires_at)}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="verifyCert('${c.cert_id || c.id}')">验证</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeCert('${c.cert_id || c.id}')">吊销</button>
+                </td>
+            </tr>`;
+        }).join('');
+        $('#total-certs').textContent = list.length;
+        $('#valid-certs').textContent = valid;
+        $('#revoked-certs').textContent = revoked;
+    } catch (e) {
+        $('#certs-table').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${e.message}</td></tr>`;
+    }
+}
+
+async function issueCert() {
+    const body = {
+        subject: $('#cert-cn').value,
+        organization: $('#cert-org').value,
+        cert_type: $('#cert-type').value === 'root' ? 'signing' : $('#cert-type').value === 'intermediate' ? 'signing' : 'encryption',
+        validity_days: parseInt($('#cert-validity').value),
+    };
+    try {
+        const result = await API.post('/api/v1/certificates/generate', body);
+        $('#cert-result').innerHTML = `<div class="card" style="background:var(--bg);margin-top:12px;">
+            <p><strong>Cert ID:</strong> <code>${result.cert_id || result.id}</code></p>
+            <p><strong>Subject:</strong> ${result.subject || '-'}</p>
+            <p><strong>PEM:</strong><pre style="white-space:pre-wrap;font-size:12px;color:var(--text-muted);">${truncate(result.cert_pem || result.pem, 200)}</pre></p>
+        </div>`;
+        loadCerts();
+    } catch (e) { alert('签发失败: ' + e.message); }
+}
+
+async function verifyCert(id) {
+    try {
+        const result = await API.get(`/api/v1/certificates/${id}/verify-chain`);
+        alert(result.valid ? '证书验证通过 ✅' : '证书验证失败 ❌: ' + (result.error || ''));
+    } catch (e) { alert('验证失败: ' + e.message); }
+}
+
+async function revokeCert(id) {
+    if (!confirm('确认吊销此证书？将级联挂起关联 DEK 和会话。')) return;
+    try {
+        await API.del(`/api/v1/certificates/${id}`);
+        loadCerts();
+    } catch (e) { alert('吊销失败: ' + e.message); }
+}
+
+loadCerts();
+</script>
+{% endblock %}

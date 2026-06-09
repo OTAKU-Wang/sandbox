@@ -1,0 +1,2044 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>密态沙箱系统 (CDS) - 交互原型 v2</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f1419;--card:#1a1f2e;--card2:#232a3b;--card3:#2a3347;--border:#2d3748;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--primary:#3b82f6;--primary2:#2563eb;--green:#22c55e;--yellow:#eab308;--orange:#f97316;--red:#ef4444;--purple:#a855f7;--cyan:#06b6d4}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.hdr{background:var(--card);border-bottom:1px solid var(--border);padding:0 20px;height:52px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.hdr .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+.hdr .logo em{font-style:normal;background:linear-gradient(135deg,var(--primary),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr .r{display:flex;align-items:center;gap:14px}
+.role-btn{padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--card2);color:var(--text);transition:.15s}
+.role-btn.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.role-btn:hover:not(.active){border-color:var(--primary);color:var(--primary)}
+.noti{position:relative;background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer}
+.noti b{position:absolute;top:-3px;right:-5px;background:var(--red);color:#fff;font-size:9px;padding:1px 4px;border-radius:8px}
+.av{width:30px;height:30px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+.layout{display:flex;flex:1;overflow:hidden}
+.sb{width:200px;background:var(--card);border-right:1px solid var(--border);padding:12px 0;flex-shrink:0;overflow-y:auto}
+.sb .mg{padding:6px 20px 2px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-top:8px}
+.sb .mi{padding:8px 20px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);transition:.12s;border-left:3px solid transparent}
+.sb .mi:hover{background:var(--card2);color:var(--text)}
+.sb .mi.on{background:rgba(59,130,246,.1);color:var(--primary);border-left-color:var(--primary)}
+.sb .mi .ic{width:18px;text-align:center;font-size:14px}
+.mn{flex:1;overflow-y:auto;padding:20px}
+h2{font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+h3{font-size:14px;margin-bottom:12px;color:var(--text2)}
+.cg{display:grid;gap:14px;margin-bottom:18px}
+.cg4{grid-template-columns:repeat(4,1fr)}
+.cg3{grid-template-columns:repeat(3,1fr)}
+.cg2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:1100px){.cg4,.cg3{grid-template-columns:repeat(2,1fr)}}
+.sc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
+.sc .lb{font-size:12px;color:var(--text2);margin-bottom:6px}
+.sc .vl{font-size:24px;font-weight:700;line-height:1.2}
+.sc .sb2{font-size:11px;color:var(--text2);margin-top:4px}
+.sc.bl{border-left:3px solid var(--primary)}
+.sc.bg{border-left:3px solid var(--green)}
+.sc.by{border-left:3px solid var(--yellow)}
+.sc.br{border-left:3px solid var(--red)}
+.sc.bo{border-left:3px solid var(--orange)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px}
+.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.ch h3{margin-bottom:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:8px 10px;background:var(--card2);color:var(--text2);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+tr:hover td{background:rgba(59,130,246,.03)}
+.bg{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600}
+.bg-g{background:rgba(34,197,94,.12);color:var(--green)}
+.bg-y{background:rgba(234,179,8,.12);color:var(--yellow)}
+.bg-o{background:rgba(249,115,22,.12);color:var(--orange)}
+.bg-r{background:rgba(239,68,68,.12);color:var(--red)}
+.bg-b{background:rgba(59,130,246,.12);color:var(--primary)}
+.bg-p{background:rgba(168,85,247,.12);color:var(--purple)}
+.bg-c{background:rgba(6,182,212,.12);color:var(--cyan)}
+.bg-gr{background:rgba(148,163,184,.12);color:var(--text2)}
+.btn{padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;border:none;transition:.12s;display:inline-flex;align-items:center;gap:4px}
+.bp{background:var(--primary);color:#fff}.bp:hover{background:var(--primary2)}
+.bo2{background:transparent;border:1px solid var(--border);color:var(--text)}.bo2:hover{border-color:var(--primary);color:var(--primary)}
+.bd{background:var(--red);color:#fff}
+.bgn{background:var(--green);color:#fff}
+.bw{background:var(--yellow);color:#000}
+.bs{padding:3px 8px;font-size:11px}
+.bg2{display:flex;gap:6px;flex-wrap:wrap}
+.pr{height:6px;background:var(--card2);border-radius:3px;overflow:hidden}
+.pr .bar{height:100%;border-radius:3px;transition:width .4s}
+.dt{font-family:'Fira Code',monospace;font-size:11px;background:var(--card2);padding:2px 6px;border-radius:3px;color:var(--cyan)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+.dg{background:var(--green)}.dy{background:var(--yellow)}.dr{background:var(--red)}.dgr{background:var(--text3)}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px}
+.tab{padding:8px 16px;cursor:pointer;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:.12s}
+.tab:hover{color:var(--text)}.tab.on{color:var(--primary);border-bottom-color:var(--primary)}
+.bar-c{display:flex;align-items:flex-end;gap:6px;height:100px;padding-top:8px}
+.bar-c .b{flex:1;border-radius:3px 3px 0 0;min-width:16px;transition:height .4s;position:relative}
+.bar-c .b:hover{opacity:.8}
+.bar-c .b .bl2{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text3);white-space:nowrap}
+.ev{max-height:240px;overflow-y:auto}
+.ev-i{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.ev-i .tm{color:var(--text3);min-width:44px;font-size:11px}
+.code{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:12px;font-family:'Fira Code',monospace;font-size:12px;line-height:1.5;color:#c9d1d9;white-space:pre;overflow-x:auto}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;display:none;align-items:center;justify-content:center}
+.modal-bg.show{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:640px;width:92%;max-height:82vh;overflow-y:auto}
+.modal h2{font-size:16px}
+.ma{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.fg{margin-bottom:14px}
+.fg label{display:block;font-size:12px;color:var(--text2);margin-bottom:5px}
+.fi,.fs,.ft{width:100%;background:var(--card2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:5px;font-size:12px}
+.fi:focus,.fs:focus,.ft:focus{outline:none;border-color:var(--primary)}
+.ft{min-height:80px;font-family:monospace;resize:vertical}
+.fr{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.ckpt{display:flex;flex-wrap:wrap;gap:10px}
+.ckpt label{display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer}
+.toast{position:fixed;top:64px;right:20px;background:var(--card);border:1px solid var(--green);border-radius:8px;padding:10px 16px;z-index:200;display:none;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.toast.show{display:flex;align-items:center;gap:6px;animation:si .3s}
+@keyframes si{from{transform:translateX(80px);opacity:0}to{transform:translateX(0);opacity:1}}
+.hidden{display:none!important}
+.wizard-steps{display:flex;margin-bottom:18px}
+.ws{flex:1;text-align:center;padding:8px;font-size:12px;color:var(--text3);position:relative}
+.ws::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--border)}
+.ws.on{color:var(--primary)}.ws.on::before{background:var(--primary)}
+.ws.done{color:var(--green)}.ws.done::before{background:var(--green)}
+.search-bar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:3px 10px;border-radius:14px;font-size:11px;cursor:pointer;border:1px solid var(--border);color:var(--text2);transition:.12s}
+.chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.node-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.node-card{background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:14px}
+.node-card .nh{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.node-card .nm{font-weight:600;font-size:13px}
+.node-card .nm2{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px}
+.node-card .ml{color:var(--text3)}
+.timeline{position:relative;padding-left:20px}
+.timeline::before{content:'';position:absolute;left:6px;top:0;bottom:0;width:2px;background:var(--border)}
+.tl-i{position:relative;padding-bottom:12px;font-size:12px}
+.tl-i::before{content:'';position:absolute;left:-16px;top:3px;width:10px;height:10px;border-radius:50%;background:var(--primary);border:2px solid var(--card)}
+.tl-i.done::before{background:var(--green)}
+.tl-i.cur::before{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
+.flow-step{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--card2);border-radius:6px;margin-bottom:6px;font-size:12px}
+.flow-step .num{width:22px;height:22px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
+.flow-step.done .num{background:var(--green)}
+.flow-step.active .num{background:var(--yellow);color:#000}
+.flow-arrow{text-align:center;color:var(--text3);font-size:14px;margin:2px 0}
+.progress-wizard{display:flex;gap:4px;margin:12px 0}
+.progress-wizard .step{flex:1;height:4px;border-radius:2px;background:var(--border)}
+.progress-wizard .step.done{background:var(--green)}
+.progress-wizard .step.active{background:var(--yellow)}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="logo"><span style="font-size:20px">🔒</span> <em>密态沙箱系统 CDS</em></div>
+  <div class="r">
+    <div style="display:flex;gap:4px" id="roleBtns">
+      <button class="role-btn active" onclick="setRole('provider')">📦 数商</button>
+      <button class="role-btn" onclick="setRole('buyer')">🛒 买方</button>
+      <button class="role-btn" onclick="setRole('operator')">⚙️ 运营方</button>
+      <button class="role-btn" onclick="setRole('regulator')">🔍 监管</button>
+    </div>
+    <button class="noti">🔔<b>3</b></button>
+    <div class="av" id="avatarText">张</div>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sb" id="sidebar"></div>
+  <div class="mn" id="main"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="modal-bg" id="mBg" onclick="if(event.target===this)cModal()">
+  <div class="modal" id="mContent"></div>
+</div>
+
+<script>
+let role='provider',page='dashboard';
+
+const MENUS={
+  provider:[
+    {g:'工作台'},{k:'dashboard',i:'📊',t:'我的工作台'},
+    {g:'产品开发'},{k:'devsandbox',i:'🧪',t:'开发沙箱'},{k:'products',i:'📦',t:'产品管理'},{k:'featplats',i:'🧩',t:'特征模板'},{k:'mymonitor',i:'📈',t:'使用监控'},
+    {g:'系统'},{k:'mykeys',i:'🔑',t:'我的密钥'}
+  ],
+  buyer:[
+    {g:'工作台'},{k:'dashboard',i:'📊',t:'我的工作台'},
+    {g:'数据消费'},{k:'catalog',i:'🔍',t:'数据目录'},{k:'console',i:'💻',t:'沙箱控制台'},{k:'mytasks',i:'📋',t:'任务历史'},
+    {g:'安全产出'},{k:'features',i:'🧬',t:'特征工程'},{k:'training',i:'🤖',t:'模型训练'},{k:'deploy',i:'🚀',t:'模型部署'},{k:'apisandbox',i:'🔌',t:'API沙箱'},
+    {g:'系统'},{k:'mycerts',i:'🔑',t:'我的证书'}
+  ],
+  operator:[
+    {g:'运维'},{k:'dashboard',i:'📊',t:'运营总览'},{k:'nodes',i:'🖥️',t:'节点管理'},{k:'cluster',i:'☁️',t:'沙箱集群'},
+    {g:'治理'},{k:'contracts',i:'📋',t:'合约视览'},{k:'audit',i:'📝',t:'审计中心'},{k:'secureout',i:'🛡️',t:'安全产出审计'},{k:'connectors',i:'🔗',t:'连接器'},{k:'users',i:'👥',t:'用户管理'}
+  ],
+  regulator:[
+    {g:'监管'},{k:'dashboard',i:'📊',t:'合规总览'},
+    {g:'审计'},{k:'audit',i:'📝',t:'审计查询'},{k:'verify',i:'✅',t:'存证验真'},{k:'reports',i:'📄',t:'合规报告'}
+  ]
+};
+
+const PAGES={
+  provider:{dashboard:P_provDash,devsandbox:P_devSandbox,products:P_products,featplats:P_featPlats,mymonitor:P_myMonitor,mykeys:P_myKeys},
+  buyer:{dashboard:P_buyerDash,catalog:P_catalog,console:P_console,mytasks:P_myTasks,features:P_features,training:P_training,deploy:P_deploy,apisandbox:P_apiSandbox,mycerts:P_myCerts},
+  operator:{dashboard:P_opDash,nodes:P_nodes,cluster:P_cluster,contracts:P_contracts,audit:P_audit,secureout:P_secureOut,connectors:P_connectors,users:P_users},
+  regulator:{dashboard:P_regDash,audit:P_regAudit,verify:P_verify,reports:P_reports}
+};
+
+function setRole(r){
+  role=r;
+  document.querySelectorAll('.role-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.role-btn')[['provider','buyer','operator','regulator'].indexOf(r)].classList.add('active');
+  document.getElementById('avatarText').textContent={provider:'张',buyer:'李',operator:'王',regulator:'陈'}[r];
+  page='dashboard';renderNav();renderPage();
+}
+
+function renderNav(){
+  const m=MENUS[role];
+  let h='';
+  m.forEach(x=>{
+    if(x.g)h+=`<div class="mg">${x.g}</div>`;
+    else h+=`<div class="mi${x.k===page?' on':''}" onclick="go('${x.k}')"><span class="ic">${x.i}</span>${x.t}</div>`;
+  });
+  document.getElementById('sidebar').innerHTML=h;
+}
+
+function go(p){page=p;renderNav();renderPage();}
+
+function renderPage(){
+  const fn=PAGES[role]?.[page];
+  document.getElementById('main').innerHTML=fn?fn():'<p>页面不存在</p>';
+}
+
+function toast(m,tp='s'){const t=document.getElementById('toast');t.innerHTML=`${tp==='s'?'✅':'❌'} ${m}`;t.style.borderColor=tp==='s'?'var(--green)':'var(--red)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+function sModal(h){document.getElementById('mContent').innerHTML=h;document.getElementById('mBg').classList.add('show');}
+function cModal(){document.getElementById('mBg').classList.remove('show');}
+
+// ==================== 数商视角 ====================
+function P_provDash(){
+  return `
+    <h2>📊 数商工作台</h2>
+    <div class="cg cg4">
+      <div class="sc bg"><div class="lb">已发布产品</div><div class="vl">12</div><div class="sb2">本月 +3</div></div>
+      <div class="sc bl"><div class="lb">草稿中</div><div class="vl">4</div><div class="sb2">待开发完成</div></div>
+      <div class="sc by"><div class="lb">本月被消费</div><div class="vl">342</div><div class="sb2">买方任务数</div></div>
+      <div class="sc bo"><div class="lb">DP预算消耗</div><div class="vl">67%</div><div class="sb2">全局平均</div></div>
+    </div>
+    <div class="cg cg2">
+      <div class="card">
+        <div class="ch"><h3>产品被消费排行</h3></div>
+        <table>
+          <tr><th>产品</th><th>任务数</th><th>买方数</th><th>DP消耗</th></tr>
+          <tr><td>企业纳税数据2023</td><td>156</td><td>8</td><td>45.2ε</td></tr>
+          <tr><td>医疗影像CT数据集</td><td>89</td><td>3</td><td>23.1ε</td></tr>
+          <tr><td>金融风控特征数据</td><td>67</td><td>5</td><td>18.7ε</td></tr>
+          <tr><td>客服语音录音数据</td><td>30</td><td>2</td><td>12.0ε</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>最近事件</h3></div>
+        <div class="ev">
+          <div class="ev-i"><span class="tm">10:30</span><span><span class="bg bg-b">消费</span> 买方"某金融科技"查询企业纳税数据, DP消耗0.5ε</span></div>
+          <div class="ev-i"><span class="tm">10:15</span><span><span class="bg bg-g">发布</span> 产品"工业IoT日志"已发布至目录</span></div>
+          <div class="ev-i"><span class="tm">09:45</span><span><span class="bg bg-y">告警</span> 合约C-003 DP预算即将耗尽(9.2/10ε)</span></div>
+          <div class="ev-i"><span class="tm">09:20</span><span><span class="bg bg-p">开发</span> 沙箱质量检测完成:医疗影像数据完整率98%</span></div>
+          <div class="ev-i"><span class="tm">09:00</span><span><span class="bg bg-c">密钥</span> DEK sandbox-dek-dp-001 已轮转</span></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function P_devSandbox(){
+  // Check if we're in wizard mode
+  if(window._devWizard) return renderDevWizard();
+  return renderDevSandboxHome();
+}
+
+function renderDevSandboxHome(){
+  return `
+    <h2>🧪 产品开发沙箱</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">在沙箱内完成数据产品的质量检测、脱敏预览、策略配置与发布。原始数据始终不出沙箱。</p>
+
+    <div class="tabs" id="devTabs">
+      <div class="tab on" onclick="showDevTab('struct')">📊 结构化数据</div>
+      <div class="tab" onclick="showDevTab('semi')">📋 半结构化数据</div>
+      <div class="tab" onclick="showDevTab('unstruct')">🖼️ 非结构化数据</div>
+    </div>
+
+    <div id="devStruct">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3>结构化数据产品</h3>
+        <button class="btn bp" onclick="startWizard('struct')">+ 新建产品</button>
+      </div>
+      <div class="card"><table>
+        <tr><th>产品</th><th>类型</th><th>数据源</th><th>规模</th><th>当前步骤</th><th>操作</th></tr>
+        <tr><td>企业纳税数据2024</td><td><span class="bg bg-b">单表</span></td><td><span class="dt">tax_2024.csv</span> (2.3GB)</td><td>5,234,567行×28字段</td><td><span class="bg bg-y">步骤5: 脱敏预览</span></td>
+          <td><button class="btn bp bs" onclick="resumeWizard('struct',4)">继续</button></td></tr>
+        <tr><td>企业征信全景数据</td><td><span class="bg bg-p">多表(4表)</span></td><td><span class="dt">JDBC:mysql://10.0.1.5</span></td><td>4800万行×4表关联</td><td><span class="bg bg-y">步骤6: 策略配置</span></td>
+          <td><button class="btn bp bs" onclick="sModal(multiTableConfig())">继续</button></td></tr>
+        <tr><td>社保缴纳记录2024</td><td><span class="bg bg-b">单表</span></td><td><span class="dt">JDBC:mysql://10.0.1.5:3306/si_db</span></td><td>3,891,234行</td><td><span class="bg bg-g">步骤8: 测试</span></td>
+          <td><button class="btn bp bs" onclick="resumeWizard('struct',7)">继续</button></td></tr>
+      </table></div>
+    </div>
+
+    <div id="devSemi" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3>半结构化数据产品</h3>
+        <button class="btn bp" onclick="startWizard('semi')">+ 新建产品</button>
+      </div>
+      <div class="card"><table>
+        <tr><th>产品</th><th>用途</th><th>数据源</th><th>规模</th><th>当前步骤</th><th>操作</th></tr>
+        <tr><td>用户行为日志2024</td><td><span class="bg bg-b">业务分析</span></td><td><span class="dt">behavior_log_2024.json</span> (890MB)</td><td>12.8M记录</td><td><span class="bg bg-y">步骤4: 结构发现</span></td>
+          <td><button class="btn bp bs" onclick="resumeWizard('semi',3)">继续</button></td></tr>
+        <tr><td>中文医疗问答指令集</td><td><span class="bg bg-c">LLM微调</span></td><td><span class="dt">medical_sft_500k.jsonl</span> (2.1GB)</td><td>50万条指令</td><td><span class="bg bg-y">步骤5: 脱敏预览</span></td>
+          <td><button class="btn bp bs" onclick="sModal(llmSFTPreview())">继续</button></td></tr>
+        <tr><td>中文互联网语料2024</td><td><span class="bg bg-c">LLM预训练</span></td><td><span class="dt">crawl_zh_2024.jsonl</span> (45GB)</td><td>1.2B tokens</td><td><span class="bg bg-b">步骤3: 沙箱检测</span></td>
+          <td><button class="btn bp bs">继续</button></td></tr>
+      </table></div>
+    </div>
+
+    <div id="devUnstruct" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3>非结构化数据产品</h3>
+        <button class="btn bp" onclick="startWizard('unstruct')">+ 新建产品</button>
+      </div>
+      <div class="card"><table>
+        <tr><th>产品</th><th>用途</th><th>类型</th><th>规模</th><th>当前步骤</th><th>操作</th></tr>
+        <tr><td>医疗影像CT胸部2024H1</td><td><span class="bg bg-b">业务推理</span></td><td><span class="bg bg-o">DICOM</span></td><td>52,345文件/812GB</td><td><span class="bg bg-y">步骤5: 脱敏预览</span></td>
+          <td><button class="btn bp bs" onclick="resumeWizard('unstruct',4)">继续</button></td></tr>
+        <tr><td>医疗指南RAG知识库</td><td><span class="bg bg-c">RAG</span></td><td><span class="bg bg-o">PDF</span></td><td>3,456文档/12GB</td><td><span class="bg bg-y">步骤6: 策略配置</span></td>
+          <td><button class="btn bp bs" onclick="sModal(ragPipelinePreview())">继续</button></td></tr>
+        <tr><td>医学影像-报告配对数据</td><td><span class="bg bg-c">多模态训练</span></td><td><span class="bg bg-o">DICOM+文本</span></td><td>120K配对/450GB</td><td><span class="bg bg-b">步骤4: 敏感识别</span></td>
+          <td><button class="btn bp bs">继续</button></td></tr>
+        <tr><td>客服语音录音2024Q1</td><td><span class="bg bg-b">业务分析</span></td><td><span class="bg bg-o">WAV</span></td><td>10,234文件/456GB</td><td><span class="bg bg-b">步骤3: 内容分析</span></td>
+          <td><button class="btn bp bs" onclick="resumeWizard('unstruct',2)">继续</button></td></tr>
+      </table></div>
+    </div>`;
+}
+
+function showDevTab(t){
+  document.getElementById('devStruct').classList.toggle('hidden',t!=='struct');
+  document.getElementById('devSemi').classList.toggle('hidden',t!=='semi');
+  document.getElementById('devUnstruct').classList.toggle('hidden',t!=='unstruct');
+  document.querySelectorAll('#devTabs .tab').forEach((el,i)=>el.classList.toggle('on',i===(t==='struct'?0:t==='semi'?1:2)));
+}
+
+// ============ PRODUCT DEVELOPMENT WIZARD ============
+window._devWizard = null;
+
+function startWizard(dataType){
+  window._devWizard = {dataType, step:0, data:{}};
+  renderPage();
+}
+
+function resumeWizard(dataType, step){
+  window._devWizard = {dataType, step, data:{
+    name: dataType==='struct'?'企业纳税数据2024':'用户行为日志2024',
+    category:'政务·财税', securityLevel:'L1'
+  }};
+  renderPage();
+}
+
+function wizardGo(step){
+  window._devWizard.step = step;
+  renderPage();
+  document.querySelector('.mn').scrollTop = 0;
+}
+
+function wizardFinish(){
+  window._devWizard = null;
+  toast('产品已发布至数据目录 ✓');
+  renderPage();
+}
+
+const WIZARD_STEPS = ['基本信息','数据接入','沙箱检测','敏感识别','脱敏预览','策略配置','测试验证','确认发布'];
+
+function renderDevWizard(){
+  const w = window._devWizard;
+  const dt = w.dataType;
+  const step = w.step;
+  const dtLabel = {struct:'结构化', semi:'半结构化', unstruct:'非结构化'}[dt];
+  const dtIcon = {struct:'📊', semi:'📋', unstruct:'🖼️'}[dt];
+
+  let stepHtml = '';
+  if(step===0) stepHtml = wizStep0(dt, dtLabel);
+  else if(step===1) stepHtml = wizStep1(dt, dtLabel);
+  else if(step===2) stepHtml = wizStep2(dt, dtLabel);
+  else if(step===3) stepHtml = wizStep3(dt, dtLabel);
+  else if(step===4) stepHtml = wizStep4(dt, dtLabel);
+  else if(step===5) stepHtml = wizStep5(dt, dtLabel);
+  else if(step===6) stepHtml = wizStep6(dt, dtLabel);
+  else if(step===7) stepHtml = wizStep7(dt, dtLabel);
+
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <button class="btn bo2" onclick="window._devWizard=null;renderPage()">← 返回</button>
+      <h2 style="margin:0">${dtIcon} 新建${dtLabel}数据产品</h2>
+    </div>
+    <div class="wizard-steps">
+      ${WIZARD_STEPS.map((s,i)=>`<div class="ws${i<step?' done':i===step?' on':''}" onclick="${i<=step?`wizardGo(${i})`:''}" style="cursor:${i<=step?'pointer':'default'}">${i+1}. ${s}</div>`).join('')}
+    </div>
+    ${stepHtml}
+    <div style="display:flex;justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      ${step>0?`<button class="btn bo2" onclick="wizardGo(${step-1})">← 上一步</button>`:'<div></div>'}
+      ${step<7?`<button class="btn bp" onclick="wizardGo(${step+1})">${step===1?'上传并检测':'下一步 →'}</button>`:`<button class="btn bgn" onclick="wizardFinish()">✓ SM2签名并发布</button>`}
+    </div>`;
+}
+
+// Step 0: Basic Info
+function wizStep0(dt, dtLabel){
+  return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">产品基本信息</h3>
+      <div class="fg"><label>产品名称 <span style="color:var(--red)">*</span></label><input class="fi" placeholder="如: 某省企业纳税数据2024" value="${dt==='struct'?'某省企业纳税数据2024':'用户行为日志2024'}"></div>
+      <div class="fr">
+        <div class="fg"><label>行业分类 <span style="color:var(--red)">*</span></label>
+          <select class="fs"><option>政务·财税</option><option>政务·社保</option><option>医疗·健康</option><option>金融·风控</option><option>工业·IoT</option><option>电信·服务</option><option>自然资源</option><option>其他</option></select></div>
+        <div class="fg"><label>数据子类型</label>
+          <select class="fs">${dt==='struct'?'<option>表格 (Tabular)</option><option>时序 (Time-series)</option><option>图数据 (Graph)</option>':dt==='semi'?'<option>JSON 文档</option><option>XML 文档</option><option>日志文件</option><option>传感器流</option>':'<option>图像 (Image)</option><option>文档 (Document)</option><option>音频 (Audio)</option><option>视频 (Video)</option><option>多模态 (Multimodal)</option>'}</select></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label>安全等级 <span style="color:var(--red)">*</span></label>
+          <select class="fs"><option value="L1">L1 - TEE 标准级 (硬件隔离, 远程证明)</option><option value="L2">L2 - 软件增强级 (gVisor+MPC, 无硬件TEE)</option><option value="L3">L3 - 最小化级 (容器隔离, 仅同态加密)</option></select></div>
+        <div class="fg"><label>更新频率</label>
+          <select class="fs"><option>一次性</option><option>每日</option><option>每周</option><option>每月</option><option>实时流</option></select></div>
+      </div>
+      <div class="fg"><label>产品描述</label><textarea class="ft" rows="3" placeholder="描述数据产品的覆盖范围、时间跨度、适用场景...">${dt==='struct'?'包含2024年度全省企业纳税申报、税款缴纳、税收优惠等结构化数据，覆盖制造业、服务业、零售业等主要行业。':'包含2024年用户在APP端的浏览、点击、购买等行为日志，含设备信息、地理位置、会话上下文。'}</textarea></div>
+      <div class="fg"><label>认证标签</label>
+        <div class="ckpt"><label><input type="checkbox" checked> TC609-2025</label><label><input type="checkbox" checked> 数安标志</label><label><input type="checkbox"> CMIA医疗数据认证</label><label><input type="checkbox"> 等保三级</label></div>
+      </div>
+    </div>`;
+}
+
+// Step 1: Data Upload
+function wizStep1(dt, dtLabel){
+  if(dt==='struct') return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">数据接入方式</h3>
+      <div class="tabs"><div class="tab on" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));this.classList.add('on');document.getElementById('wizFileUpload').classList.remove('hidden');document.getElementById('wizJDBC').classList.add('hidden');document.getElementById('wizSecurity').classList.add('hidden')">📁 文件上传</div><div class="tab" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));this.classList.add('on');document.getElementById('wizFileUpload').classList.add('hidden');document.getElementById('wizJDBC').classList.remove('hidden');document.getElementById('wizSecurity').classList.add('hidden')">🔌 数据库连接</div><div class="tab" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));this.classList.add('on');document.getElementById('wizFileUpload').classList.add('hidden');document.getElementById('wizJDBC').classList.add('hidden');document.getElementById('wizSecurity').classList.remove('hidden')">🔒 安全架构</div></div>
+      <div id="wizFileUpload">
+        <div style="border:2px dashed var(--border);border-radius:8px;padding:40px;text-align:center;cursor:pointer" onclick="document.getElementById('wizUploadProgress').classList.remove('hidden')">
+          <div style="font-size:32px;margin-bottom:8px">📁</div>
+          <div style="font-size:14px;margin-bottom:4px">拖拽文件到此处, 或点击选择</div>
+          <div style="font-size:12px;color:var(--text3)">支持 CSV, Parquet, Excel (.xlsx) | 单文件 ≤50GB | SM4-GCM 加密传输</div>
+        </div>
+        <div id="wizUploadProgress" class="hidden" style="margin-top:14px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>tax_2024.csv</span><span>2.3 GB / 2.3 GB (100%)</span></div>
+          <div class="pr"><div class="bar" style="width:100%;background:var(--green)"></div></div>
+          <div style="font-size:11px;color:var(--green);margin-top:4px">✓ 上传完成 | SM4-GCM 加密传输 | SM3 校验: <span class="dt">a1b2c3...d4e5</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">⚠ 文件经SM4加密后存入沙箱加密存储, DEK由KMS(HSM)托管, 明文仅在TEE内存中存在</div>
+        </div>
+      </div>
+      <div id="wizJDBC" class="hidden">
+        <div style="padding:10px 12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:6px;font-size:11px;margin-bottom:14px">
+          <strong>🔒 安全保障:</strong> 数据库连接在TEE内建立, 连接凭证仅在TEE内存中存在, 不落盘。数据通过SM4加密后存入沙箱加密存储。TEE销毁时凭证自动清除。
+        </div>
+        <div class="fr">
+          <div class="fg"><label>数据库类型</label><select class="fs"><option>MySQL 5.7/8.0</option><option>PostgreSQL 12+</option><option>Oracle 19c+</option><option>SQL Server 2019+</option><option>达梦 DM8</option><option>人大金仓 KingbaseES</option><option>OceanBase</option><option>TiDB</option><option>ClickHouse</option></select></div>
+          <div class="fg"><label>端口</label><input class="fi" value="3306"></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label>主机地址 <span style="color:var(--text3)">(需白名单放行沙箱节点IP)</span></label><input class="fi" value="10.0.1.5"></div>
+          <div class="fg"><label>数据库名</label><input class="fi" value="si_db"></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label>用户名 <span style="color:var(--text3)">(建议只读账号)</span></label><input class="fi" value="sandbox_reader"></div>
+          <div class="fg"><label>密码</label><input class="fi" type="password" value="********"></div>
+        </div>
+        <div class="fg"><label>表名 / SQL <span style="color:var(--text3)">(支持多表: 用逗号分隔表名, 或自定义SQL)</span></label><input class="fi" value="enterprise_basic, tax_records, credit_records, legal_cases"></div>
+        <div class="fg"><label>增量同步</label>
+          <select class="fs"><option>全量同步 (首次)</option><option>增量: 按 update_time 字段</option><option>增量: 按自增ID</option><option>CDC: Binlog/WAL实时流</option></select></div>
+        <div style="margin-top:12px">
+          <button class="btn bp" onclick="document.getElementById('wizJDBCResult').classList.remove('hidden');this.style.display='none'">🔌 测试连接</button>
+          <div id="wizJDBCResult" class="hidden" style="margin-top:10px">
+            <div style="padding:8px 12px;background:rgba(34,197,94,.1);border:1px solid var(--green);border-radius:6px;font-size:11px">
+              ✓ 连接成功 (MySQL 8.0.35) | ✓ 权限校验通过 (只读) | ✓ SSL加密连接<br>
+              检测到 4 张表: enterprise_basic(500万行), tax_records(2500万行), credit_records(1500万行), legal_cases(300万行)<br>
+              预估数据量: 4800万行, 约12.5GB | 预估导入时间: 45分钟
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="wizSecurity" class="hidden">
+        <h4 style="font-size:13px;margin-bottom:12px">数据入沙箱全链路安全架构</h4>
+        <div style="font-size:12px;line-height:1.8">
+          <div style="padding:10px;background:var(--card2);border-radius:6px;margin-bottom:10px">
+            <strong>① 连接建立 (TEE内)</strong><br>
+            • 数据库连接凭证在TEE内解密, 仅存在于TEE内存<br>
+            • 连接使用SSL/TLS加密 (MySQL SSL / PG SSL / Oracle TCPS)<br>
+            • 沙箱节点IP加入数据库白名单, 非白名单IP无法连接<br>
+            • 连接超时: 30s无响应自动断开
+          </div>
+          <div style="padding:10px;background:var(--card2);border-radius:6px;margin-bottom:10px">
+            <strong>② 数据读取 (TEE内)</strong><br>
+            • 数据在TEE内从数据库读取, 解密后仅存在于TEE加密内存<br>
+            • Intel SGX: EPC内存硬件加密, 宿主机OS/Hypervisor不可读取<br>
+            • AMD SEV-SNP: VM级内存加密, 物理内存dump不可解密<br>
+            • 国产TEE: 华为TrustZone / 海光CSV 同等硬件隔离
+          </div>
+          <div style="padding:10px;background:var(--card2);border-radius:6px;margin-bottom:10px">
+            <strong>③ 加密存储 (落地)</strong><br>
+            • TEE内用SM4-GCM加密数据, DEK由KMS(HSM)托管<br>
+            • 加密后数据存入MinIO加密对象存储 (双重加密: 应用层SM4 + 存储层SSE)<br>
+            • DEK生命周期: KMS生成 → TEE内使用 → TEE销毁时DEK清除<br>
+            • 密钥轮转: 每30天自动轮转, 旧版本DEK仍可解密历史数据
+          </div>
+          <div style="padding:10px;background:var(--card2);border-radius:6px;margin-bottom:10px">
+            <strong>④ 防脱库机制</strong><br>
+            • <span style="color:var(--red)">禁止 SELECT *</span>: 必须指定列名, 禁止全表扫描<br>
+            • <span style="color:var(--red)">强制 LIMIT</span>: 所有查询必须有LIMIT, 默认≤100行<br>
+            • <span style="color:var(--red)">分页拦截</span>: 禁止 OFFSET 递增遍历全表<br>
+            • <span style="color:var(--red)">频率限制</span>: 每会话最多100次查询/小时<br>
+            • <span style="color:var(--red)">数据量限制</span>: 每会话最多输出10MB<br>
+            • <span style="color:var(--red)">异常检测</span>: eBPF监控SQL执行模式, 检测批量读取行为<br>
+            • <span style="color:var(--red)">网络隔离</span>: 沙箱禁止主动外联, 结果仅通过审查网关输出
+          </div>
+          <div style="padding:10px;background:var(--card2);border-radius:6px;margin-bottom:10px">
+            <strong>⑤ TEE销毁</strong><br>
+            • 任务结束 → TEE内存安全擦除 (物理覆写)<br>
+            • DEK销毁, KMS记录密钥使用完成<br>
+            • 临时文件删除, 不可恢复<br>
+            • 连接凭证自动清除
+          </div>
+        </div>
+      </div>
+    </div>`;
+  if(dt==='semi') return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">数据接入方式</h3>
+      <div style="border:2px dashed var(--border);border-radius:8px;padding:40px;text-align:center;cursor:pointer" onclick="document.getElementById('wizSemiProgress').classList.remove('hidden')">
+        <div style="font-size:32px;margin-bottom:8px">📋</div>
+        <div style="font-size:14px;margin-bottom:4px">拖拽文件到此处, 或点击选择</div>
+        <div style="font-size:12px;color:var(--text3)">支持 JSON, XML, 日志文件 (.log/.ndjson), 传感器流 | 单文件 ≤10GB | 支持流式解析</div>
+      </div>
+      <div id="wizSemiProgress" class="hidden" style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>behavior_log_2024.json (NDJSON格式)</span><span>890 MB / 890 MB (100%)</span></div>
+        <div class="pr"><div class="bar" style="width:100%;background:var(--green)"></div></div>
+        <div style="font-size:11px;color:var(--green);margin-top:4px">✓ 上传完成 | SM4-GCM 加密传输 | 检测到 NDJSON 格式 (每行一条JSON记录)</div>
+      </div>
+    </div>`;
+  // unstruct
+  return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">文件上传</h3>
+      <div style="border:2px dashed var(--border);border-radius:8px;padding:40px;text-align:center;cursor:pointer">
+        <div style="font-size:32px;margin-bottom:8px">🖼️</div>
+        <div style="font-size:14px;margin-bottom:4px">拖拽文件或文件夹到此处</div>
+        <div style="font-size:12px;color:var(--text3)">支持 DICOM, JPEG, PNG, PDF, Word, WAV, MP3, MP4, AVI | 单文件 ≤10GB | 支持批量上传</div>
+      </div>
+      <div style="margin-top:14px">
+        <table style="font-size:11px">
+          <tr><th>文件</th><th>大小</th><th>MIME</th><th>状态</th></tr>
+          <tr><td>CT_001.dcm</td><td>15.2 MB</td><td>application/dicom</td><td style="color:var(--green)">✓ 已加密上传</td></tr>
+          <tr><td>CT_002.dcm</td><td>14.8 MB</td><td>application/dicom</td><td style="color:var(--green)">✓ 已加密上传</td></tr>
+          <tr><td>...</td><td>...</td><td>...</td><td>共 52,345 文件, 812 GB</td></tr>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Step 2: Sandbox Detection (auto)
+function wizStep2(dt, dtLabel){
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <h3 style="margin:0">沙箱自动检测</h3>
+        <span class="bg bg-g">TEE 内执行</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">数据已在沙箱内解密, 正在执行自动检测... 原始数据不出沙箱。</div>
+      <div id="wizDetectResult">
+        ${dt==='struct'?`
+          <h4 style="margin-bottom:10px;font-size:13px">Schema 自动推断</h4>
+          <table style="font-size:11px">
+            <tr><th>#</th><th>字段名</th><th>推断类型</th><th>非空率</th><th>唯一值</th><th>样本值</th></tr>
+            <tr><td>1</td><td>tax_id</td><td>VARCHAR(18)</td><td>100%</td><td>5,234,567</td><td>110101199003076531</td></tr>
+            <tr><td>2</td><td>company_name</td><td>VARCHAR(200)</td><td>100%</td><td>4,891,234</td><td>北京某某科技有限公司</td></tr>
+            <tr><td>3</td><td>industry_code</td><td>VARCHAR(10)</td><td>99.9%</td><td>89</td><td>C39</td></tr>
+            <tr><td>4</td><td>revenue</td><td>DECIMAL(15,2)</td><td>99.7%</td><td>3,456,789</td><td>1234567.89</td></tr>
+            <tr><td>5</td><td>tax_amount</td><td>DECIMAL(15,2)</td><td>99.7%</td><td>2,345,678</td><td>89012.34</td></tr>
+            <tr><td>6</td><td>contact_phone</td><td>VARCHAR(11)</td><td>88%</td><td>3,891,234</td><td>13812345678</td></tr>
+            <tr><td>7</td><td>legal_person</td><td>VARCHAR(50)</td><td>100%</td><td>3,456,789</td><td>张三</td></tr>
+            <tr><td>8</td><td>bank_account</td><td>VARCHAR(19)</td><td>95%</td><td>4,100,000</td><td>6222021234567890123</td></tr>
+            <tr><td>...</td><td colspan="5" style="color:var(--text3)">共 28 个字段</td></tr>
+          </table>
+          <div style="margin-top:10px;font-size:11px;color:var(--green)">✓ Schema 推断完成: 28 字段, 5,234,567 行, 完整率 98.2%</div>
+        `:dt==='semi'?`
+          <h4 style="margin-bottom:10px;font-size:13px">JSON 结构自动发现</h4>
+          <div class="code" style="font-size:11px;line-height:1.5">{
+  "<span style="color:var(--cyan)">user_id</span>": string,          <span style="color:var(--text3)">// 100% 出现率</span>
+  "<span style="color:var(--cyan)">session_id</span>": string,       <span style="color:var(--text3)">// 100%</span>
+  "<span style="color:var(--cyan)">timestamp</span>": ISO8601,      <span style="color:var(--text3)">// 100%</span>
+  "<span style="color:var(--cyan)">device</span>": {                 <span style="color:var(--text3)">// 100%, 嵌套深度:2</span>
+    "os": string,              <span style="color:var(--text3)">// 100%</span>
+    "browser": string,         <span style="color:var(--text3)">// 100%</span>
+    "ip_address": string       <span style="color:var(--text3)">// 100%</span>
+  },
+  "<span style="color:var(--cyan)">events</span>": [{                <span style="color:var(--text3)">// 100%, 数组, 平均3.2个元素</span>
+    "action": string,          <span style="color:var(--text3)">// 100%</span>
+    "page": string,            <span style="color:var(--text3)">// 100%</span>
+    "duration_ms": integer,    <span style="color:var(--text3)">// 100%</span>
+    "phone": string,           <span style="color:var(--text3)">// 7% (仅部分事件含手机号)</span>
+    "id_card": string          <span style="color:var(--text3)">// 1.2%</span>
+  }]
+}</div>
+          <div style="margin-top:10px;font-size:11px;color:var(--green)">✓ 结构发现完成: 12.8M 记录, 最大嵌套深度 4, 9 个键路径</div>
+        `:`
+          <h4 style="margin-bottom:10px;font-size:13px">文件格式分析</h4>
+          <table style="font-size:11px">
+            <tr><th>MIME 类型</th><th>文件数</th><th>大小</th><th>格式细节</th></tr>
+            <tr><td>application/dicom</td><td>52,345</td><td>812 GB</td><td>CT, 512x512, 16bit, Window Center/Width</td></tr>
+          </table>
+          <div style="margin-top:10px;font-size:11px;color:var(--green)">✓ 格式检测完成: DICOM CT 影像, 胸部扫描, 52,345 切片</div>
+        `}
+      </div>
+    </div>`;
+}
+
+// Step 3: Sensitive Field Detection
+function wizStep3(dt, dtLabel){
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <h3 style="margin:0">敏感内容自动识别</h3>
+        <span class="bg bg-r">隐私检测</span>
+      </div>
+      ${dt==='struct'?`
+        <table style="font-size:11px">
+          <tr><th>字段</th><th>检测方法</th><th>敏感类型</th><th>匹配数</th><th>敏感级别</th><th>建议脱敏</th></tr>
+          <tr><td><strong>tax_id</strong></td><td>正则+字段名</td><td>身份证号</td><td>5,234,567 (100%)</td><td><span class="bg bg-r">高</span></td><td>前3位***后3位</td></tr>
+          <tr><td><strong>contact_phone</strong></td><td>正则匹配</td><td>手机号</td><td>3,891,234 (74%)</td><td><span class="bg bg-r">高</span></td><td>前3****后4</td></tr>
+          <tr><td><strong>legal_person</strong></td><td>字段名语义</td><td>自然人姓名</td><td>5,234,567 (100%)</td><td><span class="bg bg-r">高</span></td><td>[姓名]</td></tr>
+          <tr><td><strong>bank_account</strong></td><td>正则匹配</td><td>银行卡号</td><td>4,972,838 (95%)</td><td><span class="bg bg-r">高</span></td><td>****后4位</td></tr>
+          <tr><td><strong>company_name</strong></td><td>字段名语义</td><td>企业名称</td><td>5,234,567 (100%)</td><td><span class="bg bg-y">中</span></td><td>[企业名]</td></tr>
+          <tr><td><strong>address</strong></td><td>字段名+NLP</td><td>地址</td><td>5,100,000 (97%)</td><td><span class="bg bg-y">中</span></td><td>[地址]</td></tr>
+          <tr><td>revenue</td><td>值分布</td><td>财务数据</td><td>-</td><td><span class="bg bg-y">中</span></td><td>保留(仅聚合输出)</td></tr>
+          <tr><td>industry_code</td><td>-</td><td>行业编码</td><td>-</td><td><span class="bg bg-g">低</span></td><td>保留</td></tr>
+        </table>
+        <div style="margin-top:10px;font-size:11px">检测到 <strong style="color:var(--red)">4 个高敏感字段</strong> (身份证/手机/姓名/银行卡), <strong style="color:var(--yellow)">3 个中敏感字段</strong></div>
+      `:dt==='semi'?`
+        <table style="font-size:11px">
+          <tr><th>键路径</th><th>检测方法</th><th>敏感类型</th><th>匹配记录数</th><th>敏感级别</th><th>建议脱敏</th></tr>
+          <tr><td><span class="dt">$.user_id</span></td><td>键名语义</td><td>用户标识</td><td>12,800,000 (100%)</td><td><span class="bg bg-r">高</span></td><td>哈希混淆</td></tr>
+          <tr><td><span class="dt">$.device.ip_address</span></td><td>键名+值格式</td><td>IP地址</td><td>12,800,000 (100%)</td><td><span class="bg bg-r">高</span></td><td>末段掩码</td></tr>
+          <tr><td><span class="dt">$.events[*].phone</span></td><td>正则匹配</td><td>手机号</td><td>896,000 (7%)</td><td><span class="bg bg-r">高</span></td><td>前3****后4</td></tr>
+          <tr><td><span class="dt">$.events[*].id_card</span></td><td>正则匹配</td><td>身份证号</td><td>153,600 (1.2%)</td><td><span class="bg bg-r">高</span></td><td>前3***后3</td></tr>
+          <tr><td>$.events[*].action</td><td>-</td><td>行为事件</td><td>-</td><td><span class="bg bg-g">低</span></td><td>保留</td></tr>
+        </table>
+        <div style="margin-top:10px;font-size:11px">检测到 <strong style="color:var(--red)">4 个高敏感路径</strong></div>
+      `:`
+        <table style="font-size:11px">
+          <tr><th>检测项</th><th>工具</th><th>匹配文件数</th><th>占比</th><th>敏感级别</th><th>建议处理</th></tr>
+          <tr><td>人脸</td><td>InsightFace SCRFD</td><td>38,210</td><td>73%</td><td><span class="bg bg-r">高</span></td><td>高斯模糊 (kernel=51)</td></tr>
+          <tr><td>PatientName</td><td>DICOM标签解析</td><td>52,345</td><td>100%</td><td><span class="bg bg-r">高</span></td><td>强制剥离</td></tr>
+          <tr><td>PatientID</td><td>DICOM标签解析</td><td>52,345</td><td>100%</td><td><span class="bg bg-r">高</span></td><td>强制剥离</td></tr>
+          <tr><td>PatientBirthDate</td><td>DICOM标签解析</td><td>52,345</td><td>100%</td><td><span class="bg bg-r">高</span></td><td>强制剥离</td></tr>
+          <tr><td>InstitutionName</td><td>DICOM标签解析</td><td>52,345</td><td>100%</td><td><span class="bg bg-y">中</span></td><td>可选剥离</td></tr>
+          <tr><td>StudyDate</td><td>DICOM标签解析</td><td>52,345</td><td>100%</td><td><span class="bg bg-y">中</span></td><td>泛化至年月</td></tr>
+        </table>
+        <div style="margin-top:10px;font-size:11px">检测到 <strong style="color:var(--red)">4 项高敏感内容</strong> (人脸+3个DICOM标签)</div>
+      `}
+    </div>`;
+}
+
+// Step 4: Desensitization Preview
+function wizStep4(dt, dtLabel){
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <h3 style="margin:0">脱敏预览</h3>
+        <span class="bg bg-g">原始数据不出沙箱</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">以下为沙箱内生成的脱敏预览样本, 买方在目录中看到的就是这些内容。</div>
+      ${dt==='struct'?`
+        <h4 style="font-size:13px;margin-bottom:8px">脱敏样本行 (前5行)</h4>
+        <table style="font-size:11px">
+          <tr><th>tax_id</th><th>company_name</th><th>industry_code</th><th>revenue</th><th>tax_amount</th><th>contact_phone</th><th>legal_person</th><th>bank_account</th></tr>
+          <tr><td>110***6531</td><td>[企业名]</td><td>C39</td><td>1,234,567.89</td><td>89,012.34</td><td>138****5678</td><td>[姓名]</td><td>****0123</td></tr>
+          <tr><td>310***8901</td><td>[企业名]</td><td>I65</td><td>5,678,901.23</td><td>456,789.01</td><td>159****3456</td><td>[姓名]</td><td>****4567</td></tr>
+          <tr><td>440***2345</td><td>[企业名]</td><td>G61</td><td>890,123.45</td><td>67,890.12</td><td>186****7890</td><td>[姓名]</td><td>****8901</td></tr>
+        </table>
+        <h4 style="font-size:13px;margin:14px 0 8px">聚合统计预览</h4>
+        <table style="font-size:11px">
+          <tr><th>industry_code</th><th>企业数</th><th>平均纳税额</th><th>中位数</th></tr>
+          <tr><td>C39 (计算机通信)</td><td>1,234,567</td><td>¥856,000</td><td>¥420,000</td></tr>
+          <tr><td>I65 (软件信息)</td><td>891,234</td><td>¥1,230,000</td><td>¥680,000</td></tr>
+          <tr><td>G61 (批发零售)</td><td>765,432</td><td>¥345,000</td><td>¥180,000</td></tr>
+        </table>
+      `:dt==='semi'?`
+        <h4 style="font-size:13px;margin-bottom:8px">脱敏样本记录 (第1条)</h4>
+        <div class="code" style="font-size:11px">{
+  "user_id": "<span style="color:var(--red)">a1b2c3d4</span>",        <span style="color:var(--text3)">// SHA256哈希</span>
+  "session_id": "sess_abc123",
+  "timestamp": "2024-03-15T10:23:45Z",
+  "device": {
+    "os": "iOS 17.2",
+    "browser": "Safari",
+    "ip_address": "192.168.***.**"    <span style="color:var(--text3)">// 末段掩码</span>
+  },
+  "events": [{
+    "action": "purchase",
+    "page": "/product/12345",
+    "duration_ms": 3420,
+    "phone": "138****5678",           <span style="color:var(--text3)">// 脱敏</span>
+    "id_card": "110***6531"           <span style="color:var(--text3)">// 脱敏</span>
+  }]
+}</div>
+      `:`
+        <h4 style="font-size:13px;margin-bottom:8px">DICOM 标签剥离结果 (样本)</h4>
+        <table style="font-size:11px">
+          <tr><th>标签</th><th>原始值</th><th>脱敏后</th></tr>
+          <tr><td>PatientName</td><td>张三</td><td style="color:var(--red)">[已剥离]</td></tr>
+          <tr><td>PatientID</td><td>320106199001011234</td><td style="color:var(--red)">[已剥离]</td></tr>
+          <tr><td>PatientBirthDate</td><td>19900101</td><td style="color:var(--red)">[已剥离]</td></tr>
+          <tr><td>InstitutionName</td><td>某省人民医院</td><td style="color:var(--yellow)">[可选剥离]</td></tr>
+          <tr><td>StudyDate</td><td>20240315</td><td style="color:var(--yellow)">2024-03 (泛化)</td></tr>
+          <tr><td>Modality</td><td>CT</td><td>CT (保留)</td></tr>
+          <tr><td>BodyPartExamined</td><td>CHEST</td><td>CHEST (保留)</td></tr>
+        </table>
+        <div style="margin-top:10px;font-size:11px;color:var(--green)">✓ 38,210 文件人脸已模糊 | ✓ 全部DICOM患者标签已剥离</div>
+      `}
+    </div>`;
+}
+
+// Step 5: Policy Configuration
+function wizStep5(dt, dtLabel){
+  return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">使用策略配置</h3>
+      <div class="fr">
+        <div class="fg"><label>允许操作 <span style="color:var(--red)">*</span></label>
+          <div class="ckpt">${dt==='struct'?
+            '<label><input type="checkbox" checked> aggregate (聚合统计)</label><label><input type="checkbox" checked> filter (条件过滤)</label><label><input type="checkbox" checked> statistical_model (统计建模)</label><label><input type="checkbox"> join (跨表关联)</label><label><input type="checkbox"> sort (排序)</label>':
+          dt==='semi'?
+            '<label><input type="checkbox" checked> jsonpath_query (JSONPath查询)</label><label><input type="checkbox" checked> filter (条件过滤)</label><label><input type="checkbox" checked> aggregate (聚合统计)</label><label><input type="checkbox"> python_transform (Python转换)</label>':
+            '<label><input type="checkbox" checked> image_classification (图像分类)</label><label><input type="checkbox" checked> object_detection (目标检测)</label><label><input type="checkbox" checked> feature_extraction (特征提取)</label><label><input type="checkbox"> model_training (模型训练)</label>'}</div></div>
+        <div class="fg"><label>禁止操作</label>
+          <div class="ckpt"><label><input type="checkbox" checked disabled> row_level_export (行级导出)</label><label><input type="checkbox" checked disabled> network_call (网络调用)</label><label><input type="checkbox" checked> join_with_external (外部关联)</label><label><input type="checkbox" checked> print (打印原始数据)</label></div></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label>最大输出行数</label><input class="fi" type="number" value="100"></div>
+        <div class="fg"><label>最大输出字节数</label><input class="fi" value="10MB"></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label>差分隐私 (ε) <span style="color:var(--text3)">买方累计消耗上限</span></label><input class="fi" type="number" value="10.0" step="0.1"></div>
+        <div class="fg"><label>最大运行时长</label><select class="fs"><option>1小时</option><option>4小时</option><option>24小时</option></select></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label>允许编程语言</label>
+          <div class="ckpt"><label><input type="checkbox" checked> SQL</label><label><input type="checkbox" checked> Python</label><label><input type="checkbox"> R</label></div></div>
+        <div class="fg"><label>沙箱内存限制</label><select class="fs"><option>8 GB</option><option selected>16 GB</option><option>32 GB</option><option>64 GB</option></select></div>
+      </div>
+      <div class="fg"><label>最低安全等级要求</label>
+        <select class="fs"><option value="L1">L1 - 仅允许 TEE 沙箱 (最高安全)</option><option value="L2">L2 - 允许降级至软件增强沙箱</option><option value="L3">L3 - 允许最小化沙箱 (仅测试)</option></select></div>
+    </div>`;
+}
+
+// Step 6: Test Execution
+function wizStep6(dt, dtLabel){
+  return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">测试验证</h3>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">在沙箱内执行测试, 验证脱敏效果和策略配置。数商自己跑测试确认买方体验。</div>
+      ${dt==='struct'?`
+        <div class="fg"><label>测试 SQL</label>
+          <div class="code">SELECT industry_code, COUNT(*) as cnt,
+       AVG(revenue) as avg_revenue,
+       SUM(tax_amount) as total_tax
+FROM product_data
+WHERE revenue > 1000000
+GROUP BY industry_code
+ORDER BY cnt DESC LIMIT 10</div></div>
+        <button class="btn bp" onclick="document.getElementById('wizTestResult').classList.remove('hidden');this.style.display='none'">▶ 执行测试</button>
+        <div id="wizTestResult" class="hidden" style="margin-top:14px">
+          <div style="padding:8px 12px;background:rgba(34,197,94,.1);border:1px solid var(--green);border-radius:6px;font-size:12px;margin-bottom:12px">
+            ✓ 执行成功 (3.2s) | ✓ 输出审查通过 | ✓ 无 PII 泄露 | ✓ 输出含溯源水印 | DP消耗: 0.5ε
+          </div>
+          <table style="font-size:11px">
+            <tr><th>industry_code</th><th>cnt</th><th>avg_revenue</th><th>total_tax</th></tr>
+            <tr><td>C39</td><td>1,234,567</td><td>¥1,856,000</td><td>¥1.06B</td></tr>
+            <tr><td>I65</td><td>891,234</td><td>¥2,230,000</td><td>¥1.10B</td></tr>
+            <tr><td>G61</td><td>765,432</td><td>¥1,345,000</td><td>¥0.52B</td></tr>
+          </table>
+        </div>
+      `:dt==='semi'?`
+        <div class="fg"><label>测试 JSONPath / Python</label>
+          <div class="code">df = pd.read_json('/data/product_data.json')
+result = df.explode('events')
+result = result[result['events'].apply(lambda e: e['action'] == 'purchase')]
+result = result.groupby('device.os').size().reset_index(name='count')
+result = result.sort_values('count', ascending=False).head(10)</div></div>
+        <button class="btn bp" onclick="document.getElementById('wizTestResult').classList.remove('hidden');this.style.display='none'">▶ 执行测试</button>
+        <div id="wizTestResult" class="hidden" style="margin-top:14px">
+          <div style="padding:8px 12px;background:rgba(34,197,94,.1);border:1px solid var(--green);border-radius:6px;font-size:12px;margin-bottom:12px">
+            ✓ 执行成功 (12.5s) | ✓ 输出审查通过 | ✓ 无 PII 泄露 | DP消耗: 0.3ε
+          </div>
+          <table style="font-size:11px">
+            <tr><th>os</th><th>count</th></tr>
+            <tr><td>iOS 17</td><td>4,567,890</td></tr>
+            <tr><td>Android 14</td><td>3,891,234</td></tr>
+            <tr><td>HarmonyOS 4</td><td>1,234,567</td></tr>
+          </table>
+        </div>
+      `:`
+        <div class="fg"><label>测试推理任务</label>
+          <select class="fs"><option>CT胸部异常检测 (分类)</option><option>肺结节检测 (目标检测)</option></select></div>
+        <button class="btn bp" onclick="document.getElementById('wizTestResult').classList.remove('hidden');this.style.display='none'">▶ 执行测试</button>
+        <div id="wizTestResult" class="hidden" style="margin-top:14px">
+          <div style="padding:8px 12px;background:rgba(34,197,94,.1);border:1px solid var(--green);border-radius:6px;font-size:12px;margin-bottom:12px">
+            ✓ 推理成功 (45.6s, 100张) | ✓ 仅输出标签 | ✓ 无原始图像泄露
+          </div>
+          <table style="font-size:11px">
+            <tr><th>分类</th><th>数量</th><th>置信度</th></tr>
+            <tr><td>正常</td><td>78</td><td>0.96±0.03</td></tr>
+            <tr><td>肺结节</td><td>15</td><td>0.89±0.08</td></tr>
+            <tr><td>肺炎</td><td>7</td><td>0.92±0.05</td></tr>
+          </table>
+        </div>
+      `}
+    </div>`;
+}
+
+// Step 7: Confirm & Publish
+function wizStep7(dt, dtLabel){
+  return `
+    <div class="card">
+      <h3 style="margin-bottom:14px">确认发布</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div style="background:var(--card2);padding:14px;border-radius:8px">
+          <h4 style="font-size:13px;margin-bottom:8px">产品信息</h4>
+          <div style="font-size:12px">
+            <div>名称: <strong>${dt==='struct'?'某省企业纳税数据2024':'用户行为日志2024'}</strong></div>
+            <div>分类: 政务·财税</div>
+            <div>类型: <span class="bg ${dt==='struct'?'bg-b':dt==='semi'?'bg-p':'bg-o'}">${dtLabel}</span></div>
+            <div>安全等级: <span class="bg bg-g">L1</span></div>
+            <div>数据量: ${dt==='struct'?'5,234,567 行 × 28 字段':dt==='semi'?'12.8M 记录 × 9 键路径':'52,345 文件, 812 GB'}</div>
+          </div>
+        </div>
+        <div style="background:var(--card2);padding:14px;border-radius:8px">
+          <h4 style="font-size:13px;margin-bottom:8px">策略摘要</h4>
+          <div style="font-size:12px">
+            <div>允许操作: ${dt==='struct'?'aggregate, filter, statistical_model':'jsonpath_query, filter, aggregate'}</div>
+            <div>最大输出: 100 行 / 10MB</div>
+            <div>DP预算: ε=10.0</div>
+            <div>运行时长: ≤1小时</div>
+            <div>允许语言: SQL, Python</div>
+          </div>
+        </div>
+      </div>
+      <div style="background:var(--card2);padding:14px;border-radius:8px;margin-bottom:16px">
+        <h4 style="font-size:13px;margin-bottom:8px">脱敏摘要</h4>
+        <div style="font-size:12px">${dt==='struct'?
+          '高敏感字段: 身份证(前3***后3), 手机(前3****后4), 姓名([姓名]), 银行卡(****后4)<br>中敏感字段: 企业名([企业名]), 地址([地址]), 财务(仅聚合输出)':
+        dt==='semi'?
+          '高敏感路径: user_id(哈希), ip_address(末段掩码), phone(前3****后4), id_card(前3***后3)':
+          '人脸: 38,210文件已模糊 | DICOM标签: PatientName/ID/BirthDate已剥离 | InstitutionName可选剥离 | StudyDate泛化至年月'
+        }</div>
+      </div>
+      <div style="background:var(--card2);padding:14px;border-radius:8px">
+        <h4 style="font-size:13px;margin-bottom:8px">SM2 数字签名</h4>
+        <div style="font-size:12px">
+          <div>签名证书: <span class="dt">省税务局 (SM2 X.509)</span></div>
+          <div>证书指纹: <span class="dt">3f2a...b9c1</span></div>
+          <div>签名内容: 产品元数据 + 质量报告 + 脱敏预览 + 策略配置 的 SM3 哈希</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============ ADVANCED SCENARIO MODALS ============
+
+function multiTableConfig(){
+  return `<h2>📋 多表数据产品配置 - 企业征信全景数据</h2>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">定义表结构、关联关系和访问约束。买方在沙箱内可执行跨表JOIN查询。</div>
+    <h4 style="font-size:13px;margin-bottom:8px">表定义</h4>
+    <table style="font-size:11px;margin-bottom:14px">
+      <tr><th>表名</th><th>描述</th><th>行数</th><th>主键</th><th>外键</th><th>敏感字段</th></tr>
+      <tr><td><span class="dt">enterprise_basic</span></td><td>企业基本信息</td><td>500万</td><td>ent_id</td><td>-</td><td>ent_name, legal_person</td></tr>
+      <tr><td><span class="dt">tax_records</span></td><td>纳税记录</td><td>2500万</td><td>tax_id</td><td>ent_id→enterprise_basic</td><td>ent_id</td></tr>
+      <tr><td><span class="dt">credit_records</span></td><td>信贷记录</td><td>1500万</td><td>credit_id</td><td>ent_id→enterprise_basic</td><td>ent_id</td></tr>
+      <tr><td><span class="dt">legal_cases</span></td><td>司法案件</td><td>300万</td><td>case_id</td><td>ent_id→enterprise_basic</td><td>ent_id</td></tr>
+    </table>
+    <h4 style="font-size:13px;margin-bottom:8px">JOIN 约束</h4>
+    <div class="fr">
+      <div class="fg"><label>最多JOIN表数</label><input class="fi" type="number" value="4"></div>
+      <div class="fg"><label>最大输出行数</label><input class="fi" type="number" value="500"></div>
+    </div>
+    <div class="ckpt" style="margin-bottom:14px">
+      <label><input type="checkbox" checked disabled> 必须通过FK关联 (禁止笛卡尔积)</label>
+      <label><input type="checkbox" checked> 禁止子查询泄露其他表数据</label>
+    </div>
+    <h4 style="font-size:13px;margin-bottom:8px">允许操作</h4>
+    <div class="ckpt">
+      <label><input type="checkbox" checked> multi_table_join</label>
+      <label><input type="checkbox" checked> aggregate</label>
+      <label><input type="checkbox" checked> feature_engineering (特征工程)</label>
+      <label><input type="checkbox" checked> risk_model_training (风控模型训练)</label>
+    </div>
+    <div class="ma"><button class="btn bp" onclick="toast('多表配置已保存, 进入测试验证');cModal()">保存配置</button></div>`;
+}
+
+function llmSFTPreview(){
+  return `<h2>🤖 LLM微调数据脱敏预览 - 中文医疗问答指令集</h2>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">数据类型: 指令微调 (SFT) | 格式: JSONL (instruction/input/output) | 500,000条</div>
+    <h4 style="font-size:13px;margin-bottom:8px">脱敏样本 (第1条)</h4>
+    <div class="code" style="font-size:11px">{
+  "instruction": "根据以下症状描述, 给出可能的诊断建议。",
+  "input": "<span style="color:var(--red)">[患者]</span>, 女, 45岁, 主诉: 反复头痛3个月, 伴恶心呕吐。近1周视力模糊。血压160/100mmHg。",
+  "output": "根据您描述的症状, 需要考虑以下诊断:\n\n1. **高血压脑病**: 血压显著升高伴头痛、恶心呕吐、视力障碍...\n2. **颅内占位性病变**: 慢性进行性头痛伴颅内压增高症状...\n3. **偏头痛**: 反复发作性头痛...\n\n建议: 完善头颅MRI、眼底检查、24小时动态血压监测..."
+}</div>
+    <h4 style="font-size:13px;margin:14px 0 8px">PII脱敏统计</h4>
+    <table style="font-size:11px">
+      <tr><th>脱敏项</th><th>匹配数</th><th>处理方式</th></tr>
+      <tr><td>患者姓名</td><td>487,234 (97.4%)</td><td>NER识别 → [患者]</td></tr>
+      <tr><td>身份证号</td><td>12,345 (2.5%)</td><td>正则 → [ID]</td></tr>
+      <tr><td>手机号</td><td>8,901 (1.8%)</td><td>正则 → [PHONE]</td></tr>
+      <tr><td>病历号</td><td>234,567 (46.9%)</td><td>正则 → [病历号]</td></tr>
+    </table>
+    <h4 style="font-size:13px;margin:14px 0 8px">质量评分分布</h4>
+    <div class="bar-c" style="height:60px">
+      ${['<0.5','0.5-0.6','0.6-0.7','0.7-0.8','0.8-0.9','0.9-1.0'].map((l,i)=>{const h=[2,5,8,25,38,22][i];return `<div class="b" style="height:${Math.max(h,5)}%;background:${h<10?'var(--red)':h<25?'var(--yellow)':'var(--green)'}"><div class="bl2">${l}<br>${h}%</div></div>`;}).join('')}
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:16px">过滤后保留: 456,789条 (质量≥0.7) | 去重: 移除12,345条相似指令 (BGE-M3余弦>0.9)</div>
+    <div class="ma"><button class="btn bp" onclick="toast('已确认脱敏预览, 进入策略配置');cModal()">确认并配置策略 →</button></div>`;
+}
+
+function ragPipelinePreview(){
+  return `<h2>📚 RAG知识库处理预览 - 医疗指南</h2>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">数据类型: RAG知识库 | 格式: PDF | 3,456文档/12GB</div>
+    <h4 style="font-size:13px;margin-bottom:8px">处理管线</h4>
+    <div class="flow-step done"><div class="num">1</div><div><strong>文档解析</strong> <span style="color:var(--text2)">PyMuPDF解析PDF → 提取文本+标题结构</span></div></div>
+    <div class="flow-step done"><div class="num">2</div><div><strong>OCR补充</strong> <span style="color:var(--text2)">PaddleOCR处理扫描件 (检测到892页扫描)</span></div></div>
+    <div class="flow-step done"><div class="num">3</div><div><strong>PII脱敏</strong> <span style="color:var(--text2)">NER识别患者/医生信息并替换</span></div></div>
+    <div class="flow-step done"><div class="num">4</div><div><strong>文档分块</strong> <span style="color:var(--text2)">递归分割: 512 tokens/chunk, 64 tokens重叠</span></div></div>
+    <div class="flow-step active"><div class="num">5</div><div><strong>向量化</strong> <span style="color:var(--text2)">BGE-M3嵌入: 1024维向量</span></div></div>
+    <div class="flow-step"><div class="num">6</div><div><strong>索引构建</strong> <span style="color:var(--text2)">FAISS索引 + 元数据(来源/页码/标题)</span></div></div>
+    <h4 style="font-size:13px;margin:14px 0 8px">分块统计</h4>
+    <table style="font-size:11px">
+      <tr><th>指标</th><th>值</th></tr>
+      <tr><td>总文档数</td><td>3,456</td></tr>
+      <tr><td>总页数</td><td>45,678</td></tr>
+      <tr><td>扫描件页数</td><td>892 (2.0%)</td></tr>
+      <tr><td>总chunk数</td><td>234,567</td></tr>
+      <tr><td>平均chunk长度</td><td>387 tokens</td></tr>
+      <tr><td>PII脱敏替换</td><td>12,345处</td></tr>
+    </table>
+    <div style="font-size:11px;color:var(--text3);margin-top:12px">⚠ 输出: FAISS索引+元数据JSONL (不含原始文档全文)</div>
+    <div class="ma"><button class="btn bp" onclick="toast('已确认RAG管线配置');cModal()">确认配置</button></div>`;
+}
+
+function P_products(){
+  const ps=[
+    {id:'dp-001',name:'企业纳税数据2023',cat:'政务·财税',type:'结构化',lv:'L1',rows:'500万',st:'published',uses:156},
+    {id:'dp-002',name:'医疗影像CT数据集',cat:'医疗·健康',type:'非结构化',lv:'L1',rows:'5万文件',st:'published',uses:89},
+    {id:'dp-003',name:'金融风控特征数据',cat:'金融·风控',type:'结构化',lv:'L2',rows:'200万',st:'published',uses:67},
+    {id:'dp-004',name:'工业IoT传感器日志',cat:'工业·IoT',type:'半结构化',lv:'L3',rows:'1亿条',st:'draft',uses:0},
+    {id:'dp-005',name:'客服语音录音数据',cat:'电信·服务',type:'非结构化',lv:'L1',rows:'10万小时',st:'published',uses:30},
+  ];
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2>📦 产品管理</h2>
+      <button class="btn bp" onclick="go('devsandbox')">🧪 去开发沙箱</button>
+    </div>
+    <div class="card"><table>
+      <tr><th>产品ID</th><th>名称</th><th>分类</th><th>类型</th><th>安全等级</th><th>数据量</th><th>状态</th><th>被消费</th><th>操作</th></tr>
+      ${ps.map(p=>`<tr>
+        <td><span class="dt">${p.id}</span></td><td>${p.name}</td><td>${p.cat}</td><td>${p.type}</td>
+        <td><span class="bg ${p.lv==='L1'?'bg-g':p.lv==='L2'?'bg-y':'bg-o'}">${p.lv}</span></td>
+        <td>${p.rows}</td>
+        <td><span class="bg ${p.st==='published'?'bg-g':'bg-gr'}">${p.st==='published'?'已发布':'草稿'}</span></td>
+        <td>${p.uses}次</td>
+        <td class="bg2"><button class="btn bo2 bs">策略</button><button class="btn bo2 bs">版本</button>${p.st==='draft'?'<button class="btn bp bs" onclick="go(\'devsandbox\')">继续开发</button>':'<button class="btn bw bs" onclick="toast(\'产品已下架, 关联密钥已吊销\')">下架</button>'}</td>
+      </tr>`).join('')}
+    </table></div>`;
+}
+
+function P_myMonitor(){
+  return `<h2>📈 使用监控</h2>
+    <div class="cg cg3">
+      <div class="sc bg"><div class="lb">本月任务总数</div><div class="vl">342</div></div>
+      <div class="sc bl"><div class="lb">活跃买方数</div><div class="vl">18</div></div>
+      <div class="sc by"><div class="lb">DP消耗总计</div><div class="vl">98.6ε</div></div>
+    </div>
+    <div class="card"><div class="ch"><h3>买方访问明细</h3></div>
+      <table>
+        <tr><th>买方</th><th>产品</th><th>任务数</th><th>DP消耗</th><th>最后访问</th></tr>
+        <tr><td>某金融科技</td><td>企业纳税数据</td><td>89</td><td>34.5ε</td><td>10:30</td></tr>
+        <tr><td>某银行</td><td>金融风控特征</td><td>45</td><td>18.2ε</td><td>09:15</td></tr>
+        <tr><td>某AI公司</td><td>医疗影像CT</td><td>67</td><td>23.1ε</td><td>昨天</td></tr>
+        <tr><td>某保险公司</td><td>企业纳税数据</td><td>34</td><td>12.8ε</td><td>昨天</td></tr>
+      </table>
+    </div>`;
+}
+
+function P_myKeys(){
+  return `<h2>🔑 我的密钥</h2>
+    <div class="card"><div class="ch"><h3>数据加密密钥 (DEK)</h3><button class="btn bp bs" onclick="toast('新DEK已生成')">生成新密钥</button></div>
+      <table>
+        <tr><th>密钥ID</th><th>算法</th><th>绑定产品</th><th>创建时间</th><th>轮转周期</th><th>状态</th><th>操作</th></tr>
+        <tr><td><span class="dt">dek-dp-001</span></td><td>SM4-256</td><td>企业纳税数据</td><td>2024-01-15</td><td>30天</td><td><span class="bg bg-g">活跃</span></td>
+          <td><button class="btn bo2 bs" onclick="toast('密钥已轮转')">轮转</button><button class="btn bd bs" onclick="toast('密钥已吊销, 关联产品已下架')">吊销</button></td></tr>
+        <tr><td><span class="dt">dek-dp-002</span></td><td>SM4-256</td><td>医疗影像CT</td><td>2024-02-01</td><td>30天</td><td><span class="bg bg-g">活跃</span></td>
+          <td><button class="btn bo2 bs">轮转</button><button class="btn bd bs">吊销</button></td></tr>
+        <tr><td><span class="dt">dek-dp-005</span></td><td>SM4-256</td><td>客服语音数据</td><td>2024-03-01</td><td>-</td><td><span class="bg bg-r">已吊销</span></td>
+          <td>-</td></tr>
+      </table>
+    </div>`;
+}
+
+// ==================== 买方视角 ====================
+function P_buyerDash(){
+  return `
+    <h2>📊 买方工作台</h2>
+    <div class="cg cg4">
+      <div class="sc bg"><div class="lb">活跃合约</div><div class="vl">3</div><div class="sb2">1份即将到期</div></div>
+      <div class="sc bl"><div class="lb">活跃会话</div><div class="vl">2</div><div class="sb2">L1: 1 | L2: 1</div></div>
+      <div class="sc by"><div class="lb">今日任务</div><div class="vl">8</div><div class="sb2">成功率 100%</div></div>
+      <div class="sc bo"><div class="lb">DP预算剩余</div><div class="vl">12.3ε</div><div class="sb2">3份合约合计</div></div>
+    </div>
+    <div class="cg cg2">
+      <div class="card">
+        <div class="ch"><h3>我的合约</h3></div>
+        <table>
+          <tr><th>合约ID</th><th>产品</th><th>等级</th><th>DP预算</th><th>到期</th></tr>
+          <tr><td><span class="dt">C-001</span></td><td>企业纳税数据</td><td><span class="bg bg-g">L1</span></td>
+            <td><div class="pr" style="width:100px;display:inline-block;vertical-align:middle"><div class="bar" style="width:35%;background:var(--green)"></div></div> 3.5/10ε</td><td>2024-12-31</td></tr>
+          <tr><td><span class="dt">C-002</span></td><td>医疗影像CT</td><td><span class="bg bg-g">L1</span></td>
+            <td><div class="pr" style="width:100px;display:inline-block;vertical-align:middle"><div class="bar" style="width:79%;background:var(--red)"></div></div> 7.9/10ε</td><td>2024-09-30</td></tr>
+          <tr><td><span class="dt">C-003</span></td><td>金融风控特征</td><td><span class="bg bg-y">L2</span></td>
+            <td><div class="pr" style="width:100px;display:inline-block;vertical-align:middle"><div class="bar" style="width:9%;background:var(--green)"></div></div> 0.9/10ε</td><td>2025-03-31</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>最近任务</h3></div>
+        <table>
+          <tr><th>任务ID</th><th>类型</th><th>状态</th><th>耗时</th><th>DP</th><th>操作</th></tr>
+          <tr><td><span class="dt">t-0892</span></td><td>SQL</td><td><span class="bg bg-g">完成</span></td><td>45s</td><td>0.5ε</td>
+            <td><button class="btn bp bs" onclick="sModal(buyerResult())">结果</button></td></tr>
+          <tr><td><span class="dt">t-0891</span></td><td>Python</td><td><span class="bg bg-b">执行中</span></td><td>120s</td><td>-</td>
+            <td><button class="btn bd bs">取消</button></td></tr>
+        </table>
+      </div>
+    </div>`;
+}
+
+function buyerResult(){
+  return `<h2>📊 任务结果 t-0892</h2>
+    <div class="cg cg3">
+      <div class="sc"><div class="lb">执行耗时</div><div class="vl" style="font-size:18px">45s</div></div>
+      <div class="sc"><div class="lb">DP消耗</div><div class="vl" style="font-size:18px">0.5ε</div></div>
+      <div class="sc"><div class="lb">输出行数</div><div class="vl" style="font-size:18px">23/100</div></div>
+    </div>
+    <div class="card" style="background:var(--card2)">
+      <table style="font-size:11px">
+        <tr><th>department</th><th>employee_count</th><th>avg_salary</th></tr>
+        <tr><td>Engineering</td><td>156</td><td>¥128,500</td></tr>
+        <tr><td>Finance</td><td>89</td><td>¥115,200</td></tr>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text2);margin-top:10px">
+      ✅ SM2签名验证通过 &nbsp;|&nbsp; ✅ 链上存证 <span class="dt">0x789...abc</span> &nbsp;|&nbsp; ✅ 无PII泄露 &nbsp;|&nbsp; ✅ 输出含溯源水印
+    </div>
+    <div class="ma"><button class="btn bo2" onclick="cModal()">关闭</button><button class="btn bp" onclick="toast('结果已下载(加密)')">下载结果</button></div>`;
+}
+
+function P_catalog(){
+  const items=[
+    {name:'某省企业纳税数据2023',cat:'政务·财税',type:'结构化',lv:'L1',size:'500万行',price:'¥300/任务',q:'98%',prov:'省税务局'},
+    {name:'医疗影像CT胸部数据集',cat:'医疗·健康',type:'非结构化',lv:'L1',size:'5万文件/800GB',price:'¥500/任务',q:'95%',prov:'省人民医院'},
+    {name:'金融风控特征数据',cat:'金融·风控',type:'结构化',lv:'L2',size:'200万行',price:'¥200/任务',q:'99%',prov:'某金融科技'},
+    {name:'客服语音录音数据',cat:'电信·服务',type:'非结构化',lv:'L1',size:'10万小时',price:'¥800/任务',q:'92%',prov:'某电信运营商'},
+  ];
+  return `
+    <h2>🔍 数据目录</h2>
+    <div class="search-bar"><input class="fi" placeholder="搜索数据产品..." style="max-width:400px"><button class="btn bp">搜索</button></div>
+    <div class="chips"><span class="chip on">全部</span><span class="chip" onclick="this.classList.toggle('on')">政务·财税</span><span class="chip" onclick="this.classList.toggle('on')">医疗·健康</span><span class="chip" onclick="this.classList.toggle('on')">金融·风控</span><span class="chip" onclick="this.classList.toggle('on')">结构化</span><span class="chip" onclick="this.classList.toggle('on')">非结构化</span><span class="chip" onclick="this.classList.toggle('on')">L1</span><span class="chip" onclick="this.classList.toggle('on')">L2</span></div>
+    ${items.map(p=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px">🏥 ${p.name}</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:6px">${p.cat} | ${p.type} | ${p.size} | 提供方: ${p.prov}</div>
+        <div class="bg2"><span class="bg ${p.lv==='L1'?'bg-g':'bg-y'}">${p.lv}</span><span style="font-size:11px;color:var(--green)">质量: ${p.q}</span><span style="font-size:11px;color:var(--cyan)">🔒 SM4加密</span></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:16px;font-weight:700;color:var(--primary);margin-bottom:6px">${p.price}</div>
+        <div class="bg2"><button class="btn bo2 bs" onclick="sModal(catalogDetail('${p.name}','${p.prov}','${p.q}','${p.size}','${p.lv}'))">质量报告</button><button class="btn bp bs" onclick="sModal(applyContract('${p.name}'))">申请合约</button></div>
+      </div>
+    </div>`).join('')}`;
+}
+
+function catalogDetail(name,prov,q,size,lv){
+  return `<h2>📋 质量报告 - ${name}</h2>
+    <div style="font-size:13px;margin-bottom:14px">提供方: ${prov} | 安全等级: <span class="bg ${lv==='L1'?'bg-g':'bg-y'}">${lv}</span> | 数据量: ${size}</div>
+    <div class="cg cg2">
+      <div><strong>质量指标</strong>
+        <div style="font-size:12px;margin-top:8px">
+          <div style="margin-bottom:6px">完整率: <strong style="color:var(--green)">${q}</strong><div class="pr" style="width:200px;display:inline-block;vertical-align:middle;margin-left:8px"><div class="bar" style="width:${q};background:var(--green)"></div></div></div>
+          <div style="margin-bottom:6px">一致性: <strong style="color:var(--green)">97.5%</strong></div>
+          <div style="margin-bottom:6px">时效性: <strong>2024-05更新</strong></div>
+        </div>
+      </div>
+      <div><strong>脱敏预览 (样本)</strong>
+        <div style="font-size:11px;margin-top:8px;background:var(--card2);padding:10px;border-radius:6px">
+          企业类型分布: 制造业(23.6%), 服务业(18.9%), 零售业(16.7%)...<br>
+          纳税额区间: <10万(34%), 10-100万(45%), >100万(21%)<br>
+          <span style="color:var(--text3)">所有PII字段已脱敏</span>
+        </div>
+      </div>
+    </div>
+    <div class="ma"><button class="btn bp" onclick="cModal()">关闭</button></div>`;
+}
+
+function applyContract(name){
+  return `<h2>📋 申请合约 - ${name}</h2>
+    <div class="fg"><label>合约类型</label><select class="fs"><option>数据查询合约 (SQL)</option><option>模型训练合约 (Python)</option><option>API服务合约</option></select></div>
+    <div class="fr"><div class="fg"><label>有效期</label><select class="fs"><option>7天</option><option>30天</option><option>90天</option></select></div><div class="fg"><label>最大输出行数</label><input class="fi" value="100"></div></div>
+    <div class="fg"><label>允许操作</label><div class="ckpt"><label><input type="checkbox" checked> aggregate</label><label><input type="checkbox" checked> filter</label><label><input type="checkbox"> join</label><label><input type="checkbox"> statistical_model</label></div></div>
+    <div class="fg"><label>DP ε 预算</label><input class="fi" value="10.0" type="number"></div>
+    <div class="ma"><button class="btn bo2" onclick="cModal()">取消</button><button class="btn bp" onclick="toast('合约申请已提交, 等待数商审批');cModal()">提交申请</button></div>`;
+}
+
+function P_console(){
+  return `
+    <h2>💻 沙箱控制台</h2>
+    <div class="tabs"><div class="tab on" onclick="showConTab('sess')">会话管理</div><div class="tab" onclick="showConTab('submit')">提交任务</div></div>
+    <div id="conSess">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3>活跃会话</h3><button class="btn bp" onclick="sModal(newSession())">+ 创建会话</button></div>
+      <div class="card"><table>
+        <tr><th>会话ID</th><th>合约</th><th>数据类型</th><th>等级</th><th>节点</th><th>状态</th><th>证明</th><th>操作</th></tr>
+        <tr><td><span class="dt">s-00445</span></td><td>C-001 企业纳税</td><td><span class="bg bg-b">结构化</span></td><td><span class="bg bg-g">L1</span></td><td>sgx-node-1</td>
+          <td><span class="dot dg"></span>活跃</td><td><span style="color:var(--green)">DCAP ✓</span></td>
+          <td><button class="btn bp bs" onclick="showConTab('submit')">提交任务</button></td></tr>
+        <tr><td><span class="dt">s-00444</span></td><td>C-002 医疗影像</td><td><span class="bg bg-o">非结构化</span></td><td><span class="bg bg-g">L1</span></td><td>sgx-node-2</td>
+          <td><span class="dot dg"></span>活跃</td><td><span style="color:var(--green)">DCAP ✓</span></td>
+          <td><button class="btn bp bs" onclick="showConTab('submit')">提交任务</button></td></tr>
+        <tr><td><span class="dt">s-00443</span></td><td>C-004 行为日志</td><td><span class="bg bg-p">半结构化</span></td><td><span class="bg bg-y">L2</span></td><td>gvisor-node-1</td>
+          <td><span class="dot dg"></span>活跃</td><td><span style="color:var(--green)">软件证明 ✓</span></td>
+          <td><button class="btn bp bs" onclick="showConTab('submit')">提交任务</button></td></tr>
+        <tr><td><span class="dt">s-00442</span></td><td>C-005 企业征信</td><td><span class="bg bg-p">多表关联</span></td><td><span class="bg bg-g">L1</span></td><td>sgx-node-1</td>
+          <td><span class="dot dg"></span>活跃</td><td><span style="color:var(--green)">DCAP ✓</span></td>
+          <td><button class="btn bp bs" onclick="showConTab('submit')">提交任务</button></td></tr>
+        <tr><td><span class="dt">s-00441</span></td><td>C-006 医疗问答</td><td><span class="bg bg-c">LLM微调</span></td><td><span class="bg bg-g">L1</span></td><td>sgx-node-2</td>
+          <td><span class="dot dg"></span>活跃</td><td><span style="color:var(--green)">DCAP ✓</span></td>
+          <td><button class="btn bp bs" onclick="showConTab('submit')">提交任务</button></td></tr>
+      </table></div>
+    </div>
+    <div id="conSubmit" class="hidden">
+      <div class="card">
+        <h3 style="margin-bottom:12px">提交计算任务</h3>
+        <div class="fr">
+          <div class="fg"><label>会话</label><select class="fs" id="conSession" onchange="updateTaskType()">
+            <option value="s445" data-type="struct">s-00445 (C-001 企业纳税, 结构化单表, L1)</option>
+            <option value="s442" data-type="multi">s-00442 (C-005 企业征信, 多表关联, L1)</option>
+            <option value="s444" data-type="unstruct">s-00444 (C-002 医疗影像, 非结构化, L1)</option>
+            <option value="s443" data-type="semi">s-00443 (C-004 行为日志, 半结构化, L2)</option>
+            <option value="s441" data-type="llm">s-00441 (C-006 医疗问答, LLM微调, L1)</option>
+          </select></div>
+          <div class="fg"><label>任务类型</label><select class="fs" id="conTaskType"><option>SQL查询</option><option>Python脚本</option><option>模型推理</option></select></div>
+        </div>
+
+        <!-- 结构化: SQL -->
+        <div id="conSQL">
+          <div class="fg"><label>SQL 查询 <span style="color:var(--text3)">(经策略校验后在TEE内执行)</span></label>
+            <div class="code">SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal
+FROM employees WHERE age > 30
+GROUP BY department HAVING COUNT(*) > 10
+ORDER BY avg_sal DESC LIMIT 100</div></div>
+        </div>
+
+        <!-- 半结构化: JSONPath + Python -->
+        <div id="conSemi" class="hidden">
+          <div class="fg"><label>JSONPath 查询 或 Python 脚本 <span style="color:var(--text3)">(经AST白名单验证后在TEE内执行)</span></label>
+            <div class="code"># JSONPath 查询示例
+$.events[?(@.action == 'purchase')].phone
+
+# 或 Python 脚本示例
+import pandas as pd
+df = pd.read_json('/data/events.json')
+result = df[df['action'] == 'purchase'].groupby('user_id').agg({
+    'amount': ['sum', 'mean', 'count']
+}).head(100)</div></div>
+        </div>
+
+        <!-- 非结构化: 推理任务 -->
+        <div id="conInfer" class="hidden">
+          <div class="fg"><label>推理任务 <span style="color:var(--text3)">(仅输出标签/统计/向量, 禁止输出原始内容)</span></label>
+            <div class="fg"><label>推理类型</label><select class="fs">
+              <option>图像分类 (CT胸部异常检测)</option>
+              <option>目标检测 (人脸/病灶区域)</option>
+              <option>特征提取 (图像向量嵌入)</option>
+              <option>文档OCR + NER</option>
+              <option>音频ASR + 情绪分析</option>
+              <option>视频行为分析</option>
+            </select></div>
+            <div class="fg"><label>输出格式</label><select class="fs">
+              <option>JSON标签 (分类结果+置信度)</option>
+              <option>CSV统计 (聚合统计表)</option>
+              <option>向量嵌入 (特征向量, 不可逆)</option>
+            </select></div>
+          </div>
+        </div>
+
+        <!-- 多表关联: 场景建模 + SQL -->
+        <div id="conMulti" class="hidden">
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <span class="bg bg-g">可用表: enterprise_basic, tax_records, credit_records, legal_cases</span>
+            <span class="bg bg-b">关联: ent_id (FK)</span>
+          </div>
+          <div class="tabs"><div class="tab on" onclick="document.getElementById('conMultiSQL').classList.remove('hidden');document.getElementById('conMultiScenario').classList.add('hidden');this.parentElement.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===0))">自由SQL</div><div class="tab" onclick="document.getElementById('conMultiSQL').classList.add('hidden');document.getElementById('conMultiScenario').classList.remove('hidden');this.parentElement.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===1))">场景建模</div></div>
+          <div id="conMultiSQL">
+            <div class="fg"><label>多表JOIN SQL <span style="color:var(--text3)">(最多4张表, 必须通过FK关联)</span></label>
+              <div class="code">SELECT e.ent_name, t.year, t.tax_amount,
+       c.loan_amount, c.repayment_status,
+       COUNT(l.case_id) as case_count
+FROM enterprise_basic e
+JOIN tax_records t ON e.ent_id = t.ent_id
+JOIN credit_records c ON e.ent_id = c.ent_id
+LEFT JOIN legal_cases l ON e.ent_id = l.ent_id
+WHERE e.industry_code = 'C39'
+  AND t.year = 2024
+GROUP BY e.ent_id, t.year
+HAVING case_count > 0
+ORDER BY t.tax_amount DESC
+LIMIT 100</div></div>
+          </div>
+          <div id="conMultiScenario" class="hidden">
+            <div class="fg"><label>场景模板</label><select class="fs">
+              <option>企业信用风险评分 (风控)</option>
+              <option>行业纳税趋势分析 (财税)</option>
+              <option>企业成长性评估 (投资)</option>
+              <option>司法风险预警 (风控)</option>
+            </select></div>
+            <div class="fg"><label>目标行业</label><input class="fi" value="C39" placeholder="行业代码"></div>
+            <div class="fg"><label>最低注册资本 (万元)</label><input class="fi" type="number" value="100"></div>
+            <div class="fr">
+              <div class="fg"><label>纳税稳定性权重</label><input class="fi" type="number" value="0.3" step="0.1"></div>
+              <div class="fg"><label>信贷健康度权重</label><input class="fi" type="number" value="0.3" step="0.1"></div>
+              <div class="fg"><label>司法风险权重</label><input class="fi" type="number" value="0.2" step="0.1"></div>
+              <div class="fg"><label>成长潜力权重</label><input class="fi" type="number" value="0.2" step="0.1"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LLM训练: 数据处理 + 微调 -->
+        <div id="conLLM" class="hidden">
+          <div class="tabs"><div class="tab on" onclick="document.getElementById('conLLMProcess').classList.remove('hidden');document.getElementById('conLLMTrain').classList.add('hidden');this.parentElement.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===0))">数据处理</div><div class="tab" onclick="document.getElementById('conLLMProcess').classList.add('hidden');document.getElementById('conLLMTrain').classList.remove('hidden');this.parentElement.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===1))">模型训练</div></div>
+          <div id="conLLMProcess">
+            <div class="fg"><label>处理管线</label><select class="fs">
+              <option>质量分析 (统计/分布/异常检测)</option>
+              <option>PII脱敏 (患者/医生/病历号)</option>
+              <option>质量过滤 (评分≥0.7)</option>
+              <option>去重 (BGE-M3嵌入相似度>0.9)</option>
+              <option>格式转换 (JSONL → Alpaca/ChatML/ShareGPT)</option>
+              <option>有害内容过滤</option>
+            </select></div>
+            <div class="fg"><label>输出格式</label><select class="fs">
+              <option>Alpaca (instruction/input/output)</option>
+              <option>ChatML (messages数组)</option>
+              <option>ShareGPT (conversations数组)</option>
+            </select></div>
+          </div>
+          <div id="conLLMTrain" class="hidden">
+            <div class="fr">
+              <div class="fg"><label>基座模型</label><select class="fs">
+                <option>Qwen2.5-7B</option><option>Qwen2.5-14B</option>
+                <option>LLaMA-3.1-8B</option><option>DeepSeek-V2-Lite</option>
+                <option>GLM-4-9B</option><option>Yi-1.5-9B</option>
+              </select></div>
+              <div class="fg"><label>训练方式</label><select class="fs">
+                <option>LoRA (低秩适配)</option><option>QLoRA (4bit量化)</option><option>全参数微调</option>
+              </select></div>
+            </div>
+            <div class="fr">
+              <div class="fg"><label>Epochs</label><input class="fi" type="number" value="3"></div>
+              <div class="fg"><label>Learning Rate</label><input class="fi" value="2e-4"></div>
+              <div class="fg"><label>Batch Size</label><input class="fi" type="number" value="4"></div>
+              <div class="fg"><label>Max Seq Len</label><input class="fi" type="number" value="2048"></div>
+            </div>
+            <div class="fg"><label>差分隐私</label>
+              <div class="ckpt"><label><input type="checkbox" checked> 启用DP注入 (Opacus)</label><label>ε=<input class="fi" type="number" value="2.0" step="0.1" style="width:60px;display:inline-block"></label></div>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:8px">⚠ 训练在TEE内完成, 仅输出LoRA权重+训练指标, 不含训练数据</div>
+          </div>
+        </div>
+
+        <div class="bg2">
+          <button class="btn bo2" onclick="toast('代码验证通过 ✓: AST白名单检查 + RestrictedPython编译成功')">🔍 代码验证</button>
+          <button class="btn bp" onclick="toast('任务已提交, TEE内执行中...')">🚀 提交任务</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function updateTaskType(){
+  const sel=document.getElementById('conSession');
+  const type=sel.options[sel.selectedIndex].getAttribute('data-type');
+  document.getElementById('conSQL').classList.toggle('hidden',type!=='struct');
+  document.getElementById('conSemi').classList.toggle('hidden',type!=='semi');
+  document.getElementById('conInfer').classList.toggle('hidden',type!=='unstruct');
+  document.getElementById('conMulti').classList.toggle('hidden',type!=='multi');
+  document.getElementById('conLLM').classList.toggle('hidden',type!=='llm');
+}
+
+function showConTab(t){
+  document.getElementById('conSess').classList.toggle('hidden',t!=='sess');
+  document.getElementById('conSubmit').classList.toggle('hidden',t!=='submit');
+  document.querySelectorAll('#console .tab').forEach((el,i)=>el.classList.toggle('on',i===(t==='sess'?0:1)));
+}
+
+function newSession(){
+  return `<h2>创建沙箱会话</h2>
+    <div class="fg"><label>选择合约</label><select class="fs"><option>C-001 企业纳税数据 (L1, ε剩余6.5)</option><option>C-002 医疗影像CT (L1, ε剩余2.1)</option><option>C-003 金融风控特征 (L2, ε剩余9.1)</option></select></div>
+    <div class="fg"><label>请求安全等级</label><select class="fs"><option>L1 - TEE标准级 (推荐)</option><option>L2 - 软件增强级</option></select></div>
+    <div style="background:var(--card2);padding:12px;border-radius:8px;font-size:12px;margin:12px 0">
+      <strong>🔒 安全承诺 (L1):</strong><br>✓ Intel SGX TEE硬件隔离 &nbsp;✓ DCAP远程证明 &nbsp;✓ 内存全程加密 &nbsp;✓ 运维零权限
+    </div>
+    <div class="ma"><button class="btn bo2" onclick="cModal()">取消</button><button class="btn bp" onclick="toast('会话 s-00446 已创建, DCAP远程证明通过 ✓');cModal()">创建会话</button></div>`;
+}
+
+function P_myTasks(){
+  return `<h2>📋 任务历史</h2>
+    <div class="card"><table>
+      <tr><th>任务ID</th><th>会话</th><th>类型</th><th>状态</th><th>耗时</th><th>DP消耗</th><th>输出行</th><th>存证</th><th>操作</th></tr>
+      <tr><td><span class="dt">t-0892</span></td><td>s-00445</td><td>SQL</td><td><span class="bg bg-g">完成</span></td><td>45s</td><td>0.5ε</td><td>23</td><td><span style="color:var(--green)">✓</span></td><td><button class="btn bp bs" onclick="sModal(buyerResult())">结果</button></td></tr>
+      <tr><td><span class="dt">t-0891</span></td><td>s-00444</td><td>Python</td><td><span class="bg bg-b">执行中</span></td><td>120s</td><td>-</td><td>-</td><td>-</td><td><button class="btn bd bs">取消</button></td></tr>
+      <tr><td><span class="dt">t-0890</span></td><td>s-00445</td><td>SQL</td><td><span class="bg bg-r">拒绝</span></td><td>-</td><td>-</td><td>-</td><td>-</td><td><span style="font-size:11px;color:var(--red)">策略拒绝: 输出行数超限(120>100)</span></td></tr>
+      <tr><td><span class="dt">t-0889</span></td><td>s-00445</td><td>SQL</td><td><span class="bg bg-g">完成</span></td><td>32s</td><td>0.3ε</td><td>15</td><td><span style="color:var(--green)">✓</span></td><td><button class="btn bp bs">结果</button></td></tr>
+    </table></div>`;
+}
+
+function P_myCerts(){
+  return `<h2>🔑 我的证书</h2>
+    <div class="card"><table>
+      <tr><th>主体</th><th>类型</th><th>指纹(SM3)</th><th>签发者</th><th>有效期</th><th>状态</th></tr>
+      <tr><td>某金融科技</td><td>买方机构证书</td><td><span class="dt">7d4e...a2f8</span></td><td>CDS Root CA</td><td>2024-03~2025-03</td><td><span class="bg bg-g">有效</span></td></tr>
+      <tr><td>张三 (研究员)</td><td>用户证书</td><td><span class="dt">b3c1...d9e7</span></td><td>某金融科技 CA</td><td>2024-06~2025-06</td><td><span class="bg bg-g">有效</span></td></tr>
+    </table></div>`;
+}
+
+// ==================== 运营方视角 ====================
+function P_opDash(){
+  return `
+    <h2>📊 运营总览</h2>
+    <div class="cg cg4">
+      <div class="sc bg"><div class="lb">总节点数</div><div class="vl">5</div><div class="sb2"><span style="color:var(--green)">4在线</span> | <span style="color:var(--red)">1离线</span></div></div>
+      <div class="sc bl"><div class="lb">今日任务</div><div class="vl">342</div><div class="sb2">成功率 98.5%</div></div>
+      <div class="sc by"><div class="lb">活跃会话</div><div class="vl">23</div><div class="sb2">L1:8 L2:12 L3:3</div></div>
+      <div class="sc br"><div class="lb">今日告警</div><div class="vl">3</div><div class="sb2">DP预算 1 | 熔断 1 | 拒绝 1</div></div>
+    </div>
+    <div class="cg cg2">
+      <div class="card"><div class="ch"><h3>任务趋势</h3></div>
+        <div class="bar-c">${['周一','周二','周三','周四','周五','周六','周日'].map((d,i)=>{const h=[65,80,70,90,85,40,55][i];return `<div class="b" style="height:${h}%;background:${i===3?'var(--green)':'var(--primary)'}"><div class="bl2">${d}</div></div>`;}).join('')}</div>
+      </div>
+      <div class="card"><div class="ch"><h3>策略拒绝率</h3></div>
+        <div style="font-size:12px">
+          <div style="margin-bottom:8px"><span class="bg bg-r">输出超限</span> 45% (最常见)</div>
+          <div style="margin-bottom:8px"><span class="bg bg-y">操作禁止</span> 28%</div>
+          <div style="margin-bottom:8px"><span class="bg bg-o">DP耗尽</span> 18%</div>
+          <div><span class="bg bg-gr">其他</span> 9%</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function P_nodes(){
+  const nodes=[
+    {name:'sgx-node-1',lv:'L1',st:'online',mem:'45/64GB EPC',load:'30%',tasks:8,attest:'DCAP ✓'},
+    {name:'sgx-node-2',lv:'L1',st:'online',mem:'20/64GB EPC',load:'60%',tasks:12,attest:'DCAP ✓'},
+    {name:'gvisor-node-1',lv:'L2',st:'warn',mem:'80/128GB',load:'75%',tasks:20,attest:'软件证明 ✓'},
+    {name:'docker-node-1',lv:'L3',st:'online',mem:'40/64GB',load:'50%',tasks:5,attest:'-'},
+    {name:'offline-node',lv:'L1',st:'off',mem:'-',load:'-',tasks:0,attest:'熔断器OPEN'},
+  ];
+  return `<h2>🖥️ 节点管理</h2>
+    <div class="node-grid">
+      ${nodes.map(n=>`<div class="node-card">
+        <div class="nh"><span class="nm"><span class="dot ${n.st==='online'?'dg':n.st==='warn'?'dy':'dr'}"></span>${n.name}</span><span class="bg ${n.lv==='L1'?'bg-g':n.lv==='L2'?'bg-y':'bg-o'}">${n.lv}</span></div>
+        <div class="nm2"><div><span class="ml">内存:</span> ${n.mem}</div><div><span class="ml">负载:</span> ${n.load}</div><div><span class="ml">任务:</span> ${n.tasks}</div><div><span class="ml">证明:</span> ${n.attest}</div></div>
+      </div>`).join('')}
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="ch"><h3>🛡️ 数据安全监控</h3></div>
+      <div class="cg cg4" style="margin-bottom:14px">
+        <div class="sc br"><div class="lb">SQL拦截</div><div class="vl" style="font-size:18px">23</div><div class="sb2">今日: SELECT* 12 | 无LIMIT 8 | OFFSET遍历 3</div></div>
+        <div class="sc by"><div class="lb">网络阻断</div><div class="vl" style="font-size:18px">5</div><div class="sb2">沙箱主动外联尝试</div></div>
+        <div class="sc bg"><div class="lb">内存dump检测</div><div class="vl" style="font-size:18px">0</div><div class="sb2">正常</div></div>
+        <div class="sc bl"><div class="lb">异常查询模式</div><div class="vl" style="font-size:18px">2</div><div class="sb2">批量读取尝试 (已阻断)</div></div>
+      </div>
+      <table style="font-size:11px">
+        <tr><th>时间</th><th>节点</th><th>事件类型</th><th>详情</th><th>处置</th></tr>
+        <tr><td>10:45</td><td>sgx-node-1</td><td><span class="bg bg-r">SQL拦截</span></td><td>SELECT * FROM enterprise_basic (无WHERE)</td><td><span style="color:var(--green)">已阻断</span></td></tr>
+        <tr><td>10:32</td><td>gvisor-node-1</td><td><span class="bg bg-r">网络阻断</span></td><td>尝试连接 114.114.114.114:443</td><td><span style="color:var(--green)">已阻断+告警</span></td></tr>
+        <tr><td>10:18</td><td>sgx-node-2</td><td><span class="bg bg-y">异常模式</span></td><td>连续10次查询同一表, OFFSET递增 (疑似遍历)</td><td><span style="color:var(--yellow)">已限速</span></td></tr>
+        <tr><td>09:55</td><td>sgx-node-1</td><td><span class="bg bg-r">SQL拦截</span></td><td>LOAD DATA INFILE (禁止的SQL操作)</td><td><span style="color:var(--green)">已阻断</span></td></tr>
+      </table>
+    </div>`;
+}
+
+function P_cluster(){
+  return `<h2>☁️ 沙箱集群管理</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">分布式沙箱集群: 多租户并发隔离, K8s调度, 按安全级别路由到节点池。</p>
+    <div class="cg cg4">
+      <div class="sc bg"><div class="lb">总节点</div><div class="vl" style="font-size:18px">12</div><div class="sb2">L1:3 / L2:5 / L3:4</div></div>
+      <div class="sc bl"><div class="lb">运行中沙箱</div><div class="vl" style="font-size:18px">8</div><div class="sb2">3个买方</div></div>
+      <div class="sc by"><div class="lb">CPU使用率</div><div class="vl" style="font-size:18px">62%</div><div class="sb2">49.6/80 cores</div></div>
+      <div class="sc br"><div class="lb">内存使用率</div><div class="vl" style="font-size:18px">45%</div><div class="sb2">115/256 GB</div></div>
+    </div>
+    <div class="tabs">
+      <div class="tab on" onclick="showClusterTab('pools')">节点池</div>
+      <div class="tab" onclick="showClusterTab('instances')">沙箱实例</div>
+      <div class="tab" onclick="showClusterTab('quotas')">资源配额</div>
+    </div>
+    <div id="clusterPools">
+      <div class="card"><h3 style="margin-bottom:12px">节点池</h3>
+        <table style="font-size:11px">
+          <tr><th>节点池</th><th>安全级别</th><th>RuntimeClass</th><th>节点数</th><th>已用/总CPU</th><th>已用/总内存</th><th>运行中沙箱</th><th>状态</th></tr>
+          <tr><td><strong>sgx-pool</strong></td><td><span class="bg bg-r">L1 TEE</span></td><td>sgx (Occlum/Gramine)</td><td>3</td><td>8/12 cores</td><td>24/48 GB</td><td>3</td><td><span class="bg bg-g">正常</span></td></tr>
+          <tr><td><strong>gvisor-pool</strong></td><td><span class="bg bg-y">L2 增强</span></td><td>gvisor (Firecracker)</td><td>5</td><td>20/40 cores</td><td>48/128 GB</td><td>4</td><td><span class="bg bg-g">正常</span></td></tr>
+          <tr><td><strong>standard-pool</strong></td><td><span class="bg bg-c">L3 标准</span></td><td>runc (Docker+Seccomp)</td><td>4</td><td>21.6/28 cores</td><td>43/80 GB</td><td>1</td><td><span class="bg bg-g">正常</span></td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">调度策略</h3>
+        <div class="code" style="font-size:11px">调度器: SandboxScheduler (Celery + RabbitMQ)
+
+调度流程:
+  1. 买方提交任务 → 验证合约状态
+  2. 检查安全级别 → 路由到对应节点池 (L1→sgx-pool, L2→gvisor-pool, L3→standard-pool)
+  3. 查找活跃沙箱 → 复用或创建
+  4. 检查资源配额 → CPU/内存/磁盘/DP预算
+  5. 创建K8s Pod → 等待就绪 → 提交任务
+
+亲和性策略:
+  • 同买方同节点 (减少数据移动)
+  • L1任务仅调度到SGX节点
+  • 资源不足时优先暂停最旧的沙箱
+
+隔离策略:
+  • 每买方独立K8s Namespace (sandbox-{org_id[:8]})
+  • NetworkPolicy: 沙箱间禁止互访
+  • 独立ServiceAccount + RBAC
+  • 独立PVC + 加密卷</div>
+      </div>
+    </div>
+    <div id="clusterInstances" class="hidden">
+      <div class="card"><h3 style="margin-bottom:12px">运行中的沙箱实例</h3>
+        <table style="font-size:11px">
+          <tr><th>沙箱ID</th><th>买方</th><th>合约</th><th>安全级别</th><th>节点</th><th>CPU</th><th>内存</th><th>运行时间</th><th>状态</th></tr>
+          <tr><td><span class="dt">sb-001</span></td><td>某银行</td><td>C-001</td><td><span class="bg bg-r">L1</span></td><td>sgx-node-01</td><td>2 cores</td><td>4 GB</td><td>2h 15m</td><td><span class="bg bg-g">运行中</span></td></tr>
+          <tr><td><span class="dt">sb-002</span></td><td>某银行</td><td>C-003</td><td><span class="bg bg-c">L3</span></td><td>std-node-02</td><td>4 cores</td><td>8 GB</td><td>45m</td><td><span class="bg bg-g">运行中</span></td></tr>
+          <tr><td><span class="dt">sb-003</span></td><td>某保险</td><td>C-005</td><td><span class="bg bg-y">L2</span></td><td>gvisor-node-03</td><td>4 cores</td><td>8 GB</td><td>1h 30m</td><td><span class="bg bg-g">运行中</span></td></tr>
+          <tr><td><span class="dt">sb-004</span></td><td>某金融科技</td><td>C-007</td><td><span class="bg bg-r">L1</span></td><td>sgx-node-02</td><td>2 cores</td><td>4 GB</td><td>3h 02m</td><td><span class="bg bg-g">运行中</span></td></tr>
+          <tr><td><span class="dt">sb-005</span></td><td>某银行</td><td>C-002</td><td><span class="bg bg-r">L1</span></td><td>sgx-node-03</td><td>2 cores</td><td>4 GB</td><td>20m</td><td><span class="bg bg-c">创建中</span></td></tr>
+        </table>
+      </div>
+    </div>
+    <div id="clusterQuotas" class="hidden">
+      <div class="card"><h3 style="margin-bottom:12px">买方资源配额</h3>
+        <table style="font-size:11px">
+          <tr><th>买方</th><th>最大沙箱</th><th>CPU限额</th><th>内存限额</th><th>磁盘限额</th><th>DP预算</th><th>已用DP</th><th>连接器数</th></tr>
+          <tr><td>某银行</td><td>5</td><td>16 cores</td><td>64 GB</td><td>500 GB</td><td>100ε</td><td>45.2ε</td><td>3/3</td></tr>
+          <tr><td>某保险公司</td><td>3</td><td>8 cores</td><td>32 GB</td><td>200 GB</td><td>50ε</td><td>12.8ε</td><td>2/3</td></tr>
+          <tr><td>某金融科技</td><td>3</td><td>8 cores</td><td>32 GB</td><td>200 GB</td><td>50ε</td><td>23.1ε</td><td>1/3</td></tr>
+        </table>
+      </div>
+    </div>`;
+}
+
+function showClusterTab(t){
+  document.getElementById('clusterPools').classList.toggle('hidden',t!=='pools');
+  document.getElementById('clusterInstances').classList.toggle('hidden',t!=='instances');
+  document.getElementById('clusterQuotas').classList.toggle('hidden',t!=='quotas');
+}
+
+function P_contracts(){
+  return `<h2>📋 合约视览 <span style="font-size:12px;color:var(--text3)">(只读)</span></h2>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:12px">⚠ 合约的暂停/恢复/终止由服务平台管理, 沙箱仅校验合约状态。此处为只读视图。</p>
+    <div class="card"><table>
+      <tr><th>合约ID</th><th>产品</th><th>数商</th><th>买方</th><th>等级</th><th>状态</th><th>DP预算</th><th>有效期</th><th>存证</th></tr>
+      <tr><td><span class="dt">C-001</span></td><td>企业纳税数据</td><td>省税务局</td><td>某金融科技</td><td><span class="bg bg-g">L1</span></td><td><span class="bg bg-g">生效中</span></td><td>3.5/10ε</td><td>~2024-12-31</td><td><span class="dt">0xabc...123</span></td></tr>
+      <tr><td><span class="dt">C-002</span></td><td>医疗影像CT</td><td>省人民医院</td><td>某AI公司</td><td><span class="bg bg-g">L1</span></td><td><span class="bg bg-g">生效中</span></td><td>7.9/10ε</td><td>~2024-09-30</td><td><span class="dt">0xdef...456</span></td></tr>
+      <tr><td><span class="dt">C-003</span></td><td>金融风控特征</td><td>某金融科技</td><td>某银行</td><td><span class="bg bg-y">L2</span></td><td><span class="bg bg-y">已暂停</span></td><td>9.2/10ε</td><td>~2025-03-31</td><td><span class="dt">0xghi...789</span></td></tr>
+    </table></div>`;
+}
+
+function P_audit(){
+  return `<h2>📝 审计中心</h2>
+    <div class="search-bar">
+      <input class="fi" type="date" value="2024-06-03" style="max-width:140px">
+      <input class="fi" type="date" value="2024-06-03" style="max-width:140px">
+      <select class="fs" style="max-width:120px"><option>全部操作</option><option>data_read</option><option>task_submit</option><option>policy_check</option></select>
+      <select class="fs" style="max-width:100px"><option>全部</option><option>allow</option><option>deny</option></select>
+      <button class="btn bp">查询</button>
+    </div>
+    <div class="card"><table>
+      <tr><th>时间</th><th>事件ID</th><th>用户</th><th>操作</th><th>资源</th><th>决策</th><th>DP</th><th>等级</th><th>存证</th></tr>
+      <tr><td>10:23:45</td><td><span class="dt">evt-a1b2</span></td><td>u-001</td><td><span class="bg bg-b">data_read</span></td><td>dp-042</td><td><span class="bg bg-g">allow</span></td><td>0.5ε</td><td>L1</td><td><span style="color:var(--green)">✓</span></td></tr>
+      <tr><td>10:21:12</td><td><span class="dt">evt-c3d4</span></td><td>u-002</td><td><span class="bg bg-b">task_submit</span></td><td>t-0890</td><td><span class="bg bg-r">deny</span></td><td>-</td><td>L1</td><td><span style="color:var(--green)">✓</span></td></tr>
+      <tr><td>10:18:33</td><td><span class="dt">evt-e5f6</span></td><td>u-001</td><td><span class="bg bg-b">task_complete</span></td><td>t-0892</td><td><span class="bg bg-g">allow</span></td><td>0.5ε</td><td>L1</td><td><span style="color:var(--green)">✓</span></td></tr>
+      <tr><td>10:15:01</td><td><span class="dt">evt-g7h8</span></td><td>system</td><td><span class="bg bg-p">attestation</span></td><td>sgx-node-1</td><td><span class="bg bg-g">allow</span></td><td>-</td><td>L1</td><td><span style="color:var(--green)">✓</span></td></tr>
+      <tr><td>10:12:44</td><td><span class="dt">evt-i9j0</span></td><td>system</td><td><span class="bg bg-c">merkle_anchor</span></td><td>batch-1247</td><td><span class="bg bg-y">audit</span></td><td>-</td><td>-</td><td><span style="color:var(--green)">✓</span></td></tr>
+    </table></div>`;
+}
+
+function P_connectors(){
+  return `<h2>🔗 连接器管理</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">管理数据连接器: 从外部数据源同步数据到沙箱。支持数据库/API/文件/区块链等类型。</p>
+    <div class="tabs">
+      <div class="tab on" onclick="showConnTab('spaces')">数据空间</div>
+      <div class="tab" onclick="showConnTab('sync')">同步任务</div>
+      <div class="tab" onclick="showConnTab('config')">连接器配置</div>
+    </div>
+    <div id="connSpaces">
+      <div class="card"><div class="ch"><h3>已接入数据空间</h3><button class="btn bp bs">+ 添加空间</button></div>
+        <table>
+          <tr><th>空间</th><th>类型</th><th>连接器URL</th><th>证书</th><th>状态</th><th>产品数</th><th>操作</th></tr>
+          <tr><td>政务数据空间A</td><td>政务</td><td><span class="dt">https://space-a.gov.cn</span></td><td><span style="color:var(--green)">SM2✓</span></td><td><span class="bg bg-g">已连接</span></td><td>45</td><td><button class="btn bo2 bs">配置</button><button class="btn bo2 bs">同步目录</button></td></tr>
+          <tr><td>金融数据空间B</td><td>金融</td><td><span class="dt">https://space-b.fin.cn</span></td><td><span style="color:var(--green)">SM2✓</span></td><td><span class="bg bg-g">已连接</span></td><td>32</td><td><button class="btn bo2 bs">配置</button><button class="btn bo2 bs">同步目录</button></td></tr>
+          <tr><td>医疗数据空间C</td><td>医疗</td><td><span class="dt">https://space-c.health.cn</span></td><td><span style="color:var(--yellow)">待验证</span></td><td><span class="bg bg-y">配置中</span></td><td>-</td><td><button class="btn bp bs">完成配置</button></td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">连接器类型</h3>
+        <div class="cg cg3">
+          <div style="background:var(--card2);padding:12px;border-radius:8px"><h4 style="font-size:13px">🗄️ db_connector</h4><div style="font-size:11px;color:var(--text2);margin-top:4px">MySQL/Oracle/SQLServer → CDC流式同步</div></div>
+          <div style="background:var(--card2);padding:12px;border-radius:8px"><h4 style="font-size:13px">🔌 api_gateway</h4><div style="font-size:11px;color:var(--text2);margin-top:4px">REST/gRPC API → HTTPS代理拉取</div></div>
+          <div style="background:var(--card2);padding:12px;border-radius:8px"><h4 style="font-size:13px">📁 file_connector</h4><div style="font-size:11px;color:var(--text2);margin-top:4px">SFTP/NFS → 加密文件传输</div></div>
+        </div>
+      </div>
+    </div>
+    <div id="connSync" class="hidden">
+      <div class="card"><h3 style="margin-bottom:12px">同步任务队列</h3>
+        <table style="font-size:11px">
+          <tr><th>任务ID</th><th>连接器</th><th>目标沙箱</th><th>数据源</th><th>进度</th><th>已同步</th><th>状态</th></tr>
+          <tr><td><span class="dt">sync-001</span></td><td>政务数据空间A</td><td>sandbox-买方A-001</td><td>enterprise_basic</td><td><div class="pr" style="width:100px"><div class="bar" style="width:100%;background:var(--green)"></div></div></td><td>480万行</td><td><span class="bg bg-g">完成</span></td></tr>
+          <tr><td><span class="dt">sync-002</span></td><td>金融数据空间B</td><td>sandbox-买方B-003</td><td>tax_records</td><td><div class="pr" style="width:100px"><div class="bar" style="width:67%;background:var(--primary)"></div></div></td><td>335万/500万</td><td><span class="bg bg-c">同步中</span></td></tr>
+          <tr><td><span class="dt">sync-003</span></td><td>政务数据空间A</td><td>sandbox-买方C-002</td><td>legal_cases</td><td><div class="pr" style="width:100px"><div class="bar" style="width:12%;background:var(--yellow)"></div></div></td><td>6万/50万</td><td><span class="bg bg-y">排队中</span></td></tr>
+        </table>
+      </div>
+    </div>
+    <div id="connConfig" class="hidden">
+      <div class="card">
+        <h3 style="margin-bottom:12px">新建连接器</h3>
+        <div class="fr">
+          <div class="fg"><label>连接器类型</label><select class="fs"><option>db_connector (数据库)</option><option>api_gateway (API)</option><option>file_connector (文件)</option><option>platform_hook (平台推送)</option></select></div>
+          <div class="fg"><label>数据源URL</label><input class="fi" placeholder="mysql://host:3306/db"></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label>认证方式</label><select class="fs"><option>api_key</option><option>oauth2</option><option>certificate</option></select></div>
+          <div class="fg"><label>同步模式</label><select class="fs"><option>incremental (增量)</option><option>full (全量)</option><option>cdc (CDC流式)</option></select></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label>同步间隔</label><select class="fs"><option>1小时</option><option>2小时</option><option>6小时</option><option>24小时</option></select></div>
+          <div class="fg"><label>数据格式</label><select class="fs"><option>structured (结构化)</option><option>json</option><option>csv</option><option>parquet</option></select></div>
+        </div>
+        <div style="margin-top:14px"><button class="btn bp" onclick="toast('连接器已创建, 测试连接中...')">创建并测试连接</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">数据流架构</h3>
+        <div class="code" style="font-size:11px">外部数据源 → 连接器网关(FastAPI) → SM4加密传输 → 沙箱内PostgreSQL/MinIO
+
+连接器类型:
+  db_connector   : 外部DB(MySQL/Oracle) → JDBC/CDC → 分批拉取 → SM4加密 → 沙箱PG写入
+  api_gateway    : REST/gRPC API → HTTPS → 拉取JSON → SM4加密 → 沙箱MinIO/PG
+  file_connector : SFTP/NFS → 文件拉取 → SM4加密 → 沙箱MinIO
+  platform_hook  : 第三方平台 → Webhook推送 → SM4加密 → 沙箱存储
+
+安全保障:
+  ✅ 传输加密: SM4-CBC (非TLS, 国密合规)
+  ✅ 存储加密: 沙箱内列级SM4加密 (Level 0-3)
+  ✅ 密钥隔离: 每沙箱独立DEK, Vault per-namespace secret
+  ✅ 审计日志: 每次同步记录哈希, 可追溯</div>
+      </div>
+    </div>`;
+}
+
+function showConnTab(t){
+  document.getElementById('connSpaces').classList.toggle('hidden',t!=='spaces');
+  document.getElementById('connSync').classList.toggle('hidden',t!=='sync');
+  document.getElementById('connConfig').classList.toggle('hidden',t!=='config');
+}
+
+function P_users(){
+  return `<h2>👥 用户管理</h2>
+    <div class="card"><div class="ch"><h3>机构列表</h3><button class="btn bp bs">+ 注册机构</button></div>
+      <table>
+        <tr><th>机构</th><th>类型</th><th>用户数</th><th>证书</th><th>状态</th></tr>
+        <tr><td>省税务局</td><td><span class="bg bg-p">数商</span></td><td>5</td><td><span class="dt">3f2a...b9c1</span></td><td><span class="bg bg-g">正常</span></td></tr>
+        <tr><td>省人民医院</td><td><span class="bg bg-p">数商</span></td><td>3</td><td><span class="dt">5a8c...e2d4</span></td><td><span class="bg bg-g">正常</span></td></tr>
+        <tr><td>某金融科技</td><td><span class="bg bg-c">买方</span></td><td>8</td><td><span class="dt">7d4e...a2f8</span></td><td><span class="bg bg-g">正常</span></td></tr>
+        <tr><td>某银行</td><td><span class="bg bg-c">买方</span></td><td>4</td><td><span class="dt">9b1c...d5e3</span></td><td><span class="bg bg-g">正常</span></td></tr>
+      </table>
+    </div>`;
+}
+
+// ==================== 监管视角 ====================
+function P_regDash(){
+  return `
+    <h2>📊 合规总览</h2>
+    <div class="cg cg4">
+      <div class="sc bg"><div class="lb">合规率</div><div class="vl">97.7%</div><div class="sb2">过去30天</div></div>
+      <div class="sc br"><div class="lb">安全事件</div><div class="vl">7</div><div class="sb2">本月: PII泄露3 策略违规4</div></div>
+      <div class="sc bl"><div class="lb">审计日志</div><div class="vl">1.2M</div><div class="sb2">已上链 98.5%</div></div>
+      <div class="sc by"><div class="lb">DP消耗趋势</div><div class="vl">↑12%</div><div class="sb2">环比上月</div></div>
+    </div>
+    <div class="cg cg2">
+      <div class="card"><div class="ch"><h3>违规类型分布</h3></div>
+        <div style="font-size:12px">
+          <div style="margin-bottom:8px"><span class="bg bg-r">PII泄露尝试</span> 3次 <span style="color:var(--text3)">| 输出含身份证号/手机号</span></div>
+          <div style="margin-bottom:8px"><span class="bg bg-y">输出超限</span> 2次 <span style="color:var(--text3)">| 超过maxOutputRows</span></div>
+          <div style="margin-bottom:8px"><span class="bg bg-o">DP预算耗尽</span> 1次 <span style="color:var(--text3)">| 尝试超预算查询</span></div>
+          <div><span class="bg bg-p">代码违规</span> 1次 <span style="color:var(--text3)">| 尝试import os</span></div>
+        </div>
+      </div>
+      <div class="card"><div class="ch"><h3>安全事件时间线</h3></div>
+        <div class="ev">
+          <div class="ev-i"><span class="tm">06-03</span><span><span class="bg bg-r">严重</span> 买方u-007输出含身份证号, 已阻断</span></div>
+          <div class="ev-i"><span class="tm">06-02</span><span><span class="bg bg-y">警告</span> 合约C-003 DP预算耗尽</span></div>
+          <div class="ev-i"><span class="tm">06-01</span><span><span class="bg bg-y">警告</span> 任务t-0850输出行数超限(120>100)</span></div>
+          <div class="ev-i"><span class="tm">05-30</span><span><span class="bg bg-r">严重</span> 买方u-005尝试import os, 已拒绝</span></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function P_regAudit(){
+  return `<h2>📝 审计查询</h2>
+    <div class="search-bar">
+      <input class="fi" type="date" value="2024-06-01" style="max-width:140px">
+      <input class="fi" type="date" value="2024-06-03" style="max-width:140px">
+      <select class="fs" style="max-width:120px"><option>全部操作</option><option>data_read</option><option>task_submit</option><option>policy_check</option><option>export</option></select>
+      <select class="fs" style="max-width:100px"><option>全部</option><option>allow</option><option>deny</option></select>
+      <input class="fi" placeholder="用户/合约/会话ID" style="max-width:180px">
+      <button class="btn bp">查询</button>
+    </div>
+    <div class="card"><table>
+      <tr><th>时间</th><th>事件ID</th><th>用户/系统</th><th>操作</th><th>资源</th><th>决策</th><th>DP</th><th>等级</th><th>链上存证</th></tr>
+      <tr><td>10:23:45</td><td><span class="dt">evt-a1b2</span></td><td>u-001 (某金融科技)</td><td><span class="bg bg-b">data_read</span></td><td>dp-042</td><td><span class="bg bg-g">allow</span></td><td>0.5ε</td><td>L1</td><td><span class="dt">0xabc...123</span></td></tr>
+      <tr><td>10:21:12</td><td><span class="dt">evt-c3d4</span></td><td>u-002 (某银行)</td><td><span class="bg bg-b">task_submit</span></td><td>t-0890</td><td><span class="bg bg-r">deny</span></td><td>-</td><td>L1</td><td><span class="dt">0xdef...456</span></td></tr>
+      <tr><td>10:15:01</td><td><span class="dt">evt-g7h8</span></td><td>system</td><td><span class="bg bg-p">attestation</span></td><td>sgx-node-1</td><td><span class="bg bg-g">allow</span></td><td>-</td><td>L1</td><td><span class="dt">0xghi...789</span></td></tr>
+    </table></div>`;
+}
+
+function P_verify(){
+  return `<h2>✅ 存证验真</h2>
+    <div class="card">
+      <h3 style="margin-bottom:12px">输入验证参数</h3>
+      <div class="fr">
+        <div class="fg"><label>事件ID</label><input class="fi" placeholder="如 evt-a1b2" value="evt-a1b2"></div>
+        <div class="fg"><label>或 Merkle Root 哈希</label><input class="fi" placeholder="如 3f2a...b9c1"></div>
+      </div>
+      <button class="btn bp" onclick="sModal(verifyResult())">🔍 验证存证</button>
+    </div>`;
+}
+
+function verifyResult(){
+  return `<h2>✅ 存证验证结果</h2>
+    <div style="padding:12px;background:rgba(34,197,94,.1);border:1px solid var(--green);border-radius:8px;margin-bottom:14px;font-size:13px">
+      <strong style="color:var(--green)">✓ 存证验证通过</strong> - 事件 evt-a1b2 已在区块链上不可篡改存储
+    </div>
+    <div style="font-size:12px">
+      <div style="margin-bottom:8px"><strong>事件ID:</strong> <span class="dt">evt-a1b2</span></div>
+      <div style="margin-bottom:8px"><strong>时间:</strong> 2024-06-03 10:23:45.123</div>
+      <div style="margin-bottom:8px"><strong>操作:</strong> data_read (买方u-001查询产品dp-042)</div>
+      <div style="margin-bottom:8px"><strong>Merkle批次:</strong> #1247 (包含 1,000 条审计事件)</div>
+      <div style="margin-bottom:8px"><strong>Merkle Root:</strong> <span class="dt">a1b2c3d4e5f6...7890abcdef</span></div>
+      <div style="margin-bottom:8px"><strong>区块链交易:</strong> <span class="dt">0xabc123def456...789abc</span> (FISCO BCOS)</div>
+      <div style="margin-bottom:8px"><strong>区块高度:</strong> 1,234,567</div>
+      <div><strong>SM3事件哈希:</strong> <span class="dt">9f8e7d6c5b4a...3210fedcba</span></div>
+    </div>
+    <div class="ma"><button class="btn bp" onclick="cModal()">关闭</button></div>`;
+}
+
+function P_reports(){
+  return `<h2>📄 合规报告</h2>
+    <div class="card"><div class="ch"><h3>报告生成</h3></div>
+      <div class="fr">
+        <div class="fg"><label>报告类型</label><select class="fs"><option>月度合规报告</option><option>等保三级审计报告</option><option>DSMM评估报告</option><option>密评报告</option></select></div>
+        <div class="fg"><label>时间范围</label><select class="fs"><option>2024年5月</option><option>2024年Q2</option><option>2024年H1</option></select></div>
+      </div>
+      <button class="btn bp" onclick="toast('报告生成中, 预计5分钟...')">生成报告</button>
+    </div>
+    <div class="card"><div class="ch"><h3>历史报告</h3></div>
+      <table>
+        <tr><th>报告</th><th>类型</th><th>时间范围</th><th>生成时间</th><th>操作</th></tr>
+        <tr><td>2024年5月合规报告</td><td>月度</td><td>2024-05</td><td>2024-06-01</td><td><button class="btn bo2 bs">下载PDF</button></td></tr>
+        <tr><td>2024年Q1等保审计</td><td>等保三级</td><td>2024-Q1</td><td>2024-04-05</td><td><button class="btn bo2 bs">下载PDF</button></td></tr>
+      </table>
+    </div>`;
+}
+
+// ==================== 数商: 特征模板管理 ====================
+function P_featPlats(){
+  return `<h2>🧩 特征模板管理</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">数商预定义安全特征模板, 买方在沙箱内使用这些模板计算特征。特征经过聚合处理, 不含原始行级数据。</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3>企业征信数据 — 特征模板集</h3>
+      <button class="btn bp" onclick="sModal(newFeatureTemplate())">+ 新建模板</button>
+    </div>
+    <div class="card"><table>
+      <tr><th>模板名称</th><th>描述</th><th>输出类型</th><th>安全级别</th><th>聚合方式</th><th>使用次数</th><th>操作</th></tr>
+      <tr><td><span class="dt">tax_stability</span></td><td>纳税稳定性 (变异系数)</td><td>float</td><td><span class="bg bg-g">safe</span></td><td>STDDEV/AVG per ent_id</td><td>89</td><td><button class="btn bo2 bs">编辑</button></td></tr>
+      <tr><td><span class="dt">credit_health</span></td><td>信贷健康度 (逾期率)</td><td>float</td><td><span class="bg bg-g">safe</span></td><td>SUM/COUNT per ent_id</td><td>67</td><td><button class="btn bo2 bs">编辑</button></td></tr>
+      <tr><td><span class="dt">legal_risk</span></td><td>司法风险 (案件数/金额)</td><td>float</td><td><span class="bg bg-g">safe</span></td><td>COUNT/SUM per ent_id</td><td>45</td><td><button class="btn bo2 bs">编辑</button></td></tr>
+      <tr><td><span class="dt">growth_potential</span></td><td>成长潜力 (营收增长)</td><td>float</td><td><span class="bg bg-g">safe</span></td><td>营收变化率 per ent_id</td><td>34</td><td><button class="btn bo2 bs">编辑</button></td></tr>
+      <tr><td><span class="dt">industry_position</span></td><td>行业地位 (排名百分位)</td><td>float</td><td><span class="bg bg-g">safe</span></td><td>PERCENT_RANK per industry</td><td>23</td><td><button class="btn bo2 bs">编辑</button></td></tr>
+    </table></div>
+    <div class="card" style="margin-top:14px">
+      <h4 style="font-size:13px;margin-bottom:8px">模板定义示例: tax_stability</h4>
+      <div class="code" style="font-size:11px">-- 安全特征模板: 纳税稳定性
+-- 输出: 每个企业的纳税变异系数 (越低越稳定)
+-- 安全保障: 聚合统计, 不含单条纳税记录
+
+SELECT ent_id,
+       STDDEV(tax_amount) / NULLIF(AVG(tax_amount), 0) AS tax_cv,
+       COUNT(*) AS tax_years,
+       MIN(year) AS first_year,
+       MAX(year) AS last_year
+FROM tax_records
+WHERE year >= EXTRACT(YEAR FROM CURRENT_DATE) - {lookback_years}
+  AND ent_id IN (
+    SELECT ent_id FROM enterprise_basic
+    WHERE industry_code = '{industry_code}'
+  )
+GROUP BY ent_id
+HAVING COUNT(*) >= {min_years}
+
+-- 参数:
+--   lookback_years: 回溯年数 (默认3)
+--   industry_code: 行业过滤 (可选)
+--   min_years: 最少年份数 (默认2)
+
+-- 安全保证:
+--   ✅ 输出为聚合值 (均值/标准差), 不含原始纳税额
+--   ✅ HAVING过滤确保样本充分 (≥2年)
+--   ✅ 仅输出 ent_id + 统计值, 无其他敏感字段</div>
+    </div>`;
+}
+
+function newFeatureTemplate(){
+  return `<h2>🧩 新建特征模板</h2>
+    <div class="fg"><label>模板名称</label><input class="fi" placeholder="如: debt_ratio"></div>
+    <div class="fg"><label>描述</label><input class="fi" placeholder="如: 资产负债率"></div>
+    <div class="fr">
+      <div class="fg"><label>输出类型</label><select class="fs"><option>float</option><option>int</option><option>category</option></select></div>
+      <div class="fg"><label>安全级别</label><select class="fs"><option value="safe">safe (聚合统计, 可直接导出)</option><option value="review">review (需安全审查后导出)</option></select></div>
+    </div>
+    <div class="fg"><label>SQL模板</label><textarea class="ft" rows="8" placeholder="SELECT ent_id, ... FROM ... GROUP BY ent_id"></textarea></div>
+    <div class="fg"><label>参数定义</label><textarea class="ft" rows="3" placeholder="lookback_years: int = 3 (回溯年数)"></textarea></div>
+    <div class="fg"><label>安全保障说明</label><textarea class="ft" rows="3" placeholder="说明此模板为什么是安全的: 聚合方式、不含原始数据的理由"></textarea></div>
+    <div class="ma"><button class="btn bo2" onclick="cModal()">取消</button><button class="btn bp" onclick="toast('特征模板已创建, 需运营方审批后可用');cModal()">提交审批</button></div>`;
+}
+
+// ==================== 买方: 特征工程工作台 ====================
+function P_features(){
+  return `<h2>🧬 特征工程工作台</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">在沙箱内使用数商预定义的特征模板计算特征向量。特征仅包含聚合统计, 不含原始行级数据。</p>
+    <div class="tabs">
+      <div class="tab on" onclick="showFeatTab('select')">选择数据产品</div>
+      <div class="tab" onclick="showFeatTab('define')">定义特征</div>
+      <div class="tab" onclick="showFeatTab('preview')">特征预览</div>
+    </div>
+    <div id="featSelect">
+      <div class="card">
+        <h3 style="margin-bottom:12px">选择数据产品</h3>
+        <div class="fg"><label>数据产品</label><select class="fs" onchange="document.getElementById('featTemplateList').classList.remove('hidden')">
+          <option>请选择...</option>
+          <option selected>企业征信全景数据 (4表, 4800万行)</option>
+          <option>企业纳税数据2024 (单表, 500万行)</option>
+        </select></div>
+        <div id="featTemplateList">
+          <h4 style="font-size:13px;margin:12px 0 8px">可用特征模板 (数商预定义)</h4>
+          <div class="ckpt">
+            <label><input type="checkbox" checked> tax_stability (纳税稳定性)</label>
+            <label><input type="checkbox" checked> credit_health (信贷健康度)</label>
+            <label><input type="checkbox" checked> legal_risk (司法风险)</label>
+            <label><input type="checkbox"> growth_potential (成长潜力)</label>
+            <label><input type="checkbox"> industry_position (行业地位)</label>
+          </div>
+          <h4 style="font-size:13px;margin:12px 0 8px">自定义特征 (需数商审批)</h4>
+          <button class="btn bo2" onclick="toast('自定义特征已提交审批')">+ 添加自定义特征</button>
+        </div>
+        <div style="margin-top:14px"><button class="btn bp" onclick="showFeatTab('define')">下一步: 配置参数 →</button></div>
+      </div>
+    </div>
+    <div id="featDefine" class="hidden">
+      <div class="card">
+        <h3 style="margin-bottom:12px">特征参数配置</h3>
+        <div class="fr">
+          <div class="fg"><label>目标行业</label><select class="fs"><option>全部行业</option><option>C39 (计算机通信)</option><option>I65 (软件信息)</option><option>G61 (批发零售)</option></select></div>
+          <div class="fg"><label>回溯年数</label><input class="fi" type="number" value="3"></div>
+          <div class="fg"><label>最少数据年份</label><input class="fi" type="number" value="2"></div>
+          <div class="fg"><label>企业筛选</label><select class="fs"><option>全部</option><option>注册资本≥100万</option><option>成立≥3年</option></select></div>
+        </div>
+        <div style="margin-top:14px"><button class="btn bp" onclick="showFeatTab('preview');document.getElementById('featResult').classList.remove('hidden')">执行特征计算 →</button></div>
+      </div>
+    </div>
+    <div id="featPreview" class="hidden">
+      <div id="featResult" class="hidden">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3>特征计算结果 (沙箱内执行)</h3>
+            <span class="bg bg-g">✓ 安全审查通过</span>
+          </div>
+          <div style="font-size:11px;color:var(--green);margin-bottom:12px">✓ 执行成功 (12.3s) | ✓ 特征均为聚合值 | ✓ 不含原始行级数据 | ✓ 满足5-匿名性</div>
+          <h4 style="font-size:13px;margin-bottom:8px">特征统计摘要 (沙箱内生成, 非原始数据)</h4>
+          <table style="font-size:11px">
+            <tr><th>特征</th><th>非空率</th><th>均值</th><th>标准差</th><th>最小值</th><th>最大值</th><th>分布</th></tr>
+            <tr><td>tax_cv (纳税变异系数)</td><td>95.2%</td><td>0.35</td><td>0.28</td><td>0.01</td><td>2.34</td><td>右偏</td></tr>
+            <tr><td>overdue_rate (逾期率)</td><td>89.1%</td><td>0.08</td><td>0.12</td><td>0.00</td><td>0.89</td><td>右偏</td></tr>
+            <tr><td>case_count (司法案件数)</td><td>76.3%</td><td>2.3</td><td>5.1</td><td>0</td><td>89</td><td>右偏</td></tr>
+            <tr><td>tax_years (纳税年数)</td><td>95.2%</td><td>4.2</td><td>1.8</td><td>1</td><td>10</td><td>近似正态</td></tr>
+          </table>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px">⚠ 以上为聚合统计, 不含任何单条企业记录。特征向量可在沙箱内用于模型训练。</div>
+          <div class="bg2" style="margin-top:12px">
+            <button class="btn bp" onclick="go('training')">→ 去训练模型</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function showFeatTab(t){
+  document.getElementById('featSelect').classList.toggle('hidden',t!=='select');
+  document.getElementById('featDefine').classList.toggle('hidden',t!=='define');
+  document.getElementById('featPreview').classList.toggle('hidden',t!=='preview');
+}
+
+// ==================== 买方: 模型训练工作台 ====================
+function P_training(){
+  return `<h2>🤖 模型训练工作台</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">在沙箱内使用特征向量训练模型。模型经过防记忆化检查后可导出。</p>
+    <div class="cg cg2">
+      <div class="card">
+        <h3 style="margin-bottom:12px">训练配置</h3>
+        <div class="fg"><label>特征集</label><select class="fs"><option>企业信用风险特征集 (3特征)</option><option>纳税稳定性特征集 (1特征)</option></select></div>
+        <div class="fr">
+          <div class="fg"><label>算法</label><select class="fs"><option>XGBoost (推荐, 安全)</option><option>LightGBM (推荐, 安全)</option><option>LogisticRegression (安全)</option><option>NeuralNetwork (需DP)</option></select></div>
+          <div class="fg"><label>目标变量</label><select class="fs"><option>is_default (是否违约)</option><option>risk_level (风险等级)</option></select></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label>交叉验证</label><select class="fs"><option>5折</option><option>10折</option></select></div>
+          <div class="fg"><label>测试集比例</label><select class="fs"><option>20%</option><option>30%</option></select></div>
+        </div>
+        <h4 style="font-size:13px;margin:14px 0 8px">差分隐私配置</h4>
+        <div class="ckpt" style="margin-bottom:8px"><label><input type="checkbox" checked onchange="document.getElementById('dpConfig').style.opacity=this.checked?1:0.3"> 启用差分隐私训练</label></div>
+        <div id="dpConfig">
+          <div class="fr">
+            <div class="fg"><label>ε (隐私预算)</label><input class="fi" type="number" value="2.0" step="0.1"></div>
+            <div class="fg"><label>δ</label><input class="fi" value="1e-5"></div>
+            <div class="fg"><label>梯度裁剪</label><input class="fi" type="number" value="1.0"></div>
+          </div>
+        </div>
+        <div style="margin-top:14px"><button class="btn bp" onclick="document.getElementById('trainResult').classList.remove('hidden');this.disabled=true;this.textContent='训练中...'">🚀 开始训练</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">训练结果</h3>
+        <div id="trainResult" class="hidden">
+          <div class="cg cg3" style="margin-bottom:14px">
+            <div class="sc bg"><div class="lb">AUC</div><div class="vl" style="font-size:20px">0.82</div></div>
+            <div class="sc bl"><div class="lb">F1</div><div class="vl" style="font-size:20px">0.76</div></div>
+            <div class="sc by"><div class="lb">训练时间</div><div class="vl" style="font-size:20px">45min</div></div>
+          </div>
+          <h4 style="font-size:13px;margin-bottom:8px">安全检查结果</h4>
+          <table style="font-size:11px">
+            <tr><th>检查项</th><th>结果</th><th>阈值</th><th>状态</th></tr>
+            <tr><td>成员推断攻击 (MI)</td><td>AUC=0.52</td><td>< 0.55</td><td><span class="bg bg-g">通过</span></td></tr>
+            <tr><td>模型反演攻击 (MIV)</td><td>权重正常</td><td>max < 100</td><td><span class="bg bg-g">通过</span></td></tr>
+            <tr><td>数据重建</td><td>相似度=0.31</td><td>< 0.8</td><td><span class="bg bg-g">通过</span></td></tr>
+            <tr><td>DP审计</td><td>ε=2.0已注入</td><td>正确注入</td><td><span class="bg bg-g">通过</span></td></tr>
+          </table>
+          <h4 style="font-size:13px;margin:14px 0 8px">特征重要性</h4>
+          <div style="margin-bottom:6px"><span style="font-size:11px">tax_cv</span><div class="pr" style="width:200px;display:inline-block;vertical-align:middle;margin-left:8px"><div class="bar" style="width:45%;background:var(--primary)"></div></div> <span style="font-size:11px">0.45</span></div>
+          <div style="margin-bottom:6px"><span style="font-size:11px">overdue_rate</span><div class="pr" style="width:200px;display:inline-block;vertical-align:middle;margin-left:8px"><div class="bar" style="width:35%;background:var(--primary)"></div></div> <span style="font-size:11px">0.35</span></div>
+          <div><span style="font-size:11px">case_count</span><div class="pr" style="width:200px;display:inline-block;vertical-align:middle;margin-left:8px"><div class="bar" style="width:20%;background:var(--primary)"></div></div> <span style="font-size:11px">0.20</span></div>
+          <div class="bg2" style="margin-top:14px">
+            <button class="btn bp" onclick="go('deploy')">→ 导出模型</button>
+          </div>
+        </div>
+        <div id="trainResultEmpty" style="color:var(--text3);font-size:13px;text-align:center;padding:40px">配置训练参数后点击"开始训练"</div>
+      </div>
+    </div>`;
+}
+
+// ==================== 买方: 模型部署 ====================
+function P_deploy(){
+  return `<h2>🚀 模型部署</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">经过安全审查的模型可以导出部署。支持三种部署模式。</p>
+    <div class="tabs">
+      <div class="tab on" onclick="showDeployTab('export')">模型导出</div>
+      <div class="tab" onclick="showDeployTab('history')">部署历史</div>
+    </div>
+    <div id="deployExport">
+      <div class="card">
+        <h3 style="margin-bottom:12px">可部署模型</h3>
+        <table>
+          <tr><th>模型</th><th>算法</th><th>AUC</th><th>安全检查</th><th>DP</th><th>部署方式</th></tr>
+          <tr>
+            <td><strong>企业信用风险评分 v1</strong><br><span style="font-size:11px;color:var(--text3)">训练于 2024-06-03</span></td>
+            <td>XGBoost</td><td>0.82</td>
+            <td><span class="bg bg-g">4/4 通过</span></td>
+            <td>ε=2.0</td>
+            <td class="bg2">
+              <button class="btn bp bs" onclick="sModal(exportModel())">📁 导出文件</button>
+              <button class="btn bo2 bs" onclick="sModal(deployAPI())">🔌 部署API沙箱</button>
+            </td>
+          </tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px">三种部署模式</h3>
+        <div class="cg cg3">
+          <div style="background:var(--card2);padding:14px;border-radius:8px">
+            <h4 style="font-size:13px;margin-bottom:8px">📁 模型文件导出</h4>
+            <div style="font-size:12px;color:var(--text2)">
+              • 适用: 买方有自己的推理基础设施<br>
+              • 格式: ONNX / Pickle / joblib<br>
+              • 安全: 经防记忆化检查+DP+水印<br>
+              • 风险: 模型文件离开沙箱控制
+            </div>
+          </div>
+          <div style="background:var(--card2);padding:14px;border-radius:8px;border:1px solid var(--green)">
+            <h4 style="font-size:13px;margin-bottom:8px">🔌 API沙箱推理 <span class="bg bg-g">推荐</span></h4>
+            <div style="font-size:12px;color:var(--text2)">
+              • 适用: 最高安全级别<br>
+              • 模型不出沙箱, 买方通过API调用<br>
+              • 性能: P99 < 50ms<br>
+              • 安全: 模型和数据都不出沙箱
+            </div>
+          </div>
+          <div style="background:var(--card2);padding:14px;border-radius:8px">
+            <h4 style="font-size:13px;margin-bottom:8px">🌐 联邦推理</h4>
+            <div style="font-size:12px;color:var(--text2)">
+              • 适用: 多方数据联合推理<br>
+              • 各方在各自沙箱内计算特征<br>
+              • 联合沙箱内执行推理<br>
+              • 安全: 各方数据不出各自沙箱
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="deployHistory" class="hidden">
+      <div class="card"><table>
+        <tr><th>模型</th><th>部署方式</th><th>部署时间</th><th>调用次数</th><th>状态</th></tr>
+        <tr><td>企业信用风险评分 v1</td><td><span class="bg bg-c">API沙箱</span></td><td>2024-06-03</td><td>12,345</td><td><span class="bg bg-g">运行中</span></td></tr>
+      </table></div>
+    </div>`;
+}
+
+function showDeployTab(t){
+  document.getElementById('deployExport').classList.toggle('hidden',t!=='export');
+  document.getElementById('deployHistory').classList.toggle('hidden',t!=='history');
+}
+
+function exportModel(){
+  return `<h2>📁 导出模型文件</h2>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">模型经过安全审查后可导出。导出文件包含水印和SM2签名。</div>
+    <div class="fg"><label>导出格式</label><select class="fs"><option>ONNX (推荐, 跨平台)</option><option>Pickle (Python)</option><option>joblib (sklearn)</option></select></div>
+    <div style="background:var(--card2);padding:12px;border-radius:8px;margin-bottom:14px;font-size:12px">
+      <strong>安全审查摘要:</strong><br>
+      ✅ 成员推断: AUC=0.52 (< 0.55) | ✅ 模型反演: 通过<br>
+      ✅ 数据重建: 相似度=0.31 (< 0.8) | ✅ DP审计: ε=2.0已注入<br>
+      ✅ 水印: session:s-00441 已注入 | ✅ SM2签名: 已签
+    </div>
+    <div class="ma"><button class="btn bo2" onclick="cModal()">取消</button><button class="btn bp" onclick="toast('模型已下载: risk_model_v1.onnx (2.3MB, 含水印+签名)');cModal()">下载模型</button></div>`;
+}
+
+function deployAPI(){
+  return `<h2>🔌 部署到API沙箱</h2>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">模型部署在沙箱内API服务中, 买方通过API调用推理。模型和数据都不出沙箱。</div>
+    <div class="fg"><label>API路径</label><input class="fi" value="/v1/risk/score"></div>
+    <div class="fr">
+      <div class="fg"><label>频率限制</label><select class="fs"><option>100次/分钟</option><option>1000次/分钟</option><option>10000次/分钟</option></select></div>
+      <div class="fg"><label>最大批量</label><input class="fi" type="number" value="1000"></div>
+    </div>
+    <div class="fg"><label>P99延迟目标</label><select class="fs"><option>< 50ms</option><option>< 100ms</option><option>< 500ms</option></select></div>
+    <div class="ma"><button class="btn bo2" onclick="cModal()">取消</button><button class="btn bp" onclick="toast('API沙箱已部署: POST /v1/risk/score');cModal()">部署</button></div>`;
+}
+
+// ==================== 买方: API沙箱 ====================
+function P_apiSandbox(){
+  return `<h2>🔌 API沙箱服务</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">已部署的模型API服务。模型和数据不出沙箱, 买方通过API调用推理。</p>
+    <div class="card">
+      <h3 style="margin-bottom:12px">运行中的API服务</h3>
+      <table>
+        <tr><th>API</th><th>模型</th><th>端点</th><th>频率限制</th><th>今日调用</th><th>P99延迟</th><th>状态</th></tr>
+        <tr>
+          <td><strong>企业信用风险评分</strong></td>
+          <td>XGBoost v1</td>
+          <td><span class="dt">POST /v1/risk/score</span></td>
+          <td>100/min</td>
+          <td>1,234</td>
+          <td>32ms</td>
+          <td><span class="bg bg-g">运行中</span></td>
+        </tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">API调用示例</h3>
+      <div class="code" style="font-size:11px"># 请求
+curl -X POST https://sandbox.example.com/v1/risk/score \\
+  -H "Authorization: Bearer {SM2_JWT}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "ent_id": "110101199003076531",
+    "industry_code": "C39",
+    "year": 2024
+  }'
+
+# 响应 (200 OK)
+{
+  "risk_score": 72.3,
+  "risk_level": "medium",
+  "confidence": 0.85,
+  "features_used": ["tax_cv", "overdue_rate", "case_count"],
+  "note": "原始特征值不可用, 仅返回预测结果"
+}
+
+# 安全保障:
+# ✅ 模型不出沙箱 (模型在API服务内存中)
+# ✅ 原始数据不出沙箱 (特征在沙箱内计算)
+# ✅ 不输出原始特征值 (仅输出预测结果)
+# ✅ 频率限制 (100次/分钟)
+# ✅ 所有调用记录审计日志</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">实时监控</h3>
+      <div class="cg cg4">
+        <div class="sc bg"><div class="lb">今日调用</div><div class="vl" style="font-size:18px">1,234</div></div>
+        <div class="sc bl"><div class="lb">P99延迟</div><div class="vl" style="font-size:18px">32ms</div></div>
+        <div class="sc bg"><div class="lb">成功率</div><div class="vl" style="font-size:18px">99.8%</div></div>
+        <div class="sc by"><div class="lb">活跃会话</div><div class="vl" style="font-size:18px">3</div></div>
+      </div>
+    </div>`;
+}
+
+// ==================== 运营方: 安全产出审计 ====================
+function P_secureOut(){
+  return `<h2>🛡️ 安全产出审计</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">监控所有安全产出(模型/特征)的导出和使用情况。</p>
+    <div class="cg cg4">
+      <div class="sc bg"><div class="lb">模型导出</div><div class="vl" style="font-size:18px">23</div><div class="sb2">本月, 全部通过安全检查</div></div>
+      <div class="sc bl"><div class="lb">API推理调用</div><div class="vl" style="font-size:18px">45,678</div><div class="sb2">本月</div></div>
+      <div class="sc by"><div class="lb">安全检查拒绝</div><div class="vl" style="font-size:18px">2</div><div class="sb2">成员推断未通过</div></div>
+      <div class="sc br"><div class="lb">DP预算消耗</div><div class="vl" style="font-size:18px">67%</div><div class="sb2">全局平均</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">模型导出审计日志</h3>
+      <table style="font-size:11px">
+        <tr><th>时间</th><th>买方</th><th>模型</th><th>算法</th><th>安全检查</th><th>DP</th><th>部署方式</th><th>状态</th></tr>
+        <tr><td>10:30</td><td>某银行</td><td>企业信用风险v1</td><td>XGBoost</td><td><span class="bg bg-g">4/4</span></td><td>ε=2.0</td><td>API沙箱</td><td><span class="bg bg-g">通过</span></td></tr>
+        <tr><td>09:15</td><td>某保险公司</td><td>医疗定价模型v2</td><td>LightGBM</td><td><span class="bg bg-g">4/4</span></td><td>ε=3.0</td><td>文件导出</td><td><span class="bg bg-g">通过</span></td></tr>
+        <tr><td>昨天</td><td>某金融科技</td><td>反欺诈模型v1</td><td>NeuralNet</td><td><span class="bg bg-r">3/4</span></td><td>ε=1.5</td><td>-</td><td><span class="bg bg-r">拒绝(MI未通过)</span></td></tr>
+      </table>
+    </div>`;
+}
+
+// ==================== INIT ====================
+renderNav();renderPage();
+</script>
+</body>
+</html>

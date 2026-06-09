@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cds-api
+  namespace: cds-system
+  labels:
+    app: cds-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cds-api
+  template:
+    metadata:
+      labels:
+        app: cds-api
+    spec:
+      containers:
+        - name: cds-api
+          image: cds-api:latest
+          imagePullPolicy: Never  # Use local k3s image
+          ports:
+            - containerPort: 8000
+          env:
+            - name: CDS_DATABASE_URL
+              value: "postgresql+asyncpg://cds_admin:CdsSecurePass2026@postgres:5432/cds"
+            - name: CDS_REDIS_URL
+              value: "redis://:CdsRedis2026@redis:6379/0"
+            - name: CDS_VAULT_ADDR
+              value: "http://vault:8200"
+            - name: CDS_VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: VAULT_TOKEN
+            - name: CDS_MINIO_ENDPOINT
+              value: "minio:9000"
+            - name: CDS_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: MINIO_ROOT_USER
+            - name: CDS_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: CDS_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: CDS_CLICKHOUSE_URL
+              value: "clickhouse://cds_ch:CdsCH2026@clickhouse:9000/cds_audit"
+            - name: CDS_OPA_URL
+              value: "http://opa:8181"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: REDIS_PASSWORD
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: CLICKHOUSE_PASSWORD
+            - name: CDS_JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: JWT_SECRET
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "2000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cds-api
+  namespace: cds-system
+spec:
+  selector:
+    app: cds-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30080
+  type: NodePort

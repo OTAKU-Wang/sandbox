@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}区块链验证 - CDS{% endblock %}
+{% block nav_blockchain %}active{% endblock %}
+{% block header %}区块链验证{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat-card">
+        <div class="label">锚定记录</div>
+        <div class="value" id="total-anchors">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">已验证</div>
+        <div class="value" id="verified-anchors">-</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>交易验证</h3>
+    <div style="display:flex;gap:12px;">
+        <input type="text" id="tx-hash" placeholder="输入 tx_hash 进行验证" style="flex:1;">
+        <button class="btn btn-primary" onclick="verifyTx()">验证交易</button>
+    </div>
+    <div id="verify-result"></div>
+</div>
+
+<div class="card">
+    <h3>Merkle Root 锚定记录</h3>
+    <table>
+        <thead>
+            <tr><th>Merkle Root</th><th>tx_hash</th><th>区块高度</th><th>状态</th><th>时间</th></tr>
+        </thead>
+        <tbody id="anchors-table"></tbody>
+    </table>
+    <div id="anchors-empty" class="empty" style="display:none;">暂无锚定记录</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAnchors() {
+    try {
+        const data = await API.get('/api/v1/audit/records');
+        const list = data.items || data.records || data || [];
+        if (!list.length) { $('#anchors-empty').style.display = 'block'; return; }
+        let verified = 0;
+        // Filter for blockchain-related records
+        const anchorRecords = list.filter(r => r.action && (r.action.includes('anchor') || r.action.includes('blockchain')));
+        const displayList = anchorRecords.length ? anchorRecords : list.slice(0, 20);
+        $('#anchors-table').innerHTML = displayList.map(a => {
+            const detail = a.detail || {};
+            if (detail.merkle_root || detail.tx_hash) verified++;
+            return `<tr>
+                <td><code>${truncate(detail.merkle_root || a.resource_id || '-', 24)}</code></td>
+                <td><code>${truncate(detail.tx_hash || '-', 24)}</code></td>
+                <td>${detail.block_height || '-'}</td>
+                <td>${statusBadge(detail.tx_hash ? 'verified' : 'pending')}</td>
+                <td>${formatDate(a.created_at)}</td>
+            </tr>`;
+        }).join('');
+        $('#total-anchors').textContent = displayList.length;
+        $('#verified-anchors').textContent = verified;
+    } catch (e) {
+        $('#anchors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${e.message}</td></tr>`;
+    }
+}
+
+async function verifyTx() {
+    const recordId = $('#tx-hash').value.trim();
+    if (!recordId) { alert('请输入 record_id 或 tx_hash'); return; }
+    try {
+        const result = await API.get(`/api/v1/audit/verify/${recordId}`);
+        $('#verify-result').innerHTML = `<div class="card" style="background:var(--bg);margin-top:12px;">
+            <p><strong>验证结果:</strong> ${result.valid ? badge('通过', 'success') : badge('失败', 'danger')}</p>
+            <p><strong>Record ID:</strong> <code>${result.record_id || recordId}</code></p>
+            <p><strong>Merkle Root:</strong> <code>${result.merkle_root || '-'}</code></p>
+        </div>`;
+    } catch (e) { alert('验证失败: ' + e.message); }
+}
+
+loadAnchors();
+</script>
+{% endblock %}

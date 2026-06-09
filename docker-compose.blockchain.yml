@@ -1,0 +1,27 @@
+# FISCO BCOS blockchain node for CDS audit anchoring
+# Usage: docker compose -f docker-compose.blockchain.yml up -d
+version: "3.9"
+
+services:
+  # ── FISCO BCOS single-node (development) ────────────────────
+  fisco-bcos:
+    image: fiscobcos/fiscobcos:v3.6.0
+    container_name: cds-fisco-bcos
+    restart: unless-stopped
+    ports:
+      - "20200:20200"  # P2P
+      - "20201:20201"  # JSON-RPC
+    volumes:
+      - fisco-data:/data
+    environment:
+      # Single-node development mode (no consensus overhead)
+      FISCO_BCOS_MODE: single
+    healthcheck:
+      test: ["CMD-SHELL", "cd /data && ls nodes/127.0.0.1/node0/conf/config.ini >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  fisco-data:

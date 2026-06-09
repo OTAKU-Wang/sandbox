@@ -1,0 +1,19 @@
+apiVersion: v2
+name: cds
+description: Confidential Data Sandbox — Trusted Data Space
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - data-sandbox
+  - trusted-data-space
+  - confidential-computing
+dependencies:
+  - name: postgresql
+    version: "15.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: "19.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
