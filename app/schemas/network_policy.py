@@ -1,18 +1,35 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 VALID_MODES = ("deny_all", "allowlist")
 
 
+def _validate_cidrs(values: list[str]) -> list[str]:
+    from ipaddress import ip_network
+    for cidr in values:
+        try:
+            ip_network(cidr, strict=False)
+        except ValueError:
+            raise ValueError(f"Invalid CIDR: {cidr}")
+    return values
+
+
+def _validate_ports(values: list[int]) -> list[int]:
+    for port in values:
+        if port < 1 or port > 65535:
+            raise ValueError(f"Invalid port: {port}. Must be between 1 and 65535")
+    return values
+
+
 class NetworkPolicyCreate(BaseModel):
     session_id: str
     mode: str = "deny_all"
-    allowed_ips: list[str] = []
-    allowed_domains: list[str] = []
-    allowed_ports: list[int] = [443, 80]
+    allowed_ips: list[str] = Field(default_factory=list)
+    allowed_domains: list[str] = Field(default_factory=list)
+    allowed_ports: list[int] = Field(default_factory=lambda: [443, 80])
     dns_proxy_enabled: bool = True
     max_connections_per_second: int = 10
     max_bandwidth_bytes_per_second: int = 0
@@ -27,13 +44,12 @@ class NetworkPolicyCreate(BaseModel):
     @field_validator("allowed_ips")
     @classmethod
     def validate_ips(cls, v: list[str]) -> list[str]:
-        from ipaddress import ip_network
-        for cidr in v:
-            try:
-                ip_network(cidr, strict=False)
-            except ValueError:
-                raise ValueError(f"Invalid CIDR: {cidr}")
-        return v
+        return _validate_cidrs(v)
+
+    @field_validator("allowed_ports")
+    @classmethod
+    def validate_ports(cls, v: list[int]) -> list[int]:
+        return _validate_ports(v)
 
 
 class NetworkPolicyUpdate(BaseModel):
@@ -52,6 +68,16 @@ class NetworkPolicyUpdate(BaseModel):
         if v is not None and v not in VALID_MODES:
             raise ValueError(f"Invalid mode: {v}. Must be one of {VALID_MODES}")
         return v
+
+    @field_validator("allowed_ips")
+    @classmethod
+    def validate_ips(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_cidrs(v) if v is not None else v
+
+    @field_validator("allowed_ports")
+    @classmethod
+    def validate_ports(cls, v: list[int] | None) -> list[int] | None:
+        return _validate_ports(v) if v is not None else v
 
 
 class NetworkPolicyResponse(BaseModel):

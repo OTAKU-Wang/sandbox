@@ -208,21 +208,35 @@ async def test_api_query_not_found(client: AsyncClient, operator_headers: dict):
 
 
 @pytest.mark.asyncio
-async def test_api_buyer_query_only(client: AsyncClient, operator_headers: dict, auth_headers: dict):
-    """API test: buyer can query but not create tables."""
-    # Operator creates table
+async def test_api_owner_can_query_own_ad_hoc_session(client: AsyncClient, auth_headers: dict):
+    """API test: ad-hoc sandbox DB sessions are readable by their creator."""
+    await client.post("/api/v1/sandbox-db/create-table", json={
+        "session_id": "owner-test",
+        "table_name": "t",
+        "data": [{"a": 1}],
+    }, headers=auth_headers)
+
+    resp = await client.post("/api/v1/sandbox-db/query", json={
+        "session_id": "owner-test",
+        "sql": "SELECT * FROM t",
+    }, headers=auth_headers)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_api_non_owner_query_denied(client: AsyncClient, operator_headers: dict, auth_headers: dict):
+    """API test: non-operators cannot query another user's ad-hoc sandbox DB session."""
     await client.post("/api/v1/sandbox-db/create-table", json={
         "session_id": "buyer-test",
         "table_name": "t",
         "data": [{"a": 1}],
     }, headers=operator_headers)
 
-    # Buyer can query
     resp = await client.post("/api/v1/sandbox-db/query", json={
         "session_id": "buyer-test",
         "sql": "SELECT * FROM t",
     }, headers=auth_headers)
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
 # ─── L1: DuckDB Engine TTL Cleanup ────────────────────────────────

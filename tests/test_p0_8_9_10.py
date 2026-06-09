@@ -168,6 +168,9 @@ class TestCertRevocationCascade:
 
         svc = CertificateService()
         mock_db = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.refresh = AsyncMock()
 
         # Create a mock certificate
         cert_id = uuid.uuid4()

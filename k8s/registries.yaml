@@ -1,4 +1,12 @@
 mirrors:
+  "docker.io":
+    endpoint:
+      - "https://docker.1ms.run"
+      - "https://docker.m.daocloud.io"
+  "index.docker.io":
+    endpoint:
+      - "https://docker.1ms.run"
+      - "https://docker.m.daocloud.io"
   "registry.k8s.io":
     endpoint:
       - "https://registry.k8s.io.m.daocloud.io"

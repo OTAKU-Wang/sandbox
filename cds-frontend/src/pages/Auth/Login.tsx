@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Form, Input, Button, Card, Typography, message } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Card, Typography, message, Space, Tag } from 'antd';
+import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { authApi } from '../../services/authApi';
@@ -31,13 +31,33 @@ export default function Login() {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f0f2f5' }}>
-      <Card style={{ width: 420 }}>
-        <Title level={3} style={{ textAlign: 'center' }}>密态沙箱系统</Title>
-        <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginBottom: 24 }}>
-          可信数据空间 · 安全数据流通
-        </Text>
-        <Form onFinish={onFinish} size="large">
+    <div className="cds-auth-shell">
+      <section className="cds-auth-info">
+        <div className="cds-auth-brandmark">CDS</div>
+        <div>
+          <Title level={1}>密态沙箱系统</Title>
+          <Text>Confidential Data Sandbox</Text>
+        </div>
+        <Space wrap className="cds-auth-tags">
+          <Tag color="cyan">TEE</Tag>
+          <Tag color="blue">DLP</Tag>
+          <Tag color="green">DP</Tag>
+          <Tag color="gold">SM2</Tag>
+        </Space>
+        <div className="cds-auth-status">
+          <span>安全域</span>
+          <strong>L1 / L2 / L3</strong>
+        </div>
+      </section>
+
+      <main className="cds-auth-main">
+        <Card className="cds-auth-card">
+          <Space direction="vertical" size={4} style={{ width: '100%', marginBottom: 24 }}>
+            <SafetyCertificateOutlined className="cds-auth-icon" />
+            <Title level={3} style={{ margin: 0 }}>账户登录</Title>
+            <Text type="secondary">进入密态沙箱工作台</Text>
+          </Space>
+          <Form onFinish={onFinish} size="large" layout="vertical">
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
             <Input prefix={<UserOutlined />} placeholder="用户名" />
           </Form.Item>
@@ -51,7 +71,8 @@ export default function Login() {
             <a onClick={() => navigate('/register')}>注册新账户</a>
           </div>
         </Form>
-      </Card>
+        </Card>
+      </main>
     </div>
   );
 }

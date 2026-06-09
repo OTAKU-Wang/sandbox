@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     # Sandbox
     SANDBOX_L3_ENABLED: bool = True
     SANDBOX_DEFAULT_TIMEOUT: int = 3600  # 1 hour
+    SANDBOX_K8S_NAMESPACE: str = "cds-sandbox"
+    SANDBOX_K8S_IMAGE: str = "python:3.12-slim"
+    SANDBOX_K8S_IMAGE_PULL_POLICY: str = "IfNotPresent"
+    SANDBOX_K8S_RUNTIME_CLASS: str = ""
+    SANDBOX_K8S_READY_TIMEOUT_SECONDS: int = 30
+    SANDBOX_K8S_POLL_INTERVAL_SECONDS: float = 1.0
+    SANDBOX_K8S_KUBECONFIG: str = ""
+    SANDBOX_K8S_FQDN_POLICY_PROVIDER: str = ""
 
     # TEE simulation (degraded mode when SGX/GPU hardware unavailable)
     TEE_SIMULATION_MODE: bool = True

@@ -14,6 +14,7 @@ class SandboxLevel(str, Enum):
     L1 = "L1"  # TEE (SGX/Occlum)
     L2 = "L2"  # Firecracker + gVisor
     L3 = "L3"  # bwrap namespace isolation
+    K8S = "k8s"  # Kubernetes/K3s pod isolation
 
 
 class SessionStatus(str, Enum):
@@ -50,7 +51,7 @@ class SandboxSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     data_product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("data_products.id"), nullable=False, index=True)
-    sandbox_level: Mapped[str] = mapped_column(String(4), nullable=False, default=SandboxLevel.L3.value)
+    sandbox_level: Mapped[str] = mapped_column(String(16), nullable=False, default=SandboxLevel.L3.value)
     sandbox_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default=SandboxMode.STRUCTURED_QUERY.value,
     )  # P2-5: Scenario mode

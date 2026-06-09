@@ -45,6 +45,7 @@ const LEVEL_COLORS: Record<string, string> = {
   L1: '#52c41a',
   L2: '#faad14',
   L3: '#ff4d4f',
+  k8s: '#1677ff',
 };
 
 export default function Dashboard() {

@@ -4,11 +4,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
+from app.models.data_product import DataProduct
 from app.models.data_resource import DataResource, ResourceStatus, ResourceType, ResourceFormat
 from app.schemas.data_resource import DataResourceResponse
 from app.services.audit_service import audit_service
@@ -197,7 +198,11 @@ async def upload_data_resource(
     resource.storage_path = result["path"]
     resource.encryption_key_id = result.get("key_id", "")
     resource.sm3_checksum = result["checksum"]
-    resource.chunk_refs = [{"path": result["path"], "size": result["size"], "sm3_hash": result["sm3_hash"]}]
+    resource.chunk_refs = [{
+        "path": result["path"],
+        "size": result["size"],
+        "sm3_hash": result.get("sm3_hash", result["checksum"]),
+    }]
     resource.status = ResourceStatus.READY.value
 
     await db.flush()
@@ -253,15 +258,45 @@ async def delete_data_resource(
         raise HTTPException(status_code=404, detail="Resource not found")
     if resource.provider_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Access denied")
+    product_count_result = await db.execute(
+        select(func.count())
+        .select_from(DataProduct)
+        .where(DataProduct.resource_id == resource_id)
+    )
+    product_count = product_count_result.scalar() or 0
+    if product_count:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete resource referenced by data products",
+        )
+
+    storage_deleted = False
+    if resource.storage_path:
+        try:
+            storage_deleted = storage_service.delete(resource.storage_path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete stored resource: {e}")
+    if resource.encryption_key_id:
+        try:
+            from app.services.kms_service import kms_service
+            kms_service.destroy_key(resource.encryption_key_id)
+        except Exception:
+            pass
+
     await db.delete(resource)
-    return {"deleted": True, "resource_id": str(resource_id)}
+    await audit_service.log(
+        db, action="data_resource.delete", resource_type="data_resource",
+        user_id=current_user.id, resource_id=str(resource_id),
+        detail={"storage_deleted": storage_deleted},
+    )
+    return {"deleted": True, "resource_id": str(resource_id), "storage_deleted": storage_deleted}
 
 
 @router.post("/{resource_id}/sample")
 async def sample_data_resource(
     resource_id: uuid.UUID,
     sample_size: int = Query(100, ge=1, le=10000),
-    method: str = Query("random", regex="^(random|systematic|first_n)$"),
+    method: str = Query("random", pattern="^(random|systematic|first_n)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

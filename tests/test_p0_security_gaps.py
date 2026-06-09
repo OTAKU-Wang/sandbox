@@ -87,13 +87,36 @@ class TestSM2SignatureNoFallback:
 
         service = ContractService()
         fake_db = AsyncMock()
+        fake_db.add = MagicMock()
+        fake_db.flush = AsyncMock()
+        fake_db.refresh = AsyncMock()
+        contract_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+
+        contract = MagicMock()
+        contract.id = contract_id
+        contract.contract_no = "NO-CERT-001"
+        contract.status = "negotiating"
+        contract.provider_id = user_id
+        contract.buyer_id = uuid.uuid4()
+        contract.provider_signature = None
+        contract.buyer_signature = None
+
+        user = MagicMock()
+        user.sm2_certificate = None
+
+        contract_result = MagicMock()
+        contract_result.scalar_one_or_none.return_value = contract
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        fake_db.execute.side_effect = [contract_result, user_result]
 
         # After P0-3 fix: sign() should raise ValueError when no certificate
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError, match="no SM2 certificate"):
             await service.sign(
                 db=fake_db,
-                contract_id=uuid.uuid4(),
-                user_id=uuid.uuid4(),
+                contract_id=contract_id,
+                user_id=user_id,
                 signature="fake_sig",
             )
 

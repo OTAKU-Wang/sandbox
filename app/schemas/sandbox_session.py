@@ -4,12 +4,21 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator
 
 
-VALID_SANDBOX_LEVELS = ("L0", "L1", "L2", "L3")
+VALID_SANDBOX_LEVELS = ("L0", "L1", "L2", "L3", "k8s")
+VALID_SANDBOX_MODES = (
+    "structured_query",
+    "structured_modeling",
+    "structured_app",
+    "llm_training",
+    "product_dev",
+    "joint_federated",
+)
 
 
 class SandboxSessionCreate(BaseModel):
     data_product_id: uuid.UUID
     sandbox_level: str = "L3"
+    sandbox_mode: str = "structured_query"
     contract_id: str | None = None
     timeout_seconds: int = 3600
     resource_limits: dict | None = None
@@ -19,6 +28,13 @@ class SandboxSessionCreate(BaseModel):
     def valid_sandbox_level(cls, v: str) -> str:
         if v not in VALID_SANDBOX_LEVELS:
             raise ValueError(f"Invalid sandbox_level: {v}. Must be one of {VALID_SANDBOX_LEVELS}")
+        return v
+
+    @field_validator("sandbox_mode")
+    @classmethod
+    def valid_sandbox_mode(cls, v: str) -> str:
+        if v not in VALID_SANDBOX_MODES:
+            raise ValueError(f"Invalid sandbox_mode: {v}. Must be one of {VALID_SANDBOX_MODES}")
         return v
 
     @field_validator("timeout_seconds")
@@ -34,6 +50,7 @@ class SandboxSessionResponse(BaseModel):
     user_id: uuid.UUID
     data_product_id: uuid.UUID
     sandbox_level: str
+    sandbox_mode: str
     status: str
     contract_id: str | None
     container_id: str | None
@@ -47,3 +64,15 @@ class SandboxSessionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SandboxExecuteRequest(BaseModel):
+    code: str
+    language: str = "python"
+
+    @field_validator("code")
+    @classmethod
+    def code_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("code cannot be empty")
+        return v

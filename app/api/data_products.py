@@ -9,6 +9,8 @@ from app.core.deps import get_current_user
 from app.models.user import User, UserRole
 from app.models.data_product import DataProduct, DataProductStatus
 from app.models.data_resource import DataResource, ResourceStatus
+from app.models.contract import Contract, ContractStatus
+from app.models.sandbox_session import SandboxSession, SessionStatus
 from app.schemas.data_product import DataProductCreate, DataProductUpdate, DataProductResponse
 from app.services.audit_service import audit_service
 from app.services.test_data_generator import test_data_generator
@@ -27,6 +29,60 @@ def _visible_product_filter(user: User):
     if user.role == UserRole.DATA_PROVIDER:
         return DataProduct.provider_id == user.id
     return DataProduct.status == DataProductStatus.PUBLISHED.value
+
+
+def _can_view_product(product: DataProduct, user: User) -> bool:
+    return (
+        product.provider_id == user.id
+        or _can_view_all_products(user)
+        or product.status == DataProductStatus.PUBLISHED.value
+    )
+
+
+def _update_payload_without_lifecycle_fields(body: DataProductUpdate) -> dict:
+    payload = body.model_dump(exclude_unset=True)
+    if "status" in payload:
+        raise HTTPException(
+            status_code=400,
+            detail="Use data product lifecycle endpoints to change status",
+        )
+    return payload
+
+
+def _contract_references_product(contract: Contract, product_id: uuid.UUID) -> bool:
+    return str(product_id) in {str(pid) for pid in (contract.product_ids or [])}
+
+
+async def _contracts_referencing_product(
+    db: AsyncSession,
+    product_id: uuid.UUID,
+    statuses: set[str] | None = None,
+) -> list[Contract]:
+    query = select(Contract)
+    if statuses:
+        query = query.where(Contract.status.in_(statuses))
+    result = await db.execute(query)
+    return [
+        contract for contract in result.scalars().all()
+        if _contract_references_product(contract, product_id)
+    ]
+
+
+async def _active_session_count(db: AsyncSession, product_id: uuid.UUID) -> int:
+    active_statuses = (
+        SessionStatus.PROVISIONING.value,
+        SessionStatus.READY.value,
+        SessionStatus.RUNNING.value,
+    )
+    result = await db.execute(
+        select(func.count())
+        .select_from(SandboxSession)
+        .where(
+            SandboxSession.data_product_id == product_id,
+            SandboxSession.status.in_(active_statuses),
+        )
+    )
+    return result.scalar() or 0
 
 
 @router.post("", response_model=DataProductResponse, status_code=status.HTTP_201_CREATED)
@@ -131,11 +187,7 @@ async def get_data_product(
     if not product:
         raise HTTPException(status_code=404, detail="Data product not found")
     # Operators, regulators and admins need detail visibility for review and oversight.
-    if (
-        product.provider_id != current_user.id
-        and not _can_view_all_products(current_user)
-        and product.status != DataProductStatus.PUBLISHED.value
-    ):
+    if not _can_view_product(product, current_user):
         raise HTTPException(status_code=404, detail="Data product not found")
     return DataProductResponse.model_validate(product)
 
@@ -154,7 +206,7 @@ async def update_data_product(
     if product.provider_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not the provider of this product")
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    for field, value in _update_payload_without_lifecycle_fields(body).items():
         setattr(product, field, value)
 
     await db.flush()
@@ -176,7 +228,7 @@ async def update_data_product_put(
     if product.provider_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not the provider of this product")
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    for field, value in _update_payload_without_lifecycle_fields(body).items():
         setattr(product, field, value)
 
     await db.flush()
@@ -196,6 +248,13 @@ async def delete_data_product(
         raise HTTPException(status_code=404, detail="Data product not found")
     if product.provider_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not the provider of this product")
+    if product.status != DataProductStatus.DRAFT.value:
+        raise HTTPException(status_code=409, detail="Only draft products can be deleted; archive non-draft products instead")
+    contracts = await _contracts_referencing_product(db, product_id)
+    if contracts:
+        raise HTTPException(status_code=409, detail="Cannot delete product referenced by contracts")
+    if await _active_session_count(db, product_id):
+        raise HTTPException(status_code=409, detail="Cannot delete product with active sandbox sessions")
     await db.delete(product)
 
 
@@ -307,6 +366,49 @@ async def reject_product(
     return DataProductResponse.model_validate(product)
 
 
+@router.post("/{product_id}/archive", response_model=DataProductResponse)
+async def archive_product(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Archive a non-draft product after active usage has stopped."""
+    result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Data product not found")
+    if product.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not the provider of this product")
+    if product.status == DataProductStatus.DRAFT.value:
+        raise HTTPException(status_code=400, detail="Draft products can be deleted directly")
+    if product.status == DataProductStatus.ARCHIVED.value:
+        return DataProductResponse.model_validate(product)
+
+    blocking_statuses = {
+        ContractStatus.NEGOTIATING.value,
+        ContractStatus.SIGNED.value,
+        ContractStatus.ACTIVE.value,
+        ContractStatus.SUSPENDED.value,
+    }
+    contracts = await _contracts_referencing_product(db, product_id, blocking_statuses)
+    if contracts:
+        raise HTTPException(status_code=409, detail="Cannot archive product referenced by active contracts")
+    if await _active_session_count(db, product_id):
+        raise HTTPException(status_code=409, detail="Cannot archive product with active sandbox sessions")
+
+    previous_status = product.status
+    product.status = DataProductStatus.ARCHIVED.value
+    await db.flush()
+    await db.refresh(product)
+
+    await audit_service.log(
+        db, action="data_product.archive", resource_type="data_product",
+        user_id=current_user.id, resource_id=str(product.id),
+        detail={"from": previous_status, "to": DataProductStatus.ARCHIVED.value},
+    )
+    return DataProductResponse.model_validate(product)
+
+
 # --- Test Data Generation for Development ---
 
 @router.post("/{product_id}/test-data/mock")
@@ -352,7 +454,7 @@ async def generate_mock_test_data(
 async def sample_real_test_data(
     product_id: uuid.UUID,
     sample_size: int = Query(100, ge=1, le=10000),
-    method: str = Query("random", regex="^(random|systematic|first_n)$"),
+    method: str = Query("random", pattern="^(random|systematic|first_n)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -524,6 +626,8 @@ async def list_versions(
     product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Data product not found")
+    if not _can_view_product(product, current_user):
+        raise HTTPException(status_code=404, detail="Data product not found")
 
     # Find the root product (earliest version)
     root_id = product_id
@@ -547,7 +651,7 @@ async def list_versions(
         visited.add(vid)
         v_result = await db.execute(select(DataProduct).where(DataProduct.id == vid))
         v = v_result.scalar_one_or_none()
-        if v:
+        if v and _can_view_product(v, current_user):
             versions.append({
                 "id": str(v.id),
                 "version": v.version,

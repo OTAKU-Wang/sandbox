@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contract import Contract, ContractStatus
+from app.models.data_product import DataProduct, DataProductStatus
 from app.models.user import User
 from app.services.policy_compiler import policy_compiler
 from app.services.crypto_service import crypto_service
@@ -57,6 +58,23 @@ class ContractService:
     async def get_by_id(self, db: AsyncSession, contract_id: uuid.UUID) -> Contract | None:
         result = await db.execute(select(Contract).where(Contract.id == contract_id))
         return result.scalar_one_or_none()
+
+    async def validate_activation_ready(self, db: AsyncSession, contract: Contract) -> None:
+        """Validate that contract products can be used before the contract becomes active."""
+        if not contract.product_ids:
+            raise ValueError("Contract has no data products")
+        for raw_product_id in contract.product_ids:
+            try:
+                product_id = uuid.UUID(str(raw_product_id))
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid product id in contract: {raw_product_id}")
+            product = await db.get(DataProduct, product_id)
+            if not product:
+                raise ValueError(f"Product {raw_product_id} not found")
+            if product.provider_id != contract.provider_id:
+                raise ValueError(f"Product {raw_product_id} is not owned by the contract provider")
+            if product.status != DataProductStatus.PUBLISHED.value:
+                raise ValueError(f"Product {raw_product_id} is not published")
 
     async def list_by_user(self, db: AsyncSession, user_id: uuid.UUID, skip: int = 0, limit: int = 20) -> list[Contract]:
         query = (
@@ -121,6 +139,7 @@ class ContractService:
 
         # Check if both have signed
         if contract.provider_signature and contract.buyer_signature:
+            await self.validate_activation_ready(db, contract)
             contract.status = ContractStatus.ACTIVE.value
             # Platform witness signature
             contract.platform_signature = self._platform_witness_sign(contract)

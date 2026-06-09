@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from app.models.sandbox_session import SandboxLevel
-from app.schemas.sandbox_session import VALID_SANDBOX_LEVELS
+from app.schemas.sandbox_session import SandboxSessionCreate, VALID_SANDBOX_LEVELS
 
 
 class TestSandboxLevelEnum:
@@ -18,9 +18,19 @@ class TestSandboxLevelEnum:
         assert SandboxLevel.L1.value == "L1"
         assert SandboxLevel.L2.value == "L2"
         assert SandboxLevel.L3.value == "L3"
+        assert SandboxLevel.K8S.value == "k8s"
 
     def test_l0_in_valid_levels(self):
         assert "L0" in VALID_SANDBOX_LEVELS
+        assert "k8s" in VALID_SANDBOX_LEVELS
+
+    def test_k8s_level_passes_session_schema(self):
+        body = SandboxSessionCreate(
+            data_product_id="00000000-0000-0000-0000-000000000001",
+            sandbox_level="k8s",
+        )
+
+        assert body.sandbox_level == "k8s"
 
 
 class TestProcessAdapter:

@@ -7,12 +7,91 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.models.sandbox_session import SandboxSession
 from app.services.output_inspection import output_inspector, dp_engine
 from app.services.output_gateway import output_gateway, OutputPolicy, VALID_FORMATS
 from app.services.audit_service import audit_service
 
 router = APIRouter()
+_dp_budget_owners: dict[str, str] = {}
+_output_session_owners: dict[str, str] = {}
+
+
+def _can_manage_output_control(user: User) -> bool:
+    return user.role in (UserRole.ADMIN, UserRole.OPERATOR)
+
+
+async def _authorize_dp_budget_session(
+    db: AsyncSession,
+    session_id: str,
+    current_user: User,
+    *,
+    create_if_missing: bool = False,
+) -> None:
+    await _authorize_owned_session_id(
+        db,
+        session_id,
+        current_user,
+        owner_store=_dp_budget_owners,
+        resource_name="DP budget",
+        create_if_missing=create_if_missing,
+    )
+
+
+async def _authorize_output_session(
+    db: AsyncSession,
+    session_id: str | None,
+    current_user: User,
+    *,
+    create_if_missing: bool = True,
+) -> None:
+    if not session_id:
+        return
+    await _authorize_owned_session_id(
+        db,
+        session_id,
+        current_user,
+        owner_store=_output_session_owners,
+        resource_name="output control",
+        create_if_missing=create_if_missing,
+    )
+
+
+async def _authorize_owned_session_id(
+    db: AsyncSession,
+    session_id: str,
+    current_user: User,
+    *,
+    owner_store: dict[str, str],
+    resource_name: str,
+    create_if_missing: bool = False,
+) -> None:
+    if _can_manage_output_control(current_user):
+        return
+
+    try:
+        session_uuid = uuid.UUID(str(session_id))
+    except (TypeError, ValueError):
+        session_uuid = None
+
+    if session_uuid:
+        session = await db.get(SandboxSession, session_uuid)
+        if session:
+            if session.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail=f"Not your {resource_name} session")
+            return
+
+    owner_id = owner_store.get(session_id)
+    if owner_id:
+        if owner_id != str(current_user.id):
+            raise HTTPException(status_code=403, detail=f"Not your {resource_name} session")
+        return
+
+    if create_if_missing:
+        owner_store[session_id] = str(current_user.id)
+        return
+    raise HTTPException(status_code=404, detail=f"{resource_name} session {session_id} not found")
 
 
 class InspectRequest(BaseModel):
@@ -51,6 +130,7 @@ async def inspect_output(
 
     Stages: Format → DLP Scan → DP → Watermark → Signature → Approval
     """
+    await _authorize_output_session(db, body.session_id, current_user)
     result = output_inspector.inspect(
         body.output,
         str(current_user.id),
@@ -114,8 +194,10 @@ async def init_dp_budget(
     session_id: str,
     epsilon: float = Query(..., gt=0),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Initialize DP budget for a sandbox session."""
+    await _authorize_dp_budget_session(db, session_id, current_user, create_if_missing=True)
     dp_engine.init_budget(session_id, epsilon)
     return {"session_id": session_id, "epsilon_allocated": epsilon}
 
@@ -124,8 +206,10 @@ async def init_dp_budget(
 async def get_dp_budget(
     session_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get remaining DP budget for a session."""
+    await _authorize_dp_budget_session(db, session_id, current_user)
     remaining = dp_engine.get_remaining(session_id)
     return {"session_id": session_id, "epsilon_remaining": remaining}
 
@@ -215,6 +299,7 @@ async def process_output_gateway(
     Enforces contract-derived limits (max_output_rows, allowed_output_formats).
     Returns processed output in the requested format.
     """
+    await _authorize_output_session(db, body.session_id, current_user)
     policy = OutputPolicy(
         max_output_rows=body.max_output_rows,
         allowed_output_formats=body.allowed_output_formats or ["csv", "json"],

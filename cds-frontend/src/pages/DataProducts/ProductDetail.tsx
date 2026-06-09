@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Descriptions,
@@ -12,9 +12,12 @@ import {
   Col,
   Table,
   Empty,
+  Input,
+  Select,
   Steps,
   message,
   Tooltip,
+  Switch,
 } from 'antd';
 import {
   CheckCircleOutlined,
@@ -25,6 +28,7 @@ import {
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataProductApi } from '../../services/dataProductApi';
+import { fieldExposureApi, type ExposureRequest, type FieldRule, type FieldSensitivity } from '../../services/fieldExposureApi';
 import { ProductStatus, UserRole } from '../../types/enums';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole } from '../../utils/roles';
@@ -78,6 +82,29 @@ const operationLabels: Record<string, string> = {
   aggregate: '聚合',
 };
 
+const sensitivityLabels: Record<FieldSensitivity, string> = {
+  public: '公开',
+  internal: '内部',
+  sensitive: '敏感',
+  pii: 'PII',
+  restricted: '受限',
+};
+
+const sensitivityColors: Record<FieldSensitivity, string> = {
+  public: 'green',
+  internal: 'blue',
+  sensitive: 'orange',
+  pii: 'red',
+  restricted: 'volcano',
+};
+
+const requestStatusColors: Record<string, string> = {
+  pending: 'processing',
+  approved: 'green',
+  rejected: 'red',
+  revoked: 'default',
+};
+
 type LifecycleAction = 'submit' | 'approve' | 'reject' | 'publish';
 
 interface SchemaFieldRow {
@@ -116,6 +143,8 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
+  const [fieldRules, setFieldRules] = useState<Record<string, FieldRule>>({});
+  const [defaultSensitivity, setDefaultSensitivity] = useState<FieldSensitivity>('internal');
 
   const { data: product, isLoading } = useQuery({
     queryKey: ['data-product', id],
@@ -125,12 +154,32 @@ export default function ProductDetail() {
 
   const isOwner = !!product && user?.id === product.provider_id;
   const canReview = hasAnyRole(user?.role, [UserRole.OPERATOR, UserRole.ADMIN]);
+  const canEditFieldRules = isOwner;
 
   const { data: versions } = useQuery({
     queryKey: ['data-product-versions', id],
     queryFn: () => dataProductApi.listVersions(id!),
     enabled: !!id && (isOwner || canReview),
   });
+
+  const { data: visibilityConfig } = useQuery({
+    queryKey: ['field-visibility', id],
+    queryFn: () => fieldExposureApi.getVisibility(id!),
+    enabled: !!id && (isOwner || canReview),
+    retry: false,
+  });
+
+  const { data: exposureRequests } = useQuery({
+    queryKey: ['field-exposure-requests', id],
+    queryFn: () => fieldExposureApi.listRequests({ product_id: id, as_provider: true }),
+    enabled: !!id && (isOwner || canReview),
+  });
+
+  useEffect(() => {
+    if (!visibilityConfig) return;
+    setFieldRules(visibilityConfig.field_rules || {});
+    setDefaultSensitivity(visibilityConfig.default_sensitivity);
+  }, [visibilityConfig]);
 
   const lifecycleMutation = useMutation({
     mutationFn: (action: LifecycleAction) => {
@@ -154,6 +203,47 @@ export default function ProductDetail() {
       queryClient.invalidateQueries({ queryKey: ['data-product-versions', id] });
     },
     onError: () => message.error('操作失败'),
+  });
+
+  const saveFieldRulesMutation = useMutation({
+    mutationFn: () => {
+      const rules: Record<string, FieldRule> = {};
+      schemaFields.forEach((field) => {
+        const rule = fieldRules[field.name] || { sensitivity: defaultSensitivity };
+        rules[field.name] = {
+          sensitivity: rule.sensitivity || defaultSensitivity,
+          mask_pattern: rule.mask_pattern || null,
+          auto_approve: !!rule.auto_approve,
+          description: rule.description || null,
+        };
+      });
+      return fieldExposureApi.setVisibility(product!.id, {
+        default_sensitivity: defaultSensitivity,
+        field_rules: rules,
+      });
+    },
+    onSuccess: (config) => {
+      message.success('字段可见性规则已保存');
+      setFieldRules(config.field_rules || {});
+      queryClient.invalidateQueries({ queryKey: ['field-visibility', id] });
+    },
+    onError: () => message.error('字段可见性规则保存失败'),
+  });
+
+  const reviewExposureMutation = useMutation({
+    mutationFn: ({ request, reject }: { request: ExposureRequest; reject?: boolean }) => (
+      reject
+        ? fieldExposureApi.reviewRequest(request.id, { rejection_reason: '不符合当前数据最小化授权策略' })
+        : fieldExposureApi.reviewRequest(request.id, { approved_fields: request.requested_fields })
+    ),
+    onSuccess: () => {
+      message.success('字段申请已处理');
+      queryClient.invalidateQueries({ queryKey: ['field-exposure-requests', id] });
+    },
+    onError: (error: any) => {
+      const detail = error?.detail;
+      message.error(typeof detail === 'string' ? detail : '字段申请处理失败');
+    },
   });
 
   const schemaFields = useMemo<SchemaFieldRow[]>(() => {
@@ -358,6 +448,129 @@ export default function ProductDetail() {
             ]}
           />
         </Card>
+      )}
+
+      {(isOwner || canReview) && (
+        <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+          <Col xs={24} xl={14}>
+            <Card
+              title="字段最小化规则"
+              extra={canEditFieldRules && (
+                <Space>
+                  <Select
+                    value={defaultSensitivity}
+                    onChange={setDefaultSensitivity}
+                    style={{ width: 120 }}
+                    options={(Object.keys(sensitivityLabels) as FieldSensitivity[]).map((value) => ({
+                      label: sensitivityLabels[value],
+                      value,
+                    }))}
+                  />
+                  <Button loading={saveFieldRulesMutation.isPending} onClick={() => saveFieldRulesMutation.mutate()}>
+                    保存规则
+                  </Button>
+                </Space>
+              )}
+            >
+              {schemaFields.length > 0 ? (
+                <Table
+                  size="small"
+                  pagination={false}
+                  rowKey="name"
+                  dataSource={schemaFields}
+                  columns={[
+                    { title: '字段', dataIndex: 'name', key: 'name', width: 160 },
+                    {
+                      title: '敏感级别',
+                      key: 'sensitivity',
+                      width: 150,
+                      render: (_, field) => {
+                        const value = fieldRules[field.name]?.sensitivity || defaultSensitivity;
+                        return canEditFieldRules ? (
+                          <Select
+                            value={value}
+                            style={{ width: 120 }}
+                            onChange={(next) => setFieldRules((current) => ({
+                              ...current,
+                              [field.name]: { ...(current[field.name] || { sensitivity: defaultSensitivity }), sensitivity: next },
+                            }))}
+                            options={(Object.keys(sensitivityLabels) as FieldSensitivity[]).map((item) => ({
+                              label: sensitivityLabels[item],
+                              value: item,
+                            }))}
+                          />
+                        ) : <Tag color={sensitivityColors[value]}>{sensitivityLabels[value]}</Tag>;
+                      },
+                    },
+                    {
+                      title: '自动审批',
+                      key: 'auto_approve',
+                      width: 100,
+                      render: (_, field) => (
+                        <Switch
+                          checked={!!fieldRules[field.name]?.auto_approve}
+                          disabled={!canEditFieldRules || (fieldRules[field.name]?.sensitivity || defaultSensitivity) === 'restricted'}
+                          onChange={(checked) => setFieldRules((current) => ({
+                            ...current,
+                            [field.name]: { ...(current[field.name] || { sensitivity: defaultSensitivity }), auto_approve: checked },
+                          }))}
+                        />
+                      ),
+                    },
+                    {
+                      title: '脱敏方式',
+                      key: 'mask_pattern',
+                      render: (_, field) => (
+                        canEditFieldRules ? (
+                          <Input
+                            value={fieldRules[field.name]?.mask_pattern || ''}
+                            placeholder="redact/hash/keep_first_3_last_4"
+                            onChange={(event) => setFieldRules((current) => ({
+                              ...current,
+                              [field.name]: { ...(current[field.name] || { sensitivity: defaultSensitivity }), mask_pattern: event.target.value },
+                            }))}
+                          />
+                        ) : fieldRules[field.name]?.mask_pattern || '-'
+                      ),
+                    },
+                  ]}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="产品 Schema 中没有字段定义" />
+              )}
+            </Card>
+          </Col>
+          <Col xs={24} xl={10}>
+            <Card title="字段访问申请">
+              {(exposureRequests || []).length > 0 ? (
+                <Table
+                  size="small"
+                  pagination={false}
+                  rowKey="id"
+                  dataSource={exposureRequests || []}
+                  columns={[
+                    { title: '买方', dataIndex: 'buyer_id', key: 'buyer_id', width: 110, render: (value) => <Text code>{shortId(value)}</Text> },
+                    { title: '字段', dataIndex: 'requested_fields', key: 'requested_fields', render: (value: string[]) => value.join(', ') },
+                    { title: '状态', dataIndex: 'status', key: 'status', width: 95, render: (value) => <Tag color={requestStatusColors[value] || 'default'}>{value}</Tag> },
+                    {
+                      title: '操作',
+                      key: 'action',
+                      width: 130,
+                      render: (_, request) => request.status === 'pending' ? (
+                        <Space>
+                          <Button size="small" type="link" onClick={() => reviewExposureMutation.mutate({ request })}>批准</Button>
+                          <Button size="small" type="link" danger onClick={() => reviewExposureMutation.mutate({ request, reject: true })}>拒绝</Button>
+                        </Space>
+                      ) : '-',
+                    },
+                  ]}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无字段申请" />
+              )}
+            </Card>
+          </Col>
+        </Row>
       )}
     </div>
   );

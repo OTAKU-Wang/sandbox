@@ -503,8 +503,15 @@ class FirecrackerRuntime:
 
         return args, seccomp_fd
 
-    def execute(self, vm: VMInstance, code: str, language: str = "python",
-                session_key: str | None = None) -> ExecutionResult:
+    def execute(
+        self,
+        vm: VMInstance,
+        code: str,
+        language: str = "python",
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> ExecutionResult:
         """Execute code inside a Firecracker microVM.
 
         Args:
@@ -512,6 +519,8 @@ class FirecrackerRuntime:
             code: Code to execute
             language: "python" or "bash"
             session_key: Optional session key for env injection
+            env_vars: Additional sandbox context variables for audit/policy hooks.
+            timeout: Per-execution timeout in seconds.
 
         Returns:
             ExecutionResult with output and exit code
@@ -519,12 +528,26 @@ class FirecrackerRuntime:
         start = time.monotonic()
 
         if self._simulation_mode:
-            return self._simulate_execute(vm, code, language, session_key=session_key)
+            return self._simulate_execute(
+                vm,
+                code,
+                language,
+                session_key=session_key,
+                env_vars=env_vars,
+                timeout=timeout,
+            )
 
         try:
             # For QEMU TCG, use serial execution (no SSH without network)
             if self._backend == "qemu-tcg":
-                result = self._execute_via_qemu_serial(vm, code, language, session_key=session_key)
+                result = self._execute_via_qemu_serial(
+                    vm,
+                    code,
+                    language,
+                    session_key=session_key,
+                    env_vars=env_vars,
+                    timeout=timeout,
+                )
                 duration = int((time.monotonic() - start) * 1000)
                 return ExecutionResult(
                     output=result.get("output", ""),
@@ -540,7 +563,14 @@ class FirecrackerRuntime:
 
             # Execute via SSH (if network enabled) or serial console
             if vm.config.network_enabled and vm.ip_address:
-                result = self._execute_via_ssh(vm, code_file, language)
+                result = self._execute_via_ssh(
+                    vm,
+                    code_file,
+                    language,
+                    session_key=session_key,
+                    env_vars=env_vars,
+                    timeout=timeout,
+                )
             else:
                 result = self._execute_via_serial(vm, code_file, language)
 
@@ -560,10 +590,18 @@ class FirecrackerRuntime:
                 vm_id=vm.vm_id,
             )
 
-    def _simulate_execute(self, vm: VMInstance, code: str, language: str,
-                          session_key: str | None = None) -> ExecutionResult:
+    def _simulate_execute(
+        self,
+        vm: VMInstance,
+        code: str,
+        language: str,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> ExecutionResult:
         """Simulate execution with bwrap namespace isolation (L3-grade security)."""
         start = time.monotonic()
+        effective_timeout = timeout or 120
 
         # Write code to workspace
         ext = "py" if language == "python" else "sh"
@@ -573,13 +611,19 @@ class FirecrackerRuntime:
         try:
             # Use bwrap for namespace isolation in simulation mode
             workspace = Path(vm.workspace)
-            cmd, seccomp_fd = self._build_sim_bwrap_args(workspace, f"/workspace/tmp/exec.{ext}", language, session_key)
+            cmd, seccomp_fd = self._build_sim_bwrap_args(
+                workspace,
+                f"/workspace/tmp/exec.{ext}",
+                language,
+                session_key=session_key,
+                env_vars=env_vars,
+            )
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, pass_fds=extra_fds)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
             # Retry without seccomp if kernel doesn't support it
             if result.returncode != 0 and "EINVAL" in result.stderr and seccomp_fd is not None:
                 cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=120)
+                result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
             duration = int((time.monotonic() - start) * 1000)
             return ExecutionResult(
                 output=result.stdout + result.stderr,
@@ -588,22 +632,49 @@ class FirecrackerRuntime:
                 vm_id=vm.vm_id,
             )
         except subprocess.TimeoutExpired:
-            return ExecutionResult(output="Execution timed out (120s)", exit_code=-1, duration_ms=120000, vm_id=vm.vm_id)
+            return ExecutionResult(
+                output=f"Execution timed out ({effective_timeout}s)",
+                exit_code=-1,
+                duration_ms=effective_timeout * 1000,
+                vm_id=vm.vm_id,
+            )
         except Exception as e:
             return ExecutionResult(output=str(e), exit_code=-1, duration_ms=0, vm_id=vm.vm_id)
 
-    def _execute_via_ssh(self, vm: VMInstance, code_file: str, language: str) -> dict:
+    def _execute_via_ssh(
+        self,
+        vm: VMInstance,
+        code_file: str,
+        language: str,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> dict:
         """Execute code via SSH into the VM."""
         ext = "py" if language == "python" else "sh"
         interpreter = "python3" if language == "python" else "bash"
+        effective_timeout = timeout or 120
 
         # Copy file to VM
         scp_cmd = ["scp", "-o", "StrictHostKeyChecking=no", code_file, f"root@{vm.ip_address}:/tmp/exec.{ext}"]
         subprocess.run(scp_cmd, capture_output=True, timeout=10)
 
         # Execute
-        ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=no", f"root@{vm.ip_address}", f"{interpreter} /tmp/exec.{ext}"]
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=120)
+        env_prefix = ""
+        merged_env = dict(env_vars or {})
+        if session_key:
+            merged_env["CDS_SESSION_KEY"] = session_key
+        if merged_env:
+            import shlex
+            env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in merged_env.items()) + " "
+        ssh_cmd = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            f"root@{vm.ip_address}",
+            f"{env_prefix}{interpreter} /tmp/exec.{ext}",
+        ]
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=effective_timeout)
         return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
 
     def _execute_via_serial(self, vm: VMInstance, code_file: str, language: str) -> dict:
@@ -630,8 +701,15 @@ class FirecrackerRuntime:
 
         return {"output": "Serial execution not fully implemented", "exit_code": -1}
 
-    def _execute_via_qemu_serial(self, vm: VMInstance, code: str, language: str,
-                                  session_key: str | None = None) -> dict:
+    def _execute_via_qemu_serial(
+        self,
+        vm: VMInstance,
+        code: str,
+        language: str,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> dict:
         """Execute code via QEMU serial console (QMP + guest agent or pexpect).
 
         For QEMU TCG without network, we use the QMP monitor to interact with the VM.
@@ -642,27 +720,48 @@ class FirecrackerRuntime:
         # since we can't easily pipe code through serial without a guest agent.
         # The VM provides process-level isolation (separate address space, kernel).
         logger.warning(f"[qemu-tcg] Using simulation fallback for VM {vm.vm_id}")
-        return self._simulate_execute_raw(vm, code, language, session_key=session_key)
+        return self._simulate_execute_raw(
+            vm,
+            code,
+            language,
+            session_key=session_key,
+            env_vars=env_vars,
+            timeout=timeout,
+        )
 
-    def _simulate_execute_raw(self, vm: VMInstance, code: str, language: str,
-                               session_key: str | None = None) -> dict:
+    def _simulate_execute_raw(
+        self,
+        vm: VMInstance,
+        code: str,
+        language: str,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> dict:
         """Execute code with bwrap namespace isolation (used by QEMU TCG and simulation)."""
+        effective_timeout = timeout or 120
         ext = "py" if language == "python" else "sh"
         code_file = Path(vm.workspace) / "tmp" / f"exec.{ext}"
         code_file.write_text(code)
 
         try:
             workspace = Path(vm.workspace)
-            cmd, seccomp_fd = self._build_sim_bwrap_args(workspace, f"/workspace/tmp/exec.{ext}", language, session_key)
+            cmd, seccomp_fd = self._build_sim_bwrap_args(
+                workspace,
+                f"/workspace/tmp/exec.{ext}",
+                language,
+                session_key=session_key,
+                env_vars=env_vars,
+            )
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, pass_fds=extra_fds)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
             # Retry without seccomp if kernel doesn't support it
             if result.returncode != 0 and "EINVAL" in result.stderr and seccomp_fd is not None:
                 cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=120)
+                result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
             return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
         except subprocess.TimeoutExpired:
-            return {"output": "Execution timed out (120s)", "exit_code": -1}
+            return {"output": f"Execution timed out ({effective_timeout}s)", "exit_code": -1}
         except Exception as e:
             return {"output": str(e), "exit_code": -1}
 

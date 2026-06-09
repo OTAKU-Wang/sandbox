@@ -289,7 +289,9 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
     from app.core.database import async_session
     from app.models.sandbox_task import SandboxTask, TaskStatus as ORMTaskStatus
     from app.models.sandbox_session import SandboxSession
-    from app.services.sandbox_runtime import SandboxRuntime
+    from app.services.sandbox_manager import get_sandbox_manager
+    from app.services.sandbox_runtime import SceneRuntimeFactory
+    from app.services.kms_service import kms_service
     from app.services.audit_service import audit_service
     from sqlalchemy import select
 
@@ -313,17 +315,69 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
             await db.commit()
             return TaskStatus.FAILED, {"error": "Session not found"}
 
-        runtime = SandboxRuntime()
-        container_id = session.container_id or f"bwrap-{orm_task.session_id}"
+        if not session.container_id:
+            orm_task.status = ORMTaskStatus.FAILED.value
+            orm_task.error_message = "Sandbox session has no container"
+            await db.commit()
+            return TaskStatus.FAILED, {"error": "Session has no container"}
+
+        runtime = await get_sandbox_manager()
+        container_id = session.container_id
         try:
             from app.services.task_code_security import decrypt_task_code
             code_content = decrypt_task_code(orm_task.code_content)
+            if not code_content.strip():
+                orm_task.status = ORMTaskStatus.FAILED.value
+                orm_task.error_message = "code cannot be empty"
+                await db.commit()
+                return TaskStatus.FAILED, {"error": "code cannot be empty"}
+
+            session_key = None
+            if session.session_key_id:
+                attestation = None
+                if session.sandbox_level in {"L1", "L2"}:
+                    limits = session.resource_limits or {}
+                    record = limits.get("attestation") if isinstance(limits, dict) else None
+                    quote = record.get("quote") if isinstance(record, dict) else None
+                    if isinstance(quote, str) and quote:
+                        attestation = quote.encode("utf-8")
+                    if not attestation:
+                        orm_task.status = ORMTaskStatus.FAILED.value
+                        orm_task.error_message = "Sandbox attestation quote missing; key distribution denied"
+                        await db.commit()
+                        return TaskStatus.FAILED, {"error": orm_task.error_message}
+                session_key = kms_service.distribute_key(
+                    session.session_key_id,
+                    str(session.id),
+                    attestation=attestation,
+                )
+                if not session_key:
+                    orm_task.status = ORMTaskStatus.FAILED.value
+                    orm_task.error_message = "Session key distribution failed"
+                    await db.commit()
+                    return TaskStatus.FAILED, {"error": "Session key distribution failed"}
+
+            language = (orm_task.language or "python").lower()
+            sandbox_mode = getattr(session, "sandbox_mode", None) or task.payload.get("sandbox_mode") or "structured_query"
+            scene_runtime = SceneRuntimeFactory.create(sandbox_mode)
+            scene_context = {"language": language, "max_output_rows": 10000}
+            code_content = await scene_runtime.pre_execute(code_content, scene_context)
+
             exec_result = await runtime.execute(
                 container_id=container_id,
                 code=code_content,
-                language=orm_task.language or "python",
+                language=language,
+                session_key=session_key,
+                env_vars={
+                    "CDS_SESSION_ID": str(session.id),
+                    "CDS_SANDBOX_LEVEL": session.sandbox_level,
+                    "CDS_SANDBOX_MODE": sandbox_mode,
+                    "CDS_DATA_PRODUCT_ID": str(session.data_product_id),
+                    "CDS_USER_ID": str(session.user_id),
+                },
                 timeout=orm_task.timeout_seconds,
             )
+            exec_result = await scene_runtime.post_execute(exec_result, scene_context)
             output = exec_result.get("output", "") or ""
             if exec_result.get("exit_code", -1) == 0:
                 orm_task.status = ORMTaskStatus.OUTPUT_REVIEW.value

@@ -91,6 +91,21 @@ def make_user(db_session: AsyncSession):
     return _make
 
 
+@pytest.fixture
+def publish_product(db_session: AsyncSession):
+    """Mark a product as published for tests that are not exercising lifecycle."""
+    async def _publish(product_id: str):
+        from app.models.data_product import DataProduct, DataProductStatus
+
+        product = await db_session.get(DataProduct, uuid.UUID(str(product_id)))
+        assert product is not None
+        product.status = DataProductStatus.PUBLISHED.value
+        await db_session.flush()
+        return product
+
+    return _publish
+
+
 @pytest_asyncio.fixture
 async def operator_headers(client: AsyncClient, db_session: AsyncGenerator[AsyncSession, None]) -> dict:
     """Create an operator user directly in DB and return auth headers."""

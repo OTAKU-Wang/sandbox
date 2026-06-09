@@ -11,6 +11,24 @@ import pytest
 from httpx import AsyncClient
 
 
+async def _create_session_for_output_control(client: AsyncClient, auth_headers: dict, publish_product) -> str:
+    product_resp = await client.post(
+        "/api/v1/data-products",
+        json={"name": f"Output Session Product {uuid.uuid4().hex[:8]}"},
+        headers=auth_headers,
+    )
+    assert product_resp.status_code == 201
+    product_id = product_resp.json()["id"]
+    await publish_product(product_id)
+    session_resp = await client.post(
+        "/api/v1/sandbox-sessions",
+        json={"data_product_id": product_id},
+        headers=auth_headers,
+    )
+    assert session_resp.status_code == 201
+    return session_resp.json()["id"]
+
+
 # ─── Inspect Endpoint ──────────────────────────────
 
 @pytest.mark.asyncio
@@ -134,6 +152,53 @@ async def test_inspect_unauthorized(client: AsyncClient):
         "session_id": "sess-x",
     })
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_inspect_rejects_non_owner_real_session(
+    client: AsyncClient,
+    auth_headers: dict,
+    make_user,
+    publish_product,
+):
+    """A real sandbox session ID cannot be used by a non-owner for output audit."""
+    other_headers, _ = await make_user("buyer", "inspect_other")
+    session_id = await _create_session_for_output_control(client, auth_headers, publish_product)
+
+    resp = await client.post(
+        "/api/v1/output-control/inspect",
+        json={"output": "safe result", "session_id": session_id},
+        headers=other_headers,
+    )
+
+    assert resp.status_code == 403
+    assert "Not your output control session" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_rejects_non_owner_ad_hoc_session(
+    client: AsyncClient,
+    auth_headers: dict,
+    make_user,
+):
+    """Ad-hoc output-control session IDs are bound to their first authenticated user."""
+    other_headers, _ = await make_user("buyer", "inspect_adhoc_other")
+    session_id = f"adhoc-{uuid.uuid4().hex[:8]}"
+    owner_resp = await client.post(
+        "/api/v1/output-control/inspect",
+        json={"output": "owner result", "session_id": session_id},
+        headers=auth_headers,
+    )
+    assert owner_resp.status_code == 200
+
+    other_resp = await client.post(
+        "/api/v1/output-control/inspect",
+        json={"output": "other result", "session_id": session_id},
+        headers=other_headers,
+    )
+
+    assert other_resp.status_code == 403
+    assert "Not your output control session" in other_resp.json()["detail"]
 
 
 # ─── DP Noise Endpoint ──────────────────────────────
@@ -291,6 +356,29 @@ async def test_dp_budget_overwrite(client: AsyncClient, auth_headers: dict):
 
 
 @pytest.mark.asyncio
+async def test_dp_budget_rejects_non_owner_access(client: AsyncClient, auth_headers: dict, make_user):
+    """Only the owner/operator/admin can query or reinitialize an ad-hoc DP budget."""
+    other_headers, _ = await make_user("buyer", "dp_budget_other")
+    session_id = f"budget-{uuid.uuid4().hex[:8]}"
+    await client.post(
+        f"/api/v1/output-control/dp/budget/init?session_id={session_id}&epsilon=10.0",
+        headers=auth_headers,
+    )
+
+    query_resp = await client.get(
+        f"/api/v1/output-control/dp/budget/{session_id}",
+        headers=other_headers,
+    )
+    overwrite_resp = await client.post(
+        f"/api/v1/output-control/dp/budget/init?session_id={session_id}&epsilon=20.0",
+        headers=other_headers,
+    )
+
+    assert query_resp.status_code == 403
+    assert overwrite_resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_dp_budget_unauthorized(client: AsyncClient):
     """Budget endpoints without auth should return 401."""
     resp = await client.post("/api/v1/output-control/dp/budget/init?session_id=x&epsilon=1.0")
@@ -328,3 +416,24 @@ async def test_inspect_creates_audit_log(client: AsyncClient, auth_headers: dict
     # Should have at least one output_inspection record
     inspection_records = [r for r in records.get("items", []) if "output_inspection" in r.get("action", "")]
     assert len(inspection_records) >= 1
+
+
+@pytest.mark.asyncio
+async def test_output_gateway_rejects_non_owner_real_session(
+    client: AsyncClient,
+    auth_headers: dict,
+    make_user,
+    publish_product,
+):
+    """Gateway output processing must not audit or release under another user's session."""
+    other_headers, _ = await make_user("buyer", "gateway_other")
+    session_id = await _create_session_for_output_control(client, auth_headers, publish_product)
+
+    resp = await client.post(
+        "/api/v1/output-control/gateway",
+        json={"data": [{"value": 1}], "session_id": session_id},
+        headers=other_headers,
+    )
+
+    assert resp.status_code == 403
+    assert "Not your output control session" in resp.json()["detail"]

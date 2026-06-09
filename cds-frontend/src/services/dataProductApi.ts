@@ -18,7 +18,6 @@ export interface CreateProductRequest {
 export interface UpdateProductRequest {
   name?: string;
   description?: string;
-  status?: string;
   industry?: string;
   data_schema?: Record<string, unknown>;
   security_level?: string;
@@ -58,6 +57,9 @@ export const dataProductApi = {
 
   delete: (id: string): Promise<void> =>
     api.delete(`/data-products/${id}`),
+
+  archive: (id: string): Promise<DataProduct> =>
+    api.post(`/data-products/${id}/archive`),
 
   submit: (id: string): Promise<DataProduct> =>
     api.post(`/data-products/${id}/submit`),

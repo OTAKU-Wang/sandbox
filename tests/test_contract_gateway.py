@@ -191,3 +191,54 @@ def test_credential_status_values():
 def test_contract_status_active():
     assert ContractStatus.ACTIVE.value == "active"
     assert ContractStatus.SIGNED.value == "signed"
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_credential_contract_path_mismatch(client, db_session, make_user):
+    _, provider_id = await make_user("data_provider", "gateway_provider")
+    _, buyer_id = await make_user("buyer", "gateway_buyer")
+    product_id = str(uuid.uuid4())
+    contract_a = Contract(
+        contract_no=f"GW-{uuid.uuid4().hex[:12]}",
+        contract_type="data_query",
+        status=ContractStatus.ACTIVE.value,
+        provider_id=uuid.UUID(provider_id),
+        buyer_id=uuid.UUID(buyer_id),
+        title="Gateway contract A",
+        terms={},
+        product_ids=[product_id],
+        allowed_operations="query",
+    )
+    contract_b = Contract(
+        contract_no=f"GW-{uuid.uuid4().hex[:12]}",
+        contract_type="data_query",
+        status=ContractStatus.ACTIVE.value,
+        provider_id=uuid.UUID(provider_id),
+        buyer_id=uuid.UUID(buyer_id),
+        title="Gateway contract B",
+        terms={},
+        product_ids=[product_id],
+        allowed_operations="query",
+    )
+    db_session.add_all([contract_a, contract_b])
+    await db_session.flush()
+
+    app_secret = "secret-for-contract-a"
+    credential = AppCredential(
+        app_id=f"app_{uuid.uuid4().hex}",
+        app_secret_hash=sm3_hash(app_secret),
+        contract_id=contract_a.id,
+        consumer_id=uuid.UUID(buyer_id),
+        status=CredentialStatus.ACTIVE.value,
+    )
+    db_session.add(credential)
+    await db_session.flush()
+
+    response = await client.post(
+        f"/api/v1/gateway/{contract_b.id}/query",
+        json={"product_id": product_id, "sql": "SELECT city FROM data", "format": "json"},
+        headers={"X-App-Id": credential.app_id, "X-App-Secret": app_secret},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Credential is not bound to this contract"

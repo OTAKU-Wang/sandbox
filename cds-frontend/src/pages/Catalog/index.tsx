@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Input, Select, Row, Col, Card, Tag, Typography, Empty, Spin, Pagination, Descriptions, Modal, Button, Space } from 'antd';
+import { Input, Select, Row, Col, Card, Tag, Typography, Empty, Spin, Pagination, Descriptions, Modal, Button, Space, Form, Checkbox, message } from 'antd';
 import { CloudServerOutlined, FileSearchOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { catalogApi, type CatalogProduct } from '../../services/catalogApi';
+import { fieldExposureApi } from '../../services/fieldExposureApi';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
 
@@ -33,6 +34,8 @@ export default function CatalogPage() {
   const [securityLevel, setSecurityLevel] = useState<string | undefined>();
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<CatalogProduct | null>(null);
+  const [fieldRequestOpen, setFieldRequestOpen] = useState(false);
+  const [fieldForm] = Form.useForm<{ requested_fields: string[]; justification?: string }>();
 
   const { data, isLoading } = useQuery({
     queryKey: ['catalog', q, productType, industry, securityLevel, page],
@@ -50,6 +53,32 @@ export default function CatalogPage() {
   };
 
   const selectedDetail = detailData || detail;
+  const schemaFields = Array.isArray(selectedDetail?.data_schema?.fields)
+    ? selectedDetail.data_schema.fields.map((field: any) => String(field.name)).filter(Boolean)
+    : [];
+
+  const { data: approvedFields } = useQuery({
+    queryKey: ['approved-fields', selectedDetail?.id],
+    queryFn: () => fieldExposureApi.getApprovedFields(selectedDetail!.id),
+    enabled: !!selectedDetail?.id && canCreateSession,
+  });
+
+  const exposureMutation = useMutation({
+    mutationFn: (values: { requested_fields: string[]; justification?: string }) => fieldExposureApi.createRequest({
+      product_id: selectedDetail!.id,
+      requested_fields: values.requested_fields,
+      justification: values.justification,
+    }),
+    onSuccess: (request) => {
+      message.success(request.status === 'approved' ? '字段权限已自动批准' : '字段申请已提交');
+      setFieldRequestOpen(false);
+      fieldForm.resetFields();
+    },
+    onError: (error: any) => {
+      const detailText = error?.detail;
+      message.error(typeof detailText === 'string' ? detailText : '字段申请失败');
+    },
+  });
 
   return (
     <div>
@@ -162,6 +191,11 @@ export default function CatalogPage() {
         onCancel={() => setDetail(null)}
         footer={[
           <Button key="close" onClick={() => setDetail(null)}>关闭</Button>,
+          canCreateSession && selectedDetail && schemaFields.length > 0 ? (
+            <Button key="fields" onClick={() => setFieldRequestOpen(true)}>
+              申请字段
+            </Button>
+          ) : null,
           canCreateSession && selectedDetail ? (
             <Button key="sandbox" type="primary" icon={<CloudServerOutlined />} onClick={() => openSandboxCreate(selectedDetail.id)}>
               创建沙箱
@@ -183,6 +217,9 @@ export default function CatalogPage() {
             </Descriptions.Item>
             <Descriptions.Item label="允许操作">{selectedDetail.allowed_operations?.join(', ') || '-'}</Descriptions.Item>
             <Descriptions.Item label="数据行数">{selectedDetail.row_count?.toLocaleString() || '-'}</Descriptions.Item>
+            <Descriptions.Item label="已授权字段">
+              {approvedFields?.approved_fields?.length ? approvedFields.approved_fields.join(', ') : '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="输出约束">
               {selectedDetail.output_constraints ? <pre className="cds-json-block">{JSON.stringify(selectedDetail.output_constraints, null, 2)}</pre> : '-'}
             </Descriptions.Item>
@@ -191,6 +228,24 @@ export default function CatalogPage() {
             </Descriptions.Item>
           </Descriptions>
         )}
+      </Modal>
+
+      <Modal
+        title="申请字段访问"
+        open={fieldRequestOpen}
+        onCancel={() => setFieldRequestOpen(false)}
+        onOk={() => fieldForm.submit()}
+        confirmLoading={exposureMutation.isPending}
+        okText="提交申请"
+      >
+        <Form form={fieldForm} layout="vertical" onFinish={exposureMutation.mutate}>
+          <Form.Item name="requested_fields" label="申请字段" rules={[{ required: true, message: '请选择至少一个字段' }]}>
+            <Checkbox.Group options={schemaFields.map((field) => ({ label: field, value: field }))} />
+          </Form.Item>
+          <Form.Item name="justification" label="用途说明">
+            <Input.TextArea rows={4} placeholder="说明业务目的、使用范围和保存期限；PII 字段必须填写。" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

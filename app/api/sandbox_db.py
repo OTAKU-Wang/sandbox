@@ -3,15 +3,76 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
+from app.models.sandbox_session import SandboxSession
 from app.services.secure_duckdb import SecureDuckDBEngine, MaskRule, QueryResult, cleanup_expired_engines
 
 router = APIRouter()
 
 # In-memory engine registry (per-session)
 _engines: dict[str, SecureDuckDBEngine] = {}
+_engine_owners: dict[str, str] = {}
+
+
+def _can_manage_sandbox_db(user: User) -> bool:
+    return user.role in (UserRole.ADMIN, UserRole.OPERATOR)
+
+
+async def _managed_sandbox_session(db: AsyncSession, session_id: str) -> SandboxSession | None:
+    try:
+        session_uuid = uuid.UUID(str(session_id))
+    except (TypeError, ValueError):
+        return None
+    return await db.get(SandboxSession, session_uuid)
+
+
+async def _authorize_session_engine(
+    db: AsyncSession,
+    session_id: str,
+    current_user: User,
+    *,
+    create_if_missing: bool = False,
+) -> None:
+    if _can_manage_sandbox_db(current_user):
+        return
+
+    session = await _managed_sandbox_session(db, session_id)
+    if session:
+        if session.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not your sandbox database session")
+        return
+
+    owner_id = _engine_owners.get(session_id)
+    if owner_id:
+        if owner_id != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Not your sandbox database session")
+        return
+
+    if create_if_missing:
+        return
+    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+
+async def _get_authorized_engine(
+    db: AsyncSession,
+    session_id: str,
+    current_user: User,
+    *,
+    create: bool = False,
+) -> SecureDuckDBEngine:
+    await _authorize_session_engine(db, session_id, current_user, create_if_missing=create)
+    if create:
+        engine = _get_engine(session_id)
+        _engine_owners.setdefault(session_id, str(current_user.id))
+        return engine
+    engine = _engines.get(session_id)
+    if not engine:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    return engine
 
 
 class CreateTableRequest(BaseModel):
@@ -43,14 +104,12 @@ class MaskedViewRequest(BaseModel):
 async def create_table(
     body: CreateTableRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create an in-memory DuckDB table from JSON data."""
     session_id = body.session_id
 
-    if session_id not in _engines:
-        _engines[session_id] = SecureDuckDBEngine(session_id, mode="memory")
-
-    engine = _engines[session_id]
+    engine = await _get_authorized_engine(db, session_id, current_user, create=True)
     try:
         info = engine.register_table(body.table_name, body.data)
     except Exception as e:
@@ -68,14 +127,13 @@ async def create_table(
 async def execute_query(
     body: QueryRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Execute a SQL query on a sandbox DuckDB instance."""
     # Lazy TTL cleanup: remove expired engines (1h default)
     cleanup_expired_engines(_engines)
 
-    engine = _engines.get(body.session_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail=f"Session {body.session_id} not found")
+    engine = await _get_authorized_engine(db, body.session_id, current_user)
 
     result = engine.execute_query(body.sql, limit=body.limit)
     if not result.success:
@@ -94,11 +152,10 @@ async def execute_query(
 async def create_masked_view(
     body: MaskedViewRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a masked view with field-level data masking."""
-    engine = _engines.get(body.session_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail=f"Session {body.session_id} not found")
+    engine = await _get_authorized_engine(db, body.session_id, current_user)
 
     rules = [MaskRule(field_name=r.field_name, mask_type=r.mask_type, top_k=r.top_k) for r in body.rules]
     engine.set_mask_rules(body.table_name, rules)
@@ -115,11 +172,10 @@ async def create_masked_view(
 async def list_tables(
     session_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """List tables in a sandbox session."""
-    engine = _engines.get(session_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    engine = await _get_authorized_engine(db, session_id, current_user)
 
     tables = engine.list_tables()
     return [
@@ -137,9 +193,12 @@ async def list_tables(
 async def close_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Close and cleanup a sandbox DuckDB session."""
+    await _authorize_session_engine(db, session_id, current_user)
     engine = _engines.pop(session_id, None)
+    _engine_owners.pop(session_id, None)
     if engine:
         engine.close()
     return {"session_id": session_id, "closed": True}
@@ -232,8 +291,12 @@ async def _attach_policy(session_id: str, engine: SecureDuckDBEngine) -> None:
             )
             session = result.scalar_one_or_none()
             if session and session.contract_id:
+                try:
+                    contract_uuid = uuid.UUID(str(session.contract_id))
+                except (TypeError, ValueError):
+                    return
                 contract_result = await db.execute(
-                    select(Contract).where(Contract.id == session.contract_id)
+                    select(Contract).where(Contract.id == contract_uuid)
                 )
                 contract = contract_result.scalar_one_or_none()
                 if contract:
@@ -279,13 +342,14 @@ def get_encryption_config_for_session(session_id: str) -> dict | None:
 async def create_encrypted_table(
     body: EncryptedTableRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a DuckDB table with SM4 column-level encryption.
 
     Sensitive columns are encrypted with SM4-SIV (deterministic, supports equality queries)
     or SM4-GCM (randomized, maximum security). Encrypted columns are stored as BLOB.
     """
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -312,9 +376,10 @@ async def create_encrypted_table(
 async def import_json(
     body: ImportJsonRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Import a JSON file into DuckDB with optional SM4 column encryption."""
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -338,9 +403,10 @@ async def import_json(
 async def import_parquet(
     body: ImportParquetRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Import a Parquet file into DuckDB with optional SM4 column encryption."""
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -364,9 +430,10 @@ async def import_parquet(
 async def import_postgres(
     body: ImportPostgresRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Import a PostgreSQL table via postgres_scanner with optional SM4 encryption."""
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -390,9 +457,10 @@ async def import_postgres(
 async def import_s3(
     body: ImportS3Request,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Import data from S3/MinIO via httpfs with optional SM4 encryption."""
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -418,14 +486,13 @@ async def import_s3(
 async def query_decrypted(
     body: EncryptedQueryRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Execute a query with automatic decryption of SM4-encrypted columns.
 
     Transparently decrypts SM4-SIV and SM4-GCM encrypted columns in query results.
     """
-    engine = _engines.get(body.session_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail=f"Session {body.session_id} not found")
+    engine = await _get_authorized_engine(db, body.session_id, current_user)
 
     result = engine.execute_query_decrypted(body.sql, limit=body.limit)
     if not result.success:
@@ -444,11 +511,10 @@ async def query_decrypted(
 async def get_encryption_metadata(
     session_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get encryption metadata for all tables in a session."""
-    engine = _engines.get(session_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    engine = await _get_authorized_engine(db, session_id, current_user)
 
     metadata = {}
     for table in engine.list_tables():
@@ -463,15 +529,14 @@ async def get_encryption_metadata(
 async def get_encryption_config(
     session_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get encryption config for sandbox injection (DEK hex + encrypted column map).
 
     Used by the sandbox execution layer to inject SM4 keys via environment variables.
     The DEK is never written to disk — it's passed via bwrap --setenv.
     """
-    engine = _engines.get(session_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    engine = await _get_authorized_engine(db, session_id, current_user)
 
     configs = engine.get_all_encryption_configs()
     return {"session_id": session_id, "encryption_configs": configs}
@@ -503,13 +568,14 @@ class ImportS3SandboxRequest(BaseModel):
 async def import_postgres_sandbox(
     body: ImportPostgresSandboxRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Import PostgreSQL data with sandbox network policy enforcement.
 
     Requires network_allowed=true — the caller must verify that the sandbox
     network policy allows outbound connections to the PostgreSQL host.
     """
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -536,13 +602,14 @@ async def import_postgres_sandbox(
 async def import_s3_sandbox(
     body: ImportS3SandboxRequest,
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+    db: AsyncSession = Depends(get_db),
 ):
     """Import S3/MinIO data with sandbox network policy enforcement.
 
     Requires network_allowed=true — the caller must verify that the sandbox
     network policy allows outbound connections to the S3 endpoint.
     """
-    engine = _get_engine(body.session_id)
+    engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
     dek = _parse_dek(body.dek_hex)
 
     try:

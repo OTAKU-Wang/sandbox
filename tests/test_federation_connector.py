@@ -17,6 +17,8 @@ from app.services.federation_connector import (
     ProtocolType,
 )
 
+TEST_FEDERATION_JWT_SECRET = "test-federation-jwt-secret-key-32-bytes-minimum"
+
 
 def _mock_execute_remote(self, request, trust):
     """Mock remote request handler for unit tests."""
@@ -72,7 +74,7 @@ def connector():
 
 @pytest.fixture
 def idp():
-    return JWTIdentityProvider(secret_key="test-secret")
+    return JWTIdentityProvider(secret_key=TEST_FEDERATION_JWT_SECRET)
 
 
 # ─── Identity Provider ──────────────────────────────
@@ -110,9 +112,22 @@ class TestJWTIdentityProvider:
         """Non-federation tokens should be rejected."""
         import jwt
         # Create a token without federation=True
-        non_fed_token = jwt.encode({"sub": "u", "aud": "cds-remote"}, "test-secret", algorithm="HS256")
+        non_fed_token = jwt.encode(
+            {"sub": "u", "aud": "cds-remote"},
+            TEST_FEDERATION_JWT_SECRET,
+            algorithm="HS256",
+        )
         claims = idp.verify_federated_token(non_fed_token, remote_space)
         assert claims is None
+
+    def test_default_provider_uses_test_safe_key(self, remote_space, monkeypatch):
+        monkeypatch.setenv("TESTING", "1")
+        provider = JWTIdentityProvider()
+
+        token = provider.create_federated_token("user-1", remote_space)
+        claims = provider.verify_federated_token(token, remote_space)
+
+        assert claims["sub"] == "user-1"
 
 
 # ─── SM2 Identity Provider ──────────────────────────────

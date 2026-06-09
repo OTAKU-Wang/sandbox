@@ -156,15 +156,16 @@ class ProcessAdapter(RuntimeAdapter):
     """L0: Process-level isolation with bwrap namespace hardening.
 
     Security boundary: bwrap (PID/mount/network/IPC namespace) + seccomp syscall filter
-    + cgroup v2 resource limits + output size limit + timeout.
-    Falls back to direct subprocess if bwrap is unavailable.
+    + cgroup v2 resource limits + output size limit + timeout. Unsandboxed fallback
+    is disabled by default and should only be enabled for local development.
     """
 
-    def __init__(self, workspace_root: str = "/tmp/cds-sandbox-l0"):
+    def __init__(self, workspace_root: str = "/tmp/cds-sandbox-l0", allow_unsandboxed_fallback: bool = False):
         self.workspace_root = Path(workspace_root)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self._cgroup_root = Path("/sys/fs/cgroup/cds-l0")
         self._bwrap_available = shutil.which("bwrap") is not None
+        self._allow_unsandboxed_fallback = allow_unsandboxed_fallback
 
     def provision(self, session_id: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
         # Workspace with tenant prefix: /tmp/cds-sandbox-l0/{user_id}/{session_id}/
@@ -237,7 +238,16 @@ class ProcessAdapter(RuntimeAdapter):
             cmd = bwrap_args
             env = os.environ.copy()
         else:
-            # Fallback: direct execution with cgroup enforcement only
+            if not self._allow_unsandboxed_fallback:
+                return {
+                    "output": "SECURITY ERROR: bwrap not installed and L0 unsandboxed fallback is disabled. "
+                              "Install bubblewrap or enable allow_unsandboxed_fallback for development only.",
+                    "exit_code": -1,
+                    "duration_ms": 0,
+                    "sandbox_level": "L0",
+                }
+
+            # Development fallback: direct execution with best-effort cgroup enforcement.
             if language == "python":
                 cmd = ["python3", str(code_file)]
             elif language == "sql":
@@ -713,10 +723,24 @@ class FirecrackerAdapter(RuntimeAdapter):
             if data_path and Path(data_path).exists():
                 self._runtime.transfer_file(vm, data_path, f"/workspace/input/data")
 
+            attestation_quote = None
+            attestation_measurement = None
+            try:
+                from app.services.remote_attestation import AttestationService, TEEType
+                quote = AttestationService().generate_quote(TEEType.FIRECRACKER, str(session_id).encode())
+                attestation_quote = quote.raw_bytes.decode("utf-8")
+                attestation_measurement = quote.measurement
+            except Exception as e:
+                logger.warning("[FirecrackerAdapter] Failed to generate software attestation quote: %s", e)
+
             return {
                 "container_id": vm.vm_id,
                 "status": SessionStatus.RUNNING.value,
                 "workspace": vm.workspace,
+                "attestation_quote": attestation_quote,
+                "attestation_type": "firecracker",
+                "attestation_measurement": attestation_measurement,
+                "is_simulation": self._runtime._simulation_mode,
             }
         except Exception as e:
             return {"container_id": None, "status": SessionStatus.FAILED.value, "error": str(e)}
@@ -728,7 +752,15 @@ class FirecrackerAdapter(RuntimeAdapter):
         if not vm:
             return {"output": "VM not found", "exit_code": -1, "duration_ms": 0}
 
-        result = await asyncio.to_thread(self._runtime.execute, vm, code, language, session_key)
+        result = await asyncio.to_thread(
+            self._runtime.execute,
+            vm,
+            code,
+            language,
+            session_key=session_key,
+            env_vars=env_vars,
+            timeout=timeout,
+        )
         return {"output": result.output, "exit_code": result.exit_code, "duration_ms": result.duration_ms,
                 "sandbox_level": "L2"}
 
@@ -782,6 +814,12 @@ class TEEAdapter(RuntimeAdapter):
         # Use TEESimulator as fallback when TEE_SIMULATION_MODE is enabled
         if settings.TEE_SIMULATION_MODE:
             sim = self._get_simulator()
+            if not getattr(sim, "_bwrap_available", False):
+                return {
+                    "container_id": None,
+                    "status": SessionStatus.FAILED.value,
+                    "error": "L1 TEE simulation requires bubblewrap isolation; bwrap is not available",
+                }
             try:
                 enclave = sim.create_enclave(memory_mb=256)
                 container_id = f"tee-{session_id}"
@@ -797,6 +835,15 @@ class TEEAdapter(RuntimeAdapter):
 
                 # Generate attestation report
                 report = sim.attest(enclave)
+                quote_raw = None
+                quote_measurement = None
+                try:
+                    from app.services.remote_attestation import AttestationService, TEEType
+                    quote = AttestationService().generate_quote(TEEType.SGX, str(session_id).encode())
+                    quote_raw = quote.raw_bytes.decode("utf-8")
+                    quote_measurement = quote.measurement
+                except Exception as e:
+                    logger.warning("[TEEAdapter] Failed to generate SGX-shaped attestation quote: %s", e)
 
                 logger.info(
                     "[TEEAdapter] Provisioned simulated L1 TEE session %s "
@@ -809,7 +856,10 @@ class TEEAdapter(RuntimeAdapter):
                     "workspace": enclave.workspace,
                     "is_simulation": True,
                     "mrenclave": enclave.mrenclave,
-                    "attestation_quote": report.quote,
+                    "simulated_attestation_quote": report.quote,
+                    "attestation_quote": quote_raw,
+                    "attestation_type": "sgx",
+                    "attestation_measurement": quote_measurement,
                 }
             except Exception as e:
                 logger.error("[TEEAdapter] Simulated TEE provision failed: %s", e)
@@ -881,8 +931,13 @@ class TEEAdapter(RuntimeAdapter):
             else:
                 cmd += ["bash", f"/workspace/tmp/exec.{ext}"]
         else:
-            # Fallback without bwrap
-            cmd = ["python3", str(code_file)] if language == "python" else ["bash", str(code_file)]
+            return {
+                "output": "SECURITY ERROR: bwrap not installed and L1 TEE simulation cannot execute safely.",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "sandbox_level": "L1",
+                "is_simulation": self._is_simulation,
+            }
 
         env = os.environ.copy()
         if session_key:
@@ -1007,6 +1062,11 @@ class K8sRuntimeAdapter(RuntimeAdapter):
                 raise
         return self._k8s
 
+    @staticmethod
+    def _pod_name_from_container_id(container_id: str) -> str:
+        session_id = container_id.replace("k8s-", "", 1)
+        return f"sandbox-{session_id[:16]}"
+
     def provision(self, session_id: str, data_path: str, timeout: int, user_id: str = "") -> dict:
         from app.services.k8s_sandbox import SandboxPodSpec
         k8s = self._get_k8s()
@@ -1021,40 +1081,120 @@ class K8sRuntimeAdapter(RuntimeAdapter):
             return {"status": "failed", "error": result["error"]}
         return {
             "container_id": result.get("container_id", f"k8s-{session_id}"),
-            "status": "running",
+            "status": result.get("status", "provisioning"),
         }
 
-    async def execute(self, container_id: str, code: str, language: str) -> dict:
+    async def execute(self, container_id: str, code: str, language: str = "python",
+                      session_key: str | None = None, env_vars: dict[str, str] | None = None,
+                      timeout: int | None = None) -> dict:
+        import base64
+        import shlex
+        from app.services.k8s_sandbox import _env_var_name
+
         k8s = self._get_k8s()
-        pod_name = container_id.replace("k8s-", "sandbox-")[:23]
-        # Execute code inside the pod via kubectl exec
+        pod_name = self._pod_name_from_container_id(container_id)
+        effective_timeout = timeout or 30
         try:
-            result = _kubectl(
-                "exec", pod_name, "-n", k8s.namespace, "--",
-                "python3", "-c", code,
-                timeout=30,
+            pod_status = k8s.get_status(pod_name)
+        except Exception as e:
+            return {
+                "output": "",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "error": f"K8s pod readiness check failed: {e}",
+                "sandbox_level": "k8s",
+            }
+        if pod_status.get("cds_status") != "running" or not pod_status.get("ready", False):
+            reason = pod_status.get("reason") or pod_status.get("error") or pod_status.get("message") or pod_status.get("phase", "unknown")
+            return {
+                "output": f"K8s pod is not ready: {reason}",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "error": "K8s pod is not ready",
+                "sandbox_level": "k8s",
+            }
+
+        merged_env = {
+            "HOME": "/home/sandbox",
+            "TMPDIR": "/tmp",
+            "PYTHONPYCACHEPREFIX": "/tmp/pycache",
+        }
+        merged_env.update(env_vars or {})
+        if session_key:
+            merged_env["CDS_SESSION_KEY"] = session_key
+
+        invalid_env = [name for name in merged_env if not _env_var_name(name)]
+        if invalid_env:
+            return {
+                "output": f"Invalid environment variable name(s): {', '.join(sorted(invalid_env))}",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "sandbox_level": "k8s",
+            }
+
+        lang = (language or "python").lower()
+        encoded_code = base64.b64encode(code.encode("utf-8")).decode("ascii")
+        script_lines = ["set -eu", "umask 077", "mkdir -p /workspace/tmp /workspace/output /tmp/pycache"]
+        for key, value in merged_env.items():
+            script_lines.append(f"export {key}={shlex.quote(str(value))}")
+
+        if lang == "python":
+            script_lines += [
+                "python3 - <<'CDS_DECODE_EOF'",
+                "import base64, pathlib",
+                f"pathlib.Path('/workspace/tmp/cds-exec.py').write_bytes(base64.b64decode('{encoded_code}'))",
+                "CDS_DECODE_EOF",
+                "python3 /workspace/tmp/cds-exec.py",
+            ]
+        elif lang in {"bash", "shell", "sh"}:
+            script_lines += [
+                "python3 - <<'CDS_DECODE_EOF'",
+                "import base64, pathlib",
+                f"pathlib.Path('/workspace/tmp/cds-exec.sh').write_bytes(base64.b64decode('{encoded_code}'))",
+                "CDS_DECODE_EOF",
+                "sh /workspace/tmp/cds-exec.sh",
+            ]
+        else:
+            return {
+                "output": f"Unsupported language for K8s sandbox: {language}",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "sandbox_level": "k8s",
+            }
+
+        # Execute code inside the pod via kubectl exec.
+        try:
+            result = k8s._kubectl(
+                "exec", "-i", pod_name, "-n", k8s.namespace, "--", "sh", "-s",
+                input="\n".join(script_lines) + "\n",
+                timeout=effective_timeout,
             )
             return {
                 "output": result.stdout or "",
                 "exit_code": result.returncode,
                 "error": result.stderr if result.returncode != 0 else None,
+                "sandbox_level": "k8s",
             }
         except subprocess.TimeoutExpired:
-            return {"output": "", "exit_code": -1, "error": "Execution timed out"}
+            return {
+                "output": f"Execution timed out ({effective_timeout}s)",
+                "exit_code": -1,
+                "error": "Execution timed out",
+                "sandbox_level": "k8s",
+            }
         except Exception as e:
-            return {"output": "", "exit_code": -1, "error": str(e)}
+            return {"output": "", "exit_code": -1, "error": str(e), "sandbox_level": "k8s"}
 
     def terminate(self, container_id: str) -> bool:
         k8s = self._get_k8s()
-        pod_name = container_id.replace("k8s-", "sandbox-")[:23]
+        pod_name = self._pod_name_from_container_id(container_id)
         return k8s.terminate(pod_name)
 
     def get_status(self, container_id: str) -> str:
         k8s = self._get_k8s()
-        pod_name = container_id.replace("k8s-", "sandbox-")[:23]
+        pod_name = self._pod_name_from_container_id(container_id)
         status = k8s.get_status(pod_name)
-        phase = status.get("phase", "Unknown")
-        return phase.lower()
+        return status.get("cds_status") or status.get("phase", "Unknown").lower()
 
 
 class SandboxRuntime:
@@ -1091,26 +1231,108 @@ class SandboxRuntime:
     def provision(self, session_id: uuid.UUID, level: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
         return self.get_adapter(level).provision(str(session_id), data_path, timeout, user_id=user_id)
 
-    async def execute(self, container_id: str, code: str, language: str = "python") -> dict:
+    async def _execute_adapter(
+        self,
+        adapter: RuntimeAdapter,
+        container_id: str,
+        code: str,
+        language: str,
+        *,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+        isolate_network: bool = True,
+        dns_proxy_port: int | None = None,
+    ) -> dict:
+        import inspect
+
+        kwargs = {}
+        params = inspect.signature(adapter.execute).parameters
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        optional = {
+            "session_key": session_key,
+            "env_vars": env_vars,
+            "timeout": timeout,
+            "isolate_network": isolate_network,
+            "dns_proxy_port": dns_proxy_port,
+        }
+        for name, value in optional.items():
+            if accepts_kwargs or name in params:
+                kwargs[name] = value
+        return await adapter.execute(container_id, code, language, **kwargs)
+
+    async def execute(
+        self,
+        container_id: str,
+        code: str,
+        language: str = "python",
+        *,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+        isolate_network: bool = True,
+        dns_proxy_port: int | None = None,
+    ) -> dict:
         if container_id.startswith("l0-"):
-            return await self._adapters[SandboxLevel.L0.value].execute(container_id, code, language)
+            return await self._execute_adapter(
+                self._adapters[SandboxLevel.L0.value], container_id, code, language,
+                session_key=session_key, env_vars=env_vars, timeout=timeout,
+                isolate_network=isolate_network, dns_proxy_port=dns_proxy_port,
+            )
+        if container_id.startswith("tee-"):
+            return await self._execute_adapter(
+                self._adapters[SandboxLevel.L1.value], container_id, code, language,
+                session_key=session_key, env_vars=env_vars, timeout=timeout,
+            )
+        if container_id.startswith("fc-"):
+            return await self._execute_adapter(
+                self._adapters[SandboxLevel.L2.value], container_id, code, language,
+                session_key=session_key, env_vars=env_vars, timeout=timeout,
+            )
         if container_id.startswith("bwrap-"):
-            return await self._adapters[SandboxLevel.L3.value].execute(container_id, code, language)
-        return await DockerAdapter().execute(container_id, code, language)
+            return await self._execute_adapter(
+                self._adapters[SandboxLevel.L3.value], container_id, code, language,
+                session_key=session_key, env_vars=env_vars, timeout=timeout,
+            )
+        if container_id.startswith("k8s-"):
+            return await self._execute_adapter(
+                self._adapters["k8s"], container_id, code, language,
+                session_key=session_key, env_vars=env_vars, timeout=timeout,
+            )
+        return {
+            "output": f"SECURITY ERROR: unsupported sandbox container prefix for {container_id}",
+            "exit_code": -1,
+            "duration_ms": 0,
+            "sandbox_level": "unknown",
+        }
 
     def terminate(self, container_id: str) -> bool:
         if container_id.startswith("l0-"):
             return self._adapters[SandboxLevel.L0.value].terminate(container_id)
+        if container_id.startswith("tee-"):
+            return self._adapters[SandboxLevel.L1.value].terminate(container_id)
+        if container_id.startswith("fc-"):
+            return self._adapters[SandboxLevel.L2.value].terminate(container_id)
         if container_id.startswith("bwrap-"):
             return self._adapters[SandboxLevel.L3.value].terminate(container_id)
-        return DockerAdapter().terminate(container_id)
+        if container_id.startswith("k8s-"):
+            return self._adapters["k8s"].terminate(container_id)
+        logger.warning("[SandboxRuntime] Refusing to terminate unsupported container id: %s", container_id)
+        return False
 
     def get_status(self, container_id: str) -> str:
         if container_id.startswith("l0-"):
             return self._adapters[SandboxLevel.L0.value].get_status(container_id)
+        if container_id.startswith("tee-"):
+            return self._adapters[SandboxLevel.L1.value].get_status(container_id)
+        if container_id.startswith("fc-"):
+            return self._adapters[SandboxLevel.L2.value].get_status(container_id)
         if container_id.startswith("bwrap-"):
             return self._adapters[SandboxLevel.L3.value].get_status(container_id)
-        return DockerAdapter().get_status(container_id)
+        if container_id.startswith("k8s-"):
+            return self._adapters["k8s"].get_status(container_id)
+        logger.warning("[SandboxRuntime] Refusing to inspect unsupported container id: %s", container_id)
+        return "unknown"
 
     async def secure_destroy(self, session_id: uuid.UUID, db, reason: str = "manual") -> DestructionReport:
         """Securely destroy a sandbox: terminate container + revoke key + audit.
@@ -1317,6 +1539,7 @@ class SceneRuntime:
                       context: dict | None = None) -> dict:
         """Full execution cycle: pre → adapter.execute → post."""
         ctx = context or {}
+        ctx.setdefault("language", language)
         code = await self.pre_execute(code, ctx)
         result = await sandbox_runtime.execute(container_id, code, language)
         return await self.post_execute(result, ctx)
@@ -1335,6 +1558,9 @@ class StructuredQueryRuntime(SceneRuntime):
     async def pre_execute(self, code: str, context: dict) -> str:
         """Validate and wrap SQL for DuckDB execution."""
         import re
+
+        if context.get("language", "sql") != "sql":
+            return code
 
         sql = code.strip()
         if not sql:
@@ -1438,6 +1664,9 @@ class DataModelingRuntime(SceneRuntime):
         """
         import re
 
+        if context.get("language", "sql") != "sql":
+            return code
+
         sql = code.strip()
         if not sql:
             return code
@@ -1499,7 +1728,7 @@ class SceneRuntimeFactory:
     }
 
     @classmethod
-    def create(cls, mode: str | "SandboxMode") -> SceneRuntime:
+    def create(cls, mode: str | SandboxMode) -> SceneRuntime:
         """Create a scene runtime for the given mode.
 
         Falls back to base SceneRuntime for unregistered modes (e.g. joint_federated).

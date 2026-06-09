@@ -14,6 +14,7 @@ from app.models.sandbox_session import SandboxSession, SessionStatus
 from app.models.sandbox_task import SandboxTask, TaskStatus, TaskType
 from app.services.audit_service import audit_service
 from app.services.dp_budget import dp_budget_ledger
+from app.services.sandbox_manager import get_resource_limits
 
 router = APIRouter()
 
@@ -38,17 +39,28 @@ async def create_task(
         raise HTTPException(status_code=403, detail="Not the owner of this session")
     if session.status not in (SessionStatus.READY.value, SessionStatus.RUNNING.value):
         raise HTTPException(status_code=400, detail=f"Session not ready for tasks (status: {session.status})")
+    if not session.container_id:
+        raise HTTPException(status_code=400, detail="Session has no container")
+    if not code or not code.strip():
+        raise HTTPException(status_code=422, detail="code cannot be empty")
+    if timeout_seconds <= 0:
+        raise HTTPException(status_code=422, detail="timeout_seconds must be positive")
+    if timeout_seconds > session.timeout_seconds:
+        raise HTTPException(status_code=400, detail="Task timeout exceeds session timeout")
+    level_max = get_resource_limits(session.sandbox_level)["max_timeout_seconds"]
+    if timeout_seconds > level_max:
+        raise HTTPException(status_code=400, detail=f"Task timeout exceeds sandbox level max ({level_max}s)")
+    language = (language or "python").lower()
 
     # Hash code if provided
     code_hash = None
-    if code:
-        from app.utils.crypto import sm3_hash
-        code_hash = sm3_hash(code.encode())
+    from app.utils.crypto import sm3_hash
+    code_hash = sm3_hash(code.encode())
 
     task_id = f"task-{uuid.uuid4().hex[:12]}"
     from app.services.task_code_security import encrypt_task_code
 
-    encrypted_code = encrypt_task_code(code, scope=task_id) if code else None
+    encrypted_code = encrypt_task_code(code, scope=task_id)
     task = SandboxTask(
         task_id=task_id,
         session_id=session_id,
@@ -180,6 +192,16 @@ async def submit_task(
         raise HTTPException(status_code=403, detail="Not the owner of this task")
     if task.status != TaskStatus.PENDING.value:
         raise HTTPException(status_code=400, detail=f"Can only submit pending tasks (current: {task.status})")
+    session_result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
+    session = session_result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sandbox session not found")
+    if session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not the owner of this session")
+    if session.status not in (SessionStatus.READY.value, SessionStatus.RUNNING.value):
+        raise HTTPException(status_code=400, detail=f"Session not ready for tasks (status: {session.status})")
+    if not session.container_id:
+        raise HTTPException(status_code=400, detail="Session has no container")
 
     task.status = TaskStatus.CODE_SCANNING.value
     task.started_at = datetime.now(timezone.utc)
@@ -189,10 +211,22 @@ async def submit_task(
     from app.services.task_pipeline import task_pipeline
     from app.services.task_code_security import decrypt_task_code
     code_for_scan = decrypt_task_code(task.code_content)
+    if not code_for_scan.strip():
+        task.status = TaskStatus.FAILED.value
+        task.error_message = "code cannot be empty"
+        await db.commit()
+        raise HTTPException(status_code=422, detail="code cannot be empty")
     await task_pipeline.submit(
         task_type="sandbox_execute",
         session_id=str(session_id),
-        payload={"task_id": task_id, "code": code_for_scan, "language": task.language},
+        payload={
+            "task_id": task_id,
+            "code": code_for_scan,
+            "language": task.language or "python",
+            "sandbox_mode": session.sandbox_mode,
+            "timeout_seconds": task.timeout_seconds,
+        },
+        timeout=task.timeout_seconds,
     )
 
     return {"task_id": task.task_id, "status": task.status, "message": "Task queued for execution"}

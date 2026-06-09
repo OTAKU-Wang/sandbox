@@ -42,6 +42,13 @@ RESOURCE_LIMITS = {
         "max_timeout_seconds": 7200,  # 2h
         "network": False,
     },
+    SandboxLevel.K8S.value: {
+        "cpu_cores": 1,
+        "memory_mb": 512,
+        "disk_mb": 1024,
+        "max_timeout_seconds": 7200,  # 2h
+        "network": False,
+    },
 }
 
 

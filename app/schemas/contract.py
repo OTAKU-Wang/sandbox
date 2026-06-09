@@ -9,7 +9,7 @@ VALID_CONTRACT_TYPES = (
     "data_query", "model_training", "data_application",
     "api_service", "joint_compute", "product_dev", "data_modeling",
 )
-VALID_SANDBOX_LEVELS = ("L1", "L2", "L3")
+VALID_SANDBOX_LEVELS = ("L1", "L2", "L3", "k8s")
 
 
 class ContractCreate(BaseModel):

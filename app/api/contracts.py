@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
+from app.models.data_product import DataProduct
 from app.schemas.contract import ContractCreate, ContractSign, ContractResponse
 from app.services.contract_service import contract_service
 from app.services.audit_service import audit_service
@@ -21,12 +22,46 @@ def _can_view_all_contracts(user: User) -> bool:
     return user.role in (UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)
 
 
+async def _validate_contract_create(
+    db: AsyncSession,
+    body: ContractCreate,
+    current_user: User,
+) -> None:
+    if current_user.role != UserRole.DATA_PROVIDER:
+        raise HTTPException(status_code=403, detail="Only data providers can create contracts")
+    if body.buyer_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Buyer and provider must be different users")
+
+    buyer = await db.get(User, body.buyer_id)
+    if not buyer:
+        raise HTTPException(status_code=404, detail="Buyer not found")
+    if buyer.role != UserRole.BUYER:
+        raise HTTPException(status_code=400, detail="Contract buyer must have buyer role")
+
+    result = await db.execute(select(DataProduct).where(DataProduct.id.in_(body.product_ids)))
+    products = result.scalars().all()
+    products_by_id = {str(product.id): product for product in products}
+    missing = [str(product_id) for product_id in body.product_ids if str(product_id) not in products_by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Data product not found: {missing[0]}")
+
+    not_owned = [
+        str(product.id)
+        for product in products
+        if product.provider_id != current_user.id
+    ]
+    if not_owned:
+        raise HTTPException(status_code=403, detail="Can only create contracts for your own data products")
+
+
 @router.post("", response_model=ContractResponse, status_code=status.HTTP_201_CREATED)
 async def create_contract(
     body: ContractCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _validate_contract_create(db, body, current_user)
+
     contract = await contract_service.create(
         db,
         provider_id=current_user.id,
@@ -128,15 +163,23 @@ async def activate_contract(
     contract = await contract_service.get_by_id(db, contract_id)
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
-    if contract.status not in ("signed", "active", "negotiating"):
+    if current_user.id not in (contract.provider_id, contract.buyer_id):
+        raise HTTPException(status_code=403, detail="Not a party to this contract")
+    if contract.status == "active":
+        return ContractResponse.model_validate(contract)
+    if contract.status != "signed":
         raise HTTPException(status_code=400, detail=f"Cannot activate contract in {contract.status} status")
 
-    was_active = contract.status == "active"
+    try:
+        await contract_service.validate_activation_ready(db, contract)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     contract.status = "active"
     await db.flush()
 
     # Allocate DP budget on first activation
-    if not was_active and contract.dp_epsilon_budget and float(contract.dp_epsilon_budget) > 0:
+    if contract.dp_epsilon_budget and float(contract.dp_epsilon_budget) > 0:
         await dp_budget_ledger.allocate(db, str(contract.id), float(contract.dp_epsilon_budget))
 
     await db.refresh(contract)

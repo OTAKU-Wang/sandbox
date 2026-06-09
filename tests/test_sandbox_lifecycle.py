@@ -16,7 +16,7 @@ from app.models.sandbox_session import SandboxLevel, SessionStatus
 
 def test_resource_limits_defined():
     """All sandbox levels have resource limits."""
-    for level in [SandboxLevel.L1.value, SandboxLevel.L2.value, SandboxLevel.L3.value]:
+    for level in [SandboxLevel.L1.value, SandboxLevel.L2.value, SandboxLevel.L3.value, SandboxLevel.K8S.value]:
         limits = get_resource_limits(level)
         assert "cpu_cores" in limits
         assert "memory_mb" in limits

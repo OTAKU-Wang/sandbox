@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.user import User
-from app.models.data_product import DataProduct
+from app.models.user import User, UserRole
+from app.models.data_product import DataProduct, DataProductStatus
 from app.models.field_exposure import (
     FieldExposureRequest, ExposureRequestStatus,
     FieldVisibilityConfig, FieldSensitivity,
@@ -33,6 +33,43 @@ AUTO_APPROVE_SENSITIVITIES = {FieldSensitivity.PUBLIC.value, FieldSensitivity.IN
 REQUIRE_JUSTIFICATION = {FieldSensitivity.PII.value}
 
 
+def _can_view_all_products(user: User) -> bool:
+    return user.role in (UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)
+
+
+def _can_view_product(product: DataProduct, user: User) -> bool:
+    return (
+        product.provider_id == user.id
+        or _can_view_all_products(user)
+        or product.status == DataProductStatus.PUBLISHED.value
+    )
+
+
+async def _get_visible_product(db: AsyncSession, product_id: uuid.UUID, current_user: User) -> DataProduct:
+    result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product or not _can_view_product(product, current_user):
+        raise HTTPException(status_code=404, detail="Data product not found")
+    return product
+
+
+def _get_field_sensitivity(field_name: str, field_rules: dict, default_sensitivity: str) -> str:
+    rule = field_rules.get(field_name, {}) if field_rules else {}
+    return rule.get("sensitivity", default_sensitivity)
+
+
+def _restricted_requested_fields(
+    field_names: list[str],
+    field_rules: dict,
+    default_sensitivity: str,
+) -> list[str]:
+    return [
+        field_name
+        for field_name in field_names
+        if _get_field_sensitivity(field_name, field_rules, default_sensitivity) == FieldSensitivity.RESTRICTED.value
+    ]
+
+
 @router.put("/products/{product_id}/field-visibility", response_model=FieldVisibilityConfigResponse)
 async def set_field_visibility(
     product_id: uuid.UUID,
@@ -45,8 +82,8 @@ async def set_field_visibility(
     product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Data product not found")
-    if product.provider_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the provider can set field visibility")
+    if product.provider_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only the provider or platform admin can set field visibility")
 
     # Upsert field visibility config
     result = await db.execute(select(FieldVisibilityConfig).where(FieldVisibilityConfig.product_id == product_id))
@@ -91,6 +128,7 @@ async def get_field_visibility(
     current_user: User = Depends(get_current_user),
 ):
     """Get field visibility rules for a data product."""
+    await _get_visible_product(db, product_id, current_user)
     result = await db.execute(select(FieldVisibilityConfig).where(FieldVisibilityConfig.product_id == product_id))
     config = result.scalar_one_or_none()
     if not config:
@@ -114,6 +152,8 @@ async def create_exposure_request(
         raise HTTPException(status_code=400, detail="Can only request fields from published products")
     if product.provider_id == current_user.id:
         raise HTTPException(status_code=400, detail="Provider already has full access to own product")
+    if current_user.role != UserRole.BUYER:
+        raise HTTPException(status_code=403, detail="Only buyers can request field exposure")
 
     # Load field visibility rules
     result = await db.execute(select(FieldVisibilityConfig).where(FieldVisibilityConfig.product_id == body.product_id))
@@ -131,8 +171,7 @@ async def create_exposure_request(
 
     # Check which fields require justification
     for field_name in body.requested_fields:
-        rule = field_rules.get(field_name, {})
-        sensitivity = rule.get("sensitivity", default_sensitivity)
+        sensitivity = _get_field_sensitivity(field_name, field_rules, default_sensitivity)
         if sensitivity in REQUIRE_JUSTIFICATION and not body.justification:
             raise HTTPException(
                 status_code=400,
@@ -144,9 +183,9 @@ async def create_exposure_request(
     needs_review = []
     for field_name in body.requested_fields:
         rule = field_rules.get(field_name, {})
-        sensitivity = rule.get("sensitivity", default_sensitivity)
+        sensitivity = _get_field_sensitivity(field_name, field_rules, default_sensitivity)
         auto_approve = rule.get("auto_approve", False)
-        if sensitivity in AUTO_APPROVE_SENSITIVITIES or auto_approve:
+        if sensitivity in AUTO_APPROVE_SENSITIVITIES or (auto_approve and sensitivity != FieldSensitivity.RESTRICTED.value):
             auto_approved.append(field_name)
         else:
             needs_review.append(field_name)
@@ -196,12 +235,10 @@ async def list_exposure_requests(
 ):
     """List field exposure requests. Provider sees requests for their products; buyer sees own requests."""
     if as_provider:
-        # Provider: get requests for products they own
-        query = (
-            select(FieldExposureRequest)
-            .join(DataProduct, FieldExposureRequest.product_id == DataProduct.id)
-            .where(DataProduct.provider_id == current_user.id)
-        )
+        # Provider: get requests for products they own. Platform admin/operator can review all.
+        query = select(FieldExposureRequest).join(DataProduct, FieldExposureRequest.product_id == DataProduct.id)
+        if not current_user.is_admin:
+            query = query.where(DataProduct.provider_id == current_user.id)
     else:
         query = select(FieldExposureRequest).where(FieldExposureRequest.buyer_id == current_user.id)
 
@@ -230,11 +267,13 @@ async def review_exposure_request(
     if request.status != ExposureRequestStatus.PENDING.value:
         raise HTTPException(status_code=400, detail=f"Request is already {request.status}")
 
-    # Verify the reviewer is the product provider
+    # Verify the reviewer is the product provider or a platform admin/operator.
     result = await db.execute(select(DataProduct).where(DataProduct.id == request.product_id))
     product = result.scalar_one_or_none()
-    if not product or product.provider_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the product provider can review exposure requests")
+    if not product:
+        raise HTTPException(status_code=404, detail="Data product not found")
+    if product.provider_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only the product provider or platform admin can review exposure requests")
 
     if body.rejection_reason and body.approved_fields:
         raise HTTPException(status_code=400, detail="Cannot both approve fields and reject — choose one")
@@ -250,6 +289,20 @@ async def review_exposure_request(
         invalid = [f for f in approved if f not in request.requested_fields]
         if invalid:
             raise HTTPException(status_code=400, detail=f"Cannot approve fields not requested: {invalid}")
+
+        result_config = await db.execute(
+            select(FieldVisibilityConfig).where(FieldVisibilityConfig.product_id == request.product_id)
+        )
+        config = result_config.scalar_one_or_none()
+        field_rules = config.field_rules if config else {}
+        default_sensitivity = config.default_sensitivity if config else FieldSensitivity.INTERNAL.value
+        restricted_fields = _restricted_requested_fields(approved, field_rules, default_sensitivity)
+        if restricted_fields and not current_user.is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Restricted fields require platform admin approval: {restricted_fields}",
+            )
+
         request.status = ExposureRequestStatus.APPROVED.value
         request.approved_fields = approved
         request.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
@@ -286,10 +339,14 @@ async def get_exposure_request(
     if not request:
         raise HTTPException(status_code=404, detail="Exposure request not found")
 
-    # Only buyer, provider, or admin can view
+    # Only buyer, provider, or platform admin/operator can view
     result_prod = await db.execute(select(DataProduct).where(DataProduct.id == request.product_id))
     product = result_prod.scalar_one_or_none()
-    if request.buyer_id != current_user.id and (not product or product.provider_id != current_user.id):
+    if (
+        request.buyer_id != current_user.id
+        and (not product or product.provider_id != current_user.id)
+        and not current_user.is_admin
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     return ExposureRequestResponse.model_validate(request)
@@ -340,6 +397,7 @@ async def get_approved_fields_for_buyer(
 
     This is used by the sandbox runtime to filter query results.
     """
+    await _get_visible_product(db, product_id, current_user)
     result = await db.execute(
         select(FieldExposureRequest).where(
             FieldExposureRequest.product_id == product_id,

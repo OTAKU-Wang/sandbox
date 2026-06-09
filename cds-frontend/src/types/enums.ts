@@ -34,6 +34,7 @@ export const SandboxLevel = {
   L1: 'L1',
   L2: 'L2',
   L3: 'L3',
+  K8S: 'k8s',
 } as const;
 export type SandboxLevel = typeof SandboxLevel[keyof typeof SandboxLevel];
 

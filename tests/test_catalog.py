@@ -37,11 +37,6 @@ async def _create_product(client: AsyncClient, headers: dict, **overrides) -> st
     return resp.json()["id"]
 
 
-async def _publish_product(client: AsyncClient, headers: dict, product_id: str):
-    resp = await client.patch(f"/api/v1/data-products/{product_id}", json={"status": "published"}, headers=headers)
-    assert resp.status_code == 200
-
-
 @pytest.mark.asyncio
 async def test_catalog_empty(client: AsyncClient, buyer_headers: dict):
     """Empty catalog returns empty list."""
@@ -53,11 +48,11 @@ async def test_catalog_empty(client: AsyncClient, buyer_headers: dict):
 
 
 @pytest.mark.asyncio
-async def test_catalog_only_published(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_only_published(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Only published products appear in catalog."""
     draft_id = await _create_product(client, provider_headers, name="Draft Product")
     pub_id = await _create_product(client, provider_headers, name="Published Product")
-    await _publish_product(client, provider_headers, pub_id)
+    await publish_product(pub_id)
 
     resp = await client.get("/api/v1/catalog", headers=buyer_headers)
     data = resp.json()
@@ -67,12 +62,12 @@ async def test_catalog_only_published(client: AsyncClient, provider_headers: dic
 
 
 @pytest.mark.asyncio
-async def test_catalog_search(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_search(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Search by name/description."""
     pid1 = await _create_product(client, provider_headers, name="Weather Data", description="Global weather")
     pid2 = await _create_product(client, provider_headers, name="Finance Data", description="Stock prices")
-    await _publish_product(client, provider_headers, pid1)
-    await _publish_product(client, provider_headers, pid2)
+    await publish_product(pid1)
+    await publish_product(pid2)
 
     resp = await client.get("/api/v1/catalog?q=weather", headers=buyer_headers)
     data = resp.json()
@@ -81,12 +76,12 @@ async def test_catalog_search(client: AsyncClient, provider_headers: dict, buyer
 
 
 @pytest.mark.asyncio
-async def test_catalog_filter_product_type(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_filter_product_type(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Filter by product_type."""
     pid1 = await _create_product(client, provider_headers, name="Structured", product_type="structured")
     pid2 = await _create_product(client, provider_headers, name="Unstructured", product_type="unstructured")
-    await _publish_product(client, provider_headers, pid1)
-    await _publish_product(client, provider_headers, pid2)
+    await publish_product(pid1)
+    await publish_product(pid2)
 
     resp = await client.get("/api/v1/catalog?product_type=structured", headers=buyer_headers)
     data = resp.json()
@@ -95,12 +90,12 @@ async def test_catalog_filter_product_type(client: AsyncClient, provider_headers
 
 
 @pytest.mark.asyncio
-async def test_catalog_filter_industry(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_filter_industry(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Filter by industry."""
     pid1 = await _create_product(client, provider_headers, name="Health", industry="healthcare")
     pid2 = await _create_product(client, provider_headers, name="Finance", industry="finance")
-    await _publish_product(client, provider_headers, pid1)
-    await _publish_product(client, provider_headers, pid2)
+    await publish_product(pid1)
+    await publish_product(pid2)
 
     resp = await client.get("/api/v1/catalog?industry=finance", headers=buyer_headers)
     data = resp.json()
@@ -109,12 +104,12 @@ async def test_catalog_filter_industry(client: AsyncClient, provider_headers: di
 
 
 @pytest.mark.asyncio
-async def test_catalog_filter_security_level(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_filter_security_level(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Filter by security_level."""
     pid1 = await _create_product(client, provider_headers, name="Public Data", security_level="public")
     pid2 = await _create_product(client, provider_headers, name="Secret Data", security_level="secret")
-    await _publish_product(client, provider_headers, pid1)
-    await _publish_product(client, provider_headers, pid2)
+    await publish_product(pid1)
+    await publish_product(pid2)
 
     resp = await client.get("/api/v1/catalog?security_level=public", headers=buyer_headers)
     data = resp.json()
@@ -123,11 +118,11 @@ async def test_catalog_filter_security_level(client: AsyncClient, provider_heade
 
 
 @pytest.mark.asyncio
-async def test_catalog_pagination(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_pagination(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Pagination works correctly."""
     for i in range(5):
         pid = await _create_product(client, provider_headers, name=f"Product-{i}")
-        await _publish_product(client, provider_headers, pid)
+        await publish_product(pid)
 
     resp = await client.get("/api/v1/catalog?skip=0&limit=2", headers=buyer_headers)
     data = resp.json()
@@ -140,11 +135,11 @@ async def test_catalog_pagination(client: AsyncClient, provider_headers: dict, b
 
 
 @pytest.mark.asyncio
-async def test_catalog_product_detail(client: AsyncClient, provider_headers: dict, buyer_headers: dict):
+async def test_catalog_product_detail(client: AsyncClient, provider_headers: dict, buyer_headers: dict, publish_product):
     """Get detail of a published product."""
     pid = await _create_product(client, provider_headers, name="Detail Test", description="A test product",
                                  security_level="confidential", allowed_operations=["read", "query"])
-    await _publish_product(client, provider_headers, pid)
+    await publish_product(pid)
 
     resp = await client.get(f"/api/v1/catalog/{pid}", headers=buyer_headers)
     assert resp.status_code == 200

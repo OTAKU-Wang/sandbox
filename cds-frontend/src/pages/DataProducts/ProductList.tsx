@@ -83,6 +83,16 @@ export default function ProductList() {
     onError: () => message.error('删除失败'),
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => dataProductApi.archive(id),
+    onSuccess: () => {
+      message.success('归档成功');
+      queryClient.invalidateQueries({ queryKey: ['data-products'] });
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+    },
+    onError: () => message.error('归档失败，请先确认没有活跃合约或沙箱会话'),
+  });
+
   const columns: ColumnsType<DataProduct> = [
     { title: '名称', dataIndex: 'name', key: 'name', render: (text, record) => <a onClick={() => navigate(`/data-products/${record.id}`)}>{text}</a> },
     { title: '数据类型', dataIndex: 'product_type', key: 'product_type', render: (v) => <Tag color={productTypeColors[v]}>{productTypeLabels[v] || v}</Tag> },
@@ -95,9 +105,14 @@ export default function ProductList() {
       title: '操作', key: 'action', render: (_, record) => (
         <Space>
           <a onClick={() => navigate(`/data-products/${record.id}`)}>查看</a>
-          {canWriteProduct && (
+          {canWriteProduct && record.status === 'draft' && (
             <Popconfirm title="确认删除？" onConfirm={() => deleteMutation.mutate(record.id)}>
               <a style={{ color: '#ff4d4f' }}>删除</a>
+            </Popconfirm>
+          )}
+          {canWriteProduct && record.status !== 'draft' && record.status !== 'archived' && (
+            <Popconfirm title="确认归档？归档后将从目录下架。" onConfirm={() => archiveMutation.mutate(record.id)}>
+              <a style={{ color: '#d48806' }}>归档</a>
             </Popconfirm>
           )}
         </Space>

@@ -6,6 +6,7 @@ External trusted data spaces can:
 3. Create contracts for data product access
 4. Proxy sandbox sessions for secure data usage
 """
+import json
 import uuid
 import hashlib
 from datetime import datetime, timezone
@@ -20,12 +21,69 @@ from app.models.user import User, UserRole
 from app.models.connector import Connector, ConnectorStatus, ConnectorSession, generate_api_key
 from app.models.data_product import DataProduct, DataProductStatus
 from app.models.contract import Contract, ContractStatus
+from app.models.kms import KeyMetadata, KeyStatus, KeyType
+from app.models.network_policy import NetworkPolicy
 from app.models.sandbox_session import SandboxSession, SessionStatus
 from app.services.audit_service import audit_service
+from app.services.kms_service import kms_service
+from app.services.network_policy import NetworkPolicyConfig, network_policy_engine
 from app.services.sandbox_manager import get_sandbox_manager
-from app.services.quota_manager import quota_manager
+from app.services.quota_manager import QuotaType, quota_manager
 
 router = APIRouter()
+
+
+def _contract_terms_value(contract: Contract, *keys: str) -> str | None:
+    """Read a contract term from top-level or connector/remote_space nested terms."""
+    terms = contract.terms or {}
+    if not isinstance(terms, dict):
+        return None
+    for key in keys:
+        value = terms.get(key)
+        if value:
+            return str(value)
+    for section_name in ("connector", "remote_space", "federation"):
+        section = terms.get(section_name)
+        if isinstance(section, dict):
+            for key in keys:
+                value = section.get(key)
+                if value:
+                    return str(value)
+    return None
+
+
+def _ensure_contract_bound_to_connector(contract: Contract, connector: Connector) -> None:
+    """Enforce optional contract terms that bind a contract to one connector/space."""
+    expected_connector = _contract_terms_value(contract, "connector_id")
+    if expected_connector and expected_connector != str(connector.id):
+        raise HTTPException(status_code=403, detail="Contract is not bound to this connector")
+
+    expected_space = _contract_terms_value(contract, "space_id", "remote_space_id", "connector_space_id")
+    if expected_space and expected_space != connector.space_id:
+        raise HTTPException(status_code=403, detail="Contract is not bound to this connector space")
+
+
+def _connector_execution_allowed(contract: Contract, session: SandboxSession) -> tuple[bool, str]:
+    """Check whether a proxied connector session can execute under its contract."""
+    if contract.status != ContractStatus.ACTIVE.value:
+        return False, f"Contract is {contract.status}"
+    if str(session.data_product_id) not in [str(pid) for pid in contract.product_ids]:
+        return False, "Session product is not covered by contract"
+    if contract.allowed_sandbox_modes and session.sandbox_mode not in contract.allowed_sandbox_modes:
+        return False, f"Sandbox mode '{session.sandbox_mode}' not allowed by contract"
+    if contract.allowed_operations:
+        allowed_ops = {op.strip() for op in contract.allowed_operations.split(",") if op.strip()}
+        mode_ops = {
+            "structured_query": {"query", "read", "execute", "structured_query"},
+            "structured_modeling": {"analyze", "model", "execute", "structured_modeling"},
+            "structured_app": {"invoke", "execute", "structured_app"},
+            "llm_training": {"train", "execute", "llm_training"},
+            "product_dev": {"read", "transform", "analyze", "execute", "product_dev"},
+            "joint_federated": {"compute", "execute", "joint_federated"},
+        }.get(session.sandbox_mode, {"execute", session.sandbox_mode})
+        if allowed_ops.isdisjoint(mode_ops):
+            return False, f"Contract operations {sorted(allowed_ops)} do not allow connector execution"
+    return True, "Contract permits connector execution"
 
 
 async def _verify_connector_api_key(
@@ -274,6 +332,7 @@ async def connector_create_session(
         raise HTTPException(status_code=400, detail="Contract is not active")
     if str(product_id) not in [str(pid) for pid in contract.product_ids]:
         raise HTTPException(status_code=400, detail="Product not covered by this contract")
+    _ensure_contract_bound_to_connector(contract, connector)
 
     # Check concurrent session limit
     active_sessions = await db.execute(
@@ -294,7 +353,7 @@ async def connector_create_session(
         user_id=contract.buyer_id,  # Use the buyer's identity
         data_product_id=product_id,
         sandbox_level=sandbox_level,
-        contract_id=contract_id,
+        contract_id=str(contract_id),
         timeout_seconds=contract.max_duration_hours * 3600,
         resource_limits=effective_limits,
         status=SessionStatus.PROVISIONING.value,
@@ -314,7 +373,75 @@ async def connector_create_session(
         timeout=session.timeout_seconds,
     )
     session.container_id = provision_result.get("container_id")
-    session.status = provision_result.get("status", SessionStatus.RUNNING.value)
+    session.status = provision_result.get("status", SessionStatus.PROVISIONING.value)
+    if provision_result.get("error") or not session.container_id or session.status == SessionStatus.FAILED.value:
+        session.status = SessionStatus.FAILED.value
+        session.error_message = provision_result.get("error") or "Sandbox provision failed"
+        await db.flush()
+        await audit_service.log(
+            db, action="connector.session.create_failed", resource_type="connector_session",
+            user_id=contract.buyer_id, session_id=session.id,
+            detail={
+                "connector_id": str(connector.id),
+                "space_id": connector.space_id,
+                "remote_user_id": remote_user_id,
+                "product_id": str(product_id),
+                "sandbox_level": sandbox_level,
+                "error": session.error_message,
+            },
+        )
+        raise HTTPException(status_code=503, detail=session.error_message)
+
+    await quota_manager.set_limits(session.id, {
+        QuotaType.ROWS: contract.max_output_rows or 10000,
+        QuotaType.BYTES: 100 * 1024 * 1024,
+        QuotaType.API_CALLS: 1000,
+        QuotaType.GPU_SECONDS: int((contract.max_duration_hours or 24) * 3600),
+    })
+
+    key_result = kms_service.generate_session_key(str(session.id))
+    session.session_key_id = key_result["key_id"]
+    distributed_key = kms_service.distribute_key(key_result["key_id"], str(session.id))
+    if not distributed_key:
+        kms_service.destroy_key(key_result["key_id"])
+        session.session_key_id = None
+        session.status = SessionStatus.FAILED.value
+        session.error_message = "Session key distribution failed"
+        termination_error = None
+        try:
+            if not runtime.terminate(session.container_id):
+                termination_error = "runtime terminate returned false"
+        except Exception as e:
+            termination_error = str(e)
+        await db.flush()
+        await audit_service.log(
+            db, action="connector.session.key_distribution_failed", resource_type="connector_session",
+            user_id=contract.buyer_id, session_id=session.id,
+            detail={
+                "connector_id": str(connector.id),
+                "space_id": connector.space_id,
+                "remote_user_id": remote_user_id,
+                "product_id": str(product_id),
+                "termination_error": termination_error,
+            },
+        )
+        raise HTTPException(status_code=503, detail=session.error_message)
+
+    db.add(KeyMetadata(
+        key_id=key_result["key_id"],
+        key_type=KeyType.SESSION.value,
+        status=KeyStatus.ACTIVE.value,
+        session_id=session.id,
+        product_id=product_id,
+    ))
+
+    db.add(NetworkPolicy(
+        session_id=str(session.id),
+        user_id=str(contract.buyer_id),
+        mode="deny_all",
+        active=True,
+    ))
+    await network_policy_engine.create_policy(str(session.id), NetworkPolicyConfig(mode="deny_all"))
 
     # Create connector session record
     conn_session = ConnectorSession(
@@ -360,6 +487,9 @@ async def connector_execute_in_session(
     connector: Connector = Depends(_verify_connector_api_key),
 ):
     """Execute code in a proxied sandbox session (connector-facing)."""
+    if not code or not code.strip():
+        raise HTTPException(status_code=422, detail="code cannot be empty")
+
     result = await db.execute(
         select(ConnectorSession).where(
             ConnectorSession.id == connector_session_id,
@@ -377,6 +507,43 @@ async def connector_execute_in_session(
     session = result.scalar_one_or_none()
     if not session or session.status != SessionStatus.RUNNING.value:
         raise HTTPException(status_code=400, detail="Sandbox session not running")
+    if not session.container_id:
+        raise HTTPException(status_code=400, detail="Sandbox session has no container")
+
+    result = await db.execute(select(Contract).where(Contract.id == conn_session.contract_id))
+    contract = result.scalar_one_or_none()
+    if not contract:
+        raise HTTPException(status_code=403, detail="Bound contract not found")
+    _ensure_contract_bound_to_connector(contract, connector)
+    allowed, reason = _connector_execution_allowed(contract, session)
+    if not allowed:
+        raise HTTPException(status_code=403, detail=reason)
+
+    from app.services.code_scanner import code_scanner
+
+    sandbox_mode = session.sandbox_mode or "structured_query"
+    scan_result = code_scanner.scan(code, language, sandbox_mode)
+    if not scan_result.passed:
+        fatal_issues = [i for i in scan_result.issues if i.severity.value == "FATAL"]
+        await audit_service.log(
+            db, action="connector.session.code_scan_rejected", resource_type="connector_session",
+            user_id=session.user_id, session_id=session.id,
+            detail={
+                "connector_id": str(connector.id),
+                "language": language,
+                "issues": [{"code": i.code, "message": i.message, "line": i.line} for i in fatal_issues],
+            },
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "Code scan failed",
+                "issues": [
+                    {"severity": i.severity.value, "code": i.code, "message": i.message, "line": i.line}
+                    for i in fatal_issues
+                ],
+            },
+        )
 
     runtime = await get_sandbox_manager()
     exec_result = await runtime.execute(session.container_id, code, language)
@@ -390,6 +557,49 @@ async def connector_execute_in_session(
             "exit_code": exec_result.get("exit_code"),
         },
     )
+
+    try:
+        from app.services.output_security import (
+            inspect_text_output,
+            inspection_to_report,
+            should_block,
+        )
+
+        output = exec_result.get("output", "")
+        if output is None:
+            output = ""
+        if not isinstance(output, str):
+            output = json.dumps(output, ensure_ascii=False, default=str)
+
+        if output:
+            inspection = inspect_text_output(
+                output,
+                user_id=str(session.user_id),
+                session_id=str(session.id),
+                sandbox_mode=sandbox_mode,
+            )
+            exec_result["security_report"] = inspection_to_report(inspection)
+            if should_block(inspection):
+                exec_result["output"] = ""
+                exec_result["output_blocked"] = True
+                exec_result["blocked_reason"] = "output_inspection_blocked"
+            else:
+                exec_result["output"] = inspection.redacted_output or ""
+                exec_result["output_blocked"] = False
+        else:
+            exec_result["security_report"] = {
+                "passed": True,
+                "blocked": False,
+                "stage_results": {"no_output": True},
+                "findings": [],
+                "findings_count": 0,
+            }
+            exec_result["output_blocked"] = False
+    except Exception as e:
+        exec_result["output"] = ""
+        exec_result["exit_code"] = -3
+        exec_result["security_report"] = {"passed": False, "blocked": True, "error": str(e)}
+        exec_result["output_blocked"] = True
 
     return exec_result
 

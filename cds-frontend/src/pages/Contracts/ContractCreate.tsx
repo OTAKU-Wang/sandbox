@@ -157,6 +157,7 @@ export default function ContractCreate() {
               { label: 'L1 - TEE', value: 'L1' },
               { label: 'L2 - 轻量级虚拟化', value: 'L2' },
               { label: 'L3 - 进程隔离', value: 'L3' },
+              { label: 'K8s - 分布式 Pod', value: 'k8s' },
             ]} />
           </Form.Item>
           <Form.Item name="allowed_sandbox_modes" label="允许沙箱模式">

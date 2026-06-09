@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.user import User
+from app.models.sandbox_session import SandboxSession
+from app.models.user import User, UserRole
 from app.models.network_policy import NetworkPolicy
 from app.schemas.network_policy import (
     NetworkPolicyCreate,
@@ -24,6 +25,38 @@ from app.services.network_policy import network_policy_engine
 router = APIRouter()
 
 
+def _can_view_all_network_policies(user: User) -> bool:
+    return user.role in (UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)
+
+
+def _can_operate_network_policies(user: User) -> bool:
+    return user.role in (UserRole.OPERATOR, UserRole.ADMIN)
+
+
+async def _get_authorized_session(
+    db: AsyncSession,
+    session_id: str,
+    user: User,
+    *,
+    write: bool,
+) -> SandboxSession:
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+    result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_uuid))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sandbox session not found")
+    if session.user_id == user.id:
+        return session
+    if write and _can_operate_network_policies(user):
+        return session
+    if not write and _can_view_all_network_policies(user):
+        return session
+    raise HTTPException(status_code=403, detail="Not your session")
+
+
 @router.post("", response_model=NetworkPolicyResponse, status_code=status.HTTP_201_CREATED)
 async def create_network_policy(
     body: NetworkPolicyCreate,
@@ -31,6 +64,7 @@ async def create_network_policy(
     current_user: User = Depends(get_current_user),
 ):
     """Create a network policy for a sandbox session."""
+    session = await _get_authorized_session(db, body.session_id, current_user, write=True)
     # Check if policy already exists for this session
     existing = await db.execute(
         select(NetworkPolicy).where(NetworkPolicy.session_id == body.session_id)
@@ -43,7 +77,7 @@ async def create_network_policy(
 
     policy = NetworkPolicy(
         session_id=body.session_id,
-        user_id=str(current_user.id),
+        user_id=str(session.user_id),
         mode=body.mode,
         allowed_ips=body.allowed_ips,
         allowed_domains=body.allowed_domains,
@@ -67,7 +101,7 @@ async def create_network_policy(
         max_connections_per_second=policy.max_connections_per_second,
         max_bandwidth_bytes_per_second=policy.max_bandwidth_bytes_per_second,
     )
-    network_policy_engine.create_policy(body.session_id, config)
+    await network_policy_engine.create_policy(body.session_id, config)
 
     await audit_service.log(
         db,
@@ -102,6 +136,23 @@ async def list_network_policies(
     return {"items": items, "total": total, "page": skip // limit + 1, "page_size": limit}
 
 
+@router.get("/session/{session_id}", response_model=NetworkPolicyResponse)
+async def get_policy_by_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get network policy for a specific sandbox session."""
+    await _get_authorized_session(db, session_id, current_user, write=False)
+    result = await db.execute(
+        select(NetworkPolicy).where(NetworkPolicy.session_id == session_id)
+    )
+    policy = result.scalar_one_or_none()
+    if not policy:
+        raise HTTPException(status_code=404, detail="No network policy for this session")
+    return NetworkPolicyResponse.model_validate(policy)
+
+
 @router.get("/{policy_id}", response_model=NetworkPolicyResponse)
 async def get_network_policy(
     policy_id: uuid.UUID,
@@ -113,25 +164,7 @@ async def get_network_policy(
     policy = result.scalar_one_or_none()
     if not policy:
         raise HTTPException(status_code=404, detail="Network policy not found")
-    if policy.user_id != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not your policy")
-    return NetworkPolicyResponse.model_validate(policy)
-
-
-@router.get("/session/{session_id}", response_model=NetworkPolicyResponse)
-async def get_policy_by_session(
-    session_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Get network policy for a specific sandbox session."""
-    result = await db.execute(
-        select(NetworkPolicy).where(NetworkPolicy.session_id == session_id)
-    )
-    policy = result.scalar_one_or_none()
-    if not policy:
-        raise HTTPException(status_code=404, detail="No network policy for this session")
-    if policy.user_id != str(current_user.id):
+    if policy.user_id != str(current_user.id) and not _can_view_all_network_policies(current_user):
         raise HTTPException(status_code=403, detail="Not your policy")
     return NetworkPolicyResponse.model_validate(policy)
 
@@ -148,7 +181,7 @@ async def update_network_policy(
     policy = result.scalar_one_or_none()
     if not policy:
         raise HTTPException(status_code=404, detail="Network policy not found")
-    if policy.user_id != str(current_user.id):
+    if policy.user_id != str(current_user.id) and not _can_operate_network_policies(current_user):
         raise HTTPException(status_code=403, detail="Not your policy")
 
     update_data = body.model_dump(exclude_unset=True)
@@ -159,7 +192,7 @@ async def update_network_policy(
     await db.refresh(policy)
 
     # Hot-reload: remove old policy, create new one
-    network_policy_engine.remove_policy(policy.session_id)
+    await network_policy_engine.remove_policy(policy.session_id)
     if policy.active:
         from app.services.network_policy import NetworkPolicyConfig
         config = NetworkPolicyConfig(
@@ -171,7 +204,7 @@ async def update_network_policy(
             max_connections_per_second=policy.max_connections_per_second,
             max_bandwidth_bytes_per_second=policy.max_bandwidth_bytes_per_second,
         )
-        network_policy_engine.create_policy(policy.session_id, config)
+        await network_policy_engine.create_policy(policy.session_id, config)
 
     return NetworkPolicyResponse.model_validate(policy)
 
@@ -187,11 +220,11 @@ async def delete_network_policy(
     policy = result.scalar_one_or_none()
     if not policy:
         raise HTTPException(status_code=404, detail="Network policy not found")
-    if policy.user_id != str(current_user.id):
+    if policy.user_id != str(current_user.id) and not _can_operate_network_policies(current_user):
         raise HTTPException(status_code=403, detail="Not your policy")
 
     # Remove enforcement
-    network_policy_engine.remove_policy(policy.session_id)
+    await network_policy_engine.remove_policy(policy.session_id)
 
     await db.delete(policy)
     await audit_service.log(

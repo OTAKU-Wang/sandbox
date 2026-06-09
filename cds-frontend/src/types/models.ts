@@ -65,10 +65,19 @@ export interface Contract {
 
 export interface SandboxSession {
   id: string;
+  user_id: string;
+  data_product_id: string;
   contract_id: string | null;
   sandbox_level: SandboxLevel;
+  sandbox_mode: string;
   status: SandboxSessionStatus;
   container_id: string | null;
+  session_key_id: string | null;
+  timeout_seconds: number;
+  resource_limits: Record<string, unknown> | null;
+  error_message: string | null;
+  started_at: string | null;
+  ended_at: string | null;
   created_at: string;
   updated_at: string;
 }

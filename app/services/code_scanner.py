@@ -47,12 +47,15 @@ class SandboxMode(str, Enum):
     STRUCTURED_QUERY = "structured_query"
     STRUCTURED_MODELING = "structured_modeling"
     STRUCTURED_APP = "structured_app"
+    PRODUCT_DEV = "product_dev"
     PRODUCT_DEVELOPMENT = "product_development"
+    LLM_TRAINING = "llm_training"
     LLM_SFT = "llm_sft"
     LLM_PT = "llm_pretrain"
     VISION_TRAIN = "vision_train"
     MULTIMODAL_TRAIN = "multimodal_train"
     SEMI_ETL = "semi_structured_etl"
+    JOINT_FEDERATED = "joint_federated"
 
 
 # ── Python Security Rules (Pure Whitelist Mode) ────────────────────
@@ -92,7 +95,7 @@ DANGEROUS_BUILTINS = {"exec", "eval", "compile", "__import__", "open", "globals"
 
 # Training modes where save paths must be sandbox-restricted
 GPU_MODES = {
-    SandboxMode.LLM_SFT, SandboxMode.LLM_PT,
+    SandboxMode.LLM_TRAINING, SandboxMode.LLM_SFT, SandboxMode.LLM_PT,
     SandboxMode.VISION_TRAIN, SandboxMode.MULTIMODAL_TRAIN,
 }
 
@@ -105,7 +108,7 @@ class CodeScanner:
 
     def scan(self, code: str, language: str, sandbox_mode: str) -> ScanResult:
         try:
-            mode = SandboxMode(sandbox_mode)
+            mode = SandboxMode(self._normalize_mode(sandbox_mode))
         except ValueError:
             return ScanResult.FAIL(f"Unknown sandbox mode: {sandbox_mode}")
 
@@ -115,6 +118,27 @@ class CodeScanner:
             return self._scan_sql(code, mode)
         else:
             return ScanResult.FAIL(f"Unsupported language: {language}")
+
+    @staticmethod
+    def _normalize_mode(sandbox_mode: str) -> str:
+        """Normalize legacy scene names to the canonical product mode names."""
+        aliases = {
+            "query": SandboxMode.STRUCTURED_QUERY.value,
+            "read": SandboxMode.STRUCTURED_QUERY.value,
+            "modeling": SandboxMode.STRUCTURED_MODELING.value,
+            "analyze": SandboxMode.STRUCTURED_MODELING.value,
+            "app": SandboxMode.STRUCTURED_APP.value,
+            "develop": SandboxMode.PRODUCT_DEV.value,
+            "development": SandboxMode.PRODUCT_DEV.value,
+            "product_development": SandboxMode.PRODUCT_DEV.value,
+            "train": SandboxMode.LLM_TRAINING.value,
+            "training": SandboxMode.LLM_TRAINING.value,
+            "llm_sft": SandboxMode.LLM_TRAINING.value,
+            "llm_pretrain": SandboxMode.LLM_TRAINING.value,
+            "federated": SandboxMode.JOINT_FEDERATED.value,
+            "compute": SandboxMode.JOINT_FEDERATED.value,
+        }
+        return aliases.get(str(sandbox_mode), str(sandbox_mode))
 
     def _scan_python(self, code: str, mode: SandboxMode) -> ScanResult:
         issues: list[ScanIssue] = []

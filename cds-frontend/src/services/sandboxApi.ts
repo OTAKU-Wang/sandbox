@@ -37,6 +37,45 @@ export interface DevExecuteResult {
   security_report?: SecurityReport;
 }
 
+export interface SessionExecuteResult {
+  output?: string;
+  error?: string;
+  exit_code: number;
+  duration_ms?: number;
+  output_truncated?: boolean;
+  output_blocked?: boolean;
+  blocked_reason?: string;
+  audit_events_collected?: number;
+  security_report?: SecurityReport;
+}
+
+export interface NetworkPolicy {
+  id: string;
+  session_id: string;
+  user_id: string;
+  mode: 'deny_all' | 'allowlist';
+  allowed_ips: string[] | null;
+  allowed_domains: string[] | null;
+  allowed_ports: number[] | null;
+  dns_proxy_enabled: boolean;
+  max_connections_per_second: number;
+  max_bandwidth_bytes_per_second: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateNetworkPolicyRequest {
+  mode?: 'deny_all' | 'allowlist';
+  allowed_ips?: string[];
+  allowed_domains?: string[];
+  allowed_ports?: number[];
+  dns_proxy_enabled?: boolean;
+  max_connections_per_second?: number;
+  max_bandwidth_bytes_per_second?: number;
+  active?: boolean;
+}
+
 export const sandboxApi = {
   list: (params?: { page?: number; page_size?: number; status?: string }): Promise<PaginatedResponse<SandboxSession>> =>
     api.get('/sandbox-sessions', {
@@ -55,6 +94,15 @@ export const sandboxApi = {
 
   terminate: (id: string): Promise<SandboxSession> =>
     api.post(`/sandbox-sessions/${id}/terminate`),
+
+  execute: (id: string, code: string, language: string = 'python'): Promise<SessionExecuteResult> =>
+    api.post(`/sandbox-sessions/${id}/execute`, { code, language }),
+
+  getNetworkPolicy: (id: string): Promise<NetworkPolicy> =>
+    api.get(`/sandbox-sessions/${id}/network-policy`),
+
+  updateNetworkPolicy: (id: string, data: UpdateNetworkPolicyRequest): Promise<{ network_policy: NetworkPolicy; enforcement: Record<string, unknown> | null }> =>
+    api.put(`/sandbox-sessions/${id}/network-policy`, data),
 
   // Data Product Development Sandbox
   devList: (): Promise<DevSession[]> =>

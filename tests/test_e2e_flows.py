@@ -61,24 +61,44 @@ async def _sign_contract(client: AsyncClient, contract_id: str, headers: dict, p
                             json={"signature": signature}, headers=headers)
 
 
+async def _create_resource(client: AsyncClient, headers: dict, name: str = "E2E Resource") -> dict:
+    """Upload a small CSV data resource for product publication."""
+    csv_data = "city,amount\nShanghai,100\nBeijing,200\n"
+    resp = await client.post(
+        "/api/v1/data-resources/upload",
+        files={"file": (f"{uuid.uuid4().hex}.csv", csv_data.encode("utf-8"), "text/csv")},
+        data={"name": name, "description": f"E2E resource for {name}"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, f"Resource upload failed: {resp.text}"
+    return resp.json()
+
+
 async def _create_product(client: AsyncClient, headers: dict, name: str = "E2E Product") -> dict:
     """Create a data product."""
+    resource = await _create_resource(client, headers, f"{name} Resource")
     resp = await client.post("/api/v1/data-products", json={
         "name": name,
         "description": f"E2E test product: {name}",
         "product_type": "structured",
+        "resource_id": resource["id"],
         "industry": "finance",
+        "allowed_operations": ["read", "query"],
     }, headers=headers)
     assert resp.status_code == 201
     return resp.json()
 
 
-async def _publish_product(client: AsyncClient, headers: dict, product_id: str) -> dict:
-    """Publish a data product via PATCH."""
-    resp = await client.patch(f"/api/v1/data-products/{product_id}", json={"status": "published"}, headers=headers)
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "published"
-    return resp.json()
+async def _publish_product(client: AsyncClient, provider_headers: dict, admin_headers: dict, product_id: str) -> dict:
+    """Publish a data product through the lifecycle endpoints."""
+    submit = await client.post(f"/api/v1/data-products/{product_id}/submit", headers=provider_headers)
+    assert submit.status_code == 200, f"Submit failed: {submit.text}"
+    approve = await client.post(f"/api/v1/data-products/{product_id}/approve", headers=admin_headers)
+    assert approve.status_code == 200, f"Approve failed: {approve.text}"
+    publish = await client.post(f"/api/v1/data-products/{product_id}/publish", headers=provider_headers)
+    assert publish.status_code == 200, f"Publish failed: {publish.text}"
+    assert publish.json()["status"] == "published"
+    return publish.json()
 
 
 async def _create_contract(client: AsyncClient, headers: dict, buyer_id: str, product_id: str, **overrides) -> dict:
@@ -100,7 +120,7 @@ async def _create_contract(client: AsyncClient, headers: dict, buyer_id: str, pr
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_full_happy_path(client: AsyncClient):
+async def test_e2e_full_happy_path(client: AsyncClient, admin_headers: dict):
     """Full lifecycle: provider registers → product → publish → contract → sign → sandbox → terminate."""
     # 1. Register provider and buyer
     provider_headers, provider_id = await _register(client, "data_provider", "provider")
@@ -110,7 +130,7 @@ async def test_e2e_full_happy_path(client: AsyncClient):
     product = await _create_product(client, provider_headers, "E2E Happy Path Product")
     product_id = product["id"]
     assert product["status"] == "draft"
-    await _publish_product(client, provider_headers, product_id)
+    await _publish_product(client, provider_headers, admin_headers, product_id)
 
     # 3. Provider creates a contract with the buyer
     contract = await _create_contract(client, provider_headers, buyer_id, product_id,
@@ -176,13 +196,13 @@ async def test_e2e_full_happy_path(client: AsyncClient):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_contract_policy_enforcement(client: AsyncClient):
+async def test_e2e_contract_policy_enforcement(client: AsyncClient, admin_headers: dict):
     """Contract policy reflects terms and is queryable at each stage."""
     provider_h, _ = await _register(client, "data_provider", "pol-provider")
     buyer_h, buyer_id = await _register(client, "buyer", "pol-buyer")
 
     product = await _create_product(client, provider_h, "Policy Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     contract = await _create_contract(client, provider_h, buyer_id, product["id"],
                                        allowed_operations="read,analyze",
@@ -207,13 +227,13 @@ async def test_e2e_contract_policy_enforcement(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_cannot_sign_twice_same_party(client: AsyncClient):
+async def test_e2e_contract_cannot_sign_twice_same_party(client: AsyncClient, admin_headers: dict):
     """Same party cannot sign twice."""
     provider_h, _ = await _register(client, "data_provider", "dup-provider")
     buyer_h, buyer_id = await _register(client, "buyer", "dup-buyer")
 
     product = await _create_product(client, provider_h, "Dup Sign Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     contract = await _create_contract(client, provider_h, buyer_id, product["id"])
     cid = contract["id"]
@@ -295,14 +315,14 @@ async def test_e2e_unauthenticated_access_rejected(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_cross_user_data_isolation(client: AsyncClient):
+async def test_e2e_cross_user_data_isolation(client: AsyncClient, admin_headers: dict):
     """User A cannot access User B's sandbox sessions."""
     headers_a, _ = await _register(client, "data_provider", "iso-a")
     headers_b, _ = await _register(client, "buyer", "iso-b")
 
     # A creates a product and publishes it
     product = await _create_product(client, headers_a, "Isolation Product")
-    await _publish_product(client, headers_a, product["id"])
+    await _publish_product(client, headers_a, admin_headers, product["id"])
 
     # A creates a sandbox session
     session_resp = await client.post("/api/v1/sandbox-sessions", json={
@@ -320,14 +340,14 @@ async def test_e2e_cross_user_data_isolation(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_access_control(client: AsyncClient):
+async def test_e2e_contract_access_control(client: AsyncClient, admin_headers: dict):
     """User not party to contract cannot view it."""
     provider_h, _ = await _register(client, "data_provider", "acl-provider")
     buyer_h, buyer_id = await _register(client, "buyer", "acl-buyer")
     outsider_h, _ = await _register(client, "buyer", "acl-outsider")
 
     product = await _create_product(client, provider_h, "ACL Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     contract = await _create_contract(client, provider_h, buyer_id, product["id"])
     cid = contract["id"]
@@ -373,7 +393,7 @@ async def test_e2e_product_owner_only_can_delete(client: AsyncClient):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_data_product_lifecycle(client: AsyncClient):
+async def test_e2e_data_product_lifecycle(client: AsyncClient, admin_headers: dict):
     """Create → Update → Publish → Use in contract → Delete."""
     headers, _ = await _register(client, "data_provider", "lifecycle")
 
@@ -390,8 +410,7 @@ async def test_e2e_data_product_lifecycle(client: AsyncClient):
     assert resp.json()["name"] == "Updated Lifecycle Product"
 
     # Publish
-    resp = await client.patch(f"/api/v1/data-products/{product['id']}", json={"status": "published"}, headers=headers)
-    assert resp.json()["status"] == "published"
+    await _publish_product(client, headers, admin_headers, product["id"])
 
     # Use in sandbox session
     resp = await client.post("/api/v1/sandbox-sessions", json={
@@ -409,14 +428,14 @@ async def test_e2e_data_product_lifecycle(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_multiple_contracts_same_product(client: AsyncClient):
+async def test_e2e_multiple_contracts_same_product(client: AsyncClient, admin_headers: dict):
     """Multiple contracts can reference the same data product."""
     provider_h, _ = await _register(client, "data_provider", "multi")
     buyer1_h, buyer1_id = await _register(client, "buyer", "multi-b1")
     buyer2_h, buyer2_id = await _register(client, "buyer", "multi-b2")
 
     product = await _create_product(client, provider_h, "Multi Contract Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     c1 = await _create_contract(client, provider_h, buyer1_id, product["id"], title="Contract 1")
     c2 = await _create_contract(client, provider_h, buyer2_id, product["id"], title="Contract 2")
@@ -575,7 +594,7 @@ async def test_e2e_monitoring_alerts_api(client: AsyncClient, make_user):
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_activate_endpoint(client: AsyncClient):
+async def test_e2e_contract_activate_endpoint(client: AsyncClient, admin_headers: dict):
     """Contract activate endpoint works for signed contracts.
 
     Note: After both parties sign, the contract auto-transitions to 'active'.
@@ -586,7 +605,7 @@ async def test_e2e_contract_activate_endpoint(client: AsyncClient):
     buyer_h, buyer_id = await _register(client, "buyer", "act-buyer")
 
     product = await _create_product(client, provider_h, "Activate Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     contract = await _create_contract(client, provider_h, buyer_id, product["id"])
     cid = contract["id"]
@@ -611,13 +630,13 @@ async def test_e2e_contract_activate_endpoint(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_activate_requires_signed(client: AsyncClient):
+async def test_e2e_contract_activate_requires_signed(client: AsyncClient, admin_headers: dict):
     """Cannot activate a draft contract."""
     provider_h, _ = await _register(client, "data_provider", "act-draft-provider")
     buyer_h, buyer_id = await _register(client, "buyer", "act-draft-buyer")
 
     product = await _create_product(client, provider_h, "Draft Activate Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     contract = await _create_contract(client, provider_h, buyer_id, product["id"])
     cid = contract["id"]
@@ -725,13 +744,13 @@ async def test_e2e_field_reconstruction_detects_distinct(client: AsyncClient):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_contract_extended_fields(client: AsyncClient):
+async def test_e2e_contract_extended_fields(client: AsyncClient, admin_headers: dict):
     """Contract with max_output_rows, allowed_output_formats, inspection_rule_set."""
     provider_h, _ = await _register(client, "data_provider", "ext-provider")
     buyer_h, buyer_id = await _register(client, "buyer", "ext-buyer")
 
     product = await _create_product(client, provider_h, "Extended Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     contract = await _create_contract(client, provider_h, buyer_id, product["id"],
                                        max_output_rows=5000,
@@ -752,12 +771,12 @@ async def test_e2e_contract_extended_fields(client: AsyncClient):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_catalog_search(client: AsyncClient):
+async def test_e2e_catalog_search(client: AsyncClient, admin_headers: dict):
     """Catalog search returns published products."""
     provider_h, _ = await _register(client, "data_provider", "catalog")
 
     product = await _create_product(client, provider_h, "Catalog Search Product")
-    await _publish_product(client, provider_h, product["id"])
+    await _publish_product(client, provider_h, admin_headers, product["id"])
 
     resp = await client.get("/api/v1/catalog", headers=provider_h)
     assert resp.status_code == 200

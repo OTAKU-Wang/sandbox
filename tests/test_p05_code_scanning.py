@@ -104,6 +104,18 @@ class TestCodeScannerPython:
         result = self.scanner.scan(code, "python", "llm_sft")
         assert result.passed is True
 
+    def test_product_mode_names_are_supported(self):
+        assert self.scanner.scan("print('dev')", "python", "product_dev").passed is True
+        assert self.scanner.scan("print('app')", "python", "structured_app").passed is True
+        assert self.scanner.scan("print('fed')", "python", "joint_federated").passed is True
+
+    def test_llm_training_mode_enforces_save_path_restriction(self):
+        bad = self.scanner.scan('model.save("/tmp/model.bin")', "python", "llm_training")
+        good = self.scanner.scan('model.save("/sandbox/output/model.bin")', "python", "llm_training")
+        assert bad.passed is False
+        assert any(i.code == "INVALID_SAVE_PATH" for i in bad.issues)
+        assert good.passed is True
+
 
 class TestCodeScannerSQL:
     """Test CodeScanner SQL validation."""

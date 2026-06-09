@@ -25,6 +25,17 @@ from app.services.quota_manager import quota_manager
 router = APIRouter()
 
 
+def _require_credential_contract(cred: AppCredential, contract_id: str) -> uuid.UUID:
+    """Ensure the URL contract matches the credential-bound contract."""
+    try:
+        path_contract_id = uuid.UUID(contract_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid contract ID")
+    if cred.contract_id != path_contract_id:
+        raise HTTPException(status_code=403, detail="Credential is not bound to this contract")
+    return path_contract_id
+
+
 # === Request/Response Models ===
 
 class CreateCredentialRequest(BaseModel):
@@ -204,6 +215,7 @@ async def gateway_query(
     cred, auth_error = await gateway_service.authenticate(db, x_app_id, x_app_secret, client_ip)
     if auth_error:
         raise HTTPException(status_code=401, detail=auth_error)
+    _require_credential_contract(cred, contract_id)
 
     # 2. Authorize
     contract, authz_error = await gateway_service.authorize(db, cred, "query", body.product_id)
@@ -296,6 +308,7 @@ async def gateway_access(
     cred, auth_error = await gateway_service.authenticate(db, x_app_id, x_app_secret, client_ip)
     if auth_error:
         raise HTTPException(status_code=401, detail=auth_error)
+    _require_credential_contract(cred, contract_id)
 
     # Authorize
     contract, authz_error = await gateway_service.authorize(db, cred, "access", body.product_id)
@@ -330,6 +343,7 @@ async def get_metering(
     cred, auth_error = await gateway_service.authenticate(db, x_app_id, x_app_secret, client_ip)
     if auth_error:
         raise HTTPException(status_code=401, detail=auth_error)
+    _require_credential_contract(cred, contract_id)
 
     contract, authz_error = await gateway_service.authorize(db, cred, "metering")
     if authz_error:
@@ -395,6 +409,7 @@ async def get_contract_gateway_status(
     cred, auth_error = await gateway_service.authenticate(db, x_app_id, x_app_secret, client_ip)
     if auth_error:
         raise HTTPException(status_code=401, detail=auth_error)
+    _require_credential_contract(cred, contract_id)
 
     contract, authz_error = await gateway_service.authorize(db, cred, "status")
     if authz_error:

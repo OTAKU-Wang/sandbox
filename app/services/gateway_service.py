@@ -27,6 +27,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_credential import AppCredential, CredentialStatus
 from app.models.contract import Contract, ContractStatus
 from app.models.data_product import DataProduct
+from app.models.field_exposure import (
+    ExposureRequestStatus,
+    FieldExposureRequest,
+    FieldSensitivity,
+    FieldVisibilityConfig,
+)
 from app.services.audit_service import audit_service
 from app.services.quota_manager import quota_manager
 
@@ -243,6 +249,10 @@ class GatewayService:
         if not product:
             return GatewayResponse(success=False, error="Data product not found", status_code=404)
 
+        allowed, denial_reason = await self._enforce_field_exposure(db, contract, product, sql)
+        if not allowed:
+            return GatewayResponse(success=False, error=denial_reason, status_code=403)
+
         # Route based on product type
         if product.product_type in ("structured", "semi-structured"):
             return await self._query_duckdb(product, sql, fmt)
@@ -258,6 +268,111 @@ class GatewayService:
                 error=f"Unsupported product type: {product.product_type}",
                 status_code=400,
             )
+
+    async def _enforce_field_exposure(
+        self,
+        db: AsyncSession,
+        contract: Contract,
+        product: DataProduct,
+        sql: str,
+    ) -> tuple[bool, str | None]:
+        """Enforce field exposure approvals before a query reaches DuckDB."""
+        result = await db.execute(
+            select(FieldVisibilityConfig).where(FieldVisibilityConfig.product_id == product.id)
+        )
+        config = result.scalar_one_or_none()
+        if not config:
+            return True, None
+
+        known_fields = self._product_schema_fields(product)
+        known_fields.update(str(name) for name in (config.field_rules or {}).keys())
+        if not known_fields:
+            return False, "Field visibility is configured but product schema has no fields"
+
+        if self._query_uses_wildcard(sql):
+            return False, "Field access denied: SELECT * is not allowed when field visibility is configured"
+
+        referenced_fields = self._extract_referenced_fields(sql, known_fields)
+        if not referenced_fields:
+            return True, None
+
+        allowed_fields = await self._approved_query_fields(db, contract, product, config, known_fields)
+        denied = sorted(referenced_fields - allowed_fields)
+        if denied:
+            return False, f"Field access denied: unapproved fields {denied}"
+
+        return True, None
+
+    async def _approved_query_fields(
+        self,
+        db: AsyncSession,
+        contract: Contract,
+        product: DataProduct,
+        config: FieldVisibilityConfig,
+        known_fields: set[str],
+    ) -> set[str]:
+        field_rules = config.field_rules or {}
+        default_sensitivity = config.default_sensitivity or FieldSensitivity.INTERNAL.value
+        allowed = {
+            field_name
+            for field_name in known_fields
+            if self._field_sensitivity(field_name, field_rules, default_sensitivity)
+            in (FieldSensitivity.PUBLIC.value, FieldSensitivity.INTERNAL.value)
+        }
+
+        result = await db.execute(
+            select(FieldExposureRequest).where(
+                FieldExposureRequest.product_id == product.id,
+                FieldExposureRequest.buyer_id == contract.buyer_id,
+                FieldExposureRequest.status == ExposureRequestStatus.APPROVED.value,
+            )
+        )
+        now = datetime.now(timezone.utc)
+        for request in result.scalars().all():
+            expires_at = request.expires_at
+            if expires_at and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at and expires_at < now:
+                continue
+            if request.approved_fields:
+                allowed.update(str(field_name) for field_name in request.approved_fields)
+        return allowed
+
+    @staticmethod
+    def _field_sensitivity(field_name: str, field_rules: dict, default_sensitivity: str) -> str:
+        rule = field_rules.get(field_name, {}) if field_rules else {}
+        return rule.get("sensitivity", default_sensitivity)
+
+    @staticmethod
+    def _product_schema_fields(product: DataProduct) -> set[str]:
+        schema = product.data_schema or {}
+        fields = schema.get("fields", []) if isinstance(schema, dict) else []
+        names: set[str] = set()
+        for field in fields:
+            if isinstance(field, dict) and field.get("name"):
+                names.add(str(field["name"]))
+            elif isinstance(field, str):
+                names.add(field)
+        return names
+
+    @staticmethod
+    def _strip_sql_literals(sql: str) -> str:
+        return re.sub(r"'([^']|'')*'", " ", sql)
+
+    def _query_uses_wildcard(self, sql: str) -> bool:
+        cleaned = self._strip_sql_literals(sql)
+        cleaned = re.sub(r"\bCOUNT\s*\(\s*\*\s*\)", "COUNT()", cleaned, flags=re.IGNORECASE)
+        return bool(re.search(r"(^|[\s,(])(?:[A-Za-z_][A-Za-z0-9_]*\.)?\*(?=($|[\s,)]))", cleaned))
+
+    def _extract_referenced_fields(self, sql: str, known_fields: set[str]) -> set[str]:
+        cleaned = self._strip_sql_literals(sql)
+        referenced: set[str] = set()
+        for field_name in known_fields:
+            safe = re.escape(field_name)
+            pattern = rf"(?<![A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*\.)?\"?{safe}\"?(?![A-Za-z0-9_])"
+            if re.search(pattern, cleaned, re.IGNORECASE):
+                referenced.add(field_name)
+        return referenced
 
     async def _query_duckdb(self, product: DataProduct, sql: str, fmt: str) -> GatewayResponse:
         """Execute query via DuckDB engine."""

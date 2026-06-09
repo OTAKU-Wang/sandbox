@@ -198,6 +198,7 @@ export default function SessionList() {
               { label: 'L1 - TEE', value: 'L1' },
               { label: 'L2 - 软件增强', value: 'L2' },
               { label: 'L3 - 最小隔离', value: 'L3' },
+              { label: 'K8s - 分布式 Pod', value: 'k8s' },
             ]} />
           </Form.Item>
           <Form.Item name="timeout_seconds" label="超时时间（秒）">

@@ -85,13 +85,18 @@ class ContractFulfillmentService:
         self, db: AsyncSession, contract: Contract, product_id: uuid.UUID
     ) -> dict:
         """Provision a sandbox session for a single contracted product."""
+        try:
+            product_uuid = product_id if isinstance(product_id, uuid.UUID) else uuid.UUID(str(product_id))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid product id in contract: {product_id}") from e
+
         # Get the data product
-        result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
+        result = await db.execute(select(DataProduct).where(DataProduct.id == product_uuid))
         product = result.scalar_one_or_none()
         if not product:
-            raise ValueError(f"Data product {product_id} not found")
+            raise ValueError(f"Data product {product_uuid} not found")
         if product.status != DataProductStatus.PUBLISHED.value:
-            raise ValueError(f"Product {product_id} is not published")
+            raise ValueError(f"Product {product_uuid} is not published")
 
         # Determine sandbox level from contract
         allowed_levels = (contract.allowed_sandbox_levels or "L3").split(",")
@@ -103,7 +108,7 @@ class ContractFulfillmentService:
         # Create sandbox session
         session = SandboxSession(
             user_id=contract.buyer_id,
-            data_product_id=product_id,
+            data_product_id=product_uuid,
             sandbox_level=sandbox_level,
             contract_id=str(contract.id),
             timeout_seconds=contract.max_duration_hours * 3600,
@@ -125,18 +130,38 @@ class ContractFulfillmentService:
             timeout=session.timeout_seconds,
         )
         session.container_id = provision_result.get("container_id")
-        session.status = provision_result.get("status", SessionStatus.RUNNING.value)
-        if provision_result.get("error"):
+        session.status = provision_result.get("status", SessionStatus.PROVISIONING.value)
+        if provision_result.get("error") or not session.container_id or session.status == SessionStatus.FAILED.value:
             session.status = SessionStatus.FAILED.value
-            session.error_message = provision_result["error"]
+            session.error_message = provision_result.get("error") or "Sandbox provision failed"
+            await db.flush()
+            raise RuntimeError(session.error_message)
 
         # Generate session key
         key_result = kms_service.generate_session_key(str(session.id))
         session.session_key_id = key_result["key_id"]
 
         # Distribute key
-        if session.container_id:
-            kms_service.distribute_key(key_result["key_id"], str(session.id))
+        distributed_key = kms_service.distribute_key(key_result["key_id"], str(session.id))
+        if not distributed_key:
+            kms_service.destroy_key(key_result["key_id"])
+            session.session_key_id = None
+            session.status = SessionStatus.FAILED.value
+            session.error_message = "Session key distribution failed"
+            termination_error = None
+            try:
+                if not runtime.terminate(session.container_id):
+                    termination_error = "runtime terminate returned false"
+            except Exception as e:
+                termination_error = str(e)
+            if termination_error:
+                logger.warning(
+                    "Failed to terminate session %s after key distribution failure: %s",
+                    session.id,
+                    termination_error,
+                )
+            await db.flush()
+            raise RuntimeError(session.error_message)
 
         # Record key metadata
         key_meta = KeyMetadata(
@@ -144,7 +169,7 @@ class ContractFulfillmentService:
             key_type=KeyType.SESSION.value,
             status=KeyStatus.ACTIVE.value,
             session_id=session.id,
-            product_id=product_id,
+            product_id=product_uuid,
         )
         db.add(key_meta)
 
@@ -152,7 +177,7 @@ class ContractFulfillmentService:
         await db.refresh(session)
 
         return {
-            "product_id": str(product_id),
+            "product_id": str(product_uuid),
             "session_id": str(session.id),
             "sandbox_level": sandbox_level,
             "status": session.status,
@@ -172,10 +197,19 @@ class ContractFulfillmentService:
         if not session.contract_id:
             return {"allowed": True, "reason": "No contract constraints"}
 
-        result = await db.execute(select(Contract).where(Contract.id == session.contract_id))
+        try:
+            contract_uuid = uuid.UUID(str(session.contract_id))
+        except (TypeError, ValueError):
+            return {"allowed": False, "reason": "Invalid bound contract id"}
+
+        result = await db.execute(select(Contract).where(Contract.id == contract_uuid))
         contract = result.scalar_one_or_none()
         if not contract:
-            return {"allowed": True, "reason": "Contract not found"}
+            return {"allowed": False, "reason": "Bound contract not found"}
+        if contract.status not in (ContractStatus.ACTIVE.value, ContractStatus.SIGNED.value):
+            return {"allowed": False, "reason": f"Contract is {contract.status}"}
+        if str(session.data_product_id) not in [str(pid) for pid in contract.product_ids]:
+            return {"allowed": False, "reason": "Session product is not covered by bound contract"}
 
         # Check allowed operations
         if contract.allowed_operations:
@@ -185,8 +219,8 @@ class ContractFulfillmentService:
 
         # Check allowed sandbox modes
         if contract.allowed_sandbox_modes:
-            if operation not in contract.allowed_sandbox_modes:
-                return {"allowed": False, "reason": f"Mode '{operation}' not in contract allowed_sandbox_modes"}
+            if session.sandbox_mode not in contract.allowed_sandbox_modes:
+                return {"allowed": False, "reason": f"Mode '{session.sandbox_mode}' not in contract allowed_sandbox_modes"}
 
         return {"allowed": True, "reason": "Contract constraints satisfied"}
 
@@ -194,7 +228,7 @@ class ContractFulfillmentService:
         """Terminate all active sessions for a contract. Returns count of terminated sessions."""
         result = await db.execute(
             select(SandboxSession).where(
-                SandboxSession.contract_id == contract_id,
+                SandboxSession.contract_id == str(contract_id),
                 SandboxSession.status.in_([
                     SessionStatus.PROVISIONING.value,
                     SessionStatus.RUNNING.value,

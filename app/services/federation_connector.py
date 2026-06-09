@@ -23,6 +23,7 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -34,6 +35,20 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+_LOCAL_FEDERATION_JWT_KEY = "cds-local-federation-jwt-secret-key-32-bytes-minimum"
+
+
+def _default_jwt_secret_key() -> str:
+    from app.core.config import get_settings, _JWT_DEFAULT_KEY
+
+    settings = get_settings()
+    if settings.JWT_SECRET_KEY != _JWT_DEFAULT_KEY:
+        return settings.JWT_SECRET_KEY
+    if settings.DEBUG or os.environ.get("TESTING") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
+        return _LOCAL_FEDERATION_JWT_KEY
+    settings.validate_jwt_security()
+    return settings.JWT_SECRET_KEY
 
 
 class TrustLevel(str, Enum):
@@ -141,8 +156,8 @@ class IdentityProvider(ABC):
 class JWTIdentityProvider(IdentityProvider):
     """JWT-based identity federation provider."""
 
-    def __init__(self, secret_key: str = "federation-secret-key"):
-        self._secret_key = secret_key
+    def __init__(self, secret_key: str | None = None):
+        self._secret_key = secret_key or _default_jwt_secret_key()
 
     def create_federated_token(self, local_user_id: str, remote_space: SpaceIdentity, ttl_seconds: int = 3600) -> str:
         """Create a federated JWT token."""
