@@ -18,6 +18,7 @@ from app.models.data_product import DataProduct
 from app.models.contract import Contract
 from app.models.sandbox_session import SandboxSession
 from app.models.audit_log import AuditLog
+from app.models.alert import AlertRecord
 from app.models.sandbox_node import SandboxNode
 from app.models.dp_budget import DPBudgetAllocation, DPBudgetEntry, DPBudgetStatus
 

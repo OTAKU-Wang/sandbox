@@ -1,13 +1,14 @@
 """Certificate management API — SM2 certificate lifecycle for TLCP."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
+from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.services.tlcp_service import tlcp_service
 from app.services.audit_service import audit_service
 
@@ -122,6 +123,7 @@ async def get_certificate(
 @router.delete("/{cert_id}")
 async def revoke_certificate(
     cert_id: str,
+    body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
@@ -132,6 +134,7 @@ async def revoke_certificate(
     await audit_service.log(
         db, action="certificate.revoke", resource_type="certificate",
         user_id=current_user.id, resource_id=cert_id,
+        detail={"reason": body.reason, "ticket_id": body.ticket_id},
     )
 
     return {"revoked": True, "cert_id": cert_id}

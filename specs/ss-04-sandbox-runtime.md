@@ -109,11 +109,11 @@ class SandboxRuntime:
 > | 期 | 运行时 | 状态 |
 > |----|--------|------|
 > | P1（核心） | StructuredQueryRuntime, DataModelingRuntime, ProductDevRuntime | 已实现（DuckDB + SecureDuckDBEngine） |
-> | P1（核心） | StructuredAppRuntime | 部分实现（DB access proxy） |
-> | P2（LLM） | LLMSFTRuntime, LLMPretrainRuntime | Stub（模拟训练） |
-> | P2（高级） | VisionModelTrainingRuntime, MultimodalTrainingRuntime | Stub（apply() 直通） |
+> | P1（核心） | StructuredAppRuntime | 已实现（DB access proxy + 响应大小控制） |
+> | P2（LLM） | LLMSFTRuntime, LLMPretrainRuntime | 已实现（本地确定性训练代理 + MIA/PII/水印闭环） |
+> | P2（高级） | VisionModelTrainingRuntime, MultimodalTrainingRuntime | 已实现（预处理安全策略 + 本地确定性训练代理） |
 > | P2（高级） | SemiStructuredRuntime | 已实现（JSONL Schema 推断） |
-> | P3（远期） | FederatedRuntime | 未实现 |
+> | P3（远期） | FederatedRuntime | 已实现（联邦场景 guard + FederationConnector 代理执行） |
 
 ## 3. 结构化数据场景
 

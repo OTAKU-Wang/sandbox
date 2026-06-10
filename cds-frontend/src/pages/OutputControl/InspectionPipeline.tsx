@@ -3,6 +3,7 @@ import { Typography, Card, Steps, Table, Tag, Descriptions, Space, Button, Input
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { outputControlApi, type InspectionResult, type DPNoiseResult } from '../../services/outputControlApi';
 import { sandboxApi } from '../../services/sandboxApi';
+import { EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -47,7 +48,13 @@ export default function InspectionPipeline() {
   const [budgetSessionId, setBudgetSessionId] = useState('');
   const [budgetEpsilon, setBudgetEpsilon] = useState(10.0);
 
-  const { data: sessions } = useQuery({
+  const {
+    data: sessions,
+    isLoading: sessionsLoading,
+    isError: sessionsIsError,
+    error: sessionsError,
+    refetch: refetchSessions,
+  } = useQuery({
     queryKey: ['output-control-sessions'],
     queryFn: () => sandboxApi.list({ page: 1, page_size: 100 }),
   });
@@ -82,7 +89,13 @@ export default function InspectionPipeline() {
   });
 
   // DP Budget query
-  const { data: budgetData, refetch: refetchBudget } = useQuery({
+  const {
+    data: budgetData,
+    isFetching: budgetLoading,
+    isError: budgetIsError,
+    error: budgetError,
+    refetch: refetchBudget,
+  } = useQuery({
     queryKey: ['dp-budget', budgetSessionId],
     queryFn: () => outputControlApi.getDPBudget(budgetSessionId),
     enabled: false,
@@ -111,6 +124,10 @@ export default function InspectionPipeline() {
     <div>
       <Title level={4}>输出审查管线</Title>
 
+      {sessionsIsError && (
+        <QueryErrorAlert error={sessionsError} message="沙箱会话加载失败" onRetry={() => { void refetchSessions(); }} />
+      )}
+
       {/* Pipeline Steps */}
       <Card style={{ marginBottom: 16 }}>
         <Title level={5}>审查流程</Title>
@@ -131,6 +148,8 @@ export default function InspectionPipeline() {
                   onChange={setInspectSessionId}
                   options={sessionOptions}
                   optionFilterProp="label"
+                  loading={sessionsLoading}
+                  notFoundContent={sessionsLoading ? '加载中' : '暂无可用会话'}
                   style={{ width: 200 }}
                 />
                 <InputNumber
@@ -167,7 +186,7 @@ export default function InspectionPipeline() {
               </Button>
             </Space>
 
-            {inspectResult && (
+            {inspectResult ? (
               <>
                 <Divider />
                 <Descriptions bordered column={2} size="small">
@@ -226,6 +245,11 @@ export default function InspectionPipeline() {
                   </>
                 )}
               </>
+            ) : (
+              <>
+                <Divider />
+                <EmptyState description="暂无审查结果" />
+              </>
             )}
           </Card>
         </Col>
@@ -274,7 +298,7 @@ export default function InspectionPipeline() {
               </Button>
             </Space>
 
-            {noiseResult && (
+            {noiseResult ? (
               <>
                 <Divider />
                 <Row gutter={16}>
@@ -294,6 +318,11 @@ export default function InspectionPipeline() {
                   <Descriptions.Item label="敏感度">{noiseResult.sensitivity}</Descriptions.Item>
                 </Descriptions>
               </>
+            ) : (
+              <>
+                <Divider />
+                <EmptyState description="暂无噪声结果" />
+              </>
             )}
           </Card>
         </Col>
@@ -311,6 +340,8 @@ export default function InspectionPipeline() {
                   onChange={setBudgetSessionId}
                   options={sessionOptions}
                   optionFilterProp="label"
+                  loading={sessionsLoading}
+                  notFoundContent={sessionsLoading ? '加载中' : '暂无可用会话'}
                   style={{ width: 200 }}
                 />
                 <div>
@@ -330,6 +361,7 @@ export default function InspectionPipeline() {
                   初始化预算
                 </Button>
                 <Button
+                  loading={budgetLoading}
                   onClick={() => {
                     if (!budgetSessionId.trim()) { message.warning('请输入会话ID'); return; }
                     refetchBudget();
@@ -340,7 +372,14 @@ export default function InspectionPipeline() {
               </Space>
             </Space>
 
-            {budgetData && (
+            {budgetIsError && (
+              <>
+                <Divider />
+                <QueryErrorAlert error={budgetError} message="DP预算查询失败" onRetry={() => { void refetchBudget(); }} />
+              </>
+            )}
+
+            {budgetData ? (
               <>
                 <Divider />
                 <Descriptions bordered column={1} size="small">
@@ -349,6 +388,11 @@ export default function InspectionPipeline() {
                     <Statistic value={budgetData.epsilon_remaining} precision={2} valueStyle={{ fontSize: 20 }} />
                   </Descriptions.Item>
                 </Descriptions>
+              </>
+            ) : !budgetIsError && (
+              <>
+                <Divider />
+                <EmptyState description="暂无预算余额结果" />
               </>
             )}
           </Card>

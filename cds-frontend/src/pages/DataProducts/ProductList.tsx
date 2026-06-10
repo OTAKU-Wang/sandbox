@@ -7,6 +7,7 @@ import { dataProductApi } from '../../services/dataProductApi';
 import type { DataProduct } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
+import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title } = Typography;
@@ -60,7 +61,7 @@ export default function ProductList() {
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState<string | undefined>(searchParams.get('status') || undefined);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['data-products', page, search, typeFilter, statusFilter],
     queryFn: () => dataProductApi.list({ page, page_size: 20, q: search || undefined, product_type: typeFilter, status: statusFilter }),
   });
@@ -168,6 +169,11 @@ export default function ProductList() {
           ]}
         />
       </Space>
+
+      {isError && (
+        <QueryErrorAlert error={error} message="数据产品列表加载失败" onRetry={() => { void refetch(); }} />
+      )}
+
       <Table
         columns={columns}
         dataSource={data?.items || []}
@@ -180,6 +186,7 @@ export default function ProductList() {
           onChange: setPage,
           showTotal: (total) => `共 ${total} 条`,
         }}
+        locale={tableEmpty(search || typeFilter || statusFilter ? '没有匹配筛选条件的数据产品' : '暂无数据产品')}
       />
     </div>
   );

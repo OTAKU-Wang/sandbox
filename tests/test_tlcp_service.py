@@ -70,7 +70,12 @@ async def test_revoke_certificate(client: AsyncClient, make_user):
         "subject": "Revoke Test",
     }, headers=admin_headers)
     cert_id = gen_resp.json()["cert_id"]
-    resp = await client.delete(f"/api/v1/certificates/{cert_id}", headers=admin_headers)
+    resp = await client.request(
+        "DELETE",
+        f"/api/v1/certificates/{cert_id}",
+        headers=admin_headers,
+        json={"reason": "test certificate revoke"},
+    )
     assert resp.status_code == 200
     assert resp.json()["revoked"] is True
 

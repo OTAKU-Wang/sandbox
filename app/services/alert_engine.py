@@ -74,6 +74,7 @@ class AlertRuleEngine:
         # Event tracking
         self._rejection_events: list[tuple[datetime, str, str | None]] = []  # (ts, session_id, user_id)
         self._query_events: list[tuple[datetime, str | None]] = []  # (ts, user_id)
+        self._dp_budget_snapshots: dict[str, tuple[datetime, float, float, str | None]] = {}
         self._fired_alerts: list[Alert] = []
 
     def configure(self, alert_type: AlertType, config: RuleConfig) -> None:
@@ -87,6 +88,21 @@ class AlertRuleEngine:
     def record_query(self, user_id: str | None = None) -> None:
         """Record a data query event."""
         self._query_events.append((datetime.now(timezone.utc), user_id))
+
+    def record_dp_budget(
+        self,
+        session_id: str,
+        remaining_epsilon: float,
+        total_epsilon: float,
+        user_id: str | None = None,
+    ) -> None:
+        """Record the latest DP budget snapshot for automatic evaluation."""
+        self._dp_budget_snapshots[session_id] = (
+            datetime.now(timezone.utc),
+            float(remaining_epsilon),
+            float(total_epsilon),
+            user_id,
+        )
 
     def evaluate(self) -> list[Alert]:
         """Evaluate all rules and return new alerts.
@@ -150,11 +166,14 @@ class AlertRuleEngine:
     def _check_dp_exhaustion(self, config: RuleConfig) -> list[Alert]:
         """Check if DP budget is below threshold.
 
-        Note: This checks _dp_budgets dict if set externally, or returns empty.
-        Actual DP budget tracking is in DifferentialPrivacyEngine.
+        Uses the latest snapshots recorded with ``record_dp_budget``.
         """
-        # DP exhaustion is checked via check_dp_budget() method
-        return []
+        alerts: list[Alert] = []
+        for session_id, (_, remaining, total, user_id) in self._dp_budget_snapshots.items():
+            alert = self._build_dp_budget_alert(session_id, remaining, total, config, user_id=user_id)
+            if alert:
+                alerts.append(alert)
+        return alerts
 
     def check_dp_budget(self, session_id: str, remaining_epsilon: float, total_epsilon: float) -> Alert | None:
         """Check if a session's DP budget is critically low.
@@ -171,19 +190,31 @@ class AlertRuleEngine:
         if not config or not config.enabled:
             return None
 
+        return self._build_dp_budget_alert(session_id, remaining_epsilon, total_epsilon, config)
+
+    def _build_dp_budget_alert(
+        self,
+        session_id: str,
+        remaining_epsilon: float,
+        total_epsilon: float,
+        config: RuleConfig,
+        user_id: str | None = None,
+    ) -> Alert | None:
         if total_epsilon <= 0:
             return None
 
         ratio = remaining_epsilon / total_epsilon
-        if ratio <= config.threshold:
-            return Alert(
-                alert_type=AlertType.DP_BUDGET_EXHAUSTION,
-                severity=AlertSeverity.CRITICAL if ratio <= 0.01 else AlertSeverity.HIGH,
-                message=f"DP budget critically low: {remaining_epsilon:.2f}/{total_epsilon:.2f} ({ratio:.1%})",
-                session_id=session_id,
-                metadata={"remaining_epsilon": remaining_epsilon, "total_epsilon": total_epsilon, "ratio": ratio},
-            )
-        return None
+        if ratio > config.threshold:
+            return None
+
+        return Alert(
+            alert_type=AlertType.DP_BUDGET_EXHAUSTION,
+            severity=AlertSeverity.CRITICAL if ratio <= 0.01 else AlertSeverity.HIGH,
+            message=f"DP budget critically low: {remaining_epsilon:.2f}/{total_epsilon:.2f} ({ratio:.1%})",
+            user_id=user_id,
+            session_id=session_id,
+            metadata={"remaining_epsilon": remaining_epsilon, "total_epsilon": total_epsilon, "ratio": ratio},
+        )
 
     def _check_anomaly_burst(self, config: RuleConfig) -> list[Alert]:
         """Check for burst query patterns."""
@@ -254,6 +285,7 @@ class AlertRuleEngine:
         """Clear all recorded events."""
         self._rejection_events.clear()
         self._query_events.clear()
+        self._dp_budget_snapshots.clear()
 
 
 # Singleton

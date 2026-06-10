@@ -7,6 +7,7 @@ import { contractApi } from '../../services/contractApi';
 import type { Contract } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
+import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title } = Typography;
@@ -28,7 +29,7 @@ export default function ContractList() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['contracts', page, statusFilter],
     queryFn: () => contractApi.list({ page, page_size: 20, status: statusFilter }),
   });
@@ -55,8 +56,14 @@ export default function ContractList() {
           options={['draft', 'negotiating', 'signed', 'active', 'completed', 'terminated'].map(s => ({ label: s, value: s }))}
         />
       </Space>
+
+      {isError && (
+        <QueryErrorAlert error={error} message="合约列表加载失败" onRetry={() => { void refetch(); }} />
+      )}
+
       <Table columns={columns} dataSource={data?.items || []} rowKey="id" loading={isLoading}
         pagination={{ current: page, total: data?.total || 0, pageSize: 20, onChange: setPage, showTotal: (t) => `共 ${t} 条` }}
+        locale={tableEmpty(statusFilter ? '没有匹配状态的合约' : '暂无合约')}
       />
     </div>
   );

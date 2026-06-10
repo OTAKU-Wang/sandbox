@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: opa
-          image: openpolicyagent/opa:latest
+          image: openpolicyagent/opa:0.68.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8181

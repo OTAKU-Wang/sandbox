@@ -24,6 +24,7 @@ class PipelineTaskType(str, Enum):
     ASR = "asr"
     VIDEO = "video"
     DOCUMENT = "document"
+    DICOM = "dicom"
     CDC_SYNC = "cdc_sync"  # CDC data synchronization
 
 

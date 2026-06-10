@@ -17,43 +17,49 @@ echo "Using kubectl: $KUBECTL"
 echo ""
 
 # Step 1: Create namespace
-echo "[1/7] Creating namespace..."
+echo "[1/9] Creating namespace..."
 $KUBECTL apply -f "$SCRIPT_DIR/namespace.yaml"
 
 # Step 2: Create secrets
-echo "[2/7] Creating secrets..."
+echo "[2/9] Creating secrets..."
 $KUBECTL apply -f "$SCRIPT_DIR/secrets.yaml"
 
 # Step 3: Create configmaps
-echo "[3/7] Creating configmaps..."
+echo "[3/9] Creating configmaps..."
 $KUBECTL apply -f "$SCRIPT_DIR/configmaps.yaml"
 
 # Step 4: Deploy PostgreSQL
-echo "[4/7] Deploying PostgreSQL..."
+echo "[4/9] Deploying PostgreSQL..."
 $KUBECTL apply -f "$SCRIPT_DIR/postgres.yaml"
 
 # Step 5: Deploy Redis
-echo "[5/7] Deploying Redis..."
+echo "[5/9] Deploying Redis..."
 $KUBECTL apply -f "$SCRIPT_DIR/redis.yaml"
 
 # Step 6: Deploy MinIO + Vault + ClickHouse + OPA
-echo "[6/7] Deploying infrastructure services..."
+echo "[6/9] Deploying infrastructure services..."
 $KUBECTL apply -f "$SCRIPT_DIR/minio.yaml"
 $KUBECTL apply -f "$SCRIPT_DIR/vault.yaml"
 $KUBECTL apply -f "$SCRIPT_DIR/clickhouse.yaml"
 $KUBECTL apply -f "$SCRIPT_DIR/opa.yaml"
 
-# Step 7: Wait for all pods
-echo "[7/7] Waiting for pods to be ready..."
+# Step 7: Deploy API service
+echo "[7/9] Deploying CDS API..."
+$KUBECTL apply -f "$SCRIPT_DIR/cds-app.yaml"
+
+# Step 8: Wait for all pods
+echo "[8/9] Waiting for pods to be ready..."
 $KUBECTL wait --for=condition=ready pod -l app=postgres -n cds-system --timeout=120s || true
 $KUBECTL wait --for=condition=ready pod -l app=redis -n cds-system --timeout=60s || true
 $KUBECTL wait --for=condition=ready pod -l app=minio -n cds-system --timeout=60s || true
 $KUBECTL wait --for=condition=ready pod -l app=vault -n cds-system --timeout=60s || true
 $KUBECTL wait --for=condition=ready pod -l app=clickhouse -n cds-system --timeout=60s || true
 $KUBECTL wait --for=condition=ready pod -l app=opa -n cds-system --timeout=60s || true
+$KUBECTL wait --for=condition=ready pod -l app=cds-api -n cds-system --timeout=120s || true
+$KUBECTL wait --for=condition=ready pod -l app=cds-frontend -n cds-system --timeout=120s || true
 
-# Step 8: Initialize and unseal Vault
-echo "[8/8] Initializing Vault..."
+# Step 9: Initialize and unseal Vault
+echo "[9/9] Initializing Vault..."
 VAULT_POD=$($KUBECTL get pods -n cds-system -l app=vault -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [ -n "$VAULT_POD" ]; then
   $KUBECTL cp "$SCRIPT_DIR/../scripts/vault-init.sh" "cds-system/$VAULT_POD:/tmp/vault-init.sh" 2>/dev/null || true

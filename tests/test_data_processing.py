@@ -62,12 +62,40 @@ class TestUnstructuredDataProcessor:
         assert result.success is True
         assert result.metadata["type"] == "document"
 
+    def test_pdf_extraction_failure_is_reported(self, tmp_dir, monkeypatch):
+        def fail_pdftotext(*args, **kwargs):
+            raise FileNotFoundError("pdftotext")
+
+        monkeypatch.setattr("subprocess.run", fail_pdftotext)
+        p = Path(tmp_dir) / "report.pdf"
+        p.write_bytes(b"%PDF-1.4\n")
+        result = self.proc.process(str(p), tmp_dir)
+        assert result.success is True
+        assert result.metadata["partial_success"] is True
+        assert result.metadata["text_extraction"] == "unavailable"
+        assert result.metadata["extraction_errors"][0]["stage"] == "pdf_text"
+
     def test_media_basic(self, tmp_dir):
         p = Path(tmp_dir) / "clip.wav"
         p.write_bytes(b"RIFF" + b"\x00" * 100)
         result = self.proc.process(str(p), tmp_dir)
         assert result.success is True
         assert result.metadata["type"] == "media"
+
+    def test_media_probe_failure_is_reported(self, tmp_dir, monkeypatch):
+        class FailedProbe:
+            returncode = 1
+            stdout = ""
+            stderr = "invalid media"
+
+        monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: FailedProbe())
+        p = Path(tmp_dir) / "clip.mp4"
+        p.write_bytes(b"not a real video")
+        result = self.proc.process(str(p), tmp_dir)
+        assert result.success is True
+        assert result.metadata["partial_success"] is True
+        assert result.metadata["media_probe"] == "failed"
+        assert result.metadata["extraction_errors"][0]["stage"] == "media_probe"
 
 
 # ── SemiStructuredDataProcessor ─────────────────────────────────────────────

@@ -503,6 +503,17 @@ class FirecrackerRuntime:
 
         return args, seccomp_fd
 
+    @staticmethod
+    def _seccomp_retry_needed(stderr: str, seccomp_fd: int | None) -> bool:
+        """Return true when bwrap failed because host seccomp support is incompatible."""
+        if seccomp_fd is None:
+            return False
+        return (
+            "EINVAL" in stderr
+            or "Invalid argument" in stderr
+            or "PR_SET_SECCOMP" in stderr
+        )
+
     def execute(
         self,
         vm: VMInstance,
@@ -572,7 +583,14 @@ class FirecrackerRuntime:
                     timeout=timeout,
                 )
             else:
-                result = self._execute_via_serial(vm, code_file, language)
+                result = self._execute_via_serial(
+                    vm,
+                    code_file,
+                    language,
+                    session_key=session_key,
+                    env_vars=env_vars,
+                    timeout=timeout,
+                )
 
             duration = int((time.monotonic() - start) * 1000)
             return ExecutionResult(
@@ -621,7 +639,7 @@ class FirecrackerRuntime:
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
             # Retry without seccomp if kernel doesn't support it
-            if result.returncode != 0 and "EINVAL" in result.stderr and seccomp_fd is not None:
+            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
                 cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
                 result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
             duration = int((time.monotonic() - start) * 1000)
@@ -677,29 +695,36 @@ class FirecrackerRuntime:
         result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=effective_timeout)
         return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
 
-    def _execute_via_serial(self, vm: VMInstance, code_file: str, language: str) -> dict:
-        """Execute code via serial console (fallback)."""
-        # Read code and send via serial
+    def _execute_via_serial(
+        self,
+        vm: VMInstance,
+        code_file: str,
+        language: str,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> dict:
+        """Execute code for non-network Firecracker guests.
+
+        A production Firecracker guest needs a guest agent or an SSH/mount channel
+        to run arbitrary snippets. When network execution is disabled and no guest
+        agent is configured, keep the request functional by using the same hardened
+        local bwrap fallback as QEMU TCG instead of returning a placeholder failure.
+        """
         with open(code_file) as f:
             code = f.read()
-
-        interpreter = "python3" if language == "python" else "bash"
-        # Encode and send via serial API
-        import http.client
-        conn = http.client.HTTPConnection("localhost")
-        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.sock.connect(vm.api_socket)
-
-        # Use actions API to send input
-        encoded = code.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        conn.request("PUT", "/actions", json.dumps({
-            "action_type": "SendCtrlAltDel"
-        }))
-        resp = conn.getresponse()
-        resp.read()
-        conn.close()
-
-        return {"output": "Serial execution not fully implemented", "exit_code": -1}
+        logger.warning(
+            "[firecracker] Guest serial execution unavailable for VM %s; using hardened local fallback",
+            vm.vm_id,
+        )
+        return self._simulate_execute_raw(
+            vm,
+            code,
+            language,
+            session_key=session_key,
+            env_vars=env_vars,
+            timeout=timeout,
+        )
 
     def _execute_via_qemu_serial(
         self,
@@ -756,7 +781,7 @@ class FirecrackerRuntime:
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
             # Retry without seccomp if kernel doesn't support it
-            if result.returncode != 0 and "EINVAL" in result.stderr and seccomp_fd is not None:
+            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
                 cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
                 result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
             return {"output": result.stdout + result.stderr, "exit_code": result.returncode}

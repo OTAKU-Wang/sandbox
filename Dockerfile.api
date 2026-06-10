@@ -13,7 +13,7 @@ WORKDIR /app
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    iptables iproute2 ip netns \
+    ca-certificates curl iptables iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python deps from builder

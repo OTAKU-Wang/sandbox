@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Table, Tag, Typography, Space, Button, Modal, Form, Select, Input, message, Descriptions, Progress, Spin } from 'antd';
+import { Card, Table, Tag, Typography, Space, Button, Modal, Form, Select, Input, message, Checkbox, Popconfirm } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { federationApi } from '../../services/federationApi';
 import type { TrustRelationship, SyncStatus } from '../../services/federationApi';
@@ -50,7 +50,14 @@ export default function CrossSpaceDashboard() {
   const syncMutation = useMutation({
     mutationFn: ({ spaceId, mode }: { spaceId: string; mode: 'full' | 'incremental' }) =>
       federationApi.triggerSync(spaceId, mode),
-    onSuccess: (data) => { message.success(`同步完成，${data.synced} 条记录`); queryClient.invalidateQueries({ queryKey: ['catalog-sync-status'] }); },
+    onSuccess: (data) => {
+      if (data.status === 'failed') {
+        message.error(data.errors?.join('; ') || '同步失败');
+      } else {
+        message.success(`同步完成，${data.synced} 条记录`);
+      }
+      queryClient.invalidateQueries({ queryKey: ['catalog-sync-status'] });
+    },
     onError: () => message.error('同步失败'),
   });
 
@@ -62,7 +69,7 @@ export default function CrossSpaceDashboard() {
 
   const trustColumns: ColumnsType<TrustRelationship> = [
     { title: '信任ID', dataIndex: 'trust_id', key: 'trust_id', render: (v) => <Text code>{v.slice(0, 8)}...</Text> },
-    { title: '远端空间', dataIndex: 'remote_space_name', key: 'remote_space_name' },
+    { title: '远端空间', dataIndex: 'remote_space_name', key: 'remote_space_name', render: (v, record) => v || record.remote_space_id },
     { title: '信任等级', dataIndex: 'trust_level', key: 'trust_level', render: (v) => <Tag color={trustLevelColors[v]}>{v.toUpperCase()}</Tag> },
     { title: '状态', dataIndex: 'status', key: 'status', render: (v) => <Tag color={trustStatusColors[v]}>{v}</Tag> },
     { title: '允许操作', dataIndex: 'allowed_operations', key: 'ops', render: (ops: string[]) => ops?.map(o => <Tag key={o}>{o}</Tag>) },
@@ -72,10 +79,24 @@ export default function CrossSpaceDashboard() {
       render: (_, record) => (
         <Space>
           {record.status === 'active' && (
-            <Button size="small" onClick={() => suspendMutation.mutate(record.trust_id)}>暂停</Button>
+            <Popconfirm
+              title="确认暂停该信任关系？"
+              okText="确认暂停"
+              cancelText="返回"
+              onConfirm={() => suspendMutation.mutate(record.trust_id)}
+            >
+              <Button size="small" loading={suspendMutation.isPending && suspendMutation.variables === record.trust_id}>暂停</Button>
+            </Popconfirm>
           )}
           {record.status === 'suspended' && (
-            <Button size="small" danger onClick={() => revokeMutation.mutate(record.trust_id)}>撤销</Button>
+            <Popconfirm
+              title="确认撤销该信任关系？"
+              okText="确认撤销"
+              cancelText="返回"
+              onConfirm={() => revokeMutation.mutate(record.trust_id)}
+            >
+              <Button size="small" danger loading={revokeMutation.isPending && revokeMutation.variables === record.trust_id}>撤销</Button>
+            </Popconfirm>
           )}
         </Space>
       ),
@@ -91,8 +112,20 @@ export default function CrossSpaceDashboard() {
       title: '操作', key: 'action', width: 200,
       render: (_, record) => (
         <Space>
-          <Button size="small" loading={syncMutation.isPending} onClick={() => syncMutation.mutate({ spaceId: record.space_id, mode: 'incremental' })}>增量同步</Button>
-          <Button size="small" loading={syncMutation.isPending} onClick={() => syncMutation.mutate({ spaceId: record.space_id, mode: 'full' })}>全量同步</Button>
+          <Button
+            size="small"
+            loading={syncMutation.isPending && syncMutation.variables?.spaceId === record.space_id && syncMutation.variables?.mode === 'incremental'}
+            onClick={() => syncMutation.mutate({ spaceId: record.space_id, mode: 'incremental' })}
+          >
+            增量同步
+          </Button>
+          <Button
+            size="small"
+            loading={syncMutation.isPending && syncMutation.variables?.spaceId === record.space_id && syncMutation.variables?.mode === 'full'}
+            onClick={() => syncMutation.mutate({ spaceId: record.space_id, mode: 'full' })}
+          >
+            全量同步
+          </Button>
         </Space>
       ),
     },
@@ -116,8 +149,14 @@ export default function CrossSpaceDashboard() {
       <Modal title="建立信任关系" open={createOpen} onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()} confirmLoading={createMutation.isPending}>
         <Form form={form} layout="vertical" onFinish={(v) => createMutation.mutate(v)}>
-          <Form.Item name="remote_space_id" label="远端空间ID" rules={[{ required: true }]}>
+          <Form.Item name="space_id" label="远端空间ID" rules={[{ required: true }]}>
             <Input placeholder="输入远端空间 ID" />
+          </Form.Item>
+          <Form.Item name="space_name" label="远端空间名称" rules={[{ required: true }]}>
+            <Input placeholder="输入远端空间名称" />
+          </Form.Item>
+          <Form.Item name="endpoint" label="远端端点" rules={[{ required: true }, { type: 'url', message: '请输入有效 URL' }]}>
+            <Input placeholder="https://remote-space.example.com/api" />
           </Form.Item>
           <Form.Item name="trust_level" label="信任等级" rules={[{ required: true }]}>
             <Select options={[
@@ -134,6 +173,9 @@ export default function CrossSpaceDashboard() {
               { label: 'write_data', value: 'write_data' },
               { label: 'train_model', value: 'train_model' },
             ]} />
+          </Form.Item>
+          <Form.Item name="policy_sync" valuePropName="checked">
+            <Checkbox>启用策略同步</Checkbox>
           </Form.Item>
         </Form>
       </Modal>

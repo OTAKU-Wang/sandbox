@@ -57,7 +57,18 @@ class Settings(BaseSettings):
     SANDBOX_K8S_KUBECONFIG: str = ""
     SANDBOX_K8S_FQDN_POLICY_PROVIDER: str = ""
 
-    # TEE simulation (degraded mode when SGX/GPU hardware unavailable)
+    # TEE runtime
+    # auto: use hardware when detected and command hooks are configured; otherwise
+    # fall back to ordinary software confidential sandbox isolation.
+    TEE_MODE: str = "auto"
+    TEE_ALLOW_SOFTWARE_FALLBACK: bool = True
+    TEE_HARDWARE_PROVISION_CMD: str = ""
+    TEE_HARDWARE_EXEC_CMD: str = ""
+    TEE_HARDWARE_ATTEST_CMD: str = ""
+    TEE_HARDWARE_TERMINATE_CMD: str = ""
+
+    # Legacy compatibility flag for the old SGX-shaped simulator. New L1
+    # fallback uses software_confidential semantics and software_hash evidence.
     TEE_SIMULATION_MODE: bool = True
     GPU_TEE_SIMULATION: bool = True
 
@@ -67,9 +78,16 @@ class Settings(BaseSettings):
     # Audit
     CLICKHOUSE_URL: str = "localhost:9000"
 
+    # Alert center
+    ALERT_WEBHOOK_URLS: list[str] = []
+    ALERT_NOTIFICATION_TIMEOUT_SECONDS: float = 3.0
+    ALERT_NOTIFICATION_RETRIES: int = 1
+
     # CDC Kafka
     CDC_KAFKA_BROKERS: str = "localhost:9092"
     CDC_KAFKA_TOPIC_PREFIX: str = "cds.events"
+    CDC_KAFKA_CONNECT_URL: str = ""
+    CDC_KAFKA_CONNECT_TIMEOUT_SECONDS: float = 10.0
 
     # PII NER ML
     PII_NER_USE_ML: bool = False

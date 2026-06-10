@@ -3,6 +3,7 @@ import { Card, Table, Tag, Typography, Space, Button, Drawer, Descriptions, mess
 import { PlusOutlined, StopOutlined, EyeOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { certificateApi, type Certificate, type CertificateDetail, type ChainVerifyResult } from '../../services/identityApi';
+import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title, Text } = Typography;
@@ -51,7 +52,8 @@ export default function Certificates() {
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (id: string) => certificateApi.revokeCertificate(id),
+    mutationFn: (payload: { id: string; reason: string; ticket_id?: string | null }) =>
+      certificateApi.revokeCertificate(payload.id, { reason: payload.reason, ticket_id: payload.ticket_id }),
     onSuccess: () => {
       message.success('证书已撤销');
       queryClient.invalidateQueries({ queryKey: ['certificates'] });
@@ -69,13 +71,11 @@ export default function Certificates() {
   });
 
   const handleRevoke = (id: string) => {
-    Modal.confirm({
+    confirmHighRiskOperation({
       title: '确认撤销证书',
       content: '撤销后该证书将无法使用，此操作不可逆。是否继续？',
       okText: '确认撤销',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: () => revokeMutation.mutate(id),
+      onConfirm: (payload) => revokeMutation.mutate({ id, ...payload }),
     });
   };
 
@@ -179,15 +179,18 @@ export default function Certificates() {
           >
             <Input placeholder="CN=example,O=CDS,C=CN" />
           </Form.Item>
-          <Form.Item name="algorithm" label="签名算法" initialValue="SM2WithSM3">
+          <Form.Item name="cert_type" label="证书用途" initialValue="signing">
             <Select
               options={[
-                { label: 'SM2WithSM3', value: 'SM2WithSM3' },
-                { label: 'ECDSAWithSHA256', value: 'ECDSAWithSHA256' },
+                { label: '签名证书', value: 'signing' },
+                { label: '加密证书', value: 'encryption' },
               ]}
             />
           </Form.Item>
-          <Form.Item name="valid_days" label="有效期 (天)" initialValue={365}>
+          <Form.Item name="organization" label="组织名称">
+            <Input placeholder="CDS Provider" />
+          </Form.Item>
+          <Form.Item name="validity_days" label="有效期 (天)" initialValue={365}>
             <InputNumber min={1} max={3650} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
@@ -225,11 +228,18 @@ export default function Certificates() {
             <Descriptions.Item label="过期时间">
               {new Date(certDetail.valid_to).toLocaleString()}
             </Descriptions.Item>
-            <Descriptions.Item label="公钥">
+            <Descriptions.Item label="证书PEM">
               <Text code copyable style={{ fontSize: 11, wordBreak: 'break-all' }}>
-                {certDetail.public_key}
+                {certDetail.cert_pem || certDetail.public_key}
               </Text>
             </Descriptions.Item>
+            {certDetail.key_pem && (
+              <Descriptions.Item label="私钥PEM">
+                <Text code copyable type="danger" style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                  {certDetail.key_pem}
+                </Text>
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label="创建时间">
               {new Date(certDetail.created_at).toLocaleString()}
             </Descriptions.Item>

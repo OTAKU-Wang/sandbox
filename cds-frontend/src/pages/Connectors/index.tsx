@@ -14,7 +14,6 @@ import {
   Drawer,
   Spin,
   Tooltip,
-  Popconfirm,
 } from 'antd';
 import {
   PlusOutlined,
@@ -27,6 +26,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { connectorApi } from '../../services/connectorApi';
 import type { Connector, HeartbeatResponse } from '../../services/connectorApi';
+import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title, Text } = Typography;
@@ -75,10 +75,14 @@ export default function Connectors() {
   // Register connector mutation
   const registerMutation = useMutation({
     mutationFn: connectorApi.registerConnector,
-    onSuccess: () => {
+    onSuccess: (connector) => {
       message.success('连接器注册成功');
       setRegisterOpen(false);
       form.resetFields();
+      if (connector.api_key) {
+        setNewApiKey(connector.api_key);
+        setNewKeyModalOpen(true);
+      }
       queryClient.invalidateQueries({ queryKey: ['connectors'] });
     },
     onError: () => message.error('注册失败'),
@@ -86,7 +90,8 @@ export default function Connectors() {
 
   // Suspend connector mutation
   const suspendMutation = useMutation({
-    mutationFn: (id: string) => connectorApi.suspendConnector(id),
+    mutationFn: (payload: { id: string; reason: string; ticket_id?: string | null }) =>
+      connectorApi.suspendConnector(payload.id, { reason: payload.reason, ticket_id: payload.ticket_id }),
     onSuccess: () => {
       message.success('连接器已暂停');
       queryClient.invalidateQueries({ queryKey: ['connectors'] });
@@ -96,7 +101,8 @@ export default function Connectors() {
 
   // Reactivate connector mutation
   const reactivateMutation = useMutation({
-    mutationFn: (id: string) => connectorApi.reactivateConnector(id),
+    mutationFn: (payload: { id: string; reason: string; ticket_id?: string | null }) =>
+      connectorApi.reactivateConnector(payload.id, { reason: payload.reason, ticket_id: payload.ticket_id }),
     onSuccess: () => {
       message.success('连接器已重新激活');
       queryClient.invalidateQueries({ queryKey: ['connectors'] });
@@ -106,7 +112,8 @@ export default function Connectors() {
 
   // Rotate key mutation
   const rotateKeyMutation = useMutation({
-    mutationFn: (id: string) => connectorApi.rotateKey(id),
+    mutationFn: (payload: { id: string; reason: string; ticket_id?: string | null }) =>
+      connectorApi.rotateKey(payload.id, { reason: payload.reason, ticket_id: payload.ticket_id }),
     onSuccess: (data) => {
       setNewApiKey(data.api_key);
       setNewKeyModalOpen(true);
@@ -128,6 +135,33 @@ export default function Connectors() {
   const showDetails = (record: Connector) => {
     setSelectedConnector(record);
     setDrawerOpen(true);
+  };
+
+  const handleSuspend = (id: string) => {
+    confirmHighRiskOperation({
+      title: '确认暂停连接器',
+      content: '暂停后该空间将无法继续通过此连接器访问数据产品。',
+      okText: '确认暂停',
+      onConfirm: (payload) => suspendMutation.mutate({ id, ...payload }),
+    });
+  };
+
+  const handleReactivate = (id: string) => {
+    confirmHighRiskOperation({
+      title: '确认恢复连接器',
+      content: '恢复后该空间可继续通过此连接器访问授权数据产品。',
+      okText: '确认恢复',
+      onConfirm: (payload) => reactivateMutation.mutate({ id, ...payload }),
+    });
+  };
+
+  const handleRotateKey = (id: string) => {
+    confirmHighRiskOperation({
+      title: '确认轮换 API Key',
+      content: '旧 Key 将立即失效，远端空间需要同步更新凭证。',
+      okText: '确认轮换',
+      onConfirm: (payload) => rotateKeyMutation.mutate({ id, ...payload }),
+    });
   };
 
   const columns: ColumnsType<Connector> = [
@@ -156,7 +190,7 @@ export default function Connectors() {
       title: '信任等级',
       dataIndex: 'trust_level',
       key: 'trust_level',
-      render: (v) => <Tag>{v?.toUpperCase()}</Tag>,
+      render: (_, record) => <Tag color={record.is_healthy ? 'green' : 'default'}>{record.is_healthy ? 'HEALTHY' : 'UNKNOWN'}</Tag>,
     },
     {
       title: '创建时间',
@@ -177,51 +211,45 @@ export default function Connectors() {
       render: (_, record) => (
         <Space size="small">
           {record.status === 'active' && (
-            <Popconfirm
-              title="确定暂停此连接器？"
-              onConfirm={() => suspendMutation.mutate(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Tooltip title="暂停">
-                <Button size="small" icon={<PauseCircleOutlined />} loading={suspendMutation.isPending}>
-                  暂停
-                </Button>
-              </Tooltip>
-            </Popconfirm>
-          )}
-          {record.status === 'suspended' && (
-            <Popconfirm
-              title="确定重新激活此连接器？"
-              onConfirm={() => reactivateMutation.mutate(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Tooltip title="激活">
-                <Button size="small" type="primary" icon={<PlayCircleOutlined />} loading={reactivateMutation.isPending}>
-                  激活
-                </Button>
-              </Tooltip>
-            </Popconfirm>
-          )}
-          <Popconfirm
-            title="确定轮换此连接器的 API Key？"
-            description="旧 Key 将立即失效"
-            onConfirm={() => rotateKeyMutation.mutate(record.id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Tooltip title="轮换 Key">
-              <Button size="small" icon={<KeyOutlined />} loading={rotateKeyMutation.isPending}>
-                轮换 Key
+            <Tooltip title="暂停">
+              <Button
+                size="small"
+                icon={<PauseCircleOutlined />}
+                loading={suspendMutation.isPending && suspendMutation.variables?.id === record.id}
+                onClick={() => handleSuspend(record.id)}
+              >
+                暂停
               </Button>
             </Tooltip>
-          </Popconfirm>
+          )}
+          {record.status === 'suspended' && (
+            <Tooltip title="激活">
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={reactivateMutation.isPending && reactivateMutation.variables?.id === record.id}
+                onClick={() => handleReactivate(record.id)}
+              >
+                激活
+              </Button>
+            </Tooltip>
+          )}
+          <Tooltip title="轮换 Key">
+            <Button
+              size="small"
+              icon={<KeyOutlined />}
+              loading={rotateKeyMutation.isPending && rotateKeyMutation.variables?.id === record.id}
+              onClick={() => handleRotateKey(record.id)}
+            >
+              轮换 Key
+            </Button>
+          </Tooltip>
           <Tooltip title="心跳检测">
             <Button
               size="small"
               icon={<HeartOutlined />}
-              loading={heartbeatMutation.isPending}
+              loading={heartbeatMutation.isPending && heartbeatMutation.variables === record.id}
               onClick={() => heartbeatMutation.mutate(record.id)}
             >
               心跳
@@ -263,11 +291,14 @@ export default function Connectors() {
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={(v) => registerMutation.mutate(v)}>
-          <Form.Item name="name" label="连接器名称" rules={[{ required: true, message: '请输入连接器名称' }]}>
-            <Input placeholder="输入连接器名称" />
+          <Form.Item name="space_id" label="空间ID" rules={[{ required: true, message: '请输入空间ID' }]}>
+            <Input placeholder="remote-space-001" />
+          </Form.Item>
+          <Form.Item name="space_name" label="空间名称" rules={[{ required: true, message: '请输入空间名称' }]}>
+            <Input placeholder="远端可信数据空间" />
           </Form.Item>
           <Form.Item
-            name="endpoint_url"
+            name="space_url"
             label="端点地址"
             rules={[
               { required: true, message: '请输入端点地址' },
@@ -276,8 +307,8 @@ export default function Connectors() {
           >
             <Input placeholder="https://example.com/api" />
           </Form.Item>
-          <Form.Item name="api_key" label="API Key" rules={[{ required: true, message: '请输入 API Key' }]}>
-            <Input.Password placeholder="输入 API Key" />
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={3} placeholder="连接器用途、对接系统或审批备注" />
           </Form.Item>
         </Form>
       </Modal>
@@ -304,7 +335,10 @@ export default function Connectors() {
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="信任等级">
-              <Tag>{selectedConnector.trust_level?.toUpperCase()}</Tag>
+              <Tag color={selectedConnector.is_healthy ? 'green' : 'default'}>{selectedConnector.is_healthy ? 'HEALTHY' : 'UNKNOWN'}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="API Key 前缀">
+              <Text code>{selectedConnector.api_key_prefix || '-'}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="创建时间">
               {selectedConnector.created_at ? new Date(selectedConnector.created_at).toLocaleString() : '-'}
@@ -336,7 +370,7 @@ export default function Connectors() {
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="最后在线">
-              {new Date(heartbeatData.last_seen).toLocaleString()}
+              {heartbeatData.last_seen ? new Date(heartbeatData.last_seen).toLocaleString() : '无记录'}
             </Descriptions.Item>
             <Descriptions.Item label="延迟">
               {heartbeatData.latency_ms} ms
@@ -347,7 +381,7 @@ export default function Connectors() {
 
       {/* New API Key Modal */}
       <Modal
-        title="API Key 轮换成功"
+        title="API Key 已生成"
         open={newKeyModalOpen}
         onCancel={() => { setNewKeyModalOpen(false); setNewApiKey(''); }}
         footer={<Button onClick={() => { setNewKeyModalOpen(false); setNewApiKey(''); }}>关闭</Button>}

@@ -1,6 +1,6 @@
-"""Sandbox Runtime — manages L1/L2/L3 sandbox lifecycle.
-L1: TEE/SGX/Occlum (stub)
-L2: Firecracker microVM (stub)
+"""Sandbox Runtime — manages L1/L2/L3/K8s sandbox lifecycle.
+L1: TEE/SGX/Occlum adapter with software fallback
+L2: Firecracker/QEMU adapter with hardened local fallback when guest execution is unavailable
 L3: bwrap (Bubblewrap) lightweight sandbox + Docker fallback
 """
 import asyncio
@@ -9,10 +9,12 @@ import uuid
 import subprocess
 import json
 import os
+import shlex
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from abc import ABC, abstractmethod
+from types import SimpleNamespace
 
 from app.models.sandbox_session import SandboxLevel, SessionStatus, SandboxMode
 
@@ -440,6 +442,18 @@ class BwrapAdapter(RuntimeAdapter):
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self._allow_unsandboxed_fallback = allow_unsandboxed_fallback
 
+    @staticmethod
+    def _seccomp_retry_needed(stderr: str, seccomp_fd: int | None) -> bool:
+        """Return True when bwrap failed because the kernel rejected seccomp setup."""
+        if seccomp_fd is None:
+            return False
+        text = (stderr or "").lower()
+        return (
+            "einval" in text
+            or "invalid argument" in text
+            or "pr_set_seccomp" in text
+        )
+
     def provision(self, session_id: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
         from app.services.sandbox_security import (
             SandboxSecurityConfig, SandboxResourceLimits,
@@ -561,8 +575,8 @@ class BwrapAdapter(RuntimeAdapter):
                 asyncio.to_thread(subprocess.run, bwrap_args, capture_output=True, text=True, pass_fds=extra_fds),
                 timeout=effective_timeout,
             )
-            # Retry without seccomp if kernel doesn't support it (EINVAL)
-            if result.returncode != 0 and "EINVAL" in result.stderr and seccomp_fd is not None:
+            # Retry without seccomp if kernel/bwrap rejects PR_SET_SECCOMP.
+            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
                 cmd_no_seccomp = [c for c in bwrap_args if c != "--seccomp" and c != str(seccomp_fd)]
                 result = await asyncio.wait_for(
                     asyncio.to_thread(subprocess.run, cmd_no_seccomp, capture_output=True, text=True),
@@ -778,117 +792,342 @@ class FirecrackerAdapter(RuntimeAdapter):
 
 
 class TEEAdapter(RuntimeAdapter):
-    """L1: TEE/SGX/Occlum adapter with software simulation fallback.
+    """L1 adapter for hardware TEE with ordinary software-confidential fallback.
 
-    When SGX hardware is available, uses the real TEE runtime.
-    When SGX is not available, falls back to TEESimulator (software-only
-    isolation via bubblewrap with simulated attestation).
+    Hardware is used only when both conditions are true:
+    - a host capability signal is detected for the selected provider; and
+    - an operator-configured hardware execution command is present.
+
+    Without a usable TEE environment, L1 remains a confidential sandbox backed
+    by bwrap isolation and software_hash attestation. It does not emit fake SGX
+    evidence in fallback mode.
     """
 
-    def __init__(self):
+    _QUOTE_TYPE_BY_PROVIDER = {
+        "sgx": "sgx_ecdsa",
+        "sev_snp": "sev_snp",
+        "tdx": "tdx",
+        "itrustee": "itrustee",
+    }
+
+    def __init__(self, detector=None):
         self._simulator = None
         self._is_simulation = False
-        self._enclaves: dict[str, object] = {}  # container_id -> EnclaveHandle
+        self._enclaves: dict[str, object] = {}
+        self._detector = detector
+
+    def _get_detector(self):
+        if self._detector is None:
+            from app.services.tee_capability import TEECapabilityDetector
+            self._detector = TEECapabilityDetector()
+        return self._detector
 
     def _get_simulator(self):
-        """Lazy-initialize the TEE simulator."""
+        """Lazy-initialize the software confidential sandbox backend."""
         if self._simulator is None:
             from app.services.tee_simulator import TEESimulator
             self._simulator = TEESimulator()
             self._is_simulation = True
             logger.warning(
-                "[TEEAdapter] SGX hardware not available -- using TEESimulator (software-only, "
-                "no hardware TEE guarantees)"
+                "[TEEAdapter] Hardware TEE unavailable or unconfigured -- using software_confidential "
+                "sandbox fallback (no hardware TEE guarantees)"
             )
         return self._simulator
 
     @property
     def is_simulation(self) -> bool:
-        """True when running in software simulation mode (no SGX hardware)."""
+        """True when the adapter has used the software-confidential fallback."""
         return self._is_simulation
 
     def provision(self, session_id: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
         from app.core.config import get_settings
+
         settings = get_settings()
+        capability = self._get_detector().detect(settings.TEE_MODE)
 
-        # Use TEESimulator as fallback when TEE_SIMULATION_MODE is enabled
-        if settings.TEE_SIMULATION_MODE:
-            sim = self._get_simulator()
-            if not getattr(sim, "_bwrap_available", False):
-                return {
-                    "container_id": None,
-                    "status": SessionStatus.FAILED.value,
-                    "error": "L1 TEE simulation requires bubblewrap isolation; bwrap is not available",
-                }
+        if capability.hardware_available and settings.TEE_HARDWARE_EXEC_CMD:
             try:
-                enclave = sim.create_enclave(memory_mb=256)
-                container_id = f"tee-{session_id}"
-                self._enclaves[container_id] = enclave
-
-                # Copy data into enclave workspace if provided
-                if data_path and Path(data_path).exists():
-                    input_dir = Path(enclave.workspace) / "input"
-                    if Path(data_path).is_file():
-                        shutil.copy2(data_path, input_dir)
-                    elif Path(data_path).is_dir():
-                        shutil.copytree(data_path, input_dir / "data", dirs_exist_ok=True)
-
-                # Generate attestation report
-                report = sim.attest(enclave)
-                quote_raw = None
-                quote_measurement = None
-                try:
-                    from app.services.remote_attestation import AttestationService, TEEType
-                    quote = AttestationService().generate_quote(TEEType.SGX, str(session_id).encode())
-                    quote_raw = quote.raw_bytes.decode("utf-8")
-                    quote_measurement = quote.measurement
-                except Exception as e:
-                    logger.warning("[TEEAdapter] Failed to generate SGX-shaped attestation quote: %s", e)
-
-                logger.info(
-                    "[TEEAdapter] Provisioned simulated L1 TEE session %s "
-                    "(mrenclave=%s..., is_simulation=True)",
-                    session_id[:8], enclave.mrenclave[:16],
-                )
-                return {
-                    "container_id": container_id,
-                    "status": SessionStatus.RUNNING.value,
-                    "workspace": enclave.workspace,
-                    "is_simulation": True,
-                    "mrenclave": enclave.mrenclave,
-                    "simulated_attestation_quote": report.quote,
-                    "attestation_quote": quote_raw,
-                    "attestation_type": "sgx",
-                    "attestation_measurement": quote_measurement,
-                }
+                return self._provision_hardware(session_id, data_path, timeout, user_id, capability, settings)
             except Exception as e:
-                logger.error("[TEEAdapter] Simulated TEE provision failed: %s", e)
+                logger.error("[TEEAdapter] Hardware TEE provision failed: %s", e)
                 return {
                     "container_id": None,
                     "status": SessionStatus.FAILED.value,
-                    "error": f"TEE simulation provision failed: {e}",
+                    "error": f"hardware TEE provision failed: {e}",
+                    "tee_mode": "hardware",
+                    "tee_provider": capability.provider,
                 }
 
+        if not settings.TEE_ALLOW_SOFTWARE_FALLBACK:
+            reason = capability.reason
+            if capability.hardware_available:
+                reason = "hardware TEE detected but CDS_TEE_HARDWARE_EXEC_CMD is not configured"
+            return {
+                "container_id": None,
+                "status": SessionStatus.FAILED.value,
+                "error": f"L1 TEE unavailable and software fallback is disabled: {reason}",
+                "tee_mode": "unavailable",
+                "tee_provider": capability.provider,
+            }
+
+        fallback_reason = capability.reason
+        if capability.hardware_available:
+            fallback_reason = "hardware TEE detected but CDS_TEE_HARDWARE_EXEC_CMD is not configured"
+        return self._provision_software_confidential(session_id, data_path, fallback_reason)
+
+    def _provision_software_confidential(self, session_id: str, data_path: str, fallback_reason: str) -> dict:
+        sim = self._get_simulator()
+        if not getattr(sim, "_bwrap_available", False):
+            return {
+                "container_id": None,
+                "status": SessionStatus.FAILED.value,
+                "error": "L1 software_confidential fallback requires bubblewrap isolation; bwrap is not available",
+                "tee_mode": "software_confidential",
+                "tee_provider": "software_confidential",
+            }
+
+        try:
+            enclave = sim.create_enclave(memory_mb=256)
+            container_id = f"tee-{session_id}"
+            self._copy_input_data(data_path, Path(enclave.workspace))
+
+            report = sim.attest(enclave)
+            quote = self._generate_software_quote(session_id)
+            self._enclaves[container_id] = SimpleNamespace(
+                mode="software_confidential",
+                provider="software_confidential",
+                workspace=enclave.workspace,
+                enclave=enclave,
+            )
+
+            logger.info(
+                "[TEEAdapter] Provisioned L1 software_confidential session %s "
+                "(measurement=%s..., fallback_reason=%s)",
+                session_id[:8], enclave.mrenclave[:16], fallback_reason,
+            )
+            return {
+                "container_id": container_id,
+                "status": SessionStatus.RUNNING.value,
+                "workspace": enclave.workspace,
+                "is_simulation": True,
+                "tee_mode": "software_confidential",
+                "tee_provider": "software_confidential",
+                "hardware_available": False,
+                "fallback_reason": fallback_reason,
+                "mrenclave": enclave.mrenclave,
+                "software_attestation_quote": report.quote,
+                "attestation_quote": quote.raw_bytes.decode("utf-8"),
+                "attestation_type": quote.quote_type.value,
+                "attestation_measurement": quote.measurement,
+            }
+        except Exception as e:
+            logger.error("[TEEAdapter] Software confidential provision failed: %s", e)
+            return {
+                "container_id": None,
+                "status": SessionStatus.FAILED.value,
+                "error": f"software confidential provision failed: {e}",
+                "tee_mode": "software_confidential",
+                "tee_provider": "software_confidential",
+            }
+
+    def _provision_hardware(self, session_id: str, data_path: str, timeout: int, user_id: str, capability, settings) -> dict:
+        workspace = Path("/tmp/cds-tee-hw") / str(session_id)
+        (workspace / "input").mkdir(parents=True, exist_ok=True)
+        (workspace / "output").mkdir(exist_ok=True)
+        (workspace / "tmp").mkdir(exist_ok=True)
+        (workspace / "tmp").chmod(0o700)
+        self._copy_input_data(data_path, workspace)
+
+        container_id = f"tee-{session_id}"
+        env = self._hardware_env(
+            session_id=session_id,
+            provider=capability.provider,
+            workspace=workspace,
+            user_id=user_id,
+        )
+        hardware_handle = container_id
+        if settings.TEE_HARDWARE_PROVISION_CMD:
+            result = self._run_hardware_command(
+                settings.TEE_HARDWARE_PROVISION_CMD,
+                input_text="",
+                env=env,
+                timeout=min(timeout, 120),
+                cwd=workspace,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "hardware provision command failed")
+            hardware_handle = self._parse_hardware_handle(result.stdout, default=container_id)
+            env["CDS_TEE_HANDLE"] = hardware_handle
+
+        attestation_quote, attestation_type, measurement = self._generate_hardware_quote(
+            provider=capability.provider,
+            session_id=session_id,
+            workspace=workspace,
+            env=env,
+            settings=settings,
+        )
+        handle = SimpleNamespace(
+            mode="hardware",
+            provider=capability.provider,
+            workspace=str(workspace),
+            hardware_handle=hardware_handle,
+            evidence=list(capability.evidence),
+        )
+        self._enclaves[container_id] = handle
+
+        logger.info(
+            "[TEEAdapter] Provisioned hardware TEE session %s (provider=%s, evidence=%s)",
+            session_id[:8], capability.provider, ",".join(capability.evidence),
+        )
         return {
-            "container_id": None,
-            "status": SessionStatus.FAILED.value,
-            "error": "L1 TEE not available and TEE_SIMULATION_MODE is disabled",
+            "container_id": container_id,
+            "status": SessionStatus.RUNNING.value,
+            "workspace": str(workspace),
+            "is_simulation": False,
+            "tee_mode": "hardware",
+            "tee_provider": capability.provider,
+            "hardware_available": True,
+            "hardware_evidence": list(capability.evidence),
+            "hardware_handle": hardware_handle,
+            "attestation_quote": attestation_quote,
+            "attestation_type": attestation_type,
+            "attestation_measurement": measurement,
         }
+
+    @staticmethod
+    def _generate_software_quote(session_id: str):
+        from app.services.remote_attestation import AttestationService, TEEType
+
+        return AttestationService().generate_quote(TEEType.FIRECRACKER, str(session_id).encode())
+
+    def _generate_hardware_quote(self, provider: str, session_id: str, workspace: Path, env: dict[str, str], settings):
+        quote_type = self._QUOTE_TYPE_BY_PROVIDER.get(provider, provider)
+        if settings.TEE_HARDWARE_ATTEST_CMD:
+            env = dict(env)
+            env["CDS_TEE_REPORT_DATA"] = str(session_id).encode().hex()
+            result = self._run_hardware_command(
+                settings.TEE_HARDWARE_ATTEST_CMD,
+                input_text="",
+                env=env,
+                timeout=60,
+                cwd=workspace,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "hardware attestation command failed")
+            payload = self._parse_hardware_attestation(result.stdout)
+            return (
+                json.dumps(payload, sort_keys=True),
+                payload.get("type", quote_type),
+                payload.get("measurement"),
+            )
+
+        logger.warning(
+            "[TEEAdapter] Hardware TEE attestation command is not configured for %s; "
+            "no hardware quote will be emitted",
+            provider,
+        )
+        return None, quote_type, None
+
+    @staticmethod
+    def _parse_hardware_attestation(stdout: str) -> dict:
+        raw = stdout.strip()
+        if not raw:
+            raise RuntimeError("hardware attestation command returned empty output")
+        payload = json.loads(raw)
+        if isinstance(payload.get("quote"), dict):
+            payload = payload["quote"]
+        if not isinstance(payload, dict):
+            raise RuntimeError("hardware attestation command must return a JSON object")
+        if "type" not in payload or "measurement" not in payload:
+            raise RuntimeError("hardware attestation JSON must include type and measurement")
+        return payload
+
+    @staticmethod
+    def _parse_hardware_handle(stdout: str, default: str) -> str:
+        raw = stdout.strip()
+        if not raw:
+            return default
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw.splitlines()[-1].strip() or default
+        if isinstance(payload, dict):
+            return str(payload.get("handle_id") or payload.get("container_id") or payload.get("id") or default)
+        return default
+
+    @staticmethod
+    def _hardware_env(
+        session_id: str,
+        provider: str,
+        workspace: Path,
+        user_id: str = "",
+        handle_id: str = "",
+        language: str = "",
+        code_file: Path | None = None,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        env = os.environ.copy()
+        env.update({
+            "CDS_TEE_SESSION_ID": str(session_id),
+            "CDS_TEE_PROVIDER": provider,
+            "CDS_TEE_WORKSPACE": str(workspace),
+            "CDS_TEE_INPUT_DIR": str(workspace / "input"),
+            "CDS_TEE_OUTPUT_DIR": str(workspace / "output"),
+            "CDS_TEE_TMP_DIR": str(workspace / "tmp"),
+        })
+        if user_id:
+            env["CDS_TEE_USER_ID"] = user_id
+        if handle_id:
+            env["CDS_TEE_HANDLE"] = handle_id
+        if language:
+            env["CDS_TEE_LANGUAGE"] = language
+        if code_file is not None:
+            env["CDS_TEE_CODE_FILE"] = str(code_file)
+        if session_key:
+            env["CDS_SESSION_KEY"] = session_key
+        if env_vars:
+            env.update(env_vars)
+        return env
+
+    @staticmethod
+    def _run_hardware_command(command: str, input_text: str, env: dict[str, str], timeout: int, cwd: Path):
+        argv = shlex.split(command)
+        if not argv:
+            raise RuntimeError("empty hardware TEE command")
+        return subprocess.run(
+            argv,
+            input=input_text,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(cwd),
+            timeout=timeout,
+        )
+
+    @staticmethod
+    def _copy_input_data(data_path: str, workspace: Path) -> None:
+        if not data_path or not Path(data_path).exists():
+            return
+        input_dir = workspace / "input"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        source = Path(data_path)
+        if source.is_file():
+            shutil.copy2(source, input_dir / source.name)
+        elif source.is_dir():
+            shutil.copytree(source, input_dir / "data", dirs_exist_ok=True)
 
     async def execute(self, container_id: str, code: str, language: str,
                       session_key: str | None = None, env_vars: dict[str, str] | None = None,
                       timeout: int | None = None) -> dict:
-        enclave = self._enclaves.get(container_id)
-        if not enclave:
+        handle = self._enclaves.get(container_id)
+        if not handle:
             return {"output": "TEE enclave not found", "exit_code": -1, "duration_ms": 0, "is_simulation": self._is_simulation}
 
-        # Execute inside the isolated bwrap process via the ProcessAdapter pattern
-        import asyncio
-        import subprocess
-        import os
-        from datetime import datetime
+        if getattr(handle, "mode", "software_confidential") == "hardware":
+            return await self._execute_hardware(container_id, handle, code, language, session_key, env_vars, timeout)
 
-        workspace = Path(enclave.workspace)
+        workspace = Path(handle.workspace)
         ext_map = {"python": "py", "sql": "sql", "shell": "sh", "bash": "sh"}
         ext = ext_map.get(language, "py")
         code_file = workspace / "tmp" / f"exec.{ext}"
@@ -932,11 +1171,12 @@ class TEEAdapter(RuntimeAdapter):
                 cmd += ["bash", f"/workspace/tmp/exec.{ext}"]
         else:
             return {
-                "output": "SECURITY ERROR: bwrap not installed and L1 TEE simulation cannot execute safely.",
+                "output": "SECURITY ERROR: bwrap not installed and L1 software_confidential fallback cannot execute safely.",
                 "exit_code": -1,
                 "duration_ms": 0,
                 "sandbox_level": "L1",
                 "is_simulation": self._is_simulation,
+                "tee_mode": getattr(handle, "mode", "software_confidential"),
             }
 
         env = os.environ.copy()
@@ -958,6 +1198,7 @@ class TEEAdapter(RuntimeAdapter):
                 "duration_ms": duration,
                 "sandbox_level": "L1",
                 "is_simulation": self._is_simulation,
+                "tee_mode": getattr(handle, "mode", "software_confidential"),
             }
         except asyncio.TimeoutError:
             return {
@@ -966,6 +1207,7 @@ class TEEAdapter(RuntimeAdapter):
                 "duration_ms": effective_timeout * 1000,
                 "sandbox_level": "L1",
                 "is_simulation": self._is_simulation,
+                "tee_mode": getattr(handle, "mode", "software_confidential"),
             }
         except Exception as e:
             return {
@@ -974,13 +1216,110 @@ class TEEAdapter(RuntimeAdapter):
                 "duration_ms": 0,
                 "sandbox_level": "L1",
                 "is_simulation": self._is_simulation,
+                "tee_mode": getattr(handle, "mode", "software_confidential"),
+            }
+
+    async def _execute_hardware(self, container_id: str, handle, code: str, language: str,
+                                session_key: str | None, env_vars: dict[str, str] | None,
+                                timeout: int | None) -> dict:
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        effective_timeout = timeout or 120
+        workspace = Path(handle.workspace)
+        ext_map = {"python": "py", "sql": "sql", "shell": "sh", "bash": "sh"}
+        ext = ext_map.get(language, "py")
+        code_file = workspace / "tmp" / f"exec.{ext}"
+        code_file.write_text(code)
+        code_file.chmod(0o600)
+        env = self._hardware_env(
+            session_id=container_id.removeprefix("tee-"),
+            provider=handle.provider,
+            workspace=workspace,
+            handle_id=getattr(handle, "hardware_handle", container_id),
+            language=language,
+            code_file=code_file,
+            session_key=session_key,
+            env_vars=env_vars,
+        )
+        try:
+            start = datetime.now()
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._run_hardware_command,
+                    settings.TEE_HARDWARE_EXEC_CMD,
+                    code,
+                    env,
+                    effective_timeout,
+                    workspace,
+                ),
+                timeout=effective_timeout,
+            )
+            duration = int((datetime.now() - start).total_seconds() * 1000)
+            return {
+                "output": result.stdout + result.stderr,
+                "exit_code": result.returncode,
+                "duration_ms": duration,
+                "sandbox_level": "L1",
+                "is_simulation": False,
+                "tee_mode": "hardware",
+                "tee_provider": handle.provider,
+            }
+        except asyncio.TimeoutError:
+            return {
+                "output": f"Execution timed out ({effective_timeout}s)",
+                "exit_code": -1,
+                "duration_ms": effective_timeout * 1000,
+                "sandbox_level": "L1",
+                "is_simulation": False,
+                "tee_mode": "hardware",
+                "tee_provider": handle.provider,
+            }
+        except Exception as e:
+            return {
+                "output": str(e),
+                "exit_code": -1,
+                "duration_ms": 0,
+                "sandbox_level": "L1",
+                "is_simulation": False,
+                "tee_mode": "hardware",
+                "tee_provider": handle.provider,
             }
 
     def terminate(self, container_id: str) -> bool:
-        enclave = self._enclaves.pop(container_id, None)
-        if enclave and self._simulator:
+        handle = self._enclaves.pop(container_id, None)
+        if not handle:
+            return True
+
+        if getattr(handle, "mode", "software_confidential") == "hardware":
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            if settings.TEE_HARDWARE_TERMINATE_CMD:
+                workspace = Path(handle.workspace)
+                env = self._hardware_env(
+                    session_id=container_id.removeprefix("tee-"),
+                    provider=handle.provider,
+                    workspace=workspace,
+                    handle_id=getattr(handle, "hardware_handle", container_id),
+                )
+                result = self._run_hardware_command(
+                    settings.TEE_HARDWARE_TERMINATE_CMD,
+                    input_text="",
+                    env=env,
+                    timeout=30,
+                    cwd=workspace,
+                )
+                if result.returncode != 0:
+                    logger.warning("[TEEAdapter] Hardware terminate command failed for %s: %s", container_id, result.stderr)
+                    return False
+            logger.info("[TEEAdapter] Terminated hardware TEE session for %s", container_id)
+            return True
+
+        enclave = getattr(handle, "enclave", handle)
+        if self._simulator:
             self._simulator.destroy_enclave(enclave)
-            logger.info("[TEEAdapter] Terminated simulated TEE enclave for %s", container_id)
+            logger.info("[TEEAdapter] Terminated software_confidential enclave for %s", container_id)
         return True
 
     def get_status(self, container_id: str) -> str:
@@ -1711,6 +2050,144 @@ class DataModelingRuntime(SceneRuntime):
         return result
 
 
+class FederatedRuntime(SceneRuntime):
+    """Joint federated scene runtime.
+
+    The runtime supports two execution shapes:
+    - normal sandbox code with stricter federation-mode guards;
+    - context-driven remote federation calls through ``FederationConnector``.
+    """
+
+    def __init__(self):
+        super().__init__(SandboxMode.JOINT_FEDERATED)
+
+    async def pre_execute(self, code: str, context: dict) -> str:
+        import re
+
+        language = (context.get("language") or "python").lower()
+
+        if language == "sql":
+            sql = code.strip()
+            if not sql:
+                return code
+            blocked = re.compile(
+                r"^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|COPY|ATTACH)\b",
+                re.IGNORECASE,
+            )
+            if blocked.match(sql):
+                raise ValueError(
+                    f"Mutating SQL is not allowed in joint_federated mode: {sql.split()[0].upper()}"
+                )
+            if re.search(r"\bSELECT\s+\*\s+FROM\b", sql, re.IGNORECASE) and not context.get("allow_raw_rows"):
+                raise ValueError("Raw SELECT * is not allowed in joint_federated mode")
+            max_rows = int(context.get("max_output_rows", 10000))
+            if not re.search(r"\bLIMIT\b", sql, re.IGNORECASE):
+                sql = f"{sql.rstrip(';')} LIMIT {max_rows}"
+            return sql
+
+        if language == "python" and not context.get("allow_direct_network"):
+            direct_network = re.compile(
+                r"(^|\n)\s*(import|from)\s+(requests|httpx|urllib|socket)\b|"
+                r"\b(requests|httpx|urllib|socket)\.",
+                re.IGNORECASE,
+            )
+            if direct_network.search(code):
+                raise ValueError(
+                    "Direct network access is not allowed in joint_federated mode; "
+                    "use federation_request context"
+                )
+
+        if language == "python":
+            metadata = {
+                "mode": SandboxMode.JOINT_FEDERATED.value,
+                "allowed_operations": context.get("allowed_operations", []),
+            }
+            guard = (
+                "import os\n"
+                f"os.environ['CDS_SANDBOX_MODE']='{SandboxMode.JOINT_FEDERATED.value}'\n"
+                f"os.environ['CDS_FEDERATION_CONTEXT']={json.dumps(json.dumps(metadata, ensure_ascii=False))}\n"
+            )
+            return guard + code
+
+        return code
+
+    async def execute(
+        self,
+        container_id: str,
+        code: str,
+        language: str,
+        context: dict | None = None,
+    ) -> dict:
+        ctx = context or {}
+        request = ctx.get("federation_request") or ctx.get("federated_request")
+        if request:
+            return await self._execute_federation_request(request, ctx)
+        return await super().execute(container_id, code, language, ctx)
+
+    async def _execute_federation_request(self, request: dict, context: dict) -> dict:
+        connector = request.get("connector") or context.get("federation_connector")
+        if connector is None:
+            from app.services.federation_connector import FederationConnector
+            connector = FederationConnector()
+
+        trust = request.get("trust") or context.get("federation_trust")
+        if trust is None:
+            return {
+                "output": "federation_request requires a trusted FederationTrust context",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "federated": True,
+            }
+
+        operation = request.get("operation") or context.get("operation")
+        resource = request.get("resource") or context.get("resource")
+        if not operation or not resource:
+            return {
+                "output": "federation_request requires operation and resource",
+                "exit_code": -1,
+                "duration_ms": 0,
+                "federated": True,
+            }
+
+        response = connector.send_request(
+            trust=trust,
+            operation=operation,
+            resource=resource,
+            payload=request.get("payload") or context.get("payload"),
+            user_id=request.get("user_id") or context.get("user_id"),
+        )
+        if hasattr(response, "__await__"):
+            response = await response
+
+        output = {
+            "request_id": getattr(response, "request_id", ""),
+            "status_code": getattr(response, "status_code", 0),
+            "data": getattr(response, "data", None),
+            "error": getattr(response, "error", None),
+            "source_space": getattr(response, "source_space", ""),
+        }
+        status_code = int(output["status_code"] or 0)
+        return {
+            "output": json.dumps(output, ensure_ascii=False, default=str),
+            "exit_code": 0 if 200 <= status_code < 400 else -1,
+            "duration_ms": int(getattr(response, "duration_ms", 0) or 0),
+            "federated": True,
+            "status_code": status_code,
+            "source_space": output["source_space"],
+        }
+
+    async def post_execute(self, result: dict, context: dict) -> dict:
+        output = result.get("output", "") or ""
+        max_rows = int(context.get("max_output_rows", 10000))
+        if output:
+            lines = output.splitlines()
+            if len(lines) > max_rows:
+                result["output"] = "\n".join(lines[:max_rows]) + f"\n... (truncated, {len(lines)} total rows)"
+                result["truncated"] = True
+        result.setdefault("federated", True)
+        return result
+
+
 class SceneRuntimeFactory:
     """Factory for creating scene-specific runtimes (P2-5).
 
@@ -1725,13 +2202,14 @@ class SceneRuntimeFactory:
         SandboxMode.LLM_TRAINING.value: LLMTrainingRuntime,
         SandboxMode.PRODUCT_DEV.value: ProductDevRuntime,
         SandboxMode.STRUCTURED_APP.value: StructuredAppRuntime,
+        SandboxMode.JOINT_FEDERATED.value: FederatedRuntime,
     }
 
     @classmethod
     def create(cls, mode: str | SandboxMode) -> SceneRuntime:
         """Create a scene runtime for the given mode.
 
-        Falls back to base SceneRuntime for unregistered modes (e.g. joint_federated).
+        Falls back to base SceneRuntime for unknown extension modes.
         """
         mode_val = mode.value if hasattr(mode, "value") else str(mode)
         runtime_cls = cls._registry.get(mode_val)

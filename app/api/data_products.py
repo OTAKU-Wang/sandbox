@@ -409,20 +409,13 @@ async def archive_product(
     return DataProductResponse.model_validate(product)
 
 
-# --- Test Data Generation for Development ---
-
-@router.post("/{product_id}/test-data/mock")
-async def generate_mock_test_data(
+async def _generate_synthetic_test_data_for_product(
     product_id: uuid.UUID,
-    row_count: int = Query(100, ge=1, le=10000),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    row_count: int,
+    db: AsyncSession,
+    current_user: User,
+    response_type: str,
 ):
-    """Generate mock test data from the product's schema definition.
-
-    Uses the product's data_schema to produce structurally valid but
-    synthetic data for pipeline development and testing.
-    """
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
     product = result.scalar_one_or_none()
     if not product:
@@ -432,22 +425,51 @@ async def generate_mock_test_data(
     if not product.data_schema or "fields" not in product.data_schema:
         raise HTTPException(status_code=400, detail="Product has no schema defined — set data_schema.fields first")
 
-    mock_data = test_data_generator.generate_mock(product.data_schema["fields"], row_count)
+    synthetic_data = test_data_generator.generate_mock(product.data_schema["fields"], row_count)
 
     await audit_service.log(
-        db, action="data_product.test_data.mock", resource_type="data_product",
+        db, action="data_product.test_data.synthetic", resource_type="data_product",
         user_id=current_user.id, resource_id=str(product.id),
-        detail={"row_count": row_count, "fields": len(product.data_schema["fields"])},
+        detail={"row_count": row_count, "fields": len(product.data_schema["fields"]), "response_type": response_type},
     )
 
     return {
         "product_id": str(product_id),
-        "type": "mock",
+        "type": response_type,
+        "synthetic": True,
         "row_count": row_count,
         "format": "csv",
-        "data": mock_data,
+        "data": synthetic_data,
         "schema_fields": [f["name"] for f in product.data_schema["fields"]],
     }
+
+
+# --- Test Data Generation for Development ---
+
+@router.post("/{product_id}/test-data/synthetic")
+async def generate_synthetic_test_data(
+    product_id: uuid.UUID,
+    row_count: int = Query(100, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate synthetic test data from the product's schema definition.
+
+    Uses the product's data_schema to produce structurally valid, non-real data
+    for pipeline development and testing.
+    """
+    return await _generate_synthetic_test_data_for_product(product_id, row_count, db, current_user, "synthetic")
+
+
+@router.post("/{product_id}/test-data/mock", deprecated=True)
+async def generate_mock_test_data(
+    product_id: uuid.UUID,
+    row_count: int = Query(100, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Deprecated compatibility alias for synthetic test data generation."""
+    return await _generate_synthetic_test_data_for_product(product_id, row_count, db, current_user, "mock")
 
 
 @router.post("/{product_id}/test-data/sample")

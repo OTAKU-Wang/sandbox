@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.kms import DataEncryptionKey, DEKStatus, KeyAuditLog
+from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.services.kms_service import kms_service
 from app.services.audit_service import audit_service
 
@@ -150,6 +151,7 @@ async def rotate_dek(
 @router.delete("/keys/{key_id}")
 async def revoke_dek(
     key_id: str,
+    body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -175,6 +177,7 @@ async def revoke_dek(
         key_id=key_id,
         operation="revoke",
         user_id=current_user.id,
+        detail={"reason": body.reason, "ticket_id": body.ticket_id},
     )
     db.add(audit)
 
@@ -183,7 +186,7 @@ async def revoke_dek(
     await audit_service.log(
         db, action="kms.revoke_key", resource_type="key",
         user_id=current_user.id, resource_id=key_id,
-        detail={"terminated_sessions": terminated_count},
+        detail={"terminated_sessions": terminated_count, "reason": body.reason, "ticket_id": body.ticket_id},
     )
 
     return {"key_id": key_id, "status": "revoked", "terminated_sessions": terminated_count}

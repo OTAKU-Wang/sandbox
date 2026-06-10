@@ -187,7 +187,11 @@ async def test_e2e_full_happy_path(client: AsyncClient, admin_headers: dict):
     assert term_resp.json()["status"] == "terminated"
 
     # 10. Terminate contract
-    ct_resp = await client.post(f"/api/v1/contracts/{contract_id}/terminate", headers=provider_headers)
+    ct_resp = await client.post(
+        f"/api/v1/contracts/{contract_id}/terminate",
+        headers=provider_headers,
+        json={"reason": "e2e contract terminate"},
+    )
     assert ct_resp.status_code == 200
 
 

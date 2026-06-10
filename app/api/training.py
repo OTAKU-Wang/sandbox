@@ -16,9 +16,11 @@ from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
+from app.models.audit_log import AuditLog
 from app.models.user import User, UserRole
 from app.models.training_job import TrainingJob, TrainingJobStatus, TrainingJobType
 from app.models.watermark_record import WatermarkRecord
+from app.services.crypto_service import crypto_service
 from app.services.audit_service import audit_service
 from app.services.llm_sft_runtime import (
     ALLOWED_BASE_MODELS,
@@ -30,6 +32,7 @@ from app.services.llm_sft_runtime import (
     llm_sft_runtime,
 )
 from app.services.model_watermark import model_watermark_service
+from app.services.secure_checkpoint import secure_checkpoint_store
 
 router = APIRouter()
 
@@ -273,7 +276,9 @@ async def list_training_jobs(
         "items": [
             {
                 "job_id": j.job_id, "job_type": j.job_type, "status": j.status,
-                "base_model": j.base_model, "metrics": j.metrics,
+                "base_model": j.base_model, "config": j.config,
+                "metrics": j.metrics, "output_path": j.output_path,
+                "error_message": j.error_message,
                 "created_at": j.created_at.isoformat(),
                 "started_at": j.started_at.isoformat() if j.started_at else None,
                 "completed_at": j.completed_at.isoformat() if j.completed_at else None,
@@ -328,7 +333,88 @@ async def cancel_training_job(
     job.completed_at = datetime.now(timezone.utc)
     await db.flush()
 
-    return {"job_id": job_id, "status": "cancelled"}
+    return {
+        "job_id": job.job_id, "job_type": job.job_type, "status": job.status,
+        "base_model": job.base_model, "config": job.config,
+        "metrics": job.metrics, "output_path": job.output_path,
+        "error_message": job.error_message,
+        "created_at": job.created_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
+@router.get("/jobs/{job_id}/audit")
+async def get_training_job_audit(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return audit events associated with a training job."""
+    job_result = await db.execute(select(TrainingJob).where(TrainingJob.job_id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Training job not found")
+    if job.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your training job")
+
+    result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.resource_type == "training_job", AuditLog.resource_id == job_id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(100)
+    )
+    entries = []
+    for entry in result.scalars().all():
+        payload = {
+            "id": str(entry.id),
+            "action": entry.action,
+            "resource_id": entry.resource_id,
+            "detail": entry.detail or {},
+            "created_at": entry.created_at.isoformat(),
+        }
+        entries.append({
+            "entry_id": str(entry.id),
+            "event_type": entry.action,
+            "job_id": job_id,
+            "timestamp": entry.created_at.isoformat(),
+            "actor": str(entry.user_id) if entry.user_id else "",
+            "details": entry.detail or {},
+            "prev_hash": "",
+            "entry_hash": entry.blockchain_tx_hash or crypto_service.sm3_hash(
+                json.dumps(payload, sort_keys=True, default=str).encode()
+            ),
+        })
+    return entries
+
+
+@router.get("/jobs/{job_id}/checkpoints")
+async def list_training_job_checkpoints(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List encrypted checkpoint metadata associated with a training job."""
+    job_result = await db.execute(select(TrainingJob).where(TrainingJob.job_id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Training job not found")
+    if job.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your training job")
+
+    return [
+        {
+            "checkpoint_id": checkpoint.checkpoint_id,
+            "job_id": checkpoint.job_id,
+            "epoch": checkpoint.epoch,
+            "step": checkpoint.step,
+            "plaintext_hash": checkpoint.plaintext_hash,
+            "ciphertext_hash": checkpoint.ciphertext_hash,
+            "size_bytes": checkpoint.size_bytes,
+            "created_at": checkpoint.created_at.isoformat(),
+        }
+        for checkpoint in secure_checkpoint_store.list_checkpoints(job_id)
+    ]
 
 
 # ---------------------------------------------------------------------------

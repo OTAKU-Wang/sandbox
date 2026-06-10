@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Card, Table, Tag, Typography, Space, Button, Drawer, message, Modal, Form, Select, Timeline, Spin } from 'antd';
+import { Card, Table, Tag, Typography, Space, Button, Drawer, message, Modal, Form, Input, Timeline, Spin } from 'antd';
 import { PlusOutlined, ReloadOutlined, StopOutlined, AuditOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { kmsApi, type KmsKey, type KeyAuditEntry } from '../../services/identityApi';
+import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title, Text } = Typography;
@@ -64,15 +65,16 @@ export default function KeyManagement() {
 
   const rotateMutation = useMutation({
     mutationFn: (keyId: string) => kmsApi.rotateKey(keyId),
-    onSuccess: () => {
-      message.success('密钥轮换成功');
+    onSuccess: (result) => {
+      message.success(`密钥轮换成功，新密钥 ${result.new_key_id.slice(0, 12)}...`);
       queryClient.invalidateQueries({ queryKey: ['kms-keys'] });
     },
     onError: () => message.error('密钥轮换失败'),
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (keyId: string) => kmsApi.revokeKey(keyId),
+    mutationFn: (payload: { keyId: string; reason: string; ticket_id?: string | null }) =>
+      kmsApi.revokeKey(payload.keyId, { reason: payload.reason, ticket_id: payload.ticket_id }),
     onSuccess: () => {
       message.success('密钥已撤销');
       queryClient.invalidateQueries({ queryKey: ['kms-keys'] });
@@ -81,13 +83,11 @@ export default function KeyManagement() {
   });
 
   const handleRevoke = (keyId: string) => {
-    Modal.confirm({
+    confirmHighRiskOperation({
       title: '确认撤销密钥',
       content: '撤销后该密钥将无法使用，此操作不可逆。是否继续？',
       okText: '确认撤销',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: () => revokeMutation.mutate(keyId),
+      onConfirm: (payload) => revokeMutation.mutate({ keyId, ...payload }),
     });
   };
 
@@ -107,7 +107,8 @@ export default function KeyManagement() {
       dataIndex: 'key_type',
       render: (v) => <Tag color={keyTypeColors[v]}>{keyTypeLabels[v] || v}</Tag>,
     },
-    { title: '算法', dataIndex: 'algorithm' },
+    { title: '产品ID', dataIndex: 'product_id', render: (v) => v ? <Text code>{v.slice(0, 12)}...</Text> : '-' },
+    { title: '算法', dataIndex: 'algorithm', render: (v) => v || 'SM4' },
     {
       title: '状态',
       dataIndex: 'status',
@@ -193,23 +194,13 @@ export default function KeyManagement() {
         confirmLoading={createMutation.isPending}
       >
         <Form form={form} layout="vertical" onFinish={(v) => createMutation.mutate(v)}>
-          <Form.Item name="key_type" label="密钥类型" rules={[{ required: true, message: '请选择密钥类型' }]}>
-            <Select
-              options={[
-                { label: 'DEK — 数据加密密钥', value: 'dek' },
-                { label: 'Session — 会话密钥', value: 'session' },
-                { label: 'KEK — 密钥加密密钥', value: 'kek' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="algorithm" label="算法" initialValue="SM4">
-            <Select
-              options={[
-                { label: 'SM4', value: 'SM4' },
-                { label: 'AES-256-GCM', value: 'AES-256-GCM' },
-                { label: 'ChaCha20-Poly1305', value: 'ChaCha20-Poly1305' },
-              ]}
-            />
+          <Form.Item
+            name="product_id"
+            label="数据产品ID"
+            rules={[{ required: true, message: '请输入数据产品ID' }]}
+            extra="后端 KMS 当前按数据产品生成 DEK；Session/KEK 由沙箱和 HSM/Vault 流程自动管理。"
+          >
+            <Input placeholder="输入数据产品 UUID" />
           </Form.Item>
         </Form>
       </Modal>

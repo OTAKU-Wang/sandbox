@@ -39,7 +39,7 @@ class PipelineStage(str, Enum):
     TOXICITY_FILTER = "toxicity_filter"
     TOKENIZATION = "tokenization"
     FORMAT_CONVERSION = "format_conversion"
-    CHUNKING = "chunkding"
+    CHUNKING = "chunking"
     EMBEDDING = "embedding"
     IMAGE_PREPROCESS = "image_preprocess"
     PAIRING = "pairing"
@@ -338,13 +338,29 @@ class TrainingPipelineManager:
         self,
         records: list[dict],
         train_ratio: float = 0.95,
+        seed: str | int | None = None,
     ) -> tuple[list[dict], list[dict]]:
-        """Split dataset into train/validation sets."""
-        import random
-        shuffled = list(records)
-        random.shuffle(shuffled)
+        """Split dataset into train/validation sets deterministically.
+
+        Training pipelines must be reproducible for audit and incident replay,
+        so the default split is derived from record content instead of process
+        RNG state. ``seed`` can be changed by callers that intentionally want a
+        different, still reproducible split.
+        """
+        if not records:
+            return [], []
+        split_seed = "cds-training-split-v1" if seed is None else str(seed)
+        shuffled = sorted(
+            list(records),
+            key=lambda record: self._stable_record_key(record, split_seed),
+        )
         split_idx = int(len(shuffled) * train_ratio)
         return shuffled[:split_idx], shuffled[split_idx:]
+
+    @staticmethod
+    def _stable_record_key(record: dict, seed: str) -> str:
+        payload = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(f"{seed}\n{payload}".encode("utf-8")).hexdigest()
 
     def estimate_tokens(self, text: str, tokenizer: str = "sentencepiece") -> int:
         """Estimate token count. Rough heuristic: ~1.5 chars per token for Chinese."""

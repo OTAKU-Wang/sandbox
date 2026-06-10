@@ -7,6 +7,8 @@ import asyncio
 import json
 import logging
 import uuid
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -269,13 +271,18 @@ class CDCAgent:
         backend: str = "kafka",
         kafka_brokers: str = "localhost:9092",
         topic_prefix: str = "cds.events",
+        kafka_connect_url: str = "",
+        connect_timeout_seconds: float = 10.0,
     ):
         self._connectors: dict[str, CDCConnectorConfig] = {}
+        self._connector_payloads: dict[str, dict[str, Any]] = {}
         self._table_mappings: list[CDCTableMapping] = []
         self._status: dict[str, CDCStatus] = {}
         self._event_count: int = 0
         self._last_event_time: datetime | None = None
         self._backend = backend
+        self._kafka_connect_url = kafka_connect_url.rstrip("/")
+        self._connect_timeout_seconds = connect_timeout_seconds
         self._memory_store: dict[str, list[dict[str, Any]]] = {}  # In-memory event store for testing
         self._event_producer = CDCEventProducer(
             backend=backend,
@@ -327,6 +334,7 @@ class CDCAgent:
         )
 
         self._connectors[connector_name] = config
+        self._connector_payloads[connector_name] = config.to_debezium_config()
         self._status[connector_name] = CDCStatus.PENDING
         logger.info(f"Generated Debezium config for connector: {connector_name}")
         return config
@@ -371,6 +379,7 @@ class CDCAgent:
         }
 
         self._status[connector_name] = CDCStatus.PENDING
+        self._connector_payloads[connector_name] = config
         return config
 
     def register_table_mapping(
@@ -391,28 +400,101 @@ class CDCAgent:
         return mapping
 
     async def start_connector(self, connector_name: str) -> bool:
-        """Mark a connector as running (actual Kafka Connect REST call in production)."""
-        if connector_name in self._status:
-            self._status[connector_name] = CDCStatus.RUNNING
-            logger.info(f"Started CDC connector: {connector_name}")
+        """Start or upsert a connector through Kafka Connect when configured."""
+        if connector_name not in self._status:
+            return False
+        if self._kafka_connect_url:
+            payload = self._connector_payloads.get(connector_name)
+            if not payload:
+                self._status[connector_name] = CDCStatus.FAILED
+                logger.error("No Kafka Connect payload found for connector: %s", connector_name)
+                return False
+            ok = await self._upsert_connector(connector_name, payload)
+            self._status[connector_name] = CDCStatus.RUNNING if ok else CDCStatus.FAILED
+            return ok
+        self._status[connector_name] = CDCStatus.RUNNING
+        logger.info(f"Started CDC connector: {connector_name}")
+        return True
+
+    async def _upsert_connector(self, connector_name: str, payload: dict[str, Any]) -> bool:
+        config_payload = payload.get("config", payload)
+        status, body = await asyncio.to_thread(
+            self._request_connect,
+            "PUT",
+            f"/connectors/{connector_name}/config",
+            config_payload,
+        )
+        if 200 <= status < 300:
+            logger.info("Kafka Connect connector upserted: %s", connector_name)
             return True
+        logger.error("Kafka Connect upsert failed for %s: status=%s body=%s", connector_name, status, body)
         return False
 
     async def pause_connector(self, connector_name: str) -> bool:
         """Pause a running connector."""
-        if connector_name in self._status:
-            self._status[connector_name] = CDCStatus.PAUSED
-            logger.info(f"Paused CDC connector: {connector_name}")
-            return True
-        return False
+        if connector_name not in self._status:
+            return False
+        if self._kafka_connect_url:
+            status, body = await asyncio.to_thread(
+                self._request_connect,
+                "PUT",
+                f"/connectors/{connector_name}/pause",
+                None,
+            )
+            if not (200 <= status < 300):
+                logger.error("Kafka Connect pause failed for %s: status=%s body=%s", connector_name, status, body)
+                return False
+        self._status[connector_name] = CDCStatus.PAUSED
+        logger.info(f"Paused CDC connector: {connector_name}")
+        return True
 
     async def stop_connector(self, connector_name: str) -> bool:
         """Stop a connector."""
-        if connector_name in self._status:
-            self._status[connector_name] = CDCStatus.STOPPED
-            logger.info(f"Stopped CDC connector: {connector_name}")
-            return True
-        return False
+        if connector_name not in self._status:
+            return False
+        if self._kafka_connect_url:
+            status, body = await asyncio.to_thread(
+                self._request_connect,
+                "DELETE",
+                f"/connectors/{connector_name}",
+                None,
+            )
+            if status not in {200, 202, 204, 404}:
+                logger.error("Kafka Connect delete failed for %s: status=%s body=%s", connector_name, status, body)
+                return False
+        self._status[connector_name] = CDCStatus.STOPPED
+        logger.info(f"Stopped CDC connector: {connector_name}")
+        return True
+
+    def _request_connect(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None,
+    ) -> tuple[int, str]:
+        """Call Kafka Connect REST API with stdlib urllib."""
+        if not self._kafka_connect_url:
+            return 0, "Kafka Connect URL not configured"
+        data = None
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(
+            f"{self._kafka_connect_url}{path}",
+            data=data,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self._connect_timeout_seconds) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                return resp.status, body
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            return exc.code, body
+        except Exception as exc:
+            return 0, str(exc)
 
     async def produce_event(self, event: CDCChangeEvent, topic: str) -> bool:
         """Produce a CDC change event to a Kafka topic.
@@ -515,6 +597,7 @@ class CDCAgent:
             database_server_name="cds",
             table_include_list=tables,
         )
+        self._connector_payloads[name] = config
         self._status[name] = CDCStatus.PENDING
         return config
 
@@ -590,6 +673,8 @@ def create_cdc_agent(backend: str = "kafka") -> CDCAgent:
         backend=backend,
         kafka_brokers=settings.CDC_KAFKA_BROKERS,
         topic_prefix=settings.CDC_KAFKA_TOPIC_PREFIX,
+        kafka_connect_url=settings.CDC_KAFKA_CONNECT_URL,
+        connect_timeout_seconds=settings.CDC_KAFKA_CONNECT_TIMEOUT_SECONDS,
     )
 
 

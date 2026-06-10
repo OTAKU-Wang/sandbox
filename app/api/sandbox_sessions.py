@@ -1,8 +1,10 @@
 import json
 import logging
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +18,13 @@ from app.models.user import User, UserRole
 from app.models.data_product import DataProduct
 from app.models.contract import Contract, ContractStatus
 from app.models.sandbox_session import SandboxSession, SessionStatus, SandboxLevel
+from app.models.audit_log import AuditLog
 from app.schemas.sandbox_session import SandboxExecuteRequest, SandboxSessionCreate, SandboxSessionResponse
 from app.services.audit_service import audit_service
 from app.services.kms_service import kms_service
 from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits
 from app.services.session_state_machine import session_state_machine
-from app.models.kms import KeyMetadata, KeyType, KeyStatus
+from app.models.kms import KeyDistribution, KeyMetadata, KeyType, KeyStatus
 from app.models.network_policy import NetworkPolicy
 from app.schemas.network_policy import NetworkPolicyResponse, NetworkPolicyUpdate
 from app.services.network_policy import network_policy_engine, NetworkPolicyConfig
@@ -34,12 +37,117 @@ from sqlalchemy import func
 router = APIRouter()
 
 
+PROOF_BUNDLE_SCHEMA_VERSION = "cds.session.proof.v1"
+
+
 def _can_view_all_sessions(user: User) -> bool:
     return user.role in (UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)
 
 
 def _can_operate_sessions(user: User) -> bool:
     return user.role in (UserRole.OPERATOR, UserRole.ADMIN)
+
+
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _hash_json(value: Any) -> str:
+    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _hash_text(value: str | bytes | None) -> str | None:
+    if not value:
+        return None
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
+
+
+def _session_attestation_summary(session: SandboxSession) -> dict:
+    limits = session.resource_limits or {}
+    record = limits.get("attestation") if isinstance(limits, dict) else None
+    if not isinstance(record, dict):
+        return {
+            "present": False,
+            "required": _attestation_required_for_level(session.sandbox_level),
+            "type": None,
+            "measurement": None,
+            "quote_hash": None,
+            "is_simulation": None,
+        }
+
+    quote = record.get("quote")
+    return {
+        "present": bool(quote),
+        "required": _attestation_required_for_level(session.sandbox_level),
+        "type": record.get("type"),
+        "measurement": record.get("measurement"),
+        "quote_hash": _hash_text(quote),
+        "is_simulation": bool(record.get("is_simulation")),
+    }
+
+
+def _resource_policy_summary(session: SandboxSession) -> dict:
+    limits = dict(session.resource_limits or {})
+    limits.pop("attestation", None)
+    return limits
+
+
+def _network_policy_summary(policy: NetworkPolicy | None) -> dict | None:
+    if not policy:
+        return None
+    return {
+        "mode": policy.mode,
+        "active": policy.active,
+        "allowed_ips": policy.allowed_ips or [],
+        "allowed_domains": policy.allowed_domains or [],
+        "allowed_ports": policy.allowed_ports or [],
+        "dns_proxy_enabled": policy.dns_proxy_enabled,
+        "max_connections_per_second": policy.max_connections_per_second,
+        "max_bandwidth_bytes_per_second": policy.max_bandwidth_bytes_per_second,
+        "updated_at": _iso(policy.updated_at),
+    }
+
+
+def _contract_policy_summary(contract: Contract | None) -> dict | None:
+    if not contract:
+        return None
+    return {
+        "id": str(contract.id),
+        "status": contract.status,
+        "product_ids": [str(product_id) for product_id in (contract.product_ids or [])],
+        "allowed_sandbox_levels": contract.allowed_sandbox_levels,
+        "allowed_sandbox_modes": contract.allowed_sandbox_modes or [],
+        "allowed_operations": contract.allowed_operations,
+        "max_duration_hours": contract.max_duration_hours,
+        "max_output_rows": contract.max_output_rows,
+        "dp_epsilon_budget": contract.dp_epsilon_budget,
+        "allowed_output_formats": contract.allowed_output_formats,
+        "inspection_rule_set": contract.inspection_rule_set or {},
+    }
+
+
+def _audit_event_summary(record: AuditLog) -> dict:
+    detail = record.detail or {}
+    return {
+        "id": str(record.id),
+        "action": record.action,
+        "resource_type": record.resource_type,
+        "resource_id": record.resource_id,
+        "created_at": _iso(record.created_at),
+        "signed": bool(detail.get("_sm2_signature")),
+        "signature_hash": _hash_text(detail.get("_sm2_signature")),
+        "blockchain_tx_hash": record.blockchain_tx_hash or detail.get("blockchain_tx_hash"),
+    }
 
 
 def _parse_contract_id(contract_id: str | None) -> uuid.UUID | None:
@@ -436,6 +544,193 @@ async def get_sandbox_session(
     return SandboxSessionResponse.model_validate(session)
 
 
+@router.get("/{session_id}/proof-bundle")
+async def get_sandbox_session_proof_bundle(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a release/regulatory proof bundle for a sandbox session.
+
+    The bundle intentionally contains only public evidence, metadata and
+    hashes. It never returns session key plaintext, raw sandbox output, raw
+    attestation quotes, or secret configuration values.
+    """
+    result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sandbox session not found")
+    if session.user_id != current_user.id and not _can_view_all_sessions(current_user):
+        raise HTTPException(status_code=403, detail="Not your session")
+
+    contract = None
+    if session.contract_id:
+        try:
+            contract = await db.get(Contract, uuid.UUID(str(session.contract_id)))
+        except (TypeError, ValueError):
+            contract = None
+
+    net_result = await db.execute(
+        select(NetworkPolicy).where(NetworkPolicy.session_id == str(session.id))
+    )
+    network_policy = net_result.scalar_one_or_none()
+
+    key_meta = None
+    if session.session_key_id:
+        key_result = await db.execute(
+            select(KeyMetadata).where(KeyMetadata.key_id == session.session_key_id)
+        )
+        key_meta = key_result.scalar_one_or_none()
+
+    dist_result = await db.execute(
+        select(KeyDistribution)
+        .where(KeyDistribution.session_id == str(session.id))
+        .order_by(KeyDistribution.created_at.desc())
+        .limit(1)
+    )
+    key_distribution = dist_result.scalar_one_or_none()
+
+    output_result = await db.execute(
+        select(AuditLog)
+        .where(
+            AuditLog.session_id == session.id,
+            AuditLog.action == "sandbox.output_inspected",
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    )
+    output_event = output_result.scalar_one_or_none()
+    output_detail = output_event.detail if output_event and isinstance(output_event.detail, dict) else {}
+
+    count_result = await db.execute(
+        select(func.count()).where(AuditLog.session_id == session.id)
+    )
+    audit_count = count_result.scalar() or 0
+    audit_result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.session_id == session.id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(50)
+    )
+    audit_events = [_audit_event_summary(record) for record in audit_result.scalars().all()]
+
+    attestation = _session_attestation_summary(session)
+    resource_policy = _resource_policy_summary(session)
+    network_policy_summary = _network_policy_summary(network_policy)
+    contract_policy = _contract_policy_summary(contract)
+    if attestation["present"] and attestation["type"] not in {"software_hash", "firecracker"} and not attestation["is_simulation"]:
+        proof_level = "hardware_tee"
+    elif attestation["present"]:
+        proof_level = "software_confidential"
+    else:
+        proof_level = "runtime_isolation"
+
+    policy_evidence = {
+        "resource_limits": resource_policy,
+        "network_policy": network_policy_summary,
+        "contract_policy": contract_policy,
+    }
+    key_evidence = {
+        "session_key_id": session.session_key_id,
+        "key_metadata": {
+            "status": key_meta.status,
+            "key_type": key_meta.key_type,
+            "algorithm": key_meta.algorithm,
+            "created_at": _iso(key_meta.created_at),
+            "destroyed_at": _iso(key_meta.destroyed_at),
+            "destroy_reason": key_meta.destroy_reason,
+        } if key_meta else None,
+        "latest_distribution": {
+            "status": key_distribution.status,
+            "attestation_status": key_distribution.attestation_status,
+            "tee_type": key_distribution.tee_type,
+            "tee_mrenclave": key_distribution.tee_mrenclave,
+            "tee_quote_hash": key_distribution.tee_quote_hash,
+            "created_at": _iso(key_distribution.created_at),
+            "expires_at": _iso(key_distribution.expires_at),
+            "revoked_at": _iso(key_distribution.revoked_at),
+        } if key_distribution else None,
+    }
+    output_security = {
+        "available": output_event is not None,
+        "audit_event_id": str(output_event.id) if output_event else None,
+        "created_at": _iso(output_event.created_at) if output_event else None,
+        "passed": output_detail.get("passed"),
+        "blocked": output_detail.get("blocked"),
+        "findings_count": output_detail.get("findings_count"),
+        "severities": output_detail.get("severities", []),
+        "dp_applied": output_detail.get("dp_applied"),
+        "watermark": output_detail.get("watermark"),
+        "signature": output_detail.get("signature"),
+        "report_hash": output_detail.get("report_hash"),
+        "released_output_hash": output_detail.get("released_output_hash"),
+        "output_released": output_detail.get("output_released"),
+    }
+
+    payload = {
+        "schema_version": PROOF_BUNDLE_SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "session": {
+            "id": str(session.id),
+            "user_id": str(session.user_id),
+            "data_product_id": str(session.data_product_id),
+            "contract_id": session.contract_id,
+            "sandbox_level": session.sandbox_level,
+            "sandbox_mode": session.sandbox_mode,
+            "status": session.status,
+            "container_id": session.container_id,
+            "timeout_seconds": session.timeout_seconds,
+            "created_at": _iso(session.created_at),
+            "started_at": _iso(session.started_at),
+            "ended_at": _iso(session.ended_at),
+            "updated_at": _iso(session.updated_at),
+        },
+        "runtime": {
+            "proof_level": proof_level,
+            "attestation": attestation,
+        },
+        "policy": {
+            **policy_evidence,
+            "resource_limits_hash": _hash_json(resource_policy),
+            "network_policy_hash": _hash_json(network_policy_summary),
+            "contract_policy_hash": _hash_json(contract_policy),
+            "combined_policy_hash": _hash_json(policy_evidence),
+        },
+        "keys": key_evidence,
+        "output_security": output_security,
+        "audit": {
+            "event_count": audit_count,
+            "latest_events": audit_events,
+            "latest_events_hash": _hash_json(audit_events),
+        },
+        "integrity": {
+            "hash_alg": "sha256",
+            "excluded_fields": ["session_key_plaintext", "raw_sandbox_output", "raw_attestation_quote", "secret_configuration"],
+        },
+    }
+    payload["integrity"]["evidence_hash"] = _hash_json({
+        key: value for key, value in payload.items()
+        if key not in {"generated_at", "integrity"}
+    })
+    payload["integrity"]["bundle_hash"] = _hash_json(payload)
+
+    await audit_service.log(
+        db,
+        action="sandbox.proof_bundle_generated",
+        resource_type="sandbox_session",
+        user_id=current_user.id,
+        session_id=session.id,
+        detail={
+            "schema_version": PROOF_BUNDLE_SCHEMA_VERSION,
+            "evidence_hash": payload["integrity"]["evidence_hash"],
+            "bundle_hash": payload["integrity"]["bundle_hash"],
+            "proof_level": proof_level,
+        },
+    )
+
+    return payload
+
+
 @router.post("/{session_id}/terminate", response_model=SandboxSessionResponse)
 async def terminate_sandbox_session(
     session_id: uuid.UUID,
@@ -801,6 +1096,30 @@ async def execute_in_sandbox(
         exec_result["exit_code"] = -3
         exec_result["security_report"] = {"passed": False, "blocked": True, "error": str(e)}
         exec_result["output_blocked"] = True
+
+    security_report = exec_result.get("security_report") or {}
+    try:
+        await audit_service.log(
+            db,
+            action="sandbox.output_inspected",
+            resource_type="sandbox_session",
+            user_id=current_user.id,
+            session_id=session.id,
+            detail={
+                "passed": bool(security_report.get("passed")),
+                "blocked": bool(security_report.get("blocked") or exec_result.get("output_blocked")),
+                "findings_count": security_report.get("findings_count", 0),
+                "severities": security_report.get("severities", []),
+                "dp_applied": bool(security_report.get("dp_applied")),
+                "watermark": security_report.get("watermark"),
+                "signature": security_report.get("signature"),
+                "report_hash": _hash_json(security_report),
+                "released_output_hash": _hash_text(exec_result.get("output") or ""),
+                "output_released": bool(exec_result.get("output")) and not bool(exec_result.get("output_blocked")),
+            },
+        )
+    except Exception as e:
+        logger.warning("[sandbox] Failed to audit output inspection summary: %s", e)
 
     return exec_result
 

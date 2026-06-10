@@ -49,6 +49,50 @@ export interface SessionExecuteResult {
   security_report?: SecurityReport;
 }
 
+export interface SessionProofBundle {
+  schema_version: string;
+  generated_at: string;
+  session: Record<string, unknown> & { id: string; status: string; sandbox_level: string; sandbox_mode: string };
+  runtime: {
+    proof_level: 'hardware_tee' | 'software_confidential' | 'runtime_isolation' | string;
+    attestation: Record<string, unknown> & {
+      present?: boolean;
+      required?: boolean;
+      type?: string | null;
+      measurement?: string | null;
+      quote_hash?: string | null;
+      is_simulation?: boolean | null;
+    };
+  };
+  policy: Record<string, unknown> & {
+    resource_limits_hash?: string;
+    network_policy_hash?: string;
+    contract_policy_hash?: string;
+    combined_policy_hash?: string;
+  };
+  keys: Record<string, unknown> & {
+    session_key_id?: string | null;
+  };
+  output_security: Record<string, unknown> & {
+    available?: boolean;
+    blocked?: boolean | null;
+    findings_count?: number | null;
+    watermark?: string | null;
+    signature?: string | null;
+    report_hash?: string | null;
+  };
+  audit: Record<string, unknown> & {
+    event_count?: number;
+    latest_events_hash?: string;
+  };
+  integrity: {
+    hash_alg: string;
+    evidence_hash?: string;
+    bundle_hash: string;
+    excluded_fields: string[];
+  };
+}
+
 export interface NetworkPolicy {
   id: string;
   session_id: string;
@@ -88,6 +132,9 @@ export const sandboxApi = {
 
   get: (id: string): Promise<SandboxSession> =>
     api.get(`/sandbox-sessions/${id}`),
+
+  getProofBundle: (id: string): Promise<SessionProofBundle> =>
+    api.get(`/sandbox-sessions/${id}/proof-bundle`),
 
   create: (data: CreateSessionRequest): Promise<SandboxSession> =>
     api.post('/sandbox-sessions', data),

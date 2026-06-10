@@ -372,23 +372,39 @@ async def desensitize_data_resource(
     }
 
 
-@router.post("/generate-mock")
+def _generate_synthetic_data_from_schema(schema: list[dict], row_count: int, response_type: str):
+    from app.services.test_data_generator import test_data_generator
+    synthetic_data = test_data_generator.generate_mock(schema, row_count)
+
+    return {
+        "type": response_type,
+        "synthetic": True,
+        "format": "csv",
+        "data": synthetic_data,
+        "row_count": row_count,
+        "schema": schema,
+    }
+
+
+@router.post("/generate-synthetic")
+async def generate_synthetic_data(
+    schema: list[dict],
+    row_count: int = Query(100, ge=1, le=10000),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate synthetic test data from a schema definition.
+
+    Schema format: [{name: str, type: str, sensitivity: str}]
+    Types: string, integer, float, boolean, date, datetime, email, phone, address, name
+    """
+    return _generate_synthetic_data_from_schema(schema, row_count, "synthetic")
+
+
+@router.post("/generate-mock", deprecated=True)
 async def generate_mock_data(
     schema: list[dict],
     row_count: int = Query(100, ge=1, le=10000),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate mock test data from a schema definition.
-
-    Schema format: [{name: str, type: str, sensitivity: str}]
-    Types: string, integer, float, boolean, date, datetime, email, phone, address, name
-    """
-    from app.services.test_data_generator import test_data_generator
-    mock_data = test_data_generator.generate_mock(schema, row_count)
-
-    return {
-        "format": "csv",
-        "data": mock_data,
-        "row_count": row_count,
-        "schema": schema,
-    }
+    """Deprecated compatibility alias for synthetic test data generation."""
+    return _generate_synthetic_data_from_schema(schema, row_count, "mock")

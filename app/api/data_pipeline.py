@@ -46,12 +46,13 @@ class PipelineResultResponse(BaseModel):
 async def upload_and_process(
     file: UploadFile = File(...),
     task_type: str = Form("document"),
+    max_retries: int = Form(0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
 ):
-    """Upload a file and process it in sandbox. Supported types: ocr, asr, video, document."""
-    if task_type not in ("ocr", "asr", "video", "document"):
-        raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}. Must be one of: ocr, asr, video, document")
+    """Upload a file and process it in sandbox. Supported types: ocr, asr, video, document, dicom."""
+    if task_type not in ("ocr", "asr", "video", "document", "dicom"):
+        raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}. Must be one of: ocr, asr, video, document, dicom")
 
     # Save upload
     user_dir = UPLOAD_ROOT / str(current_user.id)
@@ -67,13 +68,14 @@ async def upload_and_process(
         task_type=task_type,
         status=PipelineTaskStatus.PENDING.value,
         input_path=str(file_path),
+        options={"max_retries": max_retries},
         user_id=current_user.id,
     )
     db.add(db_task)
     await db.flush()
 
     # Execute in sandbox
-    in_memory_task = pipeline.submit_task(task_type, str(file_path))
+    in_memory_task = pipeline.submit_task(task_type, str(file_path), options={"max_retries": max_retries, "user_id": str(current_user.id)})
     result = await pipeline.execute_task(in_memory_task.task_id)
 
     # Update DB record
@@ -106,11 +108,12 @@ async def upload_and_process(
 async def process_local_path(
     task_type: str = Query(...),
     input_path: str = Query(...),
+    max_retries: int = Query(0, ge=0, le=5),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Process a local file path in sandbox (operator/admin only)."""
-    if task_type not in ("ocr", "asr", "video", "document"):
+    if task_type not in ("ocr", "asr", "video", "document", "dicom"):
         raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}")
 
     if not Path(input_path).exists():
@@ -122,12 +125,13 @@ async def process_local_path(
         task_type=task_type,
         status=PipelineTaskStatus.PENDING.value,
         input_path=input_path,
+        options={"max_retries": max_retries},
         user_id=current_user.id,
     )
     db.add(db_task)
     await db.flush()
 
-    in_memory_task = pipeline.submit_task(task_type, input_path)
+    in_memory_task = pipeline.submit_task(task_type, input_path, options={"max_retries": max_retries, "user_id": str(current_user.id)})
     result = await pipeline.execute_task(in_memory_task.task_id)
 
     db_task.status = PipelineTaskStatus.COMPLETED.value if result.success else PipelineTaskStatus.FAILED.value

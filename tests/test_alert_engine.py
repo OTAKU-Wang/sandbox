@@ -90,6 +90,14 @@ class TestDPBudgetExhaustion:
         assert alert.metadata["ratio"] == pytest.approx(0.005)
         assert alert.metadata["remaining_epsilon"] == 0.05
 
+    def test_recorded_budget_is_evaluated_automatically(self, engine):
+        engine.record_dp_budget("sess-1", remaining_epsilon=0.5, total_epsilon=10.0, user_id="user-1")
+        alerts = engine.evaluate()
+        budget_alerts = [a for a in alerts if a.alert_type == AlertType.DP_BUDGET_EXHAUSTION]
+        assert len(budget_alerts) == 1
+        assert budget_alerts[0].session_id == "sess-1"
+        assert budget_alerts[0].user_id == "user-1"
+
 
 # ── Anomaly Burst ─────────────────────────────────────────────────
 

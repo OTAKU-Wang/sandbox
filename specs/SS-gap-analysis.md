@@ -16,7 +16,7 @@
 - 输出控制：PII 检测、k 匿名、重建检测、DP 预算扣减、水印、签名、流式审查代理。
 - 审计与互联：审计签名、Merkle/PG append-only 存证、合规报告、联邦连接器、mTLS/证书管理。
 
-Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发沙箱输出、契约网关输出、DP 预算失败模式、配额 fallback、任务代码落库等软件缺口已经修复。Round 6 从产品化和易用性复核后，前端构建、角色体系、路由权限、开发沙箱、输出审查、合约创建、分页契约和主布局体验缺口已经修复。Round 7 继续补齐数据产品创建、沙箱会话创建、数据资源详情和基础品牌化缺口。Round 8 补齐产品生命周期、目录到沙箱、上下文预填、角色工作台、产品搜索/状态筛选和运营/监管产品可见性缺口。Round 9 修复普通沙箱直接执行的输出审查绕过、会话详情不可执行/不可审查、运营终止配额释放对象错误，以及认证页模板化问题。Round 10 补齐沙箱网络策略控制面，修复网络策略 API 热加载未 await、session 路由被遮挡和策略写入权限校验不足。Round 11 补齐字段级最小化控制面、买方申请体验、restricted 字段复核语义、契约网关查询执行面字段授权，以及网关凭证合约路径一致性校验。Round 12 收紧跨空间连接器代理沙箱，修复合约约束失败开放、connector 与 contract 绑定缺失、代理执行绕过代码扫描/输出审查，以及代理会话缺少 key/network/quota 安全基线。Round 13 继续收紧本地沙箱合约绑定、数据产品生命周期与归档、合约创建/激活授权、SecureDuckDB 和输出控制 DP budget 的 session owner 授权。Round 14 修复数据资源上传/删除闭环、输出控制 inspect/gateway session owner 授权、产品版本与字段策略可见性，以及字段申请角色语义。Round 15 修复运行时路由失败关闭、L2/K8s session context 透传、K8s manifest/NetworkPolicy 控制面和 Python 3.12 运行期兼容性。Round 16 继续收紧 K8s/K3s 产品化部署面，修复只读 rootfs 可写路径、零信任 egress、ResourceQuota 语义、exec 密钥泄露、env 校验和 243/K3s 中国网络安装脚本问题。Round 17 补齐 K8s 作为可创建 runtime level 的产品入口，并修复 Pod readiness、控制面 apply 失败回滚、exec 前 ready gate、terminate returncode 和 CDS/K8s 状态映射问题。Round 18 收紧 connector 与 contract fulfillment 两条非普通会话入口，修复 provision/key distribution 失败后继续激活会话，以及合约产品 ID 字符串未规范化的问题。Round 19 收紧 K8s 多集群与 allowlist 语义，修复 kubeconfig 未透传、域名 allowlist 失败开放和 allowlist 输入校验不足问题。硬件或外部基础设施能力（真实 SGX、GPU-TEE、生产 FISCO BCOS 节点、PG-in-TEE、真实 K3s 集群）保持为适配器/模拟器/可部署验证项，不列为本轮 active gap。
+Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发沙箱输出、契约网关输出、DP 预算失败模式、配额 fallback、任务代码落库等软件缺口已经修复。Round 6 从产品化和易用性复核后，前端构建、角色体系、路由权限、开发沙箱、输出审查、合约创建、分页契约和主布局体验缺口已经修复。Round 7 继续补齐数据产品创建、沙箱会话创建、数据资源详情和基础品牌化缺口。Round 8 补齐产品生命周期、目录到沙箱、上下文预填、角色工作台、产品搜索/状态筛选和运营/监管产品可见性缺口。Round 9 修复普通沙箱直接执行的输出审查绕过、会话详情不可执行/不可审查、运营终止配额释放对象错误，以及认证页模板化问题。Round 10 补齐沙箱网络策略控制面，修复网络策略 API 热加载未 await、session 路由被遮挡和策略写入权限校验不足。Round 11 补齐字段级最小化控制面、买方申请体验、restricted 字段复核语义、契约网关查询执行面字段授权，以及网关凭证合约路径一致性校验。Round 12 收紧跨空间连接器代理沙箱，修复合约约束失败开放、connector 与 contract 绑定缺失、代理执行绕过代码扫描/输出审查，以及代理会话缺少 key/network/quota 安全基线。Round 13 继续收紧本地沙箱合约绑定、数据产品生命周期与归档、合约创建/激活授权、SecureDuckDB 和输出控制 DP budget 的 session owner 授权。Round 14 修复数据资源上传/删除闭环、输出控制 inspect/gateway session owner 授权、产品版本与字段策略可见性，以及字段申请角色语义。Round 15 修复运行时路由失败关闭、L2/K8s session context 透传、K8s manifest/NetworkPolicy 控制面和 Python 3.12 运行期兼容性。Round 16 继续收紧 K8s/K3s 产品化部署面，修复只读 rootfs 可写路径、零信任 egress、ResourceQuota 语义、exec 密钥泄露、env 校验和 243/K3s 中国网络安装脚本问题。Round 17 补齐 K8s 作为可创建 runtime level 的产品入口，并修复 Pod readiness、控制面 apply 失败回滚、exec 前 ready gate、terminate returncode 和 CDS/K8s 状态映射问题。Round 18 收紧 connector 与 contract fulfillment 两条非普通会话入口，修复 provision/key distribution 失败后继续激活会话，以及合约产品 ID 字符串未规范化的问题。Round 19 收紧 K8s 多集群与 allowlist 语义，修复 kubeconfig 未透传、域名 allowlist 失败开放和 allowlist 输入校验不足问题。Round 20 清理剩余软件薄实现：补齐 FederatedRuntime、Firecracker 非网络串口 fallback、DP budget 自动告警评估，以及非结构化处理可选依赖失败显式化。Round 21 修复 L1 TEE 运行时语义：无 TEE 环境时明确降级为普通软件密态沙箱并生成 `software_hash` 证明；有硬件信号且配置 runner/attester 时进入硬件路径。Round 22 补齐告警中心后端产品化闭环：告警持久化、去重、通知投递记录、确认/解决处置状态和监控 API。Round 23 补齐非结构化/多媒体管线的软件产品化闭环：任务重试、阶段状态、DICOM 入口、加密 artifact manifest、输出审查，以及 L3 bwrap seccomp 兼容重试。Round 24 修复训练数据切分不可复现和 RAG `chunking` 阶段名拼写错误，保障训练审计、事故回放和阶段状态对齐。Round 25 补齐 CDC Kafka Connect 控制面 hook，配置真实 Connect URL 时可通过 REST upsert/pause/delete connector。Round 26 修复前端服务层与后端 API 的契约脱节，补齐连接器、联邦、训练的缺失路由和统一返回体，并收敛页面误导性操作。Round 27 收敛产品化命名，把测试数据正式接口从 mock 迁移到 synthetic，并把 GPU-TEE 默认运行时从 stub 命名改为 local/software 语义。Round 28 补齐发版安全复核和 Go/No-Go 门禁文档，明确试点/生产边界、残余风险、证据要求和发布后观察项。Round 29 补齐安全态势接口和首页披露，防止软件 fallback 被误解为硬件能力。Round 30 补齐沙箱会话证明包和输出审查摘要审计，支持客户/监管验收归档。Round 31 补齐高危管理员操作理由必填与审计字段，防止 API 直调绕过前端二次确认。硬件或外部基础设施能力（真实 SGX、GPU-TEE、生产 FISCO BCOS 节点、PG-in-TEE、真实 K3s 集群）保持为适配器/模拟器/可部署验证项，见 2.1 后续待实现/验证 Gap 表，不列为本轮 active gap。
 
 ---
 
@@ -131,8 +131,49 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | G-105 | K8s adapter 接收 kubeconfig 但控制面和 exec 路径未统一透传，真实多集群部署会打到默认集群 | P1 | 已修复，已单测通过 | Round 19 | `app/core/config.py`, `app/services/k8s_sandbox.py`, `app/services/sandbox_runtime.py`, `tests/test_sandbox_runtime.py` | 新增 `SANDBOX_K8S_KUBECONFIG`；adapter `_kubectl()` 统一追加 `--kubeconfig`，runtime exec 改用 adapter 方法而非模块级 kubectl。 |
 | G-106 | K8s allowlist 接收 allowed_domains 但原生 NetworkPolicy 不支持 FQDN，实际会失败开放或语义不生效 | P0 | 已修复，已单测通过 | Round 19 | `app/core/config.py`, `app/services/k8s_sandbox.py`, `tests/test_sandbox_runtime.py` | 默认域名 allowlist 失败关闭；仅 `SANDBOX_K8S_FQDN_POLICY_PROVIDER=cilium` 时生成 CiliumNetworkPolicy `toFQDNs`。 |
 | G-107 | K8s allowlist 的 CIDR/domain 缺少 adapter 级校验，错误会推迟到集群 apply 或形成不可预测策略 | P1 | 已修复，已单测通过 | Round 19 | `app/services/k8s_sandbox.py`, `tests/test_sandbox_runtime.py` | provision 前校验 CIDR 和域名模式；空 allowlist、非法 CIDR、非法域名均失败关闭且不触发 apply。 |
+| G-108 | `joint_federated` 是合法模式但 `SceneRuntimeFactory` 未注册真实 FederatedRuntime，实际退回 passthrough | P1 | 已修复，已单测通过 | Round 20 | `app/services/sandbox_runtime.py`, `tests/test_scene_runtime.py`, `specs/ss-04-sandbox-runtime.md` | 新增 `FederatedRuntime`，提供联邦模式 SQL/Python guard、`federation_request` 代理执行和输出截断，并注册到场景运行时工厂。 |
+| G-109 | Firecracker 非网络串口执行路径返回 `Serial execution not fully implemented` 占位 | P1 | 已修复，已单测通过 | Round 20 | `app/services/firecracker_runtime.py`, `tests/test_firecracker_runtime.py` | 串口/guest-agent 不可用时复用 QEMU TCG 的 hardened bwrap fallback，并透传 session key、env 和 timeout。 |
+| G-110 | `AlertRuleEngine.evaluate()` 中 DP budget exhaustion 分支为空，只有手工 `check_dp_budget()` 能触发 | P2 | 已修复，已单测通过 | Round 20 | `app/services/alert_engine.py`, `tests/test_alert_engine.py` | 新增 DP budget snapshot 记录，`evaluate()` 自动产生预算耗尽告警，保留直接检查接口。 |
+| G-111 | 非结构化数据处理的 Pillow/pdftotext/ffprobe 异常被静默吞掉，调用方无法区分完整成功和元数据降级 | P2 | 已修复，已单测通过 | Round 20 | `app/services/data_processing.py`, `tests/test_data_processing.py` | 可选提取失败时返回 `partial_success` 与 `extraction_errors`，基础元数据仍可用。 |
+| G-112 | Firecracker/QEMU fallback 只识别 `EINVAL`，243 上 bwrap 返回 `PR_SET_SECCOMP: Invalid argument` 时不会禁用 seccomp 重试 | P1 | 已修复，已单测通过 | Round 20 | `app/services/firecracker_runtime.py`, `tests/test_firecracker_runtime.py` | 新增 seccomp retry helper，兼容 `EINVAL`、`Invalid argument` 和 `PR_SET_SECCOMP` stderr 形态。 |
+| G-113 | L1 TEE 无硬件时仍走 SGX 形状模拟 quote，且缺少硬件能力探测和硬件 runner 对接路径 | P0 | 已修复，已单测通过 | Round 21 | `app/core/config.py`, `app/services/tee_capability.py`, `app/services/sandbox_runtime.py`, `tests/test_tee_capability.py`, `tests/test_sandbox_runtime.py` | 新增 `TEE_MODE`、软件降级开关和硬件 provision/exec/attest/terminate 命令 hook；无硬件时返回 `software_confidential` 并生成 `software_hash` attestation；有 SGX/TDX/SEV-SNP/iTrustee 信号且配置 runner 时走硬件路径。 |
+| G-114 | 告警中心只有内存规则和 audit log 反推列表，缺少告警持久化、去重、通知记录和处置闭环 | P1 | 已修复，已单测通过 | Round 22 | `app/models/alert.py`, `app/services/alert_center.py`, `app/api/monitoring.py`, `tests/test_alert_center.py`, `tests/test_alert_engine.py` | 新增 `AlertRecord`、`AlertCenterService`、webhook 投递结果、去重 occurrence 计数、acknowledge/resolve API；`/monitoring/alerts` 优先读取持久化告警，并保留 audit fallback。 |
+| G-115 | 非结构化 pipeline 只返回明文工作区结果，缺少重试、加密产物清单、输出审查和 DICOM 入口 | P1 | 已修复，已单测通过 | Round 23 | `app/services/unstructured_pipeline.py`, `app/api/data_pipeline.py`, `app/models/pipeline_task.py`, `tests/test_data_pipeline.py` | `PipelineTask` 增加 options/max_retries/retry_count/attempts/stage_status/artifacts；输出文件统一 envelope 加密上传到 `StorageService`，返回 artifact manifest；文本 artifact 经 `OutputInspector` 审查，critical DLP 阻断释放；API 支持 `max_retries` 与 `dicom`。 |
+| G-116 | L3 `BwrapAdapter` seccomp fallback 只识别 `EINVAL`，243 上 `PR_SET_SECCOMP: Invalid argument` 会导致 API 路径失败 | P1 | 已修复，已单测通过 | Round 23 | `app/services/sandbox_runtime.py`, `tests/test_sandbox_runtime.py`, `tests/test_data_pipeline.py` | 新增 Bwrap seccomp retry helper，兼容 `EINVAL`、`Invalid argument` 和 `PR_SET_SECCOMP` stderr；非结构化 API 在 243 上通过真实 bwrap 聚焦测试。 |
+| G-117 | 训练 pipeline 的 train/validation split 使用进程随机数，审计回放和训练复现实验会得到不同数据边界 | P2 | 已修复，已单测通过 | Round 24 | `app/services/training_pipeline.py`, `tests/test_training_pipeline.py` | `split_dataset()` 改为按规范化 record JSON + seed 的 SHA-256 稳定排序；默认 seed 可复现，显式 seed 可生成另一个稳定切分。 |
+| G-118 | RAG 训练 pipeline 的 `PipelineStage.CHUNKING` 枚举值误写为 `chunkding`，阶段状态和前后端契约不一致 | P2 | 已修复，已单测通过 | Round 24 | `app/services/training_pipeline.py`, `tests/test_training_pipeline.py` | 枚举值修正为 `chunking`，RAG stages 单测断言阶段名与规格一致。 |
+| G-119 | CDC connector lifecycle 只改内存状态，未对接 Kafka Connect REST 控制面 | P2 | 已修复，已单测通过 | Round 25 | `app/core/config.py`, `app/services/cdc_agent.py`, `tests/test_cdc_agent.py` | 新增 `CDC_KAFKA_CONNECT_URL` 和 timeout；配置 URL 时 `start/pause/stop_connector` 分别调用 Kafka Connect `PUT /config`、`PUT /pause`、`DELETE /connectors/{name}`，失败标记 failed；无 URL 保持本地可测 fallback。 |
+| G-120 | 前端服务层仍调用不存在或返回体不完整的后端接口，训练/连接器/联邦页面存在隐藏 404 和误导性交互 | P1 | 已修复，已编译/构建通过 | Round 26 | `app/api/connectors.py`, `app/api/federation.py`, `app/api/training.py`, `cds-frontend/src/services/*Api.ts`, `cds-frontend/src/pages/Connectors/index.tsx`, `cds-frontend/src/pages/Federation/CrossSpaceDashboard.tsx`, `cds-frontend/src/pages/Training/TrainingDashboard.tsx` | 补齐连接器详情/心跳、联邦 trust score/目录同步、训练审计/检查点接口；统一连接器和训练任务返回体；前端改为真实字段、详情抽屉、确认操作和行级 loading。 |
+| G-121 | 产品化 API 和运行时默认配置仍暴露 `mock/stub` 主命名，容易被误判为未真实实现 | P2 | 已修复，已编译通过 | Round 27 | `app/api/data_products.py`, `app/api/data_resources.py`, `app/services/gpu_tee_runtime.py` | 新增 synthetic 测试数据正式接口；旧 mock 路由标记 deprecated 并保持兼容；GPU-TEE factory 默认改为 `local`，`software`/`stub` 作为兼容 alias。 |
+| G-122 | 发版前缺少安全产品设计复核、残余风险和 Go/No-Go 门禁文档 | P0 | 已修复，文档已补齐 | Round 28 | `specs/product-security-release-review.md`, `specs/release-gate-checklist.md`, `specs/productization-deployment-runbook.md`, `specs/productization-gap-analysis.md` | 新增发版安全复核、发布门禁清单和 runbook 发版签署入口，明确试点/生产边界、P0/P1 证据、残余风险和发布后观察项。 |
+| G-123 | 缺少面向运营/监管的安全态势披露，用户可能误解软件 fallback 为硬件 TEE/HSM/链/SIEM 已启用 | P0 | 已修复，已编译/构建通过 | Round 29 | `app/api/monitoring.py`, `cds-frontend/src/services/monitoringApi.ts`, `cds-frontend/src/pages/Dashboard/index.tsx` | 新增安全态势接口和首页卡片，按配置/TEE 探测返回 Go/Conditional Go/No-Go、能力状态、证据和建议动作，不暴露 Secret。 |
+| G-124 | 沙箱会话缺少统一可下载证明包，policy hash、attestation、key id、输出签名和审计摘要分散不可交付 | P0 | 已修复，已编译/构建通过 | Round 30 | `app/api/sandbox_sessions.py`, `cds-frontend/src/services/sandboxApi.ts`, `cds-frontend/src/pages/Sandbox/SessionDetail.tsx`, `specs/productization-gap-analysis.md` | 新增会话证明包接口和前端抽屉/下载入口；执行后持久化 `sandbox.output_inspected` 审计摘要；证明包包含稳定 evidence hash 与本次 bundle hash，且不返回密钥明文、原始输出或 raw quote。 |
+| G-125 | 管理员高危操作缺少后端强制理由和可检索审计字段，API 直接调用可绕过前端二次确认 | P0 | 已修复，已编译/构建通过 | Round 31 | `app/schemas/high_risk_operation.py`, `app/api/kms.py`, `app/api/certificates.py`, `app/api/contracts.py`, `app/api/connectors.py`, `cds-frontend/src/utils/highRiskOperation.tsx`, `cds-frontend/src/pages/Identity/*`, `cds-frontend/src/pages/Contracts/ContractDetail.tsx`, `cds-frontend/src/pages/Connectors/index.tsx` | KMS 密钥撤销、证书撤销、合约终止、连接器暂停/恢复/API Key 轮换强制提交 reason，可选 ticket_id；前端统一理由弹窗；审计 detail 记录 reason/ticket_id。 |
 
 **当前 active software gap：0。**
+
+### 2.1 后续待实现/验证 Gap 表
+
+> 下表记录“当前代码闭环已可编译、可单测，但产品化/真实硬件/真实外部系统上线前仍必须完成”的 gap。它们不计入当前 active software gap；一旦进入对应交付阶段或具备真实环境，应转入 Active Gap 表并按轮次修复。
+
+| ID | 后续 Gap | 优先级 | 当前状态 | 触发条件 | 验收标准 | 代码/规格证据 |
+|---|---|---:|---|---|---|---|
+| FG-001 | 真实 L1 TEE 硬件 e2e 与厂商证书链验证未完成 | P0 | 软件侧已部分完成：自动探测、无硬件 `software_confidential` 降级、硬件 runner/attester hook 已实现；真实硬件 e2e 待验证 | 有 SGX/Occlum/Gramine、TDX、SEV-SNP 或国产 TEE 节点 | 沙箱进程真实运行在 TEE；quote 使用厂商证书链校验；measurement/策略绑定；密钥只在 attestation 通过后释放；硬件集成测试通过 | `app/core/config.py`, `app/services/tee_capability.py`, `app/services/sandbox_runtime.py`, `app/services/remote_attestation.py`, `specs/product-spec.md`, `specs/ss-04-sandbox-runtime.md` |
+| FG-002 | 真实 GPU-TEE/NVIDIA CC 训练运行时未接入 | P0 | 本地加密运行时和 CPU simulator 已实现 | 有 H100/H800 CC 模式或等价 GPU-TEE 环境 | GPU attestation 可验证；CPU-TEE 到 GPU-TEE 加密通道使用真实设备能力；训练 batch/梯度/checkpoint 不落明文；LLM/视觉训练硬件集成测试通过 | `app/services/gpu_tee_runtime.py`, `app/services/gpu_tee_simulator.py`, `app/services/llm_sft_runtime.py`, `app/services/vision_multimodal_runtime.py`, `specs/ss-07-ai-training-pipeline.md` |
+| FG-003 | Firecracker 真实 guest-agent/virtio-fs 执行通道未完成 | P1 | Firecracker/QEMU 不可用或无 guest-agent 时使用 hardened bwrap fallback | 有可启动 kernel/rootfs/guest agent 的 L2 节点 | 非网络 VM 内可通过 guest-agent 或 virtio-fs 执行代码；文件传输、stdout/stderr、超时、env/session key 全在 guest 内完成；不依赖本地 fallback | `app/services/firecracker_runtime.py`, `app/services/sandbox_runtime.py`, `specs/sandbox-adapters-spec.md` |
+| FG-004 | K3s/K8s 真实集群 e2e 尚未跑通并固化 | P0 | manifest、NetworkPolicy、quota、ready gate 已单测；安装脚本已提供 | 243 或专用节点安装 K3s/K8s 后 | 使用中国镜像源部署成功；Pod 创建/Ready/exec/terminate/status 全链路通过；Cilium FQDN allowlist、deny_all、ResourceQuota 在真实集群生效；形成 CI/e2e 脚本 | `scripts/install-k3s.sh`, `k8s/registries.yaml`, `app/services/k8s_sandbox.py`, `app/services/sandbox_runtime.py` |
+| FG-005 | 生产 FISCO BCOS/AntChain 节点存证未接入 | P1 | 默认 PG append-only hash chain 可验证；链适配器保留 | 有真实联盟链节点、账号、证书和网络 | 存证 tx 真实上链；回执/区块高度/确认数可查；链不可用时按策略失败关闭或降级可审计；链上链下 hash 可双向校验 | `app/services/blockchain_adapter.py`, `app/services/blockchain_service.py`, `app/models/blockchain_anchor.py`, `specs/blockchain-integration-spec.md` |
+| FG-006 | PG-in-TEE/生产密态数据库后端未落地 | P1 | SecureDuckDB、列加密、PG RLS 和应用级 fallback 已实现 | 需要承载生产结构化数据查询或多租户 SQL 服务 | PostgreSQL/DuckDB 实例运行在 TEE 或等价机密 VM 内；RLS/列加密/密钥释放/审计策略端到端验证；性能基线达标 | `app/services/secure_duckdb.py`, `app/services/pg_rls_manager.py`, `app/services/column_encryption.py`, `specs/ss-09-structured-db-storage.md` |
+| FG-007 | 生产 HSM/Vault/国密套件未完成环境级接入 | P0 | 软件 HSM fallback、TLCP/证书/KMS 逻辑已实现 | 上生产或等保/国密合规环境 | KEK/签名密钥由 HSM/Vault 托管；SM2/SM3/SM4/TLCP 使用合规实现；Tongsuo/gmssl 依赖可安装；密钥轮换、吊销、审计通过演练 | `app/services/hsm_adapter.py`, `app/services/kms_service.py`, `app/services/tlcp_service.py`, `app/services/crypto_service.py`, `specs/ss-01-kms-identity.md` |
+| FG-008 | 跨空间联邦真实互操作/e2e 未完成 | P1 | `FederationConnector`、mTLS、JWT/SM2 身份、FederatedRuntime 已实现 | 有第二个可信数据空间或互操作测试桩 | 双空间 trust 建立、证书校验、策略同步、目录同步、联邦请求、审计回写全链路通过；异常空间/低信任分数失败关闭 | `app/services/federation_connector.py`, `app/api/federation.py`, `app/services/catalog_sync.py`, `specs/ss-06-audit-ss-08-interconnect.md` |
+| FG-009 | 告警中心外部通知通道、SIEM 对接和前端运营台 e2e 未完成 | P1 | 后端软件侧已部分完成：告警持久化、去重、Webhook 投递记录、确认/解决处置 API 已实现；真实邮件/短信/SIEM 与前端工作台 e2e 待验证 | 进入运维/监管产品化阶段 | 邮件/短信/Webhook/SIEM 推送在真实环境通过；告警抑制/升级策略可配置；前端告警工作台支持运营处置；处置状态和审计留痕端到端通过 | `app/models/alert.py`, `app/services/alert_center.py`, `app/services/alert_engine.py`, `app/api/monitoring.py`, `app/templates/alerts.html`, `specs/product-spec.md` |
+| FG-010 | 非结构化/多媒体生产处理管线真实引擎镜像与生产数据 e2e 未完成 | P2 | 软件侧已完成：隔离 worker、失败重试、阶段状态、DICOM 入口、加密 artifact manifest、输出审查、partial_success；真实 PaddleOCR/ffmpeg/ASR/pydicom 镜像和生产数据验证待完成 | 要支持 PDF/OCR/DICOM/音视频生产数据上线 | PaddleOCR/PDF text/DICOM tag 清洗、视频抽帧/转码/语音转写依赖在生产镜像内可用；大文件/异常文件/并发任务 e2e 通过；输出 artifact 可从加密存储按授权释放 | `app/services/data_processing.py`, `app/services/unstructured_pipeline.py`, `app/services/vision_multimodal_runtime.py`, `app/api/data_pipeline.py`, `specs/tech-spec.md` |
+| FG-011 | 模型训练生产编排未接入真实分布式训练平台 | P2 | 单机/确定性代理、可复现 dataset split、RAG stage 命名、checkpoint/watermark/MIA 闭环已实现 | 需要真实 LLM/视觉训练交付 | 支持真实 tokenizer/model/dataset；GPU/CPU 资源调度；OOM/中断恢复；checkpoint 加密持久化；训练审计、MIA、水印、指标全链路通过 | `app/services/llm_sft_runtime.py`, `app/services/cpu_trainer.py`, `app/services/training_pipeline.py`, `app/api/training.py`, `specs/ss-07-ai-training-pipeline.md` |
+| FG-012 | 性能、容量和稳定性基线未完成 | P1 | 单元/聚焦测试通过；未跑压力和长稳 | 产品化验收前 | 并发沙箱数、启动耗时、查询延迟、输出审查吞吐、DP/审计写入吞吐、故障恢复时间有基线；至少 24h 长稳和故障注入通过 | `specs/product-spec.md`, `specs/deployment-spec.md`, `tests/test_e2e_full_lifecycle.py` |
+| FG-013 | 生产部署、备份恢复和迁移演练未完成 | P1 | Docker/Helm/K8s 配置和 Alembic 基础存在 | 上生产或预生产环境 | Postgres/Redis/MinIO/对象存储 HA 配置；备份恢复演练通过；Alembic migration 在真实 PG 上演练；Secret/TLS 轮换流程可执行 | `helm/`, `k8s/`, `docker-compose.yml`, `alembic/`, `specs/deployment-spec.md` |
+| FG-014 | 前端产品化 QA、可访问性和多角色工作流 e2e 未完成 | P2 | 主要页面、角色菜单和构建已修复 | 产品演示或试点验收前 | 五类角色端到端流程可用；空状态/错误态/加载态齐全；移动端/窄屏无错位；关键表单可恢复；基础 a11y 和中文文案统一 | `cds-frontend/src/`, `specs/frontend-spec.md`, `specs/frontend-implementation-guide.md` |
+| FG-015 | 安全认证、渗透测试和供应链合规未完成 | P0 | 代码级安全闭环和单测已覆盖主要逻辑 | 上线前安全评审 | 威胁模型复核；SAST/依赖漏洞/SBOM/镜像扫描；K8s/CIS baseline；渗透测试和沙箱逃逸测试；修复项回归通过 | `app/services/sandbox_security.py`, `Dockerfile.api`, `requirements.txt`, `cds-frontend/package-lock.json`, `specs/data-security-spec.md` |
+| FG-016 | 全量 e2e/CI 回归矩阵未固定 | P1 | 非 e2e 和聚焦测试通过；e2e 按当前任务暂未跑 | 进入持续交付阶段 | 243 或 CI 环境自动跑完整生命周期、K3s、联邦、链存证、训练、输出审查 e2e；失败自动生成 active gap；测试数据和依赖初始化脚本稳定 | `tests/test_e2e_full_lifecycle.py`, `tests/test_e2e_minimal_loop.py`, `tests/test_e2e_flows.py`, `.github/` 或后续 CI 配置 |
 
 ---
 
@@ -143,6 +184,7 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | DP 预算状态 | PostgreSQL `MATERIALIZED VIEW dp_budget_status` | SQLAlchemy 模型表 `dp_budget_status`，由 Ledger 写穿透维护 | 项目单测使用 SQLite，开发模式依赖 `Base.metadata.create_all()`；真实物化视图会破坏跨数据库测试。表快照能提供同等读模型。 |
 | FISCO BCOS 存证 | 强依赖真实联盟链节点 | PG append-only 哈希链为默认真实适配器，FISCO 作为可替换适配器 | 当前目标是逻辑正确和单测可跑；无链环境时 PG 哈希链更稳定，也满足不可篡改审计的本地验证。 |
 | SGX/GPU/PG-in-TEE | 真实硬件运行时 | 保留接口、模拟器和降级路径 | 真实硬件无法通过普通单元测试验证，不应阻塞软件闭环；后续用硬件集成测试覆盖。 |
+| L1 TEE 无硬件行为 | 规格默认 L1 是真实 TEE | 无 TEE 环境时 L1 明确作为普通软件密态沙箱运行，使用 `software_hash` attestation；有硬件信号且配置 runner/attester 时才进入硬件路径 | 防止无硬件环境伪造 SGX 证明；同时让部署在普通节点、SGX/TDX/SEV-SNP/iTrustee 节点上都有可解释、可单测的行为。 |
 | K8s/K3s 分布式沙箱 | 真实 K8s/K3s 集群运行沙箱 pod | 当前单元测试覆盖 hardened manifest、NetworkPolicy、ResourceQuota、ready gate、状态映射、runtime 路由、产品入口、kubeconfig 和 Cilium FQDN allowlist；243 可作为后续 K3s e2e 节点 | 当前完成标准是逻辑正确、编译通过、单元测试可跑；已提供适配中国网络的 K3s/k3d 安装脚本，真实集群部署验证不作为本轮阻塞项。 |
 | PG materialized view refresh | 定时刷新或手动 refresh | 写路径同步刷新状态表 | DP 预算属于使用控制关键路径，写穿透比定时刷新更适合实时拒绝。 |
 | 过度细分场景模式 | 9-13 种模式强拆运行时 | 核心场景运行时 + 配置参数 | 降低重复实现，保持策略与输出审查可按配置扩展。 |
@@ -935,7 +977,289 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 
 ---
 
-## 22. 最终验证状态
+## 22. Round 20 修复记录
+
+### 触发条件
+
+继续扫描 `未实现`、`not implemented`、`stub`、`mock` 和运行时工厂后发现：规格仍标注 `FederatedRuntime 未实现`，代码中 `joint_federated` 虽是合法模式但未注册专用场景运行时；Firecracker 非网络串口执行直接返回占位字符串；告警引擎的 DP budget exhaustion 在 `evaluate()` 路径为空；非结构化数据处理对 Pillow、pdftotext、ffprobe 的失败静默吞掉，产品侧无法提示“只完成基础元数据”。
+
+### 已完成
+
+1. 联邦场景运行时：
+   - 新增 `FederatedRuntime` 并注册到 `SceneRuntimeFactory`。
+   - SQL 路径阻断 DDL/DML 和默认 raw `SELECT *`，并补齐输出行数限制。
+   - Python 路径阻断直接 `requests/httpx/urllib/socket` 网络访问，要求走联邦连接器上下文。
+   - 支持 `federation_request` 上下文，调用 `FederationConnector.send_request()` 进行真实跨空间代理请求。
+
+2. Firecracker 非网络执行路径：
+   - 删除 `Serial execution not fully implemented` 占位返回。
+   - guest agent/SSH 不可用时复用 QEMU TCG 的 hardened bwrap fallback。
+   - session key、审计 env 和 timeout 透传到 fallback 执行。
+   - bwrap seccomp 不兼容检测同时识别 `EINVAL`、`Invalid argument` 和 `PR_SET_SECCOMP`，避免 243 环境 fallback 重试失效。
+
+3. DP budget 自动告警：
+   - `AlertRuleEngine` 新增 `record_dp_budget()` 快照入口。
+   - `evaluate()` 的 `DP_BUDGET_EXHAUSTION` 分支会自动生成告警。
+   - 保留现有 `check_dp_budget()` 手工检查接口。
+
+4. 非结构化数据处理降级显式化：
+   - Pillow/pdftotext/ffprobe 缺失或失败时不再静默吞掉。
+   - 返回 metadata 中的 `partial_success`、`extraction_errors` 和具体阶段状态。
+   - 基础文件元数据仍保持成功返回，避免可选依赖缺失阻塞上传/登记流程。
+
+5. 规格状态同步：
+   - `ss-04-sandbox-runtime.md` 将 LLM、视觉多模态和 FederatedRuntime 状态更新为当前实现状态，不再保留过期 `Stub/未实现` 描述。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests alembic` | 本机通过 |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 240s /root/.local/bin/uv run python -m pytest -q tests/test_scene_runtime.py tests/test_firecracker_runtime.py tests/test_alert_engine.py tests/test_data_processing.py'` | 243 通过，102 passed |
+
+---
+
+## 23. Round 21 修复记录
+
+### 触发条件
+
+继续修复后续 gap 时明确新的 L1 TEE 产品语义：如果部署环境没有提供 TEE，则安全沙箱应作为普通密态沙箱运行；如果提供 TEE 环境，则应进入相应硬件能力对接路径。当前实现的问题是：无硬件时仍使用 SGX 形状的模拟 quote，容易让 KMS/审计误判为硬件 TEE；同时缺少 SGX/TDX/SEV-SNP/iTrustee 自动探测和硬件 runner/attester hook。
+
+### 已完成
+
+1. TEE 运行配置：
+   - 新增 `TEE_MODE=auto|software|sgx|tdx|sev_snp|itrustee`。
+   - 新增 `TEE_ALLOW_SOFTWARE_FALLBACK`。
+   - 新增 `TEE_HARDWARE_PROVISION_CMD`、`TEE_HARDWARE_EXEC_CMD`、`TEE_HARDWARE_ATTEST_CMD`、`TEE_HARDWARE_TERMINATE_CMD`。
+
+2. TEE 能力探测：
+   - 新增 `TEECapabilityDetector`。
+   - 自动探测 SGX、TDX、SEV-SNP、iTrustee 的设备文件和运行时命令信号。
+   - `software/software_confidential/none/off` 显式进入普通软件密态沙箱。
+
+3. L1 无硬件降级：
+   - 无硬件或未配置硬件 exec hook 时进入 `software_confidential`。
+   - fallback 继续使用 bwrap 隔离，但对外不再声明 SGX。
+   - attestation 改为 `software_hash`，与 KMS 中 Firecracker/software attestation 解析保持一致。
+
+4. L1 硬件对接路径：
+   - 探测到硬件信号且配置 `TEE_HARDWARE_EXEC_CMD` 时进入 `tee_mode=hardware`。
+   - 用户代码经 stdin 传递给硬件 runner；session key 和上下文通过环境变量传递，避免写入命令行。
+   - `TEE_HARDWARE_ATTEST_CMD` 输出 JSON quote，运行时回填 `attestation_quote/type/measurement`；未配置硬件 attester 时不伪造厂商 quote。
+   - provision/terminate hook 支持外部硬件运行时生命周期接入。
+
+5. 测试补齐：
+   - 新增 `tests/test_tee_capability.py` 覆盖软件模式、SGX 信号探测和 auto 无信号降级。
+   - 新增 TEEAdapter 无硬件软件密态 quote 测试，断言不再产生 SGX quote。
+   - 新增硬件 runner/attester 单测，模拟 SGX provider 并验证 exec/attest 路由。
+   - 修正 bwrap timeout 测试在受限主机上“提前失败关闭”的兼容断言。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests alembic` | 本机通过 |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 240s /root/.local/bin/uv run python -m pytest -q tests/test_tee_capability.py tests/test_sandbox_runtime.py::test_tee_adapter_no_hardware_uses_software_confidential_quote tests/test_sandbox_runtime.py::test_tee_adapter_hardware_runner_executes_when_detected tests/test_sandbox_runtime.py::test_tee_adapter_fails_closed_when_bwrap_missing tests/test_remote_attestation.py::TestQuoteGeneration::test_generate_firecracker_quote'` | 243 通过，7 passed |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 240s /root/.local/bin/uv run python -m pytest -q tests/test_sandbox_runtime.py tests/test_tee_capability.py tests/test_remote_attestation.py::TestQuoteGeneration::test_generate_firecracker_quote'` | 243 编译通过，35 passed |
+
+---
+
+## 24. Round 22 修复记录
+
+### 触发条件
+
+继续从产品化后续 gap 表修复 `FG-009`：告警中心只有内存规则引擎和从 `AuditLog` 反推的列表，没有独立告警实体、去重、通知投递状态、确认/解决处置流。该缺口不依赖真实硬件，属于可软件闭环的产品能力。
+
+### 已完成
+
+1. 告警持久化模型：
+   - 新增 `AlertRecord`，包含 `dedup_key`、`alert_type`、`severity`、`status`、`occurrence_count`、`first_seen_at`、`last_seen_at`。
+   - 增加 `acknowledged_by/at`、`resolved_by/at`、`resolution_note`。
+   - 增加 `notification_status` 和 `notification_results`，保留通知投递审计。
+
+2. 告警中心服务：
+   - 新增 `AlertCenterService.ingest_alerts()`。
+   - 基于 alert type、session、user、resource/rule 生成稳定 dedup key。
+   - 重复告警合并为同一记录并递增 occurrence count。
+   - 已解决或已确认告警再次出现时自动重新打开。
+
+3. 通知投递闭环：
+   - 新增 `ALERT_WEBHOOK_URLS`、`ALERT_NOTIFICATION_TIMEOUT_SECONDS`、`ALERT_NOTIFICATION_RETRIES` 配置。
+   - 支持 webhook 投递，并记录每个 target 的状态码、是否成功、attempt 和投递时间。
+   - 未配置通知通道时明确标记 `not_configured`，不伪造发送成功。
+
+4. 监控 API：
+   - `/monitoring/alerts` 优先返回持久化告警，支持 status/severity/alert_type 过滤。
+   - 兼容旧 audit log fallback，避免升级期间前端空白。
+   - 新增 `/monitoring/alerts/{id}/acknowledge` 和 `/monitoring/alerts/{id}/resolve`。
+
+5. 测试补齐：
+   - 新增 `tests/test_alert_center.py` 覆盖持久化去重、确认/解决/重新打开、webhook 投递记录、API 列表与处置流。
+   - 保留 `tests/test_alert_engine.py` 的规则引擎测试，规则层和持久化层职责分离。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests alembic` | 本机通过 |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 240s /root/.local/bin/uv run python -m pytest -q tests/test_alert_engine.py tests/test_alert_center.py'` | 243 编译通过，29 passed |
+
+---
+
+## 25. Round 23 修复记录
+
+### 触发条件
+
+继续从产品化后续 gap 表修复 `FG-010`：非结构化/多媒体 pipeline 虽然已有 OCR/ASR/video/document 脚本形状，但产品闭环仍缺少任务级重试、阶段状态、加密产物清单、输出审查和 DICOM 入口。远端聚焦测试还暴露 L3 `BwrapAdapter` 对 243 的 `PR_SET_SECCOMP: Invalid argument` 不会重试，导致 API 路径失败。
+
+### 已完成
+
+1. 非结构化任务状态：
+   - `PipelineTask` 增加 `options/max_retries/retry_count/attempts/stage_status/artifacts`。
+   - `execute_task()` 记录 workspace/input/sandbox_execution/artifact_encryption/output_review 阶段。
+   - sandbox 执行失败可按 `max_retries` 自动重试，保留每次 attempt 的 exit code、duration 和截断状态。
+
+2. 加密 artifact manifest：
+   - 输出目录所有非 symlink 文件通过 `StorageService.upload()` envelope 加密。
+   - 返回 artifact manifest：相对路径、加密 storage path、SM3 checksum、SHA-256、content type、key id。
+   - 拒绝 symlink 或逃逸 output dir 的 artifact，失败关闭。
+
+3. 输出审查：
+   - 对 result metadata 和文本 artifact 片段调用统一 `OutputInspector`。
+   - 审查报告写入 `output_review`，critical DLP 发现会阻断释放，但 artifact 仍只以加密引用留存。
+   - API 返回保持兼容，新增 `stage_status/retry_count/attempts/artifacts/output_review`。
+
+4. DICOM 与 API 入口：
+   - 新增 `dicom` 任务类型和 DICOM tag strip 脚本。
+   - 未安装 `pydicom` 时明确返回 `partial_success`，不伪造清洗成功。
+   - `/data-pipeline/upload-and-process` 和 `/process-path` 支持 `max_retries` 与 `dicom`。
+
+5. L3 bwrap seccomp 兼容：
+   - `BwrapAdapter` 增加 `_seccomp_retry_needed()`。
+   - 兼容 `EINVAL`、`Invalid argument`、`PR_SET_SECCOMP` stderr，243 上可自动禁用 seccomp 重试。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests alembic` | 本机通过 |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 240s /root/.local/bin/uv run python -m pytest -q tests/test_data_pipeline.py tests/test_data_processing.py tests/test_sandbox_runtime.py'` | 243 编译通过，65 passed |
+
+---
+
+## 26. Round 24 修复记录
+
+### 触发条件
+
+继续检查 `FG-011` 训练编排软件侧能力时发现：`TrainingPipelineManager.split_dataset()` 使用 `random.shuffle()`，同一数据集每次运行可能得到不同 train/validation 切分。训练任务需要可审计、可回放，随机切分会导致指标、MIA 检测和故障复现实验不稳定。
+
+### 已完成
+
+1. 可复现数据切分：
+   - `split_dataset()` 改为按 record 内容和 seed 计算 SHA-256 稳定排序。
+   - 默认 seed 固定，重复运行、输入顺序变化时保持同一切分。
+   - 调用方可传入显式 seed，生成另一个可复现切分。
+
+2. 测试补齐：
+   - 新增重复调用一致性测试。
+   - 新增显式 seed 可复现且可改变切分结果测试。
+   - 新增 RAG `chunking` 阶段枚举值断言。
+
+3. RAG 阶段命名：
+   - `PipelineStage.CHUNKING` 从误拼的 `chunkding` 修正为 `chunking`。
+   - 保持 RAG pipeline 阶段名与规格、前端状态和 API 输出一致。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests alembic` | 本机通过 |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 180s /root/.local/bin/uv run python -m pytest -q tests/test_training_pipeline.py'` | 243 编译通过，33 passed |
+
+---
+
+## 27. Round 25 修复记录
+
+### 触发条件
+
+继续扫描产品代码中的薄实现时发现：`CDCAgent.start_connector()/pause_connector()/stop_connector()` 只修改内存状态，注释仍写“生产环境调用 Kafka Connect REST”。这会导致 CDC 配置生成、事件生产已有软件形状，但 connector 生命周期无法对接真实 Kafka Connect 控制面。
+
+### 已完成
+
+1. Kafka Connect 配置：
+   - 新增 `CDC_KAFKA_CONNECT_URL`。
+   - 新增 `CDC_KAFKA_CONNECT_TIMEOUT_SECONDS`。
+
+2. Connector lifecycle hook：
+   - 生成 Debezium / ClickHouse sink config 时保存 connector payload。
+   - 配置 Kafka Connect URL 时，`start_connector()` 调用 `PUT /connectors/{name}/config` 做 upsert。
+   - `pause_connector()` 调用 `PUT /connectors/{name}/pause`。
+   - `stop_connector()` 调用 `DELETE /connectors/{name}`，404 视为已停止。
+   - REST 失败时失败关闭，`start_connector()` 将状态标记为 `failed`。
+
+3. 本地 fallback：
+   - 未配置 Kafka Connect URL 时继续保持原本内存状态路径，便于单测和无外部环境部署。
+   - REST 使用标准库 `urllib`，不引入额外依赖。
+
+4. 测试补齐：
+   - 覆盖 start connector upsert payload。
+   - 覆盖 REST 失败标记 failed。
+   - 覆盖 pause/stop REST 调用路径。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app tests alembic` | 本机通过 |
+| `ssh root@172.22.4.243 'cd /root/cds-sandbox-codex && /root/.local/bin/uv run python -m compileall -q app tests alembic && timeout 180s /root/.local/bin/uv run python -m pytest -q tests/test_cdc_agent.py'` | 243 编译通过，11 passed |
+
+---
+
+## 28. Round 29-31 产品化安全证据修复记录
+
+### 触发条件
+
+产品化安全复核发现：安全能力状态已经分散在配置、运行时探测和文档中，但缺少面向运营/监管的统一披露；同时沙箱会话的 policy hash、attestation、key id、输出签名和审计摘要分散在多个接口/表中，客户试点和监管验收时无法直接下载归档。
+
+### 已完成
+
+1. 安全态势披露：
+   - `app/api/monitoring.py` 新增 `GET /api/v1/monitoring/security-posture`。
+   - 返回 TEE、GPU-TEE、HSM/Vault、链存证、SIEM、K8s policy、输出审查和 Debug 状态。
+   - 输出 Go/Conditional Go/No-Go 发版建议；不返回 Secret 值。
+   - 首页为监控读者增加“安全态势”卡片。
+
+2. 会话证明包：
+   - `app/api/sandbox_sessions.py` 新增 `GET /api/v1/sandbox-sessions/{session_id}/proof-bundle`。
+   - 证明包包含 session 摘要、runtime proof level、attestation quote hash、resource/network/contract policy hash、session key id/KMS 元数据、输出审查摘要、审计事件摘要、稳定 evidence hash 和本次 bundle hash。
+   - 执行后新增 `sandbox.output_inspected` 审计摘要，持久化 report hash、released output hash、签名、水印、阻断状态和发现数量。
+   - 证明包明确排除 session key 明文、原始沙箱输出、raw attestation quote 和 Secret 配置。
+
+3. 前端交付入口：
+   - `cds-frontend/src/services/sandboxApi.ts` 增加 `SessionProofBundle` 与 `getProofBundle()`。
+   - `cds-frontend/src/pages/Sandbox/SessionDetail.tsx` 增加证明包抽屉和 JSON 下载入口。
+
+4. 发版文档：
+   - `specs/productization-gap-analysis.md` 新增并修复 `P-GAP-012`、`P-GAP-013`。
+   - `specs/product-security-release-review.md` 标注 `SD-001`、`SD-002` 已完成。
+   - `specs/release-gate-checklist.md` 增加安全态势和会话证明包发版门禁。
+
+5. 高危操作理由必填：
+   - 新增 `HighRiskOperationRequest`，强制 `reason` 至少 8 个字符，可选 `ticket_id`。
+   - KMS 密钥撤销、证书撤销、合约终止、连接器暂停/恢复/API Key 轮换必须提交 reason。
+   - 前端新增统一高危操作确认弹窗，相关页面均要求输入理由。
+   - 审计 detail 记录 reason/ticket_id，支持发版门禁抽样检查。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `.venv/bin/python -m compileall -q app alembic` | 本机通过 |
+| `cds-frontend npm run build` | 本机通过 |
+
+---
+
+## 29. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -966,6 +1290,13 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | Round 16 编译/聚焦单测 | 通过 | 本机 compileall 通过；本机 K8s 目标测试 5 passed；243 Python 3.12 compileall 通过；243 K8s 目标测试 5 passed |
 | Round 17 编译/聚焦单测 | 通过 | 本机 compileall 通过；本机 K8s lifecycle/API schema 目标测试 15 passed；243 Python 3.12 compileall 通过；243 目标测试 15 passed；前端 build 通过 |
 | Round 19 编译/聚焦单测 | 通过 | 本机 compileall 通过；本机 K8s allowlist/kubeconfig 目标测试 13 passed；243 Python 3.12 compileall 通过；243 目标测试 13 passed |
+| Round 20 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；FederatedRuntime/Firecracker/Alert/DataProcessing 聚焦测试 102 passed |
+| Round 21 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；TEE capability/L1 runtime/Firecracker software quote 聚焦测试 35 passed |
+| Round 22 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；AlertEngine/AlertCenter 聚焦测试 29 passed |
+| Round 23 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；DataPipeline/DataProcessing/SandboxRuntime 聚焦测试 65 passed |
+| Round 24 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；TrainingPipeline 聚焦测试 33 passed |
+| Round 25 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；CDCAgent 聚焦测试 11 passed |
+| Round 29-31 编译/构建 | 通过 | 本机 `.venv/bin/python -m compileall -q app alembic` 通过；`cds-frontend npm run build` 通过 |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
@@ -974,7 +1305,7 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 
 ---
 
-## 23. 后续循环规则
+## 30. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。

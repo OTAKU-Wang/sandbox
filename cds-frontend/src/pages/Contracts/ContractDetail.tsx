@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Descriptions, Tag, Button, Typography, Spin, Space, message, Modal, Alert, Progress, Table, Card } from 'antd';
+import { Descriptions, Tag, Button, Typography, Space, message, Modal, Alert, Progress, Table, Card } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { contractApi } from '../../services/contractApi';
 import { authApi } from '../../services/authApi';
 import { useAuthStore } from '../../stores/authStore';
+import { CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 import {
   generateSM2KeyPair,
   sm2Sign,
@@ -12,6 +13,7 @@ import {
   loadSM2PrivateKey,
   saveSM2PrivateKey,
 } from '../../utils/crypto';
+import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 
 const { Title, Text } = Typography;
 
@@ -33,7 +35,7 @@ export default function ContractDetail() {
   const user = useAuthStore((s) => s.user);
   const [signing, setSigning] = useState(false);
 
-  const { data: contract, isLoading } = useQuery({
+  const { data: contract, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['contract', id],
     queryFn: () => contractApi.get(id!),
     enabled: !!id,
@@ -82,24 +84,32 @@ export default function ContractDetail() {
   });
 
   const terminateMutation = useMutation({
-    mutationFn: () => contractApi.terminate(id!),
+    mutationFn: (payload: { reason: string; ticket_id?: string | null }) => contractApi.terminate(id!, payload),
     onSuccess: () => { message.success('已终止'); queryClient.invalidateQueries({ queryKey: ['contract', id] }); },
     onError: () => message.error('终止失败'),
   });
 
   const handleTerminate = () => {
-    Modal.confirm({
+    confirmHighRiskOperation({
       title: '确认终止合约',
       content: '终止后将撤销所有关联的沙箱会话，此操作不可逆。',
       okText: '确认终止',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: () => terminateMutation.mutate(),
+      onConfirm: (payload) => terminateMutation.mutate(payload),
     });
   };
 
-  if (isLoading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
-  if (!contract) return <div>合约不存在</div>;
+  if (isLoading) return <CenteredLoading tip="加载合约详情" />;
+  if (isError) {
+    return <QueryErrorAlert error={error} message="合约详情加载失败" onRetry={() => { void refetch(); }} />;
+  }
+  if (!contract) {
+    return (
+      <EmptyState
+        description="合约不存在或当前账号无权访问"
+        action={<Button onClick={() => navigate('/contracts')}>返回合约列表</Button>}
+      />
+    );
+  }
 
   const isParty = user && (user.id === contract.provider_id || user.id === contract.buyer_id);
   const userRole = user?.id === contract.provider_id ? 'provider' : 'buyer';

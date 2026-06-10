@@ -46,6 +46,77 @@ async def test_pipeline_execute_missing_file():
 
 
 @pytest.mark.asyncio
+async def test_pipeline_retries_and_encrypts_artifacts(tmp_path):
+    """Pipeline retries transient sandbox failures and encrypts output artifacts."""
+    from app.services.storage_service import storage_service
+    from app.services.unstructured_pipeline import UnstructuredPipeline
+
+    class FakeAdapter:
+        def __init__(self, root: Path):
+            self.root = root
+            self.calls = 0
+
+        async def execute(self, container_id: str, code: str, language: str):
+            self.calls += 1
+            task_id = container_id.replace("bwrap-", "")
+            output_dir = self.root / task_id / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            if self.calls == 1:
+                return {"exit_code": 1, "output": "transient OCR failure", "duration_ms": 1}
+            (output_dir / "result.json").write_text(json.dumps({"files": [{"filename": "doc.txt", "chars": 14}]}))
+            (output_dir / "doc.txt").write_text("safe aggregate", encoding="utf-8")
+            return {"exit_code": 0, "output": "ok", "duration_ms": 2}
+
+    p = UnstructuredPipeline(workspace_root=str(tmp_path / "pipeline"))
+    p._adapter = FakeAdapter(tmp_path / "pipeline")
+    input_file = tmp_path / "doc.txt"
+    input_file.write_text("hello", encoding="utf-8")
+
+    task = p.submit_task("document", str(input_file), options={"max_retries": 1})
+    result = await p.execute_task(task.task_id)
+
+    assert result.success is True
+    assert result.output["retry_count"] == 1
+    assert len(result.output["attempts"]) == 2
+    assert result.output["stage_status"]["artifact_encryption"]["status"] == "completed"
+    assert result.output["stage_status"]["output_review"]["status"] == "completed"
+    txt_artifact = next(item for item in result.output["artifacts"] if item["path"] == "doc.txt")
+    assert txt_artifact["encrypted"] is True
+    assert storage_service.get_encryption_info(txt_artifact["storage_path"])["encrypted"] is True
+    assert storage_service.download(txt_artifact["storage_path"]) == b"safe aggregate"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_output_review_blocks_critical_text_artifact(tmp_path):
+    """Critical DLP findings block release while artifacts remain encrypted."""
+    from app.services.unstructured_pipeline import UnstructuredPipeline
+
+    class PiiAdapter:
+        async def execute(self, container_id: str, code: str, language: str):
+            task_id = container_id.replace("bwrap-", "")
+            output_dir = tmp_path / "pipeline" / task_id / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "result.json").write_text(json.dumps({"files": [{"filename": "pii.txt", "chars": 25}]}))
+            (output_dir / "pii.txt").write_text("身份证号 110101199001011234", encoding="utf-8")
+            return {"exit_code": 0, "output": "ok", "duration_ms": 1}
+
+    p = UnstructuredPipeline(workspace_root=str(tmp_path / "pipeline"))
+    p._adapter = PiiAdapter()
+    input_file = tmp_path / "pii.txt"
+    input_file.write_text("input", encoding="utf-8")
+
+    task = p.submit_task("document", str(input_file))
+    result = await p.execute_task(task.task_id)
+
+    assert result.success is False
+    assert "blocked" in result.error.lower()
+    assert result.output["output_review"]["blocked"] is True
+    assert result.output["stage_status"]["artifact_encryption"]["status"] == "completed"
+    assert all(item["encrypted"] for item in result.output["artifacts"])
+    assert task.status == "failed"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_nonexistent_task():
     """Unit test: get nonexistent task returns None."""
     from app.services.unstructured_pipeline import UnstructuredPipeline
@@ -105,7 +176,7 @@ async def test_api_process_path_document(client: AsyncClient, operator_headers: 
         assert resp.status_code == 200
         data = resp.json()
         assert data["task_type"] == "document"
-        assert data["success"] is True
+        assert data["success"] is True, data
         assert data["duration_ms"] >= 0
     finally:
         dummy.unlink()
@@ -153,7 +224,8 @@ async def test_api_upload_and_process(client: AsyncClient, operator_headers: dic
         headers=operator_headers,
     )
     assert resp.status_code == 200
-    assert resp.json()["success"] is True
+    data = resp.json()
+    assert data["success"] is True, data
 
 
 @pytest.mark.asyncio

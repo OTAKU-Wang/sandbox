@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
+from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.models.data_product import DataProduct
 from app.schemas.contract import ContractCreate, ContractSign, ContractResponse
 from app.services.contract_service import contract_service
@@ -206,6 +207,7 @@ async def activate_contract(
 @router.post("/{contract_id}/terminate", response_model=ContractResponse)
 async def terminate_contract(
     contract_id: uuid.UUID,
+    body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -219,7 +221,11 @@ async def terminate_contract(
     await audit_service.log(
         db, action="contract.terminate_with_sessions", resource_type="contract",
         user_id=current_user.id, resource_id=str(contract_id),
-        detail={"sessions_terminated": terminated_count},
+        detail={
+            "sessions_terminated": terminated_count,
+            "reason": body.reason,
+            "ticket_id": body.ticket_id,
+        },
     )
 
     return ContractResponse.model_validate(contract)

@@ -4,11 +4,11 @@ replicaCount: 2
 image:
   api:
     repository: cds/api
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
   frontend:
     repository: cds/frontend
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
 
 # ─── API Service ───
@@ -23,7 +23,7 @@ api:
       cpu: 2000m
       memory: 2Gi
   env:
-    ENVIRONMENT: production
+    CDS_DEBUG: "false"
     LOG_LEVEL: info
 
 # ─── Frontend Service ───
@@ -116,7 +116,10 @@ ingress:
 secrets:
   existingSecret: cds-secrets
   # Keys expected in the secret:
-  # JWT_SECRET, KMS_MASTER_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD, CLICKHOUSE_PASSWORD
+  # CDS_DATABASE_URL, CDS_REDIS_URL, CDS_CLICKHOUSE_URL, CDS_JWT_SECRET_KEY,
+  # CDS_VAULT_ADDR, CDS_VAULT_TOKEN, CDS_MINIO_ENDPOINT,
+  # CDS_MINIO_ACCESS_KEY, CDS_MINIO_SECRET_KEY
+  # Optional: CDS_CDC_KAFKA_BROKERS
 
 # ─── Sandbox workspace ───
 sandbox:

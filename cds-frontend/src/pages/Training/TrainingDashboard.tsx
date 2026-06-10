@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Card, Table, Tag, Typography, Space, Button, Modal, Form, InputNumber, Input, message, Descriptions, Drawer, Timeline, Collapse } from 'antd';
+import { Card, Table, Tag, Typography, Space, Button, Modal, Form, InputNumber, Input, message, Descriptions, Drawer, Collapse, Popconfirm } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { trainingApi } from '../../services/trainingApi';
-import type { TrainingJob, ValidationResult, AuditEntry, CheckpointInfo, TrainingConfig } from '../../services/trainingApi';
+import type { TrainingJob, ValidationResult, TrainingConfig } from '../../services/trainingApi';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title, Text } = Typography;
@@ -18,8 +18,7 @@ const severityColors: Record<string, string> = {
 export default function TrainingDashboard() {
   const queryClient = useQueryClient();
   const [validateOpen, setValidateOpen] = useState(false);
-  const [auditDrawer, setAuditDrawer] = useState<{ open: boolean; jobId: string | null }>({ open: false, jobId: null });
-  const [checkpointDrawer, setCheckpointDrawer] = useState<{ open: boolean; jobId: string | null }>({ open: false, jobId: null });
+  const [detailDrawer, setDetailDrawer] = useState<{ open: boolean; job: TrainingJob | null }>({ open: false, job: null });
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [form] = Form.useForm();
 
@@ -28,16 +27,10 @@ export default function TrainingDashboard() {
     queryFn: () => trainingApi.listJobs(),
   });
 
-  const { data: auditLog } = useQuery({
-    queryKey: ['training-audit', auditDrawer.jobId],
-    queryFn: () => trainingApi.getAuditLog(auditDrawer.jobId!),
-    enabled: !!auditDrawer.jobId && auditDrawer.open,
-  });
-
-  const { data: checkpoints } = useQuery({
-    queryKey: ['training-checkpoints', checkpointDrawer.jobId],
-    queryFn: () => trainingApi.listCheckpoints(checkpointDrawer.jobId!),
-    enabled: !!checkpointDrawer.jobId && checkpointDrawer.open,
+  const { data: selectedJobDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ['training-job', detailDrawer.job?.job_id],
+    queryFn: () => trainingApi.getJob(detailDrawer.job!.job_id),
+    enabled: detailDrawer.open && !!detailDrawer.job?.job_id,
   });
 
   const validateMutation = useMutation({
@@ -50,38 +43,46 @@ export default function TrainingDashboard() {
     onError: () => message.error('校验请求失败'),
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: (jobId: string) => trainingApi.cancelJob(jobId),
+    onSuccess: () => {
+      message.success('训练任务已取消');
+      queryClient.invalidateQueries({ queryKey: ['training-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['training-job'] });
+    },
+    onError: () => message.error('取消训练任务失败'),
+  });
+
+  const detailJob = selectedJobDetail || detailDrawer.job;
+  const canCancel = (status?: string) => status === 'pending' || status === 'running';
+  const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString() : '-';
+
   const jobColumns: ColumnsType<TrainingJob> = [
     { title: '任务ID', dataIndex: 'job_id', key: 'job_id', render: (v) => <Text code>{v.slice(0, 8)}...</Text> },
-    { title: '模型', dataIndex: 'model_name', key: 'model_name', render: (_, r) => r.config?.model_name || '-' },
+    { title: '模型', dataIndex: 'model_name', key: 'model_name', render: (_, r) => r.config?.model_name || r.base_model || r.model_name || '-' },
     { title: '状态', dataIndex: 'status', key: 'status', render: (v) => <Tag color={statusColors[v]}>{v}</Tag> },
-    { title: '学习率', key: 'lr', render: (_, r) => r.config?.learning_rate },
-    { title: 'Epochs', key: 'epochs', render: (_, r) => r.config?.epochs },
-    { title: 'Batch Size', key: 'bs', render: (_, r) => r.config?.batch_size },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v) => new Date(v).toLocaleString() },
+    { title: '学习率', key: 'lr', render: (_, r) => r.config?.learning_rate ?? '-' },
+    { title: 'Epochs', key: 'epochs', render: (_, r) => r.config?.epochs ?? '-' },
+    { title: 'Batch Size', key: 'bs', render: (_, r) => r.config?.batch_size ?? '-' },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v) => formatDate(v) },
     {
       title: '操作', key: 'action', width: 200,
       render: (_, record) => (
         <Space>
-          <Button size="small" onClick={() => setAuditDrawer({ open: true, jobId: record.job_id })}>审计日志</Button>
-          <Button size="small" onClick={() => setCheckpointDrawer({ open: true, jobId: record.job_id })}>检查点</Button>
+          <Button size="small" onClick={() => setDetailDrawer({ open: true, job: record })}>详情</Button>
+          {canCancel(record.status) && (
+            <Popconfirm
+              title="确认取消该训练任务？"
+              okText="确认取消"
+              cancelText="返回"
+              onConfirm={() => cancelMutation.mutate(record.job_id)}
+            >
+              <Button size="small" danger loading={cancelMutation.isPending && cancelMutation.variables === record.job_id}>取消</Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
-  ];
-
-  const auditColumns: ColumnsType<AuditEntry> = [
-    { title: '事件', dataIndex: 'event_type', key: 'event_type', render: (v) => <Tag>{v}</Tag> },
-    { title: '时间', dataIndex: 'timestamp', key: 'timestamp', render: (v) => new Date(v).toLocaleString() },
-    { title: '操作者', dataIndex: 'actor', key: 'actor' },
-    { title: '哈希', dataIndex: 'entry_hash', key: 'hash', render: (v) => <Text code>{v.slice(0, 12)}...</Text> },
-  ];
-
-  const checkpointColumns: ColumnsType<CheckpointInfo> = [
-    { title: '检查点ID', dataIndex: 'checkpoint_id', key: 'checkpoint_id', render: (v) => <Text code>{v.slice(0, 8)}...</Text> },
-    { title: 'Epoch', dataIndex: 'epoch', key: 'epoch' },
-    { title: 'Step', dataIndex: 'step', key: 'step' },
-    { title: '大小', dataIndex: 'size_bytes', key: 'size', render: (v) => `${(v / 1024).toFixed(1)} KB` },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v) => new Date(v).toLocaleString() },
   ];
 
   const handleValidate = () => {
@@ -164,33 +165,41 @@ export default function TrainingDashboard() {
         )}
       </Modal>
 
-      {/* Audit Log Drawer */}
-      <Drawer title="训练审计日志" open={auditDrawer.open} onClose={() => setAuditDrawer({ open: false, jobId: null })} width={700}>
-        {auditLog && auditLog.length > 0 ? (
-          <Timeline items={auditLog.map((entry) => ({
-            children: (
-              <div>
-                <Tag>{entry.event_type}</Tag>
-                <Text type="secondary">{new Date(entry.timestamp).toLocaleString()}</Text>
-                {entry.actor && <Text> — {entry.actor}</Text>}
-                <br />
-                <Text code style={{ fontSize: 11 }}>hash: {entry.entry_hash.slice(0, 16)}...</Text>
-                {Object.keys(entry.details).length > 0 && (
-                  <pre style={{ fontSize: 11, marginTop: 4, background: '#f5f5f5', padding: 4, borderRadius: 4 }}>
-                    {JSON.stringify(entry.details, null, 2)}
-                  </pre>
-                )}
-              </div>
-            ),
-          }))} />
-        ) : (
-          <Text type="secondary">暂无审计记录</Text>
-        )}
-      </Drawer>
+      <Drawer
+        title="训练任务详情"
+        open={detailDrawer.open}
+        onClose={() => setDetailDrawer({ open: false, job: null })}
+        width={760}
+      >
+        {detailJob ? (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="任务ID"><Text code>{detailJob.job_id}</Text></Descriptions.Item>
+              <Descriptions.Item label="任务类型">{detailJob.job_type || '-'}</Descriptions.Item>
+              <Descriptions.Item label="模型">{detailJob.config?.model_name || detailJob.base_model || detailJob.model_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="状态"><Tag color={statusColors[detailJob.status]}>{detailJob.status}</Tag></Descriptions.Item>
+              <Descriptions.Item label="输出路径">{detailJob.output_path ? <Text code>{detailJob.output_path}</Text> : '-'}</Descriptions.Item>
+              <Descriptions.Item label="错误信息">{detailJob.error_message ? <Text type="danger">{detailJob.error_message}</Text> : '-'}</Descriptions.Item>
+              <Descriptions.Item label="创建时间">{formatDate(detailJob.created_at)}</Descriptions.Item>
+              <Descriptions.Item label="开始时间">{formatDate(detailJob.started_at)}</Descriptions.Item>
+              <Descriptions.Item label="完成时间">{formatDate(detailJob.completed_at)}</Descriptions.Item>
+            </Descriptions>
 
-      {/* Checkpoints Drawer */}
-      <Drawer title="加密检查点" open={checkpointDrawer.open} onClose={() => setCheckpointDrawer({ open: false, jobId: null })} width={700}>
-        <Table columns={checkpointColumns} dataSource={checkpoints || []} rowKey="checkpoint_id" pagination={false} />
+            <Card size="small" title="训练配置" loading={detailLoading}>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {JSON.stringify(detailJob.config || {}, null, 2)}
+              </pre>
+            </Card>
+
+            <Card size="small" title="训练指标" loading={detailLoading}>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {JSON.stringify(detailJob.metrics || {}, null, 2)}
+              </pre>
+            </Card>
+          </Space>
+        ) : (
+          <Text type="secondary">请选择训练任务</Text>
+        )}
       </Drawer>
     </div>
   );

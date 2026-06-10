@@ -11,7 +11,7 @@ import uuid
 import hashlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Header
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
 from app.models.connector import Connector, ConnectorStatus, ConnectorSession, generate_api_key
+from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.models.data_product import DataProduct, DataProductStatus
 from app.models.contract import Contract, ContractStatus
 from app.models.kms import KeyMetadata, KeyStatus, KeyType
@@ -108,6 +109,40 @@ async def _verify_connector_api_key(
     return connector
 
 
+def _connector_payload(connector: Connector, api_key: str | None = None) -> dict:
+    payload = {
+        "id": str(connector.id),
+        "space_id": connector.space_id,
+        "space_name": connector.space_name,
+        "space_url": connector.space_url,
+        "description": connector.description,
+        "status": connector.status,
+        "is_healthy": connector.is_healthy,
+        "last_heartbeat": connector.last_heartbeat.isoformat() if connector.last_heartbeat else None,
+        "api_key_prefix": connector.api_key_prefix,
+        "supported_protocols": connector.supported_protocols,
+        "max_concurrent_sessions": connector.max_concurrent_sessions,
+        "created_at": connector.created_at.isoformat(),
+    }
+    if api_key is not None:
+        payload["api_key"] = api_key
+    return payload
+
+
+@router.get("/remote/heartbeat")
+async def remote_connector_heartbeat(
+    db: AsyncSession = Depends(get_db),
+    connector: Connector = Depends(_verify_connector_api_key),
+):
+    """Connector heartbeat — updates health status."""
+    connector.last_heartbeat = datetime.now(timezone.utc)
+    connector.is_healthy = True
+    await db.flush()
+    return {"status": "ok", "space_id": connector.space_id, "timestamp": connector.last_heartbeat.isoformat()}
+
+
+
+
 # --- Admin: Manage Connectors ---
 
 @router.post("/register", status_code=201)
@@ -147,14 +182,7 @@ async def register_connector(
         detail={"space_id": space_id, "space_name": space_name},
     )
 
-    return {
-        "id": str(connector.id),
-        "space_id": space_id,
-        "space_name": space_name,
-        "status": connector.status,
-        "api_key": api_key,  # Only returned once at registration
-        "api_key_prefix": connector.api_key_prefix,
-    }
+    return _connector_payload(connector, api_key=api_key)
 
 
 @router.get("/")
@@ -172,25 +200,48 @@ async def list_connectors(
 
     items = []
     for c in result.scalars().all():
-        items.append({
-            "id": str(c.id),
-            "space_id": c.space_id,
-            "space_name": c.space_name,
-            "space_url": c.space_url,
-            "status": c.status,
-            "is_healthy": c.is_healthy,
-            "last_heartbeat": c.last_heartbeat.isoformat() if c.last_heartbeat else None,
-            "api_key_prefix": c.api_key_prefix,
-            "supported_protocols": c.supported_protocols,
-            "max_concurrent_sessions": c.max_concurrent_sessions,
-            "created_at": c.created_at.isoformat(),
-        })
+        items.append(_connector_payload(c))
     return {"items": items, "total": len(items)}
+
+
+@router.get("/{connector_id}")
+async def get_connector(
+    connector_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Get a registered connector by ID (admin only)."""
+    result = await db.execute(select(Connector).where(Connector.id == connector_id))
+    c = result.scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    return _connector_payload(c)
+
+
+@router.get("/{connector_id}/heartbeat")
+async def get_connector_heartbeat_status(
+    connector_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Return the last heartbeat observed for a connector."""
+    result = await db.execute(select(Connector).where(Connector.id == connector_id))
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    return {
+        "connector_id": str(connector.id),
+        "space_id": connector.space_id,
+        "status": "healthy" if connector.is_healthy else "unknown",
+        "last_seen": connector.last_heartbeat.isoformat() if connector.last_heartbeat else None,
+        "latency_ms": 0,
+    }
 
 
 @router.post("/{connector_id}/suspend")
 async def suspend_connector(
     connector_id: uuid.UUID,
+    body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
@@ -201,12 +252,18 @@ async def suspend_connector(
         raise HTTPException(status_code=404, detail="Connector not found")
     connector.status = ConnectorStatus.SUSPENDED.value
     await db.flush()
-    return {"id": str(connector.id), "status": connector.status}
+    await audit_service.log(
+        db, action="connector.suspend", resource_type="connector",
+        user_id=current_user.id, resource_id=str(connector.id),
+        detail={"reason": body.reason, "ticket_id": body.ticket_id, "space_id": connector.space_id},
+    )
+    return _connector_payload(connector)
 
 
 @router.post("/{connector_id}/reactivate")
 async def reactivate_connector(
     connector_id: uuid.UUID,
+    body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
@@ -219,12 +276,18 @@ async def reactivate_connector(
         raise HTTPException(status_code=400, detail="Can only reactivate suspended connectors")
     connector.status = ConnectorStatus.ACTIVE.value
     await db.flush()
-    return {"id": str(connector.id), "status": connector.status}
+    await audit_service.log(
+        db, action="connector.reactivate", resource_type="connector",
+        user_id=current_user.id, resource_id=str(connector.id),
+        detail={"reason": body.reason, "ticket_id": body.ticket_id, "space_id": connector.space_id},
+    )
+    return _connector_payload(connector)
 
 
 @router.post("/{connector_id}/rotate-key")
 async def rotate_connector_key(
     connector_id: uuid.UUID,
+    body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
@@ -238,12 +301,13 @@ async def rotate_connector_key(
     connector.api_key_hash = key_hash
     connector.api_key_prefix = api_key[:15]
     await db.flush()
+    await audit_service.log(
+        db, action="connector.rotate_key", resource_type="connector",
+        user_id=current_user.id, resource_id=str(connector.id),
+        detail={"reason": body.reason, "ticket_id": body.ticket_id, "space_id": connector.space_id},
+    )
 
-    return {
-        "id": str(connector.id),
-        "api_key": api_key,
-        "api_key_prefix": connector.api_key_prefix,
-    }
+    return _connector_payload(connector, api_key=api_key)
 
 
 # --- Connector-Facing APIs (authenticated via API key) ---
@@ -637,15 +701,3 @@ async def connector_terminate_session(
 
     await db.flush()
     return {"connector_session_id": str(connector_session_id), "status": "terminated"}
-
-
-@router.get("/remote/heartbeat")
-async def connector_heartbeat(
-    db: AsyncSession = Depends(get_db),
-    connector: Connector = Depends(_verify_connector_api_key),
-):
-    """Connector heartbeat — updates health status."""
-    connector.last_heartbeat = datetime.now(timezone.utc)
-    connector.is_healthy = True
-    await db.flush()
-    return {"status": "ok", "space_id": connector.space_id, "timestamp": connector.last_heartbeat.isoformat()}

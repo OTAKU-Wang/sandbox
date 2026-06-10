@@ -211,6 +211,22 @@ class TestDatasetSplit:
         train, val = self.pipeline.split_dataset(records, train_ratio=0.9)
         assert len(train) + len(val) == 50
 
+    def test_split_is_deterministic(self):
+        records = [{"id": i, "text": f"record-{i}"} for i in range(40)]
+        first_train, first_val = self.pipeline.split_dataset(records, train_ratio=0.75)
+        second_train, second_val = self.pipeline.split_dataset(list(reversed(records)), train_ratio=0.75)
+        assert first_train == second_train
+        assert first_val == second_val
+
+    def test_split_seed_changes_reproducible_order(self):
+        records = [{"id": i, "text": f"record-{i}"} for i in range(40)]
+        default_train, default_val = self.pipeline.split_dataset(records, train_ratio=0.75)
+        seeded_train, seeded_val = self.pipeline.split_dataset(records, train_ratio=0.75, seed="audit-replay-2")
+        seeded_again_train, seeded_again_val = self.pipeline.split_dataset(records, train_ratio=0.75, seed="audit-replay-2")
+        assert seeded_train == seeded_again_train
+        assert seeded_val == seeded_again_val
+        assert (default_train, default_val) != (seeded_train, seeded_val)
+
     def test_split_empty(self):
         train, val = self.pipeline.split_dataset([], train_ratio=0.8)
         assert len(train) == 0
@@ -241,6 +257,7 @@ class TestPipelineStages:
         stages = self.pipeline.get_stages(PipelineType.RAG)
         assert PipelineStage.CHUNKING in stages
         assert PipelineStage.EMBEDDING in stages
+        assert PipelineStage.CHUNKING.value == "chunking"
         assert PipelineStage.DEDUPLICATION not in stages
 
     def test_multimodal_stages(self):

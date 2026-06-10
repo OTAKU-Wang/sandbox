@@ -6,6 +6,7 @@ import {
   Card,
   Col,
   Descriptions,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -20,7 +21,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { CodeOutlined, FileProtectOutlined, LinkOutlined, StopOutlined } from '@ant-design/icons';
+import { CodeOutlined, DownloadOutlined, FileProtectOutlined, LinkOutlined, StopOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sandboxApi, type SessionExecuteResult } from '../../services/sandboxApi';
 import { useAuthStore } from '../../stores/authStore';
@@ -83,6 +84,18 @@ const severityColors: Record<string, string> = {
   low: 'blue',
 };
 
+const proofLevelLabels: Record<string, string> = {
+  hardware_tee: '硬件 TEE',
+  software_confidential: '软件密态',
+  runtime_isolation: '运行时隔离',
+};
+
+const proofLevelColors: Record<string, string> = {
+  hardware_tee: 'green',
+  software_confidential: 'orange',
+  runtime_isolation: 'blue',
+};
+
 function shortId(id?: string | null) {
   return id ? `${id.slice(0, 8)}...${id.slice(-6)}` : '-';
 }
@@ -116,6 +129,7 @@ export default function SessionDetail() {
   const [code, setCode] = useState("print('hello confidential sandbox')");
   const [language, setLanguage] = useState('python');
   const [executeResult, setExecuteResult] = useState<SessionExecuteResult | null>(null);
+  const [proofOpen, setProofOpen] = useState(false);
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['sandbox-session', id],
@@ -135,6 +149,18 @@ export default function SessionDetail() {
     enabled: !!id && !!session,
   });
 
+  const {
+    data: proofBundle,
+    isFetching: proofFetching,
+    isError: proofIsError,
+    error: proofError,
+    refetch: refetchProofBundle,
+  } = useQuery({
+    queryKey: ['sandbox-session-proof-bundle', id],
+    queryFn: () => sandboxApi.getProofBundle(id!),
+    enabled: false,
+  });
+
   useEffect(() => {
     if (!networkPolicy) return;
     networkForm.setFieldsValue({
@@ -150,6 +176,24 @@ export default function SessionDetail() {
   }, [networkForm, networkPolicy]);
 
   const networkMode = Form.useWatch('mode', networkForm);
+
+  const openProofBundle = () => {
+    setProofOpen(true);
+    void refetchProofBundle();
+  };
+
+  const downloadProofBundle = () => {
+    if (!proofBundle) return;
+    const blob = new Blob([JSON.stringify(proofBundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cds-session-proof-${session?.id || id}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const terminateMutation = useMutation({
     mutationFn: () => sandboxApi.terminate(id!),
@@ -227,6 +271,9 @@ export default function SessionDetail() {
               合约
             </Button>
           )}
+          <Button icon={<DownloadOutlined />} loading={proofFetching && proofOpen} onClick={openProofBundle}>
+            证明包
+          </Button>
           {canOperate && ['running', 'ready', 'provisioning'].includes(session.status) && (
             <Button danger icon={<StopOutlined />} loading={terminateMutation.isPending} onClick={() => terminateMutation.mutate()}>
               终止
@@ -424,6 +471,84 @@ export default function SessionDetail() {
           </Col>
         </Row>
       )}
+
+      <Drawer
+        title="会话证明包"
+        open={proofOpen}
+        onClose={() => setProofOpen(false)}
+        width={760}
+        extra={
+          <Button icon={<DownloadOutlined />} disabled={!proofBundle} onClick={downloadProofBundle}>
+            下载 JSON
+          </Button>
+        }
+      >
+        {proofIsError && (
+          <Alert
+            type="error"
+            showIcon
+            message="证明包生成失败"
+            description={(proofError as any)?.detail || (proofError as Error)?.message}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        {proofFetching && !proofBundle ? (
+          <Spin size="large" style={{ display: 'block', margin: '80px auto' }} />
+        ) : proofBundle ? (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="证明级别">
+                <Tag color={proofLevelColors[proofBundle.runtime.proof_level] || 'default'}>
+                  {proofLevelLabels[proofBundle.runtime.proof_level] || proofBundle.runtime.proof_level}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Bundle Hash">
+                <Text code copyable>{proofBundle.integrity.bundle_hash}</Text>
+              </Descriptions.Item>
+              {proofBundle.integrity.evidence_hash && (
+                <Descriptions.Item label="Evidence Hash">
+                  <Text code copyable>{proofBundle.integrity.evidence_hash}</Text>
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="策略 Hash">
+                <Text code copyable>{proofBundle.policy.combined_policy_hash || '-'}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="Attestation">
+                <Space direction="vertical" size={2}>
+                  <Text>类型：{String(proofBundle.runtime.attestation.type || '-')}</Text>
+                  <Text code copyable={!!proofBundle.runtime.attestation.quote_hash}>
+                    quote_hash: {proofBundle.runtime.attestation.quote_hash || '-'}
+                  </Text>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="输出审查">
+                {proofBundle.output_security.available ? (
+                  <Space direction="vertical" size={2}>
+                    <Space wrap>
+                      <Tag color={proofBundle.output_security.blocked ? 'red' : 'green'}>
+                        {proofBundle.output_security.blocked ? '已阻断' : '已放行'}
+                      </Tag>
+                      <Tag>发现 {proofBundle.output_security.findings_count ?? 0} 项</Tag>
+                    </Space>
+                    {proofBundle.output_security.signature && (
+                      <Text code copyable>{proofBundle.output_security.signature}</Text>
+                    )}
+                    {proofBundle.output_security.report_hash && (
+                      <Text code copyable>report_hash: {proofBundle.output_security.report_hash}</Text>
+                    )}
+                  </Space>
+                ) : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="审计事件">{proofBundle.audit.event_count ?? 0}</Descriptions.Item>
+            </Descriptions>
+            <Card title="JSON">
+              <pre className="cds-json-block">{JSON.stringify(proofBundle, null, 2)}</pre>
+            </Card>
+          </Space>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无证明包" />
+        )}
+      </Drawer>
     </div>
   );
 }

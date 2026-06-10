@@ -1,6 +1,7 @@
 import api from './api';
 import type { Contract } from '../types/models';
 import type { PaginatedResponse } from '../types/api';
+import type { HighRiskOperationPayload } from './identityApi';
 
 export interface CreateContractRequest {
   contract_type: string;
@@ -54,8 +55,8 @@ export const contractApi = {
   activate: (id: string): Promise<Contract> =>
     api.post(`/contracts/${id}/activate`),
 
-  terminate: (id: string): Promise<Contract> =>
-    api.post(`/contracts/${id}/terminate`),
+  terminate: (id: string, data: HighRiskOperationPayload): Promise<Contract> =>
+    api.post(`/contracts/${id}/terminate`, data),
 
   getDPBudget: (id: string): Promise<DPBudgetStatus> =>
     api.get(`/contracts/${id}/dp-budget`),

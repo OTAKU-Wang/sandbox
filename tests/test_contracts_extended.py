@@ -43,7 +43,11 @@ async def test_contract_lifecycle_draft_to_active(client: AsyncClient, auth_head
 async def test_contract_terminate(client: AsyncClient, auth_headers: dict):
     """Terminate a contract."""
     contract_id, _ = await _setup_contract(client, auth_headers)
-    resp = await client.post(f"/api/v1/contracts/{contract_id}/terminate", headers=auth_headers)
+    resp = await client.post(
+        f"/api/v1/contracts/{contract_id}/terminate",
+        headers=auth_headers,
+        json={"reason": "test contract terminate"},
+    )
     assert resp.status_code == 200
 
 

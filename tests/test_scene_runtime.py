@@ -6,6 +6,7 @@ from app.services.sandbox_runtime import (
     StructuredQueryRuntime, LLMTrainingRuntime,
     ProductDevRuntime, StructuredAppRuntime,
     DataModelingRuntime,
+    FederatedRuntime,
 )
 
 
@@ -44,6 +45,10 @@ class TestSceneRuntimeFactory:
     def test_create_modeling_runtime(self):
         runtime = SceneRuntimeFactory.create(SandboxMode.STRUCTURED_MODELING)
         assert isinstance(runtime, DataModelingRuntime)
+
+    def test_create_federated_runtime(self):
+        runtime = SceneRuntimeFactory.create(SandboxMode.JOINT_FEDERATED)
+        assert isinstance(runtime, FederatedRuntime)
 
     def test_create_from_string(self):
         runtime = SceneRuntimeFactory.create("structured_query")
@@ -165,6 +170,70 @@ class TestStructuredAppRuntime:
             {"max_response_mb": 10},
         )
         assert "truncated" not in result
+
+
+class TestFederatedRuntime:
+
+    @pytest.mark.asyncio
+    async def test_pre_execute_rejects_direct_network_python(self):
+        runtime = FederatedRuntime()
+        with pytest.raises(ValueError, match="Direct network access"):
+            await runtime.pre_execute("import requests\nrequests.get('https://remote')", {"language": "python"})
+
+    @pytest.mark.asyncio
+    async def test_pre_execute_blocks_raw_select_star(self):
+        runtime = FederatedRuntime()
+        with pytest.raises(ValueError, match=r"SELECT \*"):
+            await runtime.pre_execute("SELECT * FROM remote_table", {"language": "sql"})
+
+    @pytest.mark.asyncio
+    async def test_pre_execute_adds_limit_to_federated_sql(self):
+        runtime = FederatedRuntime()
+        sql = await runtime.pre_execute(
+            "SELECT count(*) FROM remote_table",
+            {"language": "sql", "max_output_rows": 100},
+        )
+        assert sql.endswith("LIMIT 100")
+
+    @pytest.mark.asyncio
+    async def test_execute_federation_request_uses_connector(self):
+        class Response:
+            request_id = "req-1"
+            status_code = 200
+            data = {"rows": 3}
+            error = None
+            duration_ms = 12
+            source_space = "remote-a"
+
+        class FakeConnector:
+            def __init__(self):
+                self.calls = []
+
+            def send_request(self, **kwargs):
+                self.calls.append(kwargs)
+                return Response()
+
+        connector = FakeConnector()
+        runtime = FederatedRuntime()
+        result = await runtime.execute(
+            "unused",
+            "",
+            "federation",
+            {
+                "federation_request": {
+                    "trust": object(),
+                    "operation": "read",
+                    "resource": "/catalog/products",
+                    "payload": {"q": "demo"},
+                    "connector": connector,
+                }
+            },
+        )
+        assert result["exit_code"] == 0
+        assert result["federated"] is True
+        assert result["status_code"] == 200
+        assert connector.calls[0]["operation"] == "read"
+        assert '"rows": 3' in result["output"]
 
 
 class TestBaseSceneRuntime:

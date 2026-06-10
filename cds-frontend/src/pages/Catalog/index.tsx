@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Input, Select, Row, Col, Card, Tag, Typography, Empty, Spin, Pagination, Descriptions, Modal, Button, Space, Form, Checkbox, message } from 'antd';
+import { Input, Select, Row, Col, Card, Tag, Typography, Spin, Pagination, Descriptions, Modal, Button, Space, Form, Checkbox, message } from 'antd';
 import { CloudServerOutlined, FileSearchOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import { catalogApi, type CatalogProduct } from '../../services/catalogApi';
 import { fieldExposureApi } from '../../services/fieldExposureApi';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
+import { CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -37,12 +38,18 @@ export default function CatalogPage() {
   const [fieldRequestOpen, setFieldRequestOpen] = useState(false);
   const [fieldForm] = Form.useForm<{ requested_fields: string[]; justification?: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['catalog', q, productType, industry, securityLevel, page],
     queryFn: () => catalogApi.search({ q: q || undefined, product_type: productType, industry, security_level: securityLevel, page, page_size: 12 }),
   });
 
-  const { data: detailData, isFetching: detailLoading } = useQuery({
+  const {
+    data: detailData,
+    isFetching: detailLoading,
+    isError: detailIsError,
+    error: detailError,
+    refetch: refetchDetail,
+  } = useQuery({
     queryKey: ['catalog-detail', detail?.id],
     queryFn: () => catalogApi.get(detail!.id),
     enabled: !!detail?.id,
@@ -133,10 +140,14 @@ export default function CatalogPage() {
         </Col>
       </Row>
 
+      {isError && (
+        <QueryErrorAlert error={error} message="数据目录加载失败" onRetry={() => { void refetch(); }} />
+      )}
+
       {isLoading ? (
-        <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />
+        <CenteredLoading tip="加载数据产品" />
       ) : !data?.items.length ? (
-        <Empty description="暂无数据产品" />
+        <EmptyState description={q || productType || industry || securityLevel ? '没有匹配筛选条件的数据产品' : '暂无已发布数据产品'} />
       ) : (
         <>
           <Row gutter={[16, 16]}>
@@ -206,6 +217,8 @@ export default function CatalogPage() {
       >
         {detailLoading && !detailData ? (
           <Spin style={{ display: 'block', margin: '40px auto' }} />
+        ) : detailIsError ? (
+          <QueryErrorAlert error={detailError} message="产品详情加载失败" onRetry={() => { void refetchDetail(); }} />
         ) : selectedDetail && (
           <Descriptions bordered column={1} size="small">
             <Descriptions.Item label="名称">{selectedDetail.name}</Descriptions.Item>

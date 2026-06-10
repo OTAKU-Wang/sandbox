@@ -111,6 +111,55 @@ class TestExecution:
         assert code_file.exists()
         assert "print('test')" in code_file.read_text()
 
+    def test_firecracker_serial_path_uses_hardened_fallback(self, tmp_path):
+        runtime = FirecrackerRuntime(workspace_root=str(tmp_path / "fc-workspace"))
+        runtime._backend = "firecracker"
+        workspace = tmp_path / "fc-workspace" / "tenant" / "vm"
+        (workspace / "tmp").mkdir(parents=True)
+        (workspace / "input").mkdir()
+        (workspace / "output").mkdir()
+        vm = VMInstance(
+            vm_id="fc-test",
+            session_id="sess-serial",
+            socket_path=str(workspace / "fc.sock"),
+            api_socket=str(workspace / "fc.sock"),
+            state=VMState.RUNNING,
+            config=VMConfig(network_enabled=False),
+            workspace=str(workspace),
+        )
+
+        with patch.object(
+            runtime,
+            "_simulate_execute_raw",
+            return_value={"output": "fallback ok", "exit_code": 0},
+        ) as fallback:
+            result = runtime.execute(
+                vm,
+                "print('serial fallback')",
+                "python",
+                session_key="secret",
+                env_vars={"CDS_SESSION_ID": "sess-serial"},
+                timeout=7,
+            )
+
+        assert result.exit_code == 0
+        assert result.output == "fallback ok"
+        fallback.assert_called_once()
+        args, kwargs = fallback.call_args
+        assert args[0] is vm
+        assert "serial fallback" in args[1]
+        assert args[2] == "python"
+        assert kwargs["session_key"] == "secret"
+        assert kwargs["env_vars"]["CDS_SESSION_ID"] == "sess-serial"
+        assert kwargs["timeout"] == 7
+
+    def test_seccomp_invalid_argument_triggers_retry(self):
+        assert FirecrackerRuntime._seccomp_retry_needed(
+            "bwrap: prctl(PR_SET_SECCOMP): Invalid argument",
+            3,
+        ) is True
+        assert FirecrackerRuntime._seccomp_retry_needed("", None) is False
+
 
 # ─── File Transfer ──────────────────────────────
 

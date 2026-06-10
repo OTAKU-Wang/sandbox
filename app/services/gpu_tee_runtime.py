@@ -443,16 +443,20 @@ class GPUTeeRuntimeStub(GPUTeeRuntime):
         return f"{mode.value}:{digest}".encode()
 
 
+LocalSoftwareGPUTeeRuntime = GPUTeeRuntimeStub
+
+
 class GPUTeeRuntimeFactory:
     """Factory for creating GPU-TEE runtime instances."""
 
     _implementations: dict[str, type] = {
-        "stub": GPUTeeRuntimeStub,
-        "local": GPUTeeRuntimeStub,
+        "local": LocalSoftwareGPUTeeRuntime,
+        "software": LocalSoftwareGPUTeeRuntime,
+        "stub": LocalSoftwareGPUTeeRuntime,
     }
 
     @classmethod
-    def create(cls, implementation: str = "stub", **kwargs) -> GPUTeeRuntime:
+    def create(cls, implementation: str = "local", **kwargs) -> GPUTeeRuntime:
         """Create a GPU-TEE runtime instance.
 
         When implementation is 'auto', checks CDS_GPU_TEE_SIMULATION config:
@@ -481,4 +485,4 @@ try:
     gpu_tee_runtime: GPUTeeRuntime = GPUTeeSimulator()
     GPUTeeRuntimeFactory.register("simulator", GPUTeeSimulator)
 except ImportError:
-    gpu_tee_runtime: GPUTeeRuntime = GPUTeeRuntimeStub()
+    gpu_tee_runtime: GPUTeeRuntime = LocalSoftwareGPUTeeRuntime()

@@ -9,6 +9,7 @@ import { contractApi } from '../../services/contractApi';
 import type { SandboxSession } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
+import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title } = Typography;
@@ -52,18 +53,30 @@ export default function SessionList() {
   const requestedCreate = searchParams.get('create') === '1';
   const requestedProductId = searchParams.get('product_id');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['sandbox-sessions', page, statusFilter],
     queryFn: () => sandboxApi.list({ page, page_size: 20, status: statusFilter }),
   });
 
-  const { data: catalog } = useQuery({
+  const {
+    data: catalog,
+    isLoading: catalogLoading,
+    isError: catalogIsError,
+    error: catalogError,
+    refetch: refetchCatalog,
+  } = useQuery({
     queryKey: ['sandbox-catalog-products'],
     queryFn: () => catalogApi.search({ page: 1, page_size: 100 }),
     enabled: canCreateSession,
   });
 
-  const { data: contracts } = useQuery({
+  const {
+    data: contracts,
+    isLoading: contractsLoading,
+    isError: contractsIsError,
+    error: contractsError,
+    refetch: refetchContracts,
+  } = useQuery({
     queryKey: ['sandbox-active-contracts'],
     queryFn: () => contractApi.list({ page: 1, page_size: 100, status: 'active' }),
     enabled: canCreateSession,
@@ -148,12 +161,23 @@ export default function SessionList() {
         )}
       </div>
       <Space style={{ marginBottom: 16 }}>
-        <Select placeholder="状态筛选" value={statusFilter} onChange={setStatusFilter} allowClear style={{ width: 160 }}
+        <Select
+          placeholder="状态筛选"
+          value={statusFilter}
+          onChange={(value) => { setStatusFilter(value); setPage(1); }}
+          allowClear
+          style={{ width: 160 }}
           options={statusOptions.map(s => ({ label: s, value: s }))}
         />
       </Space>
+
+      {isError && (
+        <QueryErrorAlert error={error} message="沙箱会话加载失败" onRetry={() => { void refetch(); }} />
+      )}
+
       <Table columns={columns} dataSource={data?.items || []} rowKey="id" loading={isLoading}
         pagination={{ current: page, total: data?.total || 0, pageSize: 20, onChange: setPage, showTotal: (t) => `共 ${t} 条` }}
+        locale={tableEmpty(statusFilter ? '没有匹配状态的沙箱会话' : '暂无沙箱会话')}
       />
 
       <Modal
@@ -170,11 +194,19 @@ export default function SessionList() {
           onFinish={createMutation.mutate}
           initialValues={{ sandbox_level: 'L3', timeout_seconds: 3600 }}
         >
+          {catalogIsError && (
+            <QueryErrorAlert error={catalogError} message="可用数据产品加载失败" onRetry={() => { void refetchCatalog(); }} />
+          )}
+          {contractsIsError && (
+            <QueryErrorAlert error={contractsError} message="可用合约加载失败" onRetry={() => { void refetchContracts(); }} />
+          )}
           <Form.Item name="data_product_id" label="数据产品" rules={[{ required: true, message: '请选择数据产品' }]}>
             <Select
               showSearch
               placeholder="选择已发布数据产品"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogLoading ? '加载中' : '暂无可用数据产品'}
               options={(catalog?.items || []).map((product) => ({
                 label: `${product.name}${product.industry ? ` / ${product.industry}` : ''}${product.security_level ? ` / ${product.security_level}` : ''}`,
                 value: product.id,
@@ -187,6 +219,8 @@ export default function SessionList() {
               showSearch
               placeholder="选择 active 合约"
               optionFilterProp="label"
+              loading={contractsLoading}
+              notFoundContent={contractsLoading ? '加载中' : '暂无 active 合约'}
               options={(contracts?.items || []).map((contract) => ({
                 label: `${contract.title} / ${contract.contract_no}`,
                 value: contract.id,

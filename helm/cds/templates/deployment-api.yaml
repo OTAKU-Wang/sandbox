@@ -23,35 +23,61 @@ spec:
             - containerPort: {{ .Values.api.port }}
               protocol: TCP
           env:
-            - name: DATABASE_URL
+            - name: CDS_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: DATABASE_URL
-            - name: REDIS_URL
+                  key: CDS_DATABASE_URL
+            - name: CDS_REDIS_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: REDIS_URL
-            - name: CLICKHOUSE_URL
+                  key: CDS_REDIS_URL
+            - name: CDS_CLICKHOUSE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: CLICKHOUSE_URL
-            - name: JWT_SECRET
+                  key: CDS_CLICKHOUSE_URL
+            - name: CDS_JWT_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: JWT_SECRET
-            - name: KMS_MASTER_KEY
+                  key: CDS_JWT_SECRET_KEY
+            - name: CDS_VAULT_ADDR
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: KMS_MASTER_KEY
-            - name: OPA_URL
+                  key: CDS_VAULT_ADDR
+            - name: CDS_VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: CDS_VAULT_TOKEN
+            - name: CDS_MINIO_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: CDS_MINIO_ENDPOINT
+            - name: CDS_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: CDS_MINIO_ACCESS_KEY
+            - name: CDS_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: CDS_MINIO_SECRET_KEY
+            - name: CDS_CDC_KAFKA_BROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: CDS_CDC_KAFKA_BROKERS
+                  optional: true
+            - name: CDS_OPA_URL
               value: "http://{{ include "cds.fullname" . }}-opa:{{ .Values.opa.port }}"
-            - name: ENVIRONMENT
-              value: {{ .Values.api.env.ENVIRONMENT | quote }}
+            - name: CDS_DEBUG
+              value: {{ .Values.api.env.CDS_DEBUG | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.api.env.LOG_LEVEL | quote }}
           livenessProbe:

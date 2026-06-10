@@ -127,3 +127,68 @@ class TestCDCPipeline:
         topics = agent.list_topics()
         assert "topic-a" in topics
         assert "topic-b" in topics
+
+
+# ============================================================
+# Kafka Connect Control Plane
+# ============================================================
+class TestKafkaConnectControlPlane:
+    """CDC agent uses Kafka Connect REST when configured."""
+
+    @pytest.mark.asyncio
+    async def test_start_connector_upserts_config(self):
+        from app.services.cdc_agent import CDCAgent, CDCStatus
+
+        calls = []
+        agent = CDCAgent(backend="memory", kafka_connect_url="http://connect:8083")
+        config = agent.generate_debezium_config(
+            db_type="postgresql",
+            host="postgres",
+            port=5432,
+            database="cds",
+            username="cdc_user",
+            password="secret",
+            table_include_list=["public.audit_logs"],
+            connector_name="audit-cdc",
+        )
+
+        def fake_request(method, path, payload):
+            calls.append((method, path, payload))
+            return 200, "{}"
+
+        agent._request_connect = fake_request
+        assert await agent.start_connector("audit-cdc") is True
+        assert agent.get_connector_status("audit-cdc") == CDCStatus.RUNNING
+        assert calls == [("PUT", "/connectors/audit-cdc/config", config["config"])]
+
+    @pytest.mark.asyncio
+    async def test_start_connector_failure_marks_failed(self):
+        from app.services.cdc_agent import CDCAgent, CDCStatus
+
+        agent = CDCAgent(backend="memory", kafka_connect_url="http://connect:8083")
+        agent.generate_debezium_config(connector_name="bad-cdc")
+        agent._request_connect = lambda method, path, payload: (500, "connect down")
+
+        assert await agent.start_connector("bad-cdc") is False
+        assert agent.get_connector_status("bad-cdc") == CDCStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_pause_and_stop_connector_call_rest(self):
+        from app.services.cdc_agent import CDCAgent, CDCStatus
+
+        calls = []
+        agent = CDCAgent(backend="memory", kafka_connect_url="http://connect:8083")
+        agent.generate_debezium_config(connector_name="audit-cdc")
+
+        def fake_request(method, path, payload):
+            calls.append((method, path, payload))
+            return 202, ""
+
+        agent._request_connect = fake_request
+        assert await agent.pause_connector("audit-cdc") is True
+        assert await agent.stop_connector("audit-cdc") is True
+        assert agent.get_connector_status("audit-cdc") == CDCStatus.STOPPED
+        assert calls == [
+            ("PUT", "/connectors/audit-cdc/pause", None),
+            ("DELETE", "/connectors/audit-cdc", None),
+        ]

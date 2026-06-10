@@ -18,6 +18,11 @@ class ProcessingResult:
 class UnstructuredDataProcessor:
     """Processes unstructured data: images, documents, audio/video."""
 
+    @staticmethod
+    def _record_extraction_error(metadata: dict, stage: str, error: str) -> None:
+        metadata["partial_success"] = True
+        metadata.setdefault("extraction_errors", []).append({"stage": stage, "error": error})
+
     def process(self, file_path: str, output_dir: str, options: dict | None = None) -> ProcessingResult:
         """Process an unstructured file."""
         path = Path(file_path)
@@ -57,9 +62,9 @@ class UnstructuredDataProcessor:
             if hasattr(img, "_getexif") and img._getexif():
                 metadata["exif"] = dict(img._getexif())
         except ImportError:
-            pass
-        except Exception:
-            pass
+            self._record_extraction_error(metadata, "image_metadata", "Pillow is not installed")
+        except Exception as e:
+            self._record_extraction_error(metadata, "image_metadata", str(e))
 
         return ProcessingResult(success=True, records_processed=1, metadata=metadata)
 
@@ -74,7 +79,6 @@ class UnstructuredDataProcessor:
             "type": "document",
         }
 
-        # PDF text extraction
         if path.suffix.lower() == ".pdf":
             try:
                 import subprocess
@@ -87,8 +91,23 @@ class UnstructuredDataProcessor:
                     out_file = output / f"{path.stem}.txt"
                     out_file.write_text(text)
                     metadata["output_file"] = str(out_file)
-            except Exception:
-                pass
+                    metadata["text_extraction"] = "ok"
+                else:
+                    stderr = (result.stderr or "").strip()
+                    self._record_extraction_error(
+                        metadata,
+                        "pdf_text",
+                        stderr or f"pdftotext exited with {result.returncode}",
+                    )
+                    metadata["text_extraction"] = "failed"
+            except FileNotFoundError:
+                self._record_extraction_error(metadata, "pdf_text", "pdftotext is not installed")
+                metadata["text_extraction"] = "unavailable"
+            except Exception as e:
+                self._record_extraction_error(metadata, "pdf_text", str(e))
+                metadata["text_extraction"] = "failed"
+        else:
+            metadata["text_extraction"] = "not_supported"
 
         return ProcessingResult(success=True, records_processed=1, metadata=metadata)
 
@@ -115,8 +134,21 @@ class UnstructuredDataProcessor:
                 metadata["duration"] = float(probe.get("format", {}).get("duration", 0))
                 metadata["format"] = probe.get("format", {}).get("format_name")
                 metadata["streams"] = len(probe.get("streams", []))
-        except Exception:
-            pass
+                metadata["media_probe"] = "ok"
+            else:
+                stderr = (result.stderr or "").strip()
+                self._record_extraction_error(
+                    metadata,
+                    "media_probe",
+                    stderr or f"ffprobe exited with {result.returncode}",
+                )
+                metadata["media_probe"] = "failed"
+        except FileNotFoundError:
+            self._record_extraction_error(metadata, "media_probe", "ffprobe is not installed")
+            metadata["media_probe"] = "unavailable"
+        except Exception as e:
+            self._record_extraction_error(metadata, "media_probe", str(e))
+            metadata["media_probe"] = "failed"
 
         return ProcessingResult(success=True, records_processed=1, metadata=metadata)
 

@@ -20,6 +20,7 @@ K3D_BIN="${K3D_BIN:-$HOME/.local/bin/k3d}"
 KUBECTL="${KUBECTL:-kubectl}"
 REGISTRY_CONFIG="${REGISTRY_CONFIG:-$K8S_DIR/registries.yaml}"
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-python:3.12-slim}"
+CDS_IMPORT_LOCAL_IMAGES="${CDS_IMPORT_LOCAL_IMAGES:-true}"
 
 log() {
     printf '[cds-k3s] %s\n' "$*"
@@ -75,6 +76,7 @@ install_k3d() {
             --servers 1 \
             --agents 0 \
             --port "30080:30080@server:0" \
+            --port "30081:30081@server:0" \
             --port "30001:30001@server:0" \
             --port "30082:30082@server:0" \
             --k3s-arg "--disable=traefik@server:0" \
@@ -105,6 +107,26 @@ deploy_cds() {
         ctr images pull "$SANDBOX_IMAGE" || true
     elif command -v crictl >/dev/null 2>&1; then
         crictl pull "$SANDBOX_IMAGE" || true
+    fi
+
+    if [ "$CDS_IMPORT_LOCAL_IMAGES" = "true" ] && command -v docker >/dev/null 2>&1; then
+        for image in cds-api:latest cds-frontend:latest; do
+            if docker image inspect "$image" >/dev/null 2>&1; then
+                log "importing local image into $CDS_K3S_MODE: $image"
+                if [ "$CDS_K3S_MODE" = "k3s" ] && command -v k3s >/dev/null 2>&1; then
+                    docker save "$image" | k3s ctr images import - || true
+                elif [ "$CDS_K3S_MODE" = "k3d" ] && [ -x "$K3D_BIN" ]; then
+                    "$K3D_BIN" image import "$image" -c "$CLUSTER_NAME" || true
+                fi
+            else
+                log "local image not found, skipping import: $image"
+            fi
+        done
+    fi
+
+    if [ -f "$K8S_DIR/cds-app.yaml" ]; then
+        log "applying CDS API and frontend manifests"
+        $KUBECTL apply -f "$K8S_DIR/cds-app.yaml"
     fi
 
     log "current CDS pods"
