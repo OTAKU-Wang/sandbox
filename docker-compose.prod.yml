@@ -1,0 +1,156 @@
+services:
+  # ─── 数据库层 ───
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cds
+      POSTGRES_USER: cds
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cds"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./scripts/clickhouse-init.sql:/docker-entrypoint-initdb.d/clickhouse-init.sql
+    environment:
+      CLICKHOUSE_DB: cds_audit
+      CLICKHOUSE_USER: cds
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9001:9000"
+      - "9002:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── 策略引擎 ───
+  opa:
+    image: openpolicyagent/opa:0.68.0
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+    volumes:
+      - ./policies:/policies
+    healthcheck:
+      test: ["CMD", "/opa", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── 密钥管理 ───
+  vault:
+    image: hashicorp/vault:1.15
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_LOCAL_CONFIG: |
+        {
+          "backend": {"file": {"path": "/vault/file"}},
+          "ui": true
+        }
+    volumes:
+      - vault-data:/vault/file
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://localhost:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── 应用层 ───
+  cds-api:
+    image: cds-api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      CDS_DEBUG: "true"
+      CDS_DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@postgres:5432/cds
+      CDS_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CDS_CLICKHOUSE_URL: http://clickhouse:8123/cds_audit
+      CDS_OPA_URL: http://opa:8181
+      CDS_VAULT_ADDR: http://vault:8200
+      CDS_VAULT_TOKEN: ${VAULT_TOKEN}
+      CDS_MINIO_ENDPOINT: minio:9000
+      CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    volumes:
+      - sandbox-workspace:/tmp/cds_sandbox
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  cds-frontend:
+    image: cds-frontend:latest
+    ports:
+      - "3000:80"
+    depends_on:
+      cds-api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  minio-data:
+  vault-data:
+  sandbox-workspace:

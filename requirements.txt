@@ -51,8 +51,5 @@ transformers>=4.36.0
 torch>=2.0.0
 peft>=0.7.0
 
-# === TLCP (国密 TLS) ===
-tongsuo>=1.0.0
-
 # === Kafka (CDC) ===
 aiokafka>=0.10.0
