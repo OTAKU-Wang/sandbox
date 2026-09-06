@@ -107,7 +107,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      CDS_DEBUG: "true"
+      # Production must NOT run in DEBUG: it silently disables the
+      # validate_security_config posture matrix (is_prod gate) and the JWT
+      # secret requirement. Keep false unless actively debugging the stack.
+      CDS_DEBUG: "false"
       CDS_DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@postgres:5432/cds
       CDS_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CDS_CLICKHOUSE_URL: http://clickhouse:8123/cds_audit
@@ -122,6 +125,24 @@ services:
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "true"
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+      # Fail-closed simulation/fallback switches (validate_security_config
+      # surfaces every enabled one at startup so degradation is never silent).
+      # SECCOMP: never silently retry an exec without seccomp — fail closed.
+      CDS_SECCOMP_FALLBACK_ALLOWED: "false"
+      # HSM: Vault is a required compose service, so an in-memory software KEK
+      # fallback is unacceptable in production — fail closed to real Vault.
+      CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
+      # Hardware-gated switches. These stay TRUE until a real TEE/GPU backend is
+      # provisioned (productization acceptance, FG-001/FG-002): the software-only
+      # L0/L3 path and L1/L2 software-confidential fallback need them, and
+      # ALLOW_SIMULATION=false would block KMS key distribution for software
+      # levels (which produce no real quote). Flip to false ONLY once real
+      # hardware attestation is available and verified.
+      CDS_ALLOW_SIMULATION: "true"
+      CDS_TEE_ALLOW_SOFTWARE_FALLBACK: "true"
+      CDS_TEE_SIMULATION_MODE: "true"
+      CDS_GPU_TEE_SIMULATION: "true"
+      CDS_FEDERATION_JWT_KEY_REQUIRED: "true"
     depends_on:
       postgres:
         condition: service_healthy

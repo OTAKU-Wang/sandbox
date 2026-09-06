@@ -193,10 +193,23 @@ class Settings(BaseSettings):
 
         if self.ALLOW_SIMULATION:
             issues.append("WARN: ALLOW_SIMULATION=true — software-simulated TEE attestation quotes are accepted in production")
+        # Pure-degradation switches have NO hardware dependency and MUST fail
+        # closed in production — a deployment silently retrying without seccomp,
+        # or using an in-memory software KEK, is a hard security failure, not a
+        # warn-worthy degradation. Raise so misconfiguration aborts startup.
         if self.SECCOMP_FALLBACK_ALLOWED:
-            issues.append("WARN: SECCOMP_FALLBACK_ALLOWED=true — sandbox seccomp failures silently retry without seccomp")
+            raise ValueError(
+                "SECCOMP_FALLBACK_ALLOWED=true is not permitted in production: "
+                "sandbox exec must never retry without seccomp. Set "
+                "CDS_SECCOMP_FALLBACK_ALLOWED=false (requires a seccomp-capable kernel)."
+            )
         if self.HSM_SOFTWARE_FALLBACK_ALLOWED:
-            issues.append("WARN: HSM_SOFTWARE_FALLBACK_ALLOWED=true — software KEK/signing fallback is enabled (degraded crypto strength)")
+            raise ValueError(
+                "HSM_SOFTWARE_FALLBACK_ALLOWED=true is not permitted in production: "
+                "an in-memory software KEK/signing fallback has degraded crypto "
+                "strength. Set CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false and back "
+                "key management with a real HSM/Vault."
+            )
         if not self.FEDERATION_JWT_KEY_REQUIRED:
             issues.append("WARN: FEDERATION_JWT_KEY_REQUIRED=false — static federation JWT fallback is permitted in production")
 

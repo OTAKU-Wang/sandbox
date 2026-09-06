@@ -1439,7 +1439,40 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 33. 最终验证状态
+## 33. Round 36 部署 fail-closed 姿态修复记录
+
+### 触发条件
+
+用户设定持续目标"完成所有功能开发、实现完整沙箱（参考 CubeSandbox 设计）"并选择"补齐软件层所有可做特性"。全量探查确认：141 个软件 gap（G-001..G-141）已全部关闭（active software gap=0），剩余均为硬件/外部系统/e2e 门禁项（FG-001..FG-016、P2 六方向、T8 真链、T9 LAC）。软件层可真实落地的剩余项为**生产部署 fail-closed 姿态**：仿真/回退开关机制已实现并有测试，但生产部署文件未显式 fail-closed、且 `docker-compose.prod.yml` 误设 `CDS_DEBUG=true` 使生产安全校验（`validate_security_config` 的 `is_prod` 门）被静默关闭。
+
+### 已完成
+
+1. **生产 fail-closed 部署姿态（纯软件、零伪造）**：
+   - `docker-compose.prod.yml`：修复 `CDS_DEBUG: "true"` → `"false"`（原配置静默禁用 `validate_security_config` 姿态矩阵与 JWT 密钥强制）。
+   - 在同一 P0 加固块显式声明全部仿真/回退开关：`SECCOMP_FALLBACK_ALLOWED=false`、`HSM_SOFTWARE_FALLBACK_ALLOWED=false`（无硬件依赖的纯降级项，生产必须 fail-closed）；`ALLOW_SIMULATION`/`TEE_ALLOW_SOFTWARE_FALLBACK`/`TEE_SIMULATION_MODE`/`GPU_TEE_SIMULATION=true`（硬件门禁项，真实 TEE/GPU 落地前软件级 L0/L3 与 L1/L2 软件机密回退依赖它们，含注释说明）；`FEDERATION_JWT_KEY_REQUIRED=true`。
+   - `.env.prod`：同步上述 fail-closed 姿态与注释（非 compose 部署用）。
+
+2. **`validate_security_config` 强化（WARN→RAISE）**：纯降级项（无硬件依赖）在生产从"警告"升级为"启动即失败"——
+   - `SECCOMP_FALLBACK_ALLOWED=true` 在生产 → `raise ValueError`（禁止静默无 seccomp 重试执行）。
+   - `HSM_SOFTWARE_FALLBACK_ALLOWED=true` 在生产 → `raise ValueError`（禁止内存软件 KEK/签名降级）。
+   - 硬件门禁项（`ALLOW_SIMULATION`/`TEE_*`/`GPU_TEE_SIMULATION`）保持 WARN（当前软件机密是唯一可部署姿态，强杀会阻塞部署）。
+   - raise 仅在 `is_prod`（非 DEBUG、非 TESTING/PYTEST）触发，测试套件 app 启动路径（`TESTING=1` + lifespan 关闭）不受影响。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `tests/test_security_config_matrix.py` + `test_kms_attestation_required.py` | 14 passed 全绿 |
+| 新增用例：SECCOMP/HSM 生产 raise、硬件门禁项保持 WARN | 通过 |
+| 受影响回归：test_security_config_matrix / test_kms_attestation_required / test_output_gateway_enforcement / test_code_scanner / test_sandbox_levels | 67 passed；7 failed 均为既有 Windows `import resource` 收集错误（基线已记录），零新增回归 |
+| `python -m compileall -q app/core/config.py` | 通过 |
+| 全量基线（Round 35） | 2143 passed / 75 failed / 16 error 不变（本改动不新增/不消除既有失败，部署文件非测试覆盖路径） |
+
+**仍未实施**：T11 二期、T8 真链 e2e、T9 LAC、P2 六方向、FG-001..FG-016（硬件/外部系统/e2e 门禁，按约束持续跟踪为产品化验收项）。真实 TEE/GPU 落地前，`ALLOW_SIMULATION` 等硬件门禁开关保持 true 并如实 WARN。
+
+---
+
+## 34. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1479,6 +1512,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 | Round 29-31 编译/构建 | 通过 | 本机 `.venv/bin/python -m compileall -q app alembic` 通过；`cds-frontend npm run build` 通过 |
 | Round 32-34 编译/聚焦单测 | 通过 | 本机 compileall 通过；P0 5 测试文件 24 用例 + P1 5 测试文件 24 用例 + Round34 3 测试文件 13 用例全绿；受影响回归 111 passed；全量 2103 passed / 75 failed / 16 error 零回归 |
 | Round 35（RAG 一期）编译/聚焦单测 | 通过 | 本机 `python -m compileall -q app tests alembic` 通过；RAG 5 测试文件 40 用例全绿；受影响回归 111 passed；全量 2143 passed / 75 failed / 16 error（新增恰为 40 个 RAG 用例，失败/error 与基线一致，零回归）；前端新增 ragApi.ts/TaskType 枚举（本机无 node_modules 未构建，编译级） |
+| Round 36（部署 fail-closed）聚焦单测 | 通过 | 本机 `python -m compileall -q app/core/config.py` 通过；test_security_config_matrix + test_kms_attestation_required 14 passed；新增 SECCOMP/HSM 生产 raise 用例通过；受影响回归 67 passed / 7 既有 Windows resource 收集错误（零新增回归）；部署文件（docker-compose.prod.yml/.env.prod）非测试覆盖路径，全量基线 2143/75/16 不变 |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
@@ -1487,7 +1521,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 34. 后续循环规则
+## 35. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。

@@ -8,18 +8,42 @@ import pytest
 from app.core.config import get_settings
 
 
-def test_validate_security_config_warns_on_production_fallbacks(monkeypatch):
+def test_validate_security_config_warns_on_hardware_gated_fallbacks(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "DEBUG", False)
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "k" * 40)
+    monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", False)
+    monkeypatch.setattr(settings, "HSM_SOFTWARE_FALLBACK_ALLOWED", False)
     monkeypatch.delenv("TESTING", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     issues = settings.validate_security_config()
     joined = "\n".join(issues)
     assert "ALLOW_SIMULATION=true" in joined
-    assert "SECCOMP_FALLBACK_ALLOWED=true" in joined
-    assert "HSM_SOFTWARE_FALLBACK_ALLOWED=true" in joined
+
+
+def test_validate_security_config_raises_on_seccomp_fallback_in_prod(monkeypatch):
+    """Seccomp fallback is a pure degradation — production MUST fail closed."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "k" * 40)
+    monkeypatch.setattr(settings, "HSM_SOFTWARE_FALLBACK_ALLOWED", False)
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    with pytest.raises(ValueError, match="SECCOMP_FALLBACK_ALLOWED"):
+        settings.validate_security_config()
+
+
+def test_validate_security_config_raises_on_hsm_software_fallback_in_prod(monkeypatch):
+    """Software KEK/signing fallback is a pure degradation — prod fails closed."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "k" * 40)
+    monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", False)
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    with pytest.raises(ValueError, match="HSM_SOFTWARE_FALLBACK_ALLOWED"):
+        settings.validate_security_config()
 
 
 def test_validate_security_config_silent_in_debug(monkeypatch):

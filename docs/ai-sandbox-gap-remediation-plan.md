@@ -457,3 +457,20 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 **验证**：受影响回归 111 passed 全绿；`compileall -q app tests alembic` 通过；全量 `pytest tests/`（排除 2 个 Windows `import resource` 收集错误文件）→ **2143 passed / 75 failed / 16 error / 3 skipped**，与基线 2103/75/16 相比新增恰为 40 个 RAG 用例，**零回归**。前端新增为编译级（本机无 node_modules 未构建）。
 
 **仍未实施**：T11 二期（沙箱镜像内生成式 LLM、transformers 检索、模型水印、MIA 门禁、推理计量计费）、T8 真链 e2e、T9 LAC 模型实际安装、P2 六方向（同态/MPC、智能体框架、快照回滚、TEE 硬件、K8s python client、GPU 插件）。
+
+### Round 36 执行记录（2026-09-06 追加）—— 部署 fail-closed 姿态
+
+| 任务 | 状态 | 关键产出 | 对应 specs |
+|---|---|---|---|
+| T12 后续 · 生产部署 fail-closed 姿态 | ✅ 已实现 | `docker-compose.prod.yml`：修 `CDS_DEBUG=true→false`（原静默禁用生产安全校验）+ 显式声明全部仿真/回退开关（SECCOMP/HSM=false，硬件门禁项=true 含注释）；`.env.prod` 同步；`validate_security_config` 对纯降级项（SECCOMP/HSM）从 WARN 升级为生产 RAISE（启动即失败），硬件门禁项保持 WARN | Round 36 |
+
+**背景与决策（源自目标"补齐软件层所有可做特性"）**：
+1. 全量探查确认：141 个软件 gap（G-001..G-141）已全部关闭（`active software gap=0`）；剩余 FG-001..FG-016 / P2 六方向 / T8 / T9 均依赖真实硬件/外部系统/e2e，按项目约束作为产品化验收项持续跟踪，本机（Windows、无 TEE/GPU/K8s/链）不可伪造实现。
+2. **软件层可真实落地的剩余项是生产部署 fail-closed 姿态**：仿真/回退开关的 fail-closed 机制已实现且有测试（KMS/HSM/seccomp 三处消费点全绿），但生产部署文件未显式 fail-closed，且 prod compose 误设 `CDS_DEBUG=true` 使 `validate_security_config` 的 `is_prod` 门被关闭 → 生产降级被静默接受。
+3. **WARN→RAISE 边界**：`SECCOMP_FALLBACK_ALLOWED`（禁止无 seccomp 重试）与 `HSM_SOFTWARE_FALLBACK_ALLOWED`（禁止内存软件 KEK）为无硬件依赖的纯降级项，生产必须启动即失败；`ALLOW_SIMULATION`/`TEE_*`/`GPU_TEE_SIMULATION` 为硬件门禁项，真实 TEE/GPU 落地前软件机密是唯一可部署姿态，保持 WARN 并如实披露。
+
+**新增测试**（`tests/test_security_config_matrix.py` 扩展）：SECCOMP 生产 raise、HSM 生产 raise、硬件门禁项保持 WARN 共 3 用例；连同 `test_kms_attestation_required` 14 passed 全绿。
+
+**验证**：受影响回归 67 passed / 7 既有 Windows `import resource` 收集错误（零新增回归）；`compileall -q app/core/config.py` 通过；部署文件（docker-compose.prod.yml/.env.prod）非测试覆盖路径，全量基线 2143/75/16 不变。
+
+**仍未实施**：T11 二期、T8 真链 e2e、T9 LAC、P2 六方向、FG-001..FG-016（硬件/外部系统/e2e 门禁，持续跟踪为产品化验收项）。
