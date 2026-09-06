@@ -190,12 +190,20 @@ class CryptoService:
         return decrypted
 
     @staticmethod
-    def contract_sign_data(contract_id: str, contract_no: str, party_role: str, timestamp: str) -> bytes:
+    def contract_sign_data(contract_id: str, contract_no: str, party_role: str, timestamp: str,
+                           purpose: str | None = None, purpose_scope: list | None = None) -> bytes:
         """Build the canonical sign payload for a contract.
 
-        This ensures both parties sign the same deterministic data.
+        Gap A4: a purpose limitation is part of the signed payload so both
+        parties commit to it. purpose=None keeps the legacy payload shape,
+        so existing purpose-less contracts verify unchanged.
         """
-        return f"CDS-SIGN|{contract_id}|{contract_no}|{party_role}|{timestamp}".encode("utf-8")
+        base = f"CDS-SIGN|{contract_id}|{contract_no}|{party_role}|{timestamp}"
+        if purpose:
+            base += f"|purpose:{purpose}"
+        if purpose_scope:
+            base += f"|purpose_scope:{','.join(str(s) for s in purpose_scope)}"
+        return base.encode("utf-8")
 
     def sign_with_hsm(self, data: bytes, key_id: str) -> SM2Signature:
         """Sign data using HSM-managed key (P0-2).

@@ -204,6 +204,31 @@ allow {{
     input.requests_per_second <= {max_rps}
 }}"""
 
+    def field_rules_from_classifications(self, classifications: dict | None) -> dict:
+        """Gap A5/T7: map field-level classifications to output policy rules.
+
+        Level semantics (1=public, 2=internal, 3=confidential, 4=secret):
+        - level >= 4 → deny_out (field must never leave the sandbox)
+        - level == 3 → mask (field is force-masked on any output)
+        - level <= 2 → no restriction
+
+        Returns {"mask_fields": [...], "deny_out_fields": [...]}.
+        """
+        if not classifications:
+            return {"mask_fields": [], "deny_out_fields": []}
+        mask_fields: list[str] = []
+        deny_out_fields: list[str] = []
+        for field, raw_level in classifications.items():
+            try:
+                level = int(raw_level)
+            except (TypeError, ValueError):
+                continue
+            if level >= 4:
+                deny_out_fields.append(str(field))
+            elif level == 3:
+                mask_fields.append(str(field))
+        return {"mask_fields": mask_fields, "deny_out_fields": deny_out_fields}
+
     def verify_integrity(self, bundle: PolicyBundle) -> bool:
         """Verify the SM3 hash of a policy bundle matches its rego_source."""
         if not bundle.sm3_hash or not bundle.rego_source:

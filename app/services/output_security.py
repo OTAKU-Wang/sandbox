@@ -96,6 +96,38 @@ def redact_data(value: Any, inspector: OutputInspector | None = None) -> Any:
     return value
 
 
+def mask_rows_by_field_rules(rows: list[dict], field_rules: dict) -> tuple[list[dict], list[str]]:
+    """Apply field-level classification rules to output rows (gap A5/T7).
+
+    field_rules: {"mask_fields": [...], "deny_out_fields": [...]}
+
+    - deny_out_fields present in a row → the row is withheld (blocked).
+    - mask_fields → the cell value is replaced with "***".
+    Returns (allowed_rows, blocked_reasons).
+    """
+    if not rows or not field_rules:
+        return rows, []
+    mask_fields = {str(f) for f in (field_rules.get("mask_fields") or [])}
+    deny_out_fields = {str(f) for f in (field_rules.get("deny_out_fields") or [])}
+    if not mask_fields and not deny_out_fields:
+        return rows, []
+
+    allowed: list[dict] = []
+    blocked: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            allowed.append(row)
+            continue
+        present_denied = [f for f in deny_out_fields if f in row]
+        if present_denied:
+            blocked.append(",".join(present_denied))
+            continue
+        if mask_fields:
+            row = {k: ("***" if k in mask_fields else v) for k, v in row.items()}
+        allowed.append(row)
+    return allowed, blocked
+
+
 def inspect_text_output(
     output: str,
     *,

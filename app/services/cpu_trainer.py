@@ -144,6 +144,14 @@ class CPUTrainer:
             TrainingResult with loss history and memorization score.
         """
         if not self._torch_available:
+            # Gap C1/T10: fail-closed when torch is required but missing —
+            # never silently return a simulated result as if training ran.
+            from app.core.config import get_settings
+            if get_settings().TRAINING_REQUIRE_TORCH:
+                raise RuntimeError(
+                    "torch is required for training (TRAINING_REQUIRE_TORCH=true) "
+                    "but not installed in this environment"
+                )
             return self._simulate_fallback(dataset, config)
 
         cfg = config or TrainConfig()

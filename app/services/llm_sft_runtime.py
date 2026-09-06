@@ -110,11 +110,18 @@ class SFTResult:
     metrics: list[TrainingMetrics] = field(default_factory=list)
     error: str | None = None
     duration_seconds: float = 0.0
+    mia_status: str = "not_evaluable"  # shadow_model | proxy_estimate | not_evaluable (gap C2)
 
 
 @dataclass
 class MIAProbeResult:
-    """Membership Inference Attack probe result."""
+    """Membership Inference Attack probe result.
+
+    mia_status labels the evidence quality (gap C2):
+    - ``shadow_model``: real shadow-model evaluation (can enforce the gate)
+    - ``proxy_estimate``: deterministic heuristic proxy — advisory only
+    - ``not_evaluable``: no samples/data to evaluate
+    """
     advantage_score: float  # 0~1, lower is safer
     member_confidence_avg: float
     non_member_confidence_avg: float
@@ -122,6 +129,7 @@ class MIAProbeResult:
     num_non_member_samples: int
     threshold: float
     risk_level: str  # "low", "medium", "high"
+    mia_status: str = "proxy_estimate"
 
 
 # Allowed base models (from SS-04 §4.2)
@@ -168,9 +176,26 @@ class MIAProbe:
         return min(1.0, advantage)
 
     def detailed_result(self, threshold: float = 0.3) -> MIAProbeResult:
-        """Get detailed MIA probe result."""
+        """Get detailed MIA probe result.
+
+        Gap C2: the probe does not train a real shadow model in the software
+        fallback path, so the result is labelled ``proxy_estimate`` — it must
+        not be presented as (or gated on as) real memorization evidence.
+        """
         member_conf = self._confidence_avg(self._member_samples, "member")
         non_member_conf = self._confidence_avg(self._non_member_samples, "non-member")
+        if not self._member_samples and not self._non_member_samples:
+            return MIAProbeResult(
+                advantage_score=0.0,
+                member_confidence_avg=0.0,
+                non_member_confidence_avg=0.0,
+                num_member_samples=0,
+                num_non_member_samples=0,
+                threshold=threshold,
+                risk_level="low",
+                mia_status="not_evaluable",
+            )
+
         advantage = min(
             1.0,
             max(
@@ -427,11 +452,16 @@ class LLMSFTRuntime:
                     member_samples=dataloader.get_sample(200),
                     non_member_samples=dataloader.get_holdout(200),
                 )
-                memorization_score = probe.compute_advantage()
+                mia_result = probe.detailed_result(config.max_memorization_score)
+                memorization_score = mia_result.advantage_score
+                mia_status = mia_result.mia_status
 
-            # Check memorization threshold
+            # Check memorization threshold — Gap C2: only a REAL shadow-model
+            # evaluation may enforce the hard gate. Deterministic proxy
+            # estimates are advisory (labeled proxy_estimate); hard-gating on
+            # them would present a heuristic as real memorization evidence.
             self._phase = TrainingPhase.PROBING
-            if memorization_score > config.max_memorization_score:
+            if mia_status == "shadow_model" and memorization_score > config.max_memorization_score:
                 raise MemorizationRiskError(
                     f"Memorization score {memorization_score:.3f} exceeds "
                     f"threshold {config.max_memorization_score}"
@@ -455,6 +485,7 @@ class LLMSFTRuntime:
                 watermark_injected=watermark_ok,
                 metrics=list(self._metrics),
                 duration_seconds=time.monotonic() - start,
+                mia_status=mia_status,
             )
 
         except MemorizationRiskError:

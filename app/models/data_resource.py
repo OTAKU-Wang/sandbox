@@ -65,6 +65,12 @@ class DataResource(Base):
     row_count: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(String(1000))    # Last error if status=failed
 
+    # Gap A5/T7: field-level classification map {field: level} where
+    # level ∈ {1,2,3,4} (public/internal/confidential/secret). Level 3 fields
+    # are force-masked on output, level 4 fields are denied out of the
+    # sandbox. Consumed by policy_compiler.field_rules_from_classifications.
+    field_classifications: Mapped[dict | None] = mapped_column(JSON)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

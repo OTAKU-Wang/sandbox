@@ -122,6 +122,37 @@ class OutputGateway:
                 )
             if findings:
                 data = redact_data(data)
+
+            # Gap A5/T7: apply field-level classification rules (mask /
+            # deny-out) derived from the data product's field_classifications.
+            # Accepts either pre-compiled rules ({"mask_fields":..., "deny_out_fields":...})
+            # or a raw field→level map (auto-compiled here).
+            field_cls = rules.get("field_classifications") or {}
+            field_rules = None
+            if isinstance(field_cls, dict):
+                if "mask_fields" in field_cls or "deny_out_fields" in field_cls:
+                    field_rules = field_cls
+                else:
+                    from app.services.policy_compiler import policy_compiler
+                    field_rules = policy_compiler.field_rules_from_classifications(field_cls)
+            if field_rules and (field_rules.get("mask_fields") or field_rules.get("deny_out_fields")):
+                from app.services.output_security import mask_rows_by_field_rules
+                data, blocked = mask_rows_by_field_rules(data, field_rules)
+                if blocked:
+                    return GatewayResult(
+                        success=False,
+                        output_format=output_format,
+                        row_count=len(data),
+                        truncated=truncated,
+                        findings=findings,
+                        security_report=security_report,
+                        watermark=inspection.watermark,
+                        signature=inspection.signature,
+                        error=f"Output blocked: rows contained denied fields ({','.join(sorted(set(blocked)))})",
+                    )
+                if field_rules.get("mask_fields"):
+                    security_report["field_masking_applied"] = True
+                    findings = security_report.get("findings") or []
         except Exception as e:
             logger.warning("Output inspection failed closed: %s", e)
             return GatewayResult(success=False, error=f"Output inspection failed: {e}")

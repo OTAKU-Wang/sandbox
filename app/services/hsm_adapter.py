@@ -208,9 +208,11 @@ class SoftwareHSMAdapter(HSMAdapter):
 def create_hsm_adapter() -> HSMAdapter:
     """Create HSM adapter based on configuration.
 
-    Tries Vault Transit first; falls back to software HSM if Vault
-    is unreachable or unauthenticated.
+    Tries Vault Transit first; falls back to software HSM only when
+    explicitly allowed (gap B5/T12 — HSM_SOFTWARE_FALLBACK_ALLOWED=false
+    makes the degradation fail-closed instead of silent).
     """
+    vault_available = False
     try:
         from app.core.config import get_settings
         settings = get_settings()
@@ -219,9 +221,21 @@ def create_hsm_adapter() -> HSMAdapter:
             # Probe Vault availability before committing
             if adapter._get_client() is not None:
                 return adapter
-            logger.info("Vault configured but unreachable — using software HSM fallback")
+            logger.info("Vault configured but unreachable")
     except Exception:
         pass
+
+    fallback_allowed = True
+    try:
+        from app.core.config import get_settings as _gs
+        fallback_allowed = bool(_gs().HSM_SOFTWARE_FALLBACK_ALLOWED)
+    except Exception:
+        pass
+    if not fallback_allowed:
+        raise RuntimeError(
+            "HSM/Vault unavailable and HSM_SOFTWARE_FALLBACK_ALLOWED=false — "
+            "refusing to fall back to the software HSM"
+        )
     logger.info("Using software HSM fallback (dev/test only)")
     return SoftwareHSMAdapter()
 

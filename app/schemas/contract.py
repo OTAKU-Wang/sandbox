@@ -26,6 +26,9 @@ class ContractCreate(BaseModel):
     max_output_rows: int = 10000
     allowed_output_formats: str = "csv,json"
     inspection_rule_set: dict | None = None
+    # Gap A4: purpose limitation
+    purpose: str | None = None
+    purpose_scope: list[str] | None = None
 
     @field_validator("product_ids")
     @classmethod
@@ -33,6 +36,16 @@ class ContractCreate(BaseModel):
         if not v:
             raise ValueError("At least one data product is required")
         return v
+
+    @field_validator("purpose_scope")
+    @classmethod
+    def purpose_scope_not_empty_strings(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        cleaned = [str(p).strip() for p in v if str(p).strip()]
+        if not cleaned:
+            raise ValueError("purpose_scope must contain at least one non-empty purpose")
+        return cleaned
 
     @field_validator("contract_type")
     @classmethod
@@ -122,6 +135,8 @@ class ContractResponse(BaseModel):
     max_output_rows: int
     allowed_output_formats: str | None
     inspection_rule_set: dict | None
+    purpose: str | None = None
+    purpose_scope: list | None = None
     provider_signed_at: datetime | None
     buyer_signed_at: datetime | None
     provider_signature: str | None

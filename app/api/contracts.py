@@ -79,12 +79,19 @@ async def create_contract(
         max_output_rows=body.max_output_rows,
         allowed_output_formats=body.allowed_output_formats,
         inspection_rule_set=body.inspection_rule_set,
+        purpose=body.purpose,
+        purpose_scope=body.purpose_scope,
     )
 
     await audit_service.log(
         db, action="contract.create", resource_type="contract",
         user_id=current_user.id, resource_id=str(contract.id),
-        detail={"contract_type": body.contract_type, "product_ids": [str(p) for p in body.product_ids]},
+        detail={
+            "contract_type": body.contract_type,
+            "product_ids": [str(p) for p in body.product_ids],
+            "purpose": body.purpose,
+            "purpose_scope": body.purpose_scope,
+        },
     )
 
     return ContractResponse.model_validate(contract)

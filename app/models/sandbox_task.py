@@ -48,6 +48,9 @@ class SandboxTask(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     task_type: Mapped[str] = mapped_column(String(32), nullable=False, default=TaskType.QUERY.value)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=TaskStatus.PENDING.value)
+    # Gap A4: declared purpose, validated against the governing contract's
+    # purpose limitation at task creation/submission.
+    purpose: Mapped[str | None] = mapped_column(String(64))
 
     # Code/execution
     code_hash: Mapped[str | None] = mapped_column(String(64))  # SM3 hash of submitted code

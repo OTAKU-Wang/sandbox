@@ -83,6 +83,14 @@ class DPBudgetLedger:
         if epsilon < 0:
             raise ValueError("epsilon budget must be non-negative")
 
+        # Gap E3: global allocation cap — fail-closed against oversized budgets.
+        from app.core.config import get_settings
+        max_alloc = get_settings().DP_MAX_EPSILON_ALLOCATION
+        if max_alloc is not None and epsilon > float(max_alloc):
+            raise ValueError(
+                f"epsilon allocation {epsilon} exceeds DP_MAX_EPSILON_ALLOCATION={max_alloc}"
+            )
+
         result = await db.execute(
             select(DPBudgetAllocation).where(DPBudgetAllocation.contract_id == contract_id)
         )
@@ -112,7 +120,16 @@ class DPBudgetLedger:
 
     async def consume(self, db: AsyncSession, contract_id: str, session_id: str,
                       epsilon: float, operation: str = "query") -> bool:
-        """Consume epsilon budget. Returns False if insufficient."""
+        """Consume epsilon budget. Returns False if insufficient or outside
+        the configured guardrails (gap E3)."""
+        from app.core.config import get_settings
+        settings = get_settings()
+        if epsilon <= settings.DP_MIN_EPSILON_CONSUMPTION:
+            return False  # no-op / non-positive consumption is not meaningful
+        max_per = settings.DP_MAX_EPSILON_PER_CONSUMPTION
+        if max_per is not None and epsilon > float(max_per):
+            return False  # single consumption exceeds the per-request ceiling
+
         await self._ensure_loaded(db, contract_id)
         remaining = self._cache.get(contract_id, 0.0)
         if remaining < epsilon:

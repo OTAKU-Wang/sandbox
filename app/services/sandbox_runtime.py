@@ -21,6 +21,19 @@ from app.models.sandbox_session import SandboxLevel, SessionStatus, SandboxMode
 logger = logging.getLogger(__name__)
 
 
+def _seccomp_fallback_allowed() -> bool:
+    """Gap D4/T12: whether sandbox exec may retry without seccomp on EINVAL.
+
+    Fail-closed when SECCOMP_FALLBACK_ALLOWED=false — the seccomp error is
+    surfaced instead of silently degrading isolation.
+    """
+    try:
+        from app.core.config import get_settings
+        return bool(get_settings().SECCOMP_FALLBACK_ALLOWED)
+    except Exception:
+        return True
+
+
 class RuntimeAdapter(ABC):
     """Abstract interface for sandbox runtime adapters."""
 
@@ -279,8 +292,14 @@ class ProcessAdapter(RuntimeAdapter):
                 asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, env=env, pass_fds=extra_fds),
                 timeout=effective_timeout,
             )
-            # Retry without seccomp if kernel doesn't support it (EINVAL)
-            if result.returncode != 0 and "EINVAL" in result.stderr and seccomp_fd is not None:
+            # Retry without seccomp if kernel doesn't support it (EINVAL) —
+            # gated by SECCOMP_FALLBACK_ALLOWED (gap D4/T12, fail-closed).
+            if (
+                result.returncode != 0
+                and "EINVAL" in result.stderr
+                and seccomp_fd is not None
+                and _seccomp_fallback_allowed()
+            ):
                 cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
                 result = await asyncio.wait_for(
                     asyncio.to_thread(subprocess.run, cmd_no_seccomp, capture_output=True, text=True, env=env),
@@ -575,8 +594,13 @@ class BwrapAdapter(RuntimeAdapter):
                 asyncio.to_thread(subprocess.run, bwrap_args, capture_output=True, text=True, pass_fds=extra_fds),
                 timeout=effective_timeout,
             )
-            # Retry without seccomp if kernel/bwrap rejects PR_SET_SECCOMP.
-            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
+            # Retry without seccomp if kernel/bwrap rejects PR_SET_SECCOMP —
+            # gated by SECCOMP_FALLBACK_ALLOWED (gap D4/T12, fail-closed).
+            if (
+                result.returncode != 0
+                and self._seccomp_retry_needed(result.stderr, seccomp_fd)
+                and _seccomp_fallback_allowed()
+            ):
                 cmd_no_seccomp = [c for c in bwrap_args if c != "--seccomp" and c != str(seccomp_fd)]
                 result = await asyncio.wait_for(
                     asyncio.to_thread(subprocess.run, cmd_no_seccomp, capture_output=True, text=True),
