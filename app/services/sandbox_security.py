@@ -393,10 +393,15 @@ def build_bwrap_args(
 
     args += [
         # Workspace (tmpfs base + bind mounts)
-        "--tmpfs", "/workspace:size=500m",
-        "--bind", str(workspace / "output"), "/workspace/output",
-        "--bind", str(workspace / "tmp"), "/workspace/tmp",
-        "--ro-bind", str(workspace / "input"), "/workspace/input",
+"--tmpfs", "/workspace:size=500m",
+    "--bind", str(workspace / "output"), "/workspace/output",
+    "--bind", str(workspace / "tmp"), "/workspace/tmp",
+    "--ro-bind", str(workspace / "input"), "/workspace/input",
+    # Session files exchange dir (Round 39/40 usability): read-write so
+    # sandbox code reads uploaded inputs and can drop results back.
+    *(["--bind", str(workspace / "files"), "/workspace/files"]
+      if (workspace / "files").is_dir()
+      else []),
 
         # Tmpfs for /home
         "--tmpfs", "/home:size=10m",

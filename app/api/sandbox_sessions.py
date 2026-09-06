@@ -492,6 +492,12 @@ async def create_sandbox_session(
                 "template": body.template,
                 "template_env": seeded.get("env") or {},
             }
+            # Flush + refresh so server-managed columns (updated_at) are
+            # re-loaded BEFORE response validation — model_validate on an
+            # expired attribute triggers lazy IO and fails with
+            # MissingGreenlet outside the greenlet context.
+            await db.flush()
+            await db.refresh(session)
         except Exception as e:
             logger.warning("[sandbox] Template seeding failed for %s: %s", session.id, e)
             await audit_service.log(

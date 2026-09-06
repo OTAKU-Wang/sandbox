@@ -50,11 +50,16 @@ def snapshots_dir(workspace: Path) -> Path:
 
 
 def _tar_bytes(workspace: Path) -> bytes:
-    """Build a deterministic tar.gz of the workspace tree in memory."""
+    """Build a deterministic tar.gz of the workspace tree in memory.
+
+    Directories are included (parent-before-child under lexicographic order)
+    so empty runtime dirs (e.g. ``tmp/`` — the adapter's exec staging area)
+    survive a rollback.
+    """
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for p in sorted(workspace.rglob("*")):
-            if p.is_file():
+            if p.is_file() or p.is_dir():
                 tar.add(str(p), arcname=str(p.relative_to(workspace)), recursive=False)
     return buf.getvalue()
 
@@ -150,6 +155,12 @@ def rollback(workspace: Path, snapshot_id: str) -> dict:
             tar.extractall(path=str(workspace), filter="data")  # noqa: S202 - data filter + self-produced archives
         except TypeError:  # Python < 3.12 without data filter backport
             tar.extractall(path=str(workspace))
+
+    # Pre-guard snapshots taken before directory entries were archived:
+    # the runtime expects tmp/ (exec staging) and the files API keeps its
+    # store under files/ — both must exist after a rollback.
+    (workspace / "tmp").mkdir(parents=True, exist_ok=True)
+    (workspace / "files").mkdir(parents=True, exist_ok=True)
 
     logger.info(
         "[SessionSnapshots] rolled back %s for session %s (discarded %d files)",
