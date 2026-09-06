@@ -25,6 +25,13 @@ api:
   env:
     CDS_DEBUG: "false"
     LOG_LEVEL: info
+    # P0 hardening switches — production fail-closed posture.
+    # NOTE: KMS_REQUIRE_ATTESTATION=true rejects key distribution for
+    # software-only sandbox levels (L0/L3); deployments that rely on them must
+    # explicitly set this to "false" (see docs/ai-sandbox-gap-remediation-plan.md).
+    CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
+    CDS_KMS_REQUIRE_ATTESTATION: "true"
+    CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
 
 # ─── Frontend Service ───
 frontend:

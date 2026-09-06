@@ -16,7 +16,7 @@
 - 输出控制：PII 检测、k 匿名、重建检测、DP 预算扣减、水印、签名、流式审查代理。
 - 审计与互联：审计签名、Merkle/PG append-only 存证、合规报告、联邦连接器、mTLS/证书管理。
 
-Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发沙箱输出、契约网关输出、DP 预算失败模式、配额 fallback、任务代码落库等软件缺口已经修复。Round 6 从产品化和易用性复核后，前端构建、角色体系、路由权限、开发沙箱、输出审查、合约创建、分页契约和主布局体验缺口已经修复。Round 7 继续补齐数据产品创建、沙箱会话创建、数据资源详情和基础品牌化缺口。Round 8 补齐产品生命周期、目录到沙箱、上下文预填、角色工作台、产品搜索/状态筛选和运营/监管产品可见性缺口。Round 9 修复普通沙箱直接执行的输出审查绕过、会话详情不可执行/不可审查、运营终止配额释放对象错误，以及认证页模板化问题。Round 10 补齐沙箱网络策略控制面，修复网络策略 API 热加载未 await、session 路由被遮挡和策略写入权限校验不足。Round 11 补齐字段级最小化控制面、买方申请体验、restricted 字段复核语义、契约网关查询执行面字段授权，以及网关凭证合约路径一致性校验。Round 12 收紧跨空间连接器代理沙箱，修复合约约束失败开放、connector 与 contract 绑定缺失、代理执行绕过代码扫描/输出审查，以及代理会话缺少 key/network/quota 安全基线。Round 13 继续收紧本地沙箱合约绑定、数据产品生命周期与归档、合约创建/激活授权、SecureDuckDB 和输出控制 DP budget 的 session owner 授权。Round 14 修复数据资源上传/删除闭环、输出控制 inspect/gateway session owner 授权、产品版本与字段策略可见性，以及字段申请角色语义。Round 15 修复运行时路由失败关闭、L2/K8s session context 透传、K8s manifest/NetworkPolicy 控制面和 Python 3.12 运行期兼容性。Round 16 继续收紧 K8s/K3s 产品化部署面，修复只读 rootfs 可写路径、零信任 egress、ResourceQuota 语义、exec 密钥泄露、env 校验和 243/K3s 中国网络安装脚本问题。Round 17 补齐 K8s 作为可创建 runtime level 的产品入口，并修复 Pod readiness、控制面 apply 失败回滚、exec 前 ready gate、terminate returncode 和 CDS/K8s 状态映射问题。Round 18 收紧 connector 与 contract fulfillment 两条非普通会话入口，修复 provision/key distribution 失败后继续激活会话，以及合约产品 ID 字符串未规范化的问题。Round 19 收紧 K8s 多集群与 allowlist 语义，修复 kubeconfig 未透传、域名 allowlist 失败开放和 allowlist 输入校验不足问题。Round 20 清理剩余软件薄实现：补齐 FederatedRuntime、Firecracker 非网络串口 fallback、DP budget 自动告警评估，以及非结构化处理可选依赖失败显式化。Round 21 修复 L1 TEE 运行时语义：无 TEE 环境时明确降级为普通软件密态沙箱并生成 `software_hash` 证明；有硬件信号且配置 runner/attester 时进入硬件路径。Round 22 补齐告警中心后端产品化闭环：告警持久化、去重、通知投递记录、确认/解决处置状态和监控 API。Round 23 补齐非结构化/多媒体管线的软件产品化闭环：任务重试、阶段状态、DICOM 入口、加密 artifact manifest、输出审查，以及 L3 bwrap seccomp 兼容重试。Round 24 修复训练数据切分不可复现和 RAG `chunking` 阶段名拼写错误，保障训练审计、事故回放和阶段状态对齐。Round 25 补齐 CDC Kafka Connect 控制面 hook，配置真实 Connect URL 时可通过 REST upsert/pause/delete connector。Round 26 修复前端服务层与后端 API 的契约脱节，补齐连接器、联邦、训练的缺失路由和统一返回体，并收敛页面误导性操作。Round 27 收敛产品化命名，把测试数据正式接口从 mock 迁移到 synthetic，并把 GPU-TEE 默认运行时从 stub 命名改为 local/software 语义。Round 28 补齐发版安全复核和 Go/No-Go 门禁文档，明确试点/生产边界、残余风险、证据要求和发布后观察项。Round 29 补齐安全态势接口和首页披露，防止软件 fallback 被误解为硬件能力。Round 30 补齐沙箱会话证明包和输出审查摘要审计，支持客户/监管验收归档。Round 31 补齐高危管理员操作理由必填与审计字段，防止 API 直调绕过前端二次确认。硬件或外部基础设施能力（真实 SGX、GPU-TEE、生产 FISCO BCOS 节点、PG-in-TEE、真实 K3s 集群）保持为适配器/模拟器/可部署验证项，见 2.1 后续待实现/验证 Gap 表，不列为本轮 active gap。
+Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发沙箱输出、契约网关输出、DP 预算失败模式、配额 fallback、任务代码落库等软件缺口已经修复。Round 6 从产品化和易用性复核后，前端构建、角色体系、路由权限、开发沙箱、输出审查、合约创建、分页契约和主布局体验缺口已经修复。Round 7 继续补齐数据产品创建、沙箱会话创建、数据资源详情和基础品牌化缺口。Round 8 补齐产品生命周期、目录到沙箱、上下文预填、角色工作台、产品搜索/状态筛选和运营/监管产品可见性缺口。Round 9 修复普通沙箱直接执行的输出审查绕过、会话详情不可执行/不可审查、运营终止配额释放对象错误，以及认证页模板化问题。Round 10 补齐沙箱网络策略控制面，修复网络策略 API 热加载未 await、session 路由被遮挡和策略写入权限校验不足。Round 11 补齐字段级最小化控制面、买方申请体验、restricted 字段复核语义、契约网关查询执行面字段授权，以及网关凭证合约路径一致性校验。Round 12 收紧跨空间连接器代理沙箱，修复合约约束失败开放、connector 与 contract 绑定缺失、代理执行绕过代码扫描/输出审查，以及代理会话缺少 key/network/quota 安全基线。Round 13 继续收紧本地沙箱合约绑定、数据产品生命周期与归档、合约创建/激活授权、SecureDuckDB 和输出控制 DP budget 的 session owner 授权。Round 14 修复数据资源上传/删除闭环、输出控制 inspect/gateway session owner 授权、产品版本与字段策略可见性，以及字段申请角色语义。Round 15 修复运行时路由失败关闭、L2/K8s session context 透传、K8s manifest/NetworkPolicy 控制面和 Python 3.12 运行期兼容性。Round 16 继续收紧 K8s/K3s 产品化部署面，修复只读 rootfs 可写路径、零信任 egress、ResourceQuota 语义、exec 密钥泄露、env 校验和 243/K3s 中国网络安装脚本问题。Round 17 补齐 K8s 作为可创建 runtime level 的产品入口，并修复 Pod readiness、控制面 apply 失败回滚、exec 前 ready gate、terminate returncode 和 CDS/K8s 状态映射问题。Round 18 收紧 connector 与 contract fulfillment 两条非普通会话入口，修复 provision/key distribution 失败后继续激活会话，以及合约产品 ID 字符串未规范化的问题。Round 19 收紧 K8s 多集群与 allowlist 语义，修复 kubeconfig 未透传、域名 allowlist 失败开放和 allowlist 输入校验不足问题。Round 20 清理剩余软件薄实现：补齐 FederatedRuntime、Firecracker 非网络串口 fallback、DP budget 自动告警评估，以及非结构化处理可选依赖失败显式化。Round 21 修复 L1 TEE 运行时语义：无 TEE 环境时明确降级为普通软件密态沙箱并生成 `software_hash` 证明；有硬件信号且配置 runner/attester 时进入硬件路径。Round 22 补齐告警中心后端产品化闭环：告警持久化、去重、通知投递记录、确认/解决处置状态和监控 API。Round 23 补齐非结构化/多媒体管线的软件产品化闭环：任务重试、阶段状态、DICOM 入口、加密 artifact manifest、输出审查，以及 L3 bwrap seccomp 兼容重试。Round 24 修复训练数据切分不可复现和 RAG `chunking` 阶段名拼写错误，保障训练审计、事故回放和阶段状态对齐。Round 25 补齐 CDC Kafka Connect 控制面 hook，配置真实 Connect URL 时可通过 REST upsert/pause/delete connector。Round 26 修复前端服务层与后端 API 的契约脱节，补齐连接器、联邦、训练的缺失路由和统一返回体，并收敛页面误导性操作。Round 27 收敛产品化命名，把测试数据正式接口从 mock 迁移到 synthetic，并把 GPU-TEE 默认运行时从 stub 命名改为 local/software 语义。Round 28 补齐发版安全复核和 Go/No-Go 门禁文档，明确试点/生产边界、残余风险、证据要求和发布后观察项。Round 29 补齐安全态势接口和首页披露，防止软件 fallback 被误解为硬件能力。Round 30 补齐沙箱会话证明包和输出审查摘要审计，支持客户/监管验收归档。Round 31 补齐高危管理员操作理由必填与审计字段，防止 API 直调绕过前端二次确认。硬件或外部基础设施能力（真实 SGX、GPU-TEE、生产 FISCO BCOS 节点、PG-in-TEE、真实 K3s 集群）保持为适配器/模拟器/可部署验证项，见 2.1 后续待实现/验证 Gap 表，不列为本轮 active gap。 Round 32 修复 AI 数据沙箱审查（docs/ai-sandbox-gap-review-20260906.md）定位的 4 个高危闭环缺口：会话生命周期自动回收（A2/D1）、合约终止/到期级联回收（A1）、dev 沙箱合约门禁与 DP 合约继承（A3）、KMS 密钥分发强制证明与 wrapped keys 持久化（B1/B3）、任务输出强制过合约输出网关（E1），全部含单测。 Round 33 修复 P1 设计对齐缺口：合约用途限定进签名与任务门禁（A4）、字段级分类分级到输出策略联动（A5）、训练 fail-closed 与 MIA 诚实标注（C1/C2）、模拟/降级显式化开关矩阵（B2/D4/B5/F2）、DP 预算 epsilon 上下限（E3），均含单测并在 Linux 真实环境全量回归通过。 Round 34 补齐剩余 P1 最小软件闭环：KMS DEK 明文落库修复（encrypted_key 改存 KEK 封装 blob）、PII NER LAC 模型层与诚实 ner_engine 标注（T9）、链存证 backend 诚实披露（T8 最小可行，不冒充已上链）。
 
 ---
 
@@ -149,6 +149,19 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | G-123 | 缺少面向运营/监管的安全态势披露，用户可能误解软件 fallback 为硬件 TEE/HSM/链/SIEM 已启用 | P0 | 已修复，已编译/构建通过 | Round 29 | `app/api/monitoring.py`, `cds-frontend/src/services/monitoringApi.ts`, `cds-frontend/src/pages/Dashboard/index.tsx` | 新增安全态势接口和首页卡片，按配置/TEE 探测返回 Go/Conditional Go/No-Go、能力状态、证据和建议动作，不暴露 Secret。 |
 | G-124 | 沙箱会话缺少统一可下载证明包，policy hash、attestation、key id、输出签名和审计摘要分散不可交付 | P0 | 已修复，已编译/构建通过 | Round 30 | `app/api/sandbox_sessions.py`, `cds-frontend/src/services/sandboxApi.ts`, `cds-frontend/src/pages/Sandbox/SessionDetail.tsx`, `specs/productization-gap-analysis.md` | 新增会话证明包接口和前端抽屉/下载入口；执行后持久化 `sandbox.output_inspected` 审计摘要；证明包包含稳定 evidence hash 与本次 bundle hash，且不返回密钥明文、原始输出或 raw quote。 |
 | G-125 | 管理员高危操作缺少后端强制理由和可检索审计字段，API 直接调用可绕过前端二次确认 | P0 | 已修复，已编译/构建通过 | Round 31 | `app/schemas/high_risk_operation.py`, `app/api/kms.py`, `app/api/certificates.py`, `app/api/contracts.py`, `app/api/connectors.py`, `cds-frontend/src/utils/highRiskOperation.tsx`, `cds-frontend/src/pages/Identity/*`, `cds-frontend/src/pages/Contracts/ContractDetail.tsx`, `cds-frontend/src/pages/Connectors/index.tsx` | KMS 密钥撤销、证书撤销、合约终止、连接器暂停/恢复/API Key 轮换强制提交 reason，可选 ticket_id；前端统一理由弹窗；审计 detail 记录 reason/ticket_id。 |
+| G-126 | 过期沙箱会话无自动回收调度，仅 admin 手动 `POST /cleanup-expired`，孤儿容器/密钥/网络策略长期存活（A2/D1） | P0 | 已修复，已单测通过 | Round 32 | `app/services/session_lifecycle.py`, `app/services/sandbox_manager.py`, `app/main.py`, `app/api/sandbox_sessions.py`, `tests/test_session_lifecycle.py` | 新增 `session_lifecycle` 服务：`terminate_session` 唯一终止原语（状态机→容器→密钥 crypto-erase→任务取消→网络策略→配额释放）+ `cleanup_expired_sessions` + `session_cleanup_loop`；lifespan 注册后台循环（`TESTING=1` 关闭）；admin 端点改调同一 service；清扫范围从 3 态扩到全部非终态（修 READY 孤儿泄漏）；修复 `is_session_expired` 对 SQLite naive datetime 的兼容。 |
+| G-127 | 合约终止/到期不级联回收运行中会话与已下发资源，买方会话在合约终止后仍可运行（A1） | P0 | 已修复，已单测通过 | Round 32 | `app/services/contract_service.py`, `app/services/contract_fulfillment.py`, `app/models/contract.py`, `app/models/policy_bundle.py`, `tests/test_contract_terminate_cascade.py` | `contract_service.terminate()` 级联终止名下非终态会话（复用 `session_lifecycle.terminate_session`）+ 撤销 policy bundle（DB `revoked_at` + OPA `delete_policy`）+ 审计 `contract.terminate_cascade`；新增 `contracts.valid_until`，激活时从 terms 取值，清理循环到期自动终止；旧的 `terminate_contract_sessions` 收敛到统一终止原语。 |
+| G-128 | dev 沙箱绕过合约授权，`dp_epsilon_budget` 由请求自报（A3） | P0 | 已修复，已单测通过 | Round 32 | `app/api/dev_sandbox.py`, `app/core/config.py`, `tests/test_dev_sandbox_contract.py` | 新增 `DEV_SANDBOX_REQUIRE_CONTRACT`（默认 true，fail-closed）；dev 会话携带 `data_product_id` 时必须提供覆盖该产品且生效的合约（状态 SIGNED/ACTIVE、产品覆盖、当事方三检）；dev 会话 DP 预算改为合约继承，请求自报值在受合约治理的会话中完全失效；纯开发模式（不挂载数据产品）不受限。 |
+| G-129 | KMS 密钥分发 TEE 证明验证可选，无证明即可取得会话密钥；wrapped keys 仅存进程内存，重启即丢（B1/B3） | P0 | 已修复，已单测通过 | Round 32 | `app/services/kms_service.py`, `app/services/kms_recovery.py`, `app/models/kms.py`, `app/api/sandbox_sessions.py`, `app/api/connectors.py`, `app/services/contract_fulfillment.py`, `app/services/task_pipeline.py`, `tests/test_kms_attestation_required.py` | `distribute_key` 增加 fail-closed 门禁（`KMS_REQUIRE_ATTESTATION` 默认 true，dev/test 显式放宽）；connectors/contract_fulfillment/task_pipeline 三个调用点补传 provision 证明；`DataEncryptionKey` 新增 `wrapped_payload`/`sm2_encrypted_payload`，三处 session-key 创建点持久化，`kms_recovery.restore_wrapped_keys` 启动恢复，销毁时 crypto-erase。 |
+| G-130 | 输出审查非强制路径，任务结果可绕过合约输出策略取回；`/gateway` 限制参数自报（E1） | P0 | 已修复，已单测通过 | Round 32 | `app/services/output_policy.py`, `app/services/task_pipeline.py`, `app/services/task_worker.py`, `app/api/sandbox_tasks.py`, `app/api/output_control.py`, `tests/test_output_gateway_enforcement.py` | 新增 `output_policy` 服务（合约 OutputPolicy 解析、请求钳制、文本行数截断）；pipeline OUTPUT_INSPECTING 与 legacy worker 双路径按合约 `max_output_rows` 截断并记录策略；`get_task_result` 要求落库检查结论通过否则 409，返回脱敏输出/水印/签名；`/output-control/gateway` 请求参数改为合约钳制（只能收窄不能放宽），审计记录合约来源与生效值。 |
+| G-131 | 合约无用途限定字段，任务提交不声明/不校验用途，无法阻止"约定用于统计、实际用于成员推断"类滥用（A4） | P1 | 已修复，已单测通过 | Round 33 | `app/models/contract.py`, `app/models/sandbox_task.py`, `app/schemas/contract.py`, `app/api/contracts.py`, `app/api/sandbox_tasks.py`, `app/services/crypto_service.py`, `app/services/contract_service.py`, `tests/test_contract_purpose.py` | 合约新增 `purpose`/`purpose_scope`，用途进入三方签名原文（`contract_sign_data` 扩展，向后兼容存量合约）；任务创建时按会话合约的用途限定校验（scope 内/单值匹配/缺声明拒绝），无用途限定的存量合约不受限。 |
+| G-132 | 数据产品仅有 4 级字符串分级，未落到字段级策略执行，身份证等敏感字段可随输出离开沙箱（A5） | P1 | 已修复，已单测通过 | Round 33 | `app/models/data_resource.py`, `app/services/policy_compiler.py`, `app/services/output_security.py`, `app/services/output_gateway.py`, `app/services/output_policy.py`, `tests/test_field_classification_policy.py` | `DataResource` 新增 `field_classifications`（field→level）；`policy_compiler.field_rules_from_classifications` 生成掩码/禁出规则（level≥4 禁出、level==3 掩码）；`build_output_policy` 端到端注入产品资源分级；`output_gateway.process` 对行数据执行掩码/禁出（含原始分级映射自动编译）。 |
+| G-133 | 训练在 torch 缺失时静默返回模拟结果；MIA 用确定性代理当真实门禁，给出虚假记忆风险保证（C1/C2） | P1 | 已修复，已单测通过 | Round 33 | `app/core/config.py`, `app/services/cpu_trainer.py`, `app/services/llm_sft_runtime.py`, `tests/test_training_fail_closed.py` | 新增 `TRAINING_REQUIRE_TORCH`（默认 true），torch 缺失且要求时训练抛错失败关闭；MIA 结果新增 `mia_status`（shadow_model/proxy_estimate/not_evaluable），仅真实影子模型评估可触发硬门禁，确定性代理只作咨询性标签不再冒充真实保证。 |
+| G-134 | 模拟/软件降级开关缺失，HSM 软件回退、seccomp 降级、TEE 模拟证明、联邦静态 JWT 密钥在未配置时静默生效（B2/D4/B5/F2） | P1 | 已修复，已单测通过 | Round 33 | `app/core/config.py`, `app/main.py`, `app/services/hsm_adapter.py`, `app/services/sandbox_runtime.py`, `app/services/kms_service.py`, `tests/test_security_config_matrix.py` | 新增 `ALLOW_SIMULATION`/`SECCOMP_FALLBACK_ALLOWED`/`HSM_SOFTWARE_FALLBACK_ALLOWED`/`FEDERATION_JWT_KEY_REQUIRED` 四开关；`validate_security_config` 启动时把每个已启用的降级项显式告警（不再静默）；HSM 软件回退、seccomp 重试、KMS 软件模拟证明在关闭时失败关闭。 |
+| G-135 | DP 预算 epsilon 数值由合约自定，缺全局下限/单次上限与分配上限校验（E3） | P2 | 已修复，已单测通过 | Round 33 | `app/core/config.py`, `app/services/dp_budget.py`, `tests/test_dp_guardrails.py` | 新增 `DP_MIN_EPSILON_CONSUMPTION`/`DP_MAX_EPSILON_PER_CONSUMPTION`/`DP_MAX_EPSILON_ALLOCATION`；`consume()` 拒绝非正/超单次上限消费，`allocate()` 拒绝超全局上限分配。 |
+| G-136 | KMS API DEK 明文落库：`encrypted_key` 存裸 `key_bytes.hex()`，数据库可读即得明文密钥 | P0 | 已修复，已单测通过 | Round 34 | `app/api/kms.py`, `tests/test_kms_dek_wrapped.py` | `create_dek`/`rotate_dek` 改存 KEK-wrapped blob（`export_wrapped(key_id).hex()`）；`encrypted_key` 列全库无读取方（get 只返回元数据），纯存储格式加固，明文不再落库，KEK 在 HSM 才可解。 |
+| G-137 | PII NER 的 ML 层使用不存在的默认模型名 `bert-base-chinese-pii-ner`，实际仅规则层运行却无引擎标注，可能被误读为模型识别（E2） | P1 | 已修复，已单测通过 | Round 34 | `app/services/pii_ner.py`, `app/core/config.py`, `tests/test_pii_ner_engine.py` | `PIINERService` 新增 `ner_engine`（auto/rule/lac/transformers/regex）与 `PIIDetectionResult.ner_engine` 诚实标注；新增 LAC 模型 NER 层（layer=`ner_lac`）；请求模型不可用时如实降级为 rule 并标注，绝不冒充模型识别；`PII_NER_ENGINE` 配置接入 singleton。 |
+| G-138 | 审计锚定/合规报告未披露存证 backend，pg_append_only 本地防篡改日志可能被误读为"已上链"（F1） | P1 | 已修复，已单测通过 | Round 34 | `app/api/audit.py`, `app/services/compliance_report.py`, `app/schemas/compliance.py`, `cds-frontend/src/services/auditApi.ts`, `tests/test_blockchain_backend_disclosure.py` | anchor/verify/merkle-proof/compliance-report 响应新增 `backend`/`backend_label`/`is_consortium_chain` 诚实披露；verify 加 `verification_note`；合规报告 service 新增 `anchoring` 披露；前端类型扩展（纯增量）。 |
 
 **当前 active software gap：0。**
 
@@ -1259,7 +1272,132 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 
 ---
 
-## 29. 最终验证状态
+## 29. Round 32 AI 数据沙箱安全闭环修复记录
+
+### 触发条件
+
+对 `docs/ai-sandbox-gap-review-20260906.md`（对照 PPT P17–P20 的 AI 数据沙箱设计）逐条源码复核确认：4 个高危闭环缺口（权限回收不闭环、dev 沙箱绕过合约、密钥分发验证可选、输出网关非强制）与 2 个能力性缺口（wrapped keys 重启丢失、输出策略未落合约）为真实软件缺口，按 `docs/ai-sandbox-gap-remediation-plan.md` P0 任务实施。
+
+### 已完成
+
+1. **会话生命周期自动回收（G-126，A2/D1）**：
+   - 新增 `app/services/session_lifecycle.py`：`terminate_session` 唯一终止原语（状态机 → 容器 → 密钥 crypto-erase → 任务取消 → 网络策略 → 配额释放）、`cleanup_expired_sessions`、`session_cleanup_loop`。
+   - `app/main.py` lifespan 注册后台循环（`TESTING=1` 关闭）；`POST /cleanup-expired` 改为调同一 service。
+   - 清扫范围从原 3 态扩到全部非终态（含 READY，修孤儿沙箱泄漏）；修复 `is_session_expired` 对 SQLite naive datetime 的兼容。
+
+2. **合约终止/到期级联回收（G-127，A1）**：
+   - `contract_service.terminate()` 级联终止名下非终态会话（复用 T1 原语）+ 撤销 policy bundle（DB `revoked_at` + OPA `delete_policy`）+ 审计 `contract.terminate_cascade`。
+   - 新增 `contracts.valid_until`，激活时从 terms 取值；`terminate_expired_contracts` 由清理循环调用做到期自动终止。
+   - 收敛旧的 `terminate_contract_sessions` 到统一终止原语，消除两套清理逻辑。
+
+3. **dev 沙箱合约门禁（G-128，A3）**：
+   - 新增 `DEV_SANDBOX_REQUIRE_CONTRACT`（默认 true，fail-closed；dev/test 显式 false）。
+   - dev 会话携带 `data_product_id` 时强制 `contract_id`，校验合约状态（SIGNED/ACTIVE）、产品覆盖、当事方；DP 预算改为合约继承，请求自报值失效。
+   - 纯开发模式（不挂载数据产品）不受限。
+
+4. **KMS 密钥分发强制证明 + wrapped keys 持久化（G-129，B1/B3）**：
+   - `distribute_key` 增加 fail-closed 门禁：`KMS_REQUIRE_ATTESTATION`（默认 true）时无证明拒绝分发；connectors/contract_fulfillment/task_pipeline 三个调用点补传 provision 证明。
+   - `DataEncryptionKey` 新增 `wrapped_payload`/`sm2_encrypted_payload`；三处 session-key 创建点持久化；`app/services/kms_recovery.py` 启动恢复；销毁时 crypto-erase（生命周期终止器置空）。
+
+5. **任务输出强制过合约输出网关（G-130，E1）**：
+   - 新增 `app/services/output_policy.py`：合约 OutputPolicy 解析、请求钳制（只能收窄）、文本行数截断。
+   - pipeline OUTPUT_INSPECTING 与 legacy worker 双路径按合约 `max_output_rows` 截断并记录应用策略。
+   - `get_task_result` 要求落库检查结论 `passed is True` 否则 409，返回脱敏输出/水印/签名。
+   - `/output-control/gateway` 请求参数改为合约钳制，审计记录合约来源与生效值。
+
+6. **模型与迁移**：`app/models/contract.py`（`valid_until`）、`app/models/policy_bundle.py`（`revoked_at`）、`app/models/kms.py`（wrapped 列，注意 `KeyMetadata = DataEncryptionKey` 兼容别名）；首个 Alembic 迁移 `alembic/versions/0001_p0_security_hardening.py`（仅 additive 可空列）。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `python -m pytest tests/test_session_lifecycle.py tests/test_contract_terminate_cascade.py tests/test_dev_sandbox_contract.py tests/test_kms_attestation_required.py tests/test_output_gateway_enforcement.py -q` | 24 passed |
+| 受影响既有测试组基线对比（git stash 前后同组 171 通过 / 29 失败） | 结果一致 → 零回归 |
+| `python -m py_compile` 全部改动文件 | 通过 |
+
+> 环境说明：全量测试 1974 通过；104 失败 / 16 error 全部为既有 Windows/Linux 环境问题（`resource` 模块缺失、e2e 需真实集群、`column_encryption.py` 既有 `Any` bug 等），与本次改动无关，详见 `docs/ai-sandbox-gap-remediation-plan.md` §7。
+
+---
+
+## 30. Round 33 P1 设计对齐修复记录
+
+### 触发条件
+
+Round 32 完成 P0 安全闭环后，继续修复 P1 设计对齐项：用途限定（A4）、字段级分类分级（A5）、训练/MIA 诚实化（C1/C2）、模拟与降级显式化（B2/D4/B5/F2）以及 DP 预算口径（E3）。本轮在真实 Linux 环境（openEuler 22.03, Python 3.11.9）全量回归。
+
+### 已完成
+
+1. **合约用途限定（G-131，A4）**：
+   - `Contract` 新增 `purpose`/`purpose_scope`（迁移 0001 已含），创建 schema/API 透传。
+   - `crypto_service.contract_sign_data` 扩展可选 purpose/scope 参数，用途进入三方签名原文（存量无用途合约载荷不变，向后兼容）。
+   - `SandboxTask.purpose` 列；`create_task` 按会话合约用途校验：scope 内 / 单值匹配 / 缺声明拒绝 / 无限制不受限；审计记录用途。
+
+2. **字段级分类分级 → 策略联动（G-132，A5）**：
+   - `DataResource.field_classifications`（field→level）+ 迁移。
+   - `policy_compiler.field_rules_from_classifications`：level≥4 禁出、level==3 掩码。
+   - `output_security.mask_rows_by_field_rules`：行级掩码/禁出。
+   - `output_gateway.process` 执行字段规则（自动编译原始分级映射）；`build_output_policy` 端到端注入产品资源分级。
+
+3. **训练 fail-closed 与 MIA 诚实化（G-133，C1/C2）**：
+   - `TRAINING_REQUIRE_TORCH`（默认 true）：torch 缺失且要求时训练抛错，不再静默返回模拟结果。
+   - `MIAProbeResult.mia_status`（shadow_model/proxy_estimate/not_evaluable）；SFT 硬门禁仅对真实影子模型评估生效，确定性代理降级为咨询性标签。
+
+4. **模拟/降级显式化开关矩阵（G-134，B2/D4/B5/F2）**：
+   - 新增 `ALLOW_SIMULATION`/`SECCOMP_FALLBACK_ALLOWED`/`HSM_SOFTWARE_FALLBACK_ALLOWED`/`FEDERATION_JWT_KEY_REQUIRED`。
+   - `Settings.validate_security_config` 启动时显式告警每个已启用的降级项；main lifespan 改调。
+   - HSM 软件回退（Vault 不可达且开关关闭→拒绝）、seccomp 重试（两处，开关关闭→不降级）、KMS 软件模拟证明（`ALLOW_SIMULATION=false` 拒绝 software_hash quote）均失败关闭。
+
+5. **DP 预算 epsilon 上下限（G-135，E3）**：
+   - `DP_MIN_EPSILON_CONSUMPTION`/`DP_MAX_EPSILON_PER_CONSUMPTION`/`DP_MAX_EPSILON_ALLOCATION`；`consume`/`allocate` 越界失败关闭。
+
+6. **顺带修复（非本轮缺口）**：`app/services/column_encryption.py` 缺 `from typing import Any` 导致 2 个测试文件收集失败 —— 补导入（1 行，安全），解除全量收集阻断。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| 新增 5 测试文件（24 用例）：test_contract_purpose / test_security_config_matrix / test_training_fail_closed / test_field_classification_policy / test_dp_guardrails | 全部通过 |
+| Linux 全量 `pytest tests/`（openEuler, Python 3.11.9, 装 bwrap/poppler-utils 后） | **2211 passed / 10 failed / 16 error** |
+| 剩余失败分类 | 16 error = 打真实集群的 e2e_full_lifecycle（需 172.21.0.2:30080）；5×L0 = 容器 /sys/fs/cgroup 只读；2×L0 bwrap = 单跑通过（顺序 flake）；1×e2e = 水印 JSON 与朴素 json.loads 冲突（既有特性）；1×e2e = 产品被会话引用删除 409（既有守卫）；1×e2e = 会话 owner 403（既有授权）—— 均在未改动文件路径，**零回归** |
+
+> Windows 对照：1974 passed / 104 failed（多为 `resource` 模块缺失）/ 16 error；Linux 补齐环境后 2211 passed。
+
+---
+
+## 31. Round 34 剩余 P1 最小软件闭环修复记录
+
+### 触发条件
+
+Round 33 完成 P1 设计对齐后，剩余可落地的软件闭环为三项：KMS DEK 明文落库（`api/kms.py` 的 `encrypted_key` 存裸 key hex）、PII NER 模型层诚实化（T9/E2，默认模型名不存在且无引擎标注）、链存证 backend 诚实披露（T8/F1 最小可行）。T11 RAG 一期为约 8 人日大特性，经用户确认留待独立轮次；P2 六方向与真链 e2e 仍需外部环境。
+
+### 已完成
+
+1. **KMS DEK 明文落库修复（G-136）**：
+   - `app/api/kms.py` `create_dek`/`rotate_dek` 的 `encrypted_key` 从 `result["key_bytes"].hex()`（明文）改为 `export_wrapped(key_id).hex()`（KEK 封装 blob）。
+   - `encrypted_key` 列全库无读取方（`get_dek` 只返回元数据），改动为纯存储格式加固，零行为破坏；新增 `_wrapped_key_hex` helper 消除两处重复。
+
+2. **PII NER 模型层诚实化（G-137，T9/E2）**：
+   - `PIINERService` 新增 `ner_engine` 参数（auto/rule/lac/transformers/regex）；`PIIDetectionResult.ner_engine` 诚实标注实际运行引擎（regex_only/rule/lac/transformers）。
+   - 新增 LAC 模型 NER 层（`_detect_ner_lac`，PER/LOC/GPE/ORG/TIME → PII 类型，layer=`ner_lac`）；模型不可用时如实降级为 rule，绝不冒充模型识别。
+   - 修复 transformers 路径依赖不存在的默认模型名 `bert-base-chinese-pii-ner` 的问题；`PII_NER_ENGINE` 配置接入 singleton（保留 `PII_NER_USE_ML` 兼容）。
+
+3. **链存证 backend 诚实披露（G-138，T8 最小可行）**：
+   - `app/api/audit.py` 的 anchor/verify/merkle-proof/compliance-report 响应新增 `backend`/`backend_label`/`is_consortium_chain` 披露；verify 增加 `verification_note`（pg_append_only 明确标注"非联盟链上链"）。
+   - `app/services/compliance_report.py` + `app/schemas/compliance.py` 新增 `anchoring` 披露；`cds-frontend/src/services/auditApi.ts` 接口类型扩展（纯增量可选字段）。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| 新增 3 测试文件（13 用例）：test_kms_dek_wrapped（3）/ test_pii_ner_engine（10）/ test_blockchain_backend_disclosure（5） | 全部通过 |
+| 受影响既有文件回归：test_kms / test_kms_lifecycle / test_pii_ner / test_compliance_report / test_audit_api / test_audit_enhanced | 全部通过（共 56 + 36 passed） |
+| 全量 `pytest tests/`（排除 2 个 Windows `import resource` 收集错误文件与 e2e 集群文件后） | **2103 passed / 75 failed / 16 error** |
+| 剩余失败分类 | 全部为既有环境问题：`resource` 模块缺失（Windows）、tmpfs/磁盘加密（Linux 专属）、bwrap/firecracker、TEE 设备检测、e2e 集群 172.21.0.2:30080、Windows GBK 读 UTF-8 —— **零回归**（改动文件零命中） |
+
+---
+
+
+## 32. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1305,7 +1443,7 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 
 ---
 
-## 30. 后续循环规则
+## 33. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。

@@ -119,6 +119,11 @@ services:
       CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cds_minio_admin}
       CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-cds_dev_minio_password}
       CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY:-dev_jwt_secret_change_in_prod_32bytes}
+      # P0 hardening switches — dev values (relaxed); production template sets
+      # the fail-closed posture. See .env.example for semantics.
+      CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
+      CDS_KMS_REQUIRE_ATTESTATION: "false"
+      CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "false"
     depends_on:
       postgres:
         condition: service_healthy
