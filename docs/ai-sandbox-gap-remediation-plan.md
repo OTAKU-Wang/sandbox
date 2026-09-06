@@ -437,3 +437,23 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 **全量回归**（排除 2 个 Windows `import resource` 收集错误文件与 e2e 集群文件）：**2103 passed / 75 failed / 16 error**。剩余失败 100% 为既有环境问题（`resource` 模块缺失、tmpfs/磁盘加密、bwrap/firecracker、TEE 设备检测、e2e 集群、Windows GBK 读 UTF-8），**零回归**，改动文件零命中。
 
 **仍未实施**：T11 RAG 一期（约 8 人日大特性，用户确认留待独立轮次）、T8 真链 e2e、T9 模型实际安装（LAC 可选依赖，环境验收项）、P2 六方向（同态/MPC、智能体框架、快照回滚、TEE 硬件、K8s python client、GPU 插件）。
+
+---
+
+### Round 35 执行记录（2026-09-06 追加）—— T11 RAG 一期
+
+| 任务 | 状态 | 关键产出 | 对应 specs |
+|---|---|---|---|
+| T11 一期 · 语料不出域的最小检索问答 | ✅ 已实现 | `TaskType.RAG_QUERY` + `create_task` 的 `rag_query` 分支（生成自包含 runner 加密落库）；`POST /api/v1/rag/corpus` 摄入端点；`app/services/rag_embedding.py`（tf/regex 确定性嵌入 + transformers 宿主侧后端 + 诚实标注）；`app/services/rag_service.py`（分块/建索引/检索/抽取式答案/`build_rag_runner`/`prepare_corpus_for_task`/`validate_rag_runner`）；`SandboxRuntime.get_workspace`；`_default_running_handler` RAG 语料物化；`RAG_*` 配置 + `validate_security_config` 校验；前端 `ragApi.ts`/TaskType 枚举 | G-139 / G-140 / G-141 |
+
+**关键决策（源自计划 .omo/plans/t11-rag-phase1.md）**：
+1. **一期为依赖最轻 + 诚实标注**：嵌入用自实现 char n-gram TF（确定性、沙箱内可复现），`auto` 一期解析为 tf；transformers 仅宿主侧实验，`build_corpus` 对其 fail-closed（runner 不可复现，属二期）。
+2. **一期为抽取式答案**：`answer_mode="extractive_retrieval"`，绝不冒充生成式 LLM。
+3. **语料进沙箱**：摄入信封加密持久化（storage_service）→ 任务执行前 `prepare_corpus_for_task` 物化到 `workspace/input` 并用会话 DEK 重加密（与 provision 同构）→ runner 用 `CDS_DEK_HEX` 内嵌解密读取（明文/加密双形态验证通过）。
+4. **系统代码不经通用扫描器**：`validate_rag_runner` 模板字节级校验（AST 提取字面量 → 重新生成逐字节比对），篡改/注入即拒，**扫描器白名单零放宽**。
+
+**新增测试**（5 文件 40 用例全绿）：`tests/test_rag_embedding.py`（11）、`tests/test_rag_service.py`（13）、`tests/test_rag_runner.py`（6，子进程端到端 + 加密 + host/runner 一致性）、`tests/test_rag_task.py`（6，RAG 任务 API + purpose 门禁 + T5 409 门禁）、`tests/test_rag_ingest.py`（4）。
+
+**验证**：受影响回归 111 passed 全绿；`compileall -q app tests alembic` 通过；全量 `pytest tests/`（排除 2 个 Windows `import resource` 收集错误文件）→ **2143 passed / 75 failed / 16 error / 3 skipped**，与基线 2103/75/16 相比新增恰为 40 个 RAG 用例，**零回归**。前端新增为编译级（本机无 node_modules 未构建）。
+
+**仍未实施**：T11 二期（沙箱镜像内生成式 LLM、transformers 检索、模型水印、MIA 门禁、推理计量计费）、T8 真链 e2e、T9 LAC 模型实际安装、P2 六方向（同态/MPC、智能体框架、快照回滚、TEE 硬件、K8s python client、GPU 插件）。

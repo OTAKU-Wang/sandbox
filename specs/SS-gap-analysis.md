@@ -162,6 +162,9 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | G-136 | KMS API DEK 明文落库：`encrypted_key` 存裸 `key_bytes.hex()`，数据库可读即得明文密钥 | P0 | 已修复，已单测通过 | Round 34 | `app/api/kms.py`, `tests/test_kms_dek_wrapped.py` | `create_dek`/`rotate_dek` 改存 KEK-wrapped blob（`export_wrapped(key_id).hex()`）；`encrypted_key` 列全库无读取方（get 只返回元数据），纯存储格式加固，明文不再落库，KEK 在 HSM 才可解。 |
 | G-137 | PII NER 的 ML 层使用不存在的默认模型名 `bert-base-chinese-pii-ner`，实际仅规则层运行却无引擎标注，可能被误读为模型识别（E2） | P1 | 已修复，已单测通过 | Round 34 | `app/services/pii_ner.py`, `app/core/config.py`, `tests/test_pii_ner_engine.py` | `PIINERService` 新增 `ner_engine`（auto/rule/lac/transformers/regex）与 `PIIDetectionResult.ner_engine` 诚实标注；新增 LAC 模型 NER 层（layer=`ner_lac`）；请求模型不可用时如实降级为 rule 并标注，绝不冒充模型识别；`PII_NER_ENGINE` 配置接入 singleton。 |
 | G-138 | 审计锚定/合规报告未披露存证 backend，pg_append_only 本地防篡改日志可能被误读为"已上链"（F1） | P1 | 已修复，已单测通过 | Round 34 | `app/api/audit.py`, `app/services/compliance_report.py`, `app/schemas/compliance.py`, `cds-frontend/src/services/auditApi.ts`, `tests/test_blockchain_backend_disclosure.py` | anchor/verify/merkle-proof/compliance-report 响应新增 `backend`/`backend_label`/`is_consortium_chain` 诚实披露；verify 加 `verification_note`；合规报告 service 新增 `anchoring` 披露；前端类型扩展（纯增量）。 |
+| G-139 | 缺少"语料不出域"的最小检索问答（T11/C3）：无 `TaskType.RAG_QUERY`、无语料摄入端点、无沙箱内检索 runner，隐私推理路径为空 | P1 | 已修复，已单测通过 | Round 35 | `app/models/sandbox_task.py`, `app/api/sandbox_tasks.py`, `app/api/rag.py`, `app/services/rag_service.py`, `app/services/rag_embedding.py`, `app/services/task_pipeline.py`, `app/services/sandbox_runtime.py`, `app/core/config.py`, `cds-frontend/src/types/enums.ts`, `cds-frontend/src/services/ragApi.ts`, `tests/test_rag_*.py` | 新增 `TaskType.RAG_QUERY` + `rag_query` 参数（create_task 生成自包含 runner）；`POST /rag/corpus` 摄入端点；系统生成 runner 在 L0/L3 沙箱内用 `CDS_DEK_HEX` 解密语料索引做纯 Python 余弦检索 + 抽取式答案；查询走现有 pipeline 与 T5 输出网关。 |
+| G-140 | RAG 语料静态加密与沙箱内解密读取闭环缺失：索引落明文或无法进入 workspace/input | P1 | 已修复，已单测通过 | Round 35 | `app/services/rag_service.py`, `app/services/sandbox_runtime.py`, `app/services/task_pipeline.py` | 摄入经 `storage_service` 信封加密（SM4-GCM + KMS per-object DEK）持久化；任务执行前 `prepare_corpus_for_task` 把索引物化进 `workspace/input` 并用会话 DEK 重加密（与 provision 同构）；runner 内嵌 AES-GCM 解密 helper 读取。 |
+| G-141 | RAG 系统生成代码走通用用户代码扫描器会因 `os/sys/open/Cryptodome` 白名单缺失被拒；若放宽白名单则削弱用户代码扫描 | P1 | 已修复，已单测通过 | Round 35 | `app/services/rag_service.py`, `app/services/task_pipeline.py` | RAG runner 不做通用白名单扫描，改为**模板字节级校验** `validate_rag_runner`：提取 `_RAG_QUERY`/`_RAG_TOP_K` 字面量重新生成并逐字节比对，任何篡改/注入都被拒绝；结果诚实标注 `embedding_engine`/`answer_mode="extractive_retrieval"`/`backend="local_sandbox"`，绝不冒充生成式 LLM。 |
 
 **当前 active software gap：0。**
 
@@ -1397,7 +1400,46 @@ Round 33 完成 P1 设计对齐后，剩余可落地的软件闭环为三项：K
 ---
 
 
-## 32. 最终验证状态
+## 32. Round 35 RAG 一期（T11 Phase 1）修复记录
+
+### 触发条件
+
+Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RAG 一期（约 8 人日）。用户确认启动该独立轮次（2026-09-06）。Plan/Momus 子代理受 5 小时用量配额限制不可用，改为基于完整源码复核直接实施（计划沉淀于 `.omo/plans/t11-rag-phase1.md`）。
+
+### 已完成
+
+1. **任务类型与 API（G-139）**：
+   - `TaskType.RAG_QUERY`（`app/models/sandbox_task.py`）；`create_task` 新增 `rag_query` 参数——RAG 任务不收用户代码，由 `build_rag_runner(query)` 生成自包含 runner 加密落库（查询明文仅在加密 `code_content` 内，审计只记 `rag_query_chars`）；RAG 强制 python、禁同时传 code、长度上限 `RAG_QUERY_MAX_CHARS`。
+   - 新增 `POST /api/v1/rag/corpus` 摄入端点（session owner 授权、doc/字节上限、runner-replicable 引擎强制）；`app/main.py` 注册路由。
+   - 查询复用现有任务生命周期：`POST /sandbox-tasks`（task_type=rag_query）+ `POST /tasks/{id}/submit` → 现有 pipeline（CODE_SCANNING→RUNNING→OUTPUT_INSPECTING[T5]）→ `get_task_result`（409 门禁不变）。
+
+2. **语料静态加密与沙箱内读取（G-140）**：
+   - 摄入分块（CJK 滑动窗口）→ 向量化 → `rag_index.json` 经 `storage_service.upload` 信封加密（SM4-GCM + KMS per-object DEK）持久化，对象名按 `rag/corpus/{data_product_id}/rag_index.json` 确定性派生（无新表）。
+   - `_default_running_handler` 对 RAG 任务先调 `prepare_corpus_for_task`：`storage_service.download` 解密索引 → 写入 `workspace/input/rag_index.json` → 会话 DEK（`kms_service.get_key(workspace_key_id)`）重加密（与 provision 同构）。`SandboxRuntime.get_workspace` 公开 workspace 解析。
+   - runner 内嵌 AES-GCM 解密 helper（Cryptodome 主 + cryptography 兜底 + fail-closed），用 `CDS_DEK_HEX` 读取加密索引；明文/加密两种形态均验证通过。
+
+3. **系统代码模板校验与诚实标注（G-141）**：
+   - `validate_rag_runner`：AST 提取 `_RAG_QUERY`（强制字符串字面量）/`_RAG_TOP_K` → 重新生成逐字节比对 → 模板被篡改即 REJECTED。**通用扫描器白名单零放宽**。
+   - runner 与宿主机共用 tf/regex 确定性嵌入（FNV-1a hashed char n-gram TF，L2 归一化，dim=512），host-vs-runner 检索结果逐字节一致。
+   - 结果诚实标注 `embedding_engine`（tf/transformers/regex，`auto` 一期解析为 tf 保证沙箱可复现）、`answer_mode="extractive_retrieval"`、`backend="local_sandbox"`；transformers 后端用于宿主侧实验，`build_corpus` 对其 fail-closed（一期 runner 不可复现）。`RAG_*` 配置（top_k/chunk/大小上限/加密强制）接入 `validate_security_config` 取值校验。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| 新增 5 测试文件（40 用例）：test_rag_embedding（11）/ test_rag_service（13）/ test_rag_runner（6）/ test_rag_task（6）/ test_rag_ingest（4） | 全部通过 |
+| runner 端到端：子进程执行明文/加密语料 | 均 exit 0，结果与宿主 `retrieve`+`build_answer` 逐字节一致 |
+| `validate_rag_runner`：生成正例 / import 注入篡改 / 非模板代码 / 非字面量查询 | 按预期通过/拒绝（模板字节校验防注入） |
+| 受影响既有文件回归：test_task_worker / test_output_gateway_enforcement / test_contract_purpose / test_session_lifecycle / test_p05_code_scanning / test_code_scanner / test_kms_attestation_required / test_output_gateway | 111 passed 全绿 |
+| `python -m compileall -q app tests alembic` | 通过 |
+| 全量 `pytest tests/`（排除 2 个 Windows `import resource` 收集错误文件） | **2143 passed / 75 failed / 16 error / 3 skipped** |
+| 剩余失败分类 | 与基线（2103 passed / 75 failed / 16 error）相比**新增恰为 40 个 RAG 用例**；失败/error 数量与基线完全一致（75/16）——**零回归**。全部为既有环境问题：bwrap 缺失、tmpfs/磁盘加密、TEE 设备检测、e2e 集群 172.21.0.2:30080、storage 路径守卫旧测试失配。 |
+
+**仍未实施**：T11 二期（沙箱镜像内生成式 LLM、transformers 检索、模型水印、MIA 门禁、推理计量）、T8 真链 e2e、T9 LAC 模型实际安装、P2 六方向（同态/MPC、智能体框架、快照回滚、TEE 硬件、K8s python client、GPU 插件）。前端新增 `ragApi.ts`/TaskType 枚举为编译级（本机无 node_modules 未构建，既有环境限制）。
+
+---
+
+## 33. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1435,6 +1477,8 @@ Round 33 完成 P1 设计对齐后，剩余可落地的软件闭环为三项：K
 | Round 24 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；TrainingPipeline 聚焦测试 33 passed |
 | Round 25 编译/聚焦单测 | 通过 | 本机 compileall 通过；243 Python 3.12 compileall 通过；CDCAgent 聚焦测试 11 passed |
 | Round 29-31 编译/构建 | 通过 | 本机 `.venv/bin/python -m compileall -q app alembic` 通过；`cds-frontend npm run build` 通过 |
+| Round 32-34 编译/聚焦单测 | 通过 | 本机 compileall 通过；P0 5 测试文件 24 用例 + P1 5 测试文件 24 用例 + Round34 3 测试文件 13 用例全绿；受影响回归 111 passed；全量 2103 passed / 75 failed / 16 error 零回归 |
+| Round 35（RAG 一期）编译/聚焦单测 | 通过 | 本机 `python -m compileall -q app tests alembic` 通过；RAG 5 测试文件 40 用例全绿；受影响回归 111 passed；全量 2143 passed / 75 failed / 16 error（新增恰为 40 个 RAG 用例，失败/error 与基线一致，零回归）；前端新增 ragApi.ts/TaskType 枚举（本机无 node_modules 未构建，编译级） |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
@@ -1443,7 +1487,7 @@ Round 33 完成 P1 设计对齐后，剩余可落地的软件闭环为三项：K
 
 ---
 
-## 33. 后续循环规则
+## 34. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。
