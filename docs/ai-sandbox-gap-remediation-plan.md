@@ -474,3 +474,17 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 **验证**：受影响回归 67 passed / 7 既有 Windows `import resource` 收集错误（零新增回归）；`compileall -q app/core/config.py` 通过；部署文件（docker-compose.prod.yml/.env.prod）非测试覆盖路径，全量基线 2143/75/16 不变。
 
 **仍未实施**：T11 二期、T8 真链 e2e、T9 LAC、P2 六方向、FG-001..FG-016（硬件/外部系统/e2e 门禁，持续跟踪为产品化验收项）。
+
+### Round 37 执行记录（2026-09-06 追加）—— 远程 Linux e2e 闭环与合约签名可用性修复
+
+| 任务 | 状态 | 关键产出 | 对应 specs |
+|---|---|---|---|
+| 远程 e2e 闭环（100.112.3.247） | ✅ 已实现 | 3 个过时 e2e 期望对齐（G-072 仅 DRAFT 可删 / G-073 会话所有权 / T5 零宽水印首行解析）；实时 API（独立 SQLite + 端口 18765，不触碰 fabric 栈）full-lifecycle **16/16 全绿**；admin fixture 429 步进等待 | Round 37 |
+| 合约 SM2 签名客户端可用性修复 | ✅ 已实现 | 缺陷：规范签名串嵌入服务端 `now()` 微秒时间戳，客户端不可构造 → 全客户端不可用。修复：`ContractSign.timestamp` 必填 + ISO 校验，服务端用它构造规范串并强制 ±300s 新鲜度防重放 | Round 37 |
+
+**关键决策**：
+1. **3 个 e2e 失败全部判定为"测试期望过时"而非代码缺陷**——代码行为分别对应 G-072（发布后仅归档不可删）、G-073（sandbox-db 所有权强制）、T5 输出水印（隐形零宽字符）的既有安全设计；测试随设计对齐而非放松设计。
+2. **合约签名缺陷是真缺陷**：fail-closed 加固（Round 32/33 拒绝 demo 签名）无意中使合法客户端也无法签名（无挑战/时间戳通道）。修复保持 fail-closed：时间戳客户端供给 + 服务端新鲜度窗口 + 状态机阻断同方重签，外部客户端按文档化规范串格式即可完成真实 SM2 双方签名闭环。
+3. **实时 API e2e 的环境隔离**：独立 SQLite 文件 + 空闲端口，admin 直接播种；该机 fabric_* 服务栈与共享端口全程未动，验证后 API 进程已停止。
+
+**验证**：三文件 e2e 57 passed（原 3 failed 清零）；合约 6 文件 53 passed 零回归；实时 full-lifecycle 16/16；test_p0 15 passed；全量 2275 passed / 8 failed / 16 errors / 1 skipped——8 failed 全为 cgroup v1 只读环境门禁（bwrap 命名空间/seccomp 隔离本身正常），16 errors 为进程内套件无实时 API 的预期形态（已由实时 API 16/16 单独覆盖）。
