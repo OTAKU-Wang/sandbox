@@ -32,6 +32,19 @@ class DataProtectionReport(BaseModel):
     output_blocks: int
 
 
+class AnchoringDisclosure(BaseModel):
+    """Honest disclosure of the active anchoring backend (T8/F1).
+
+    ``is_consortium_chain`` is False when the report's anchoring evidence comes
+    from the local PG append-only tamper-evident log rather than a real
+    consortium chain — the report must never be read as "已上链".
+    """
+
+    backend: str
+    backend_label: str
+    is_consortium_chain: bool
+
+
 class ComplianceReportResponse(BaseModel):
     report_id: str
     report_type: str
@@ -44,3 +57,4 @@ class ComplianceReportResponse(BaseModel):
     data_protection: DataProtectionReport
     compliance_status: dict[str, str]  # check_name -> pass/fail/warn
     recommendations: list[str]
+    anchoring: AnchoringDisclosure | None = None

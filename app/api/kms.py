@@ -17,6 +17,18 @@ from app.services.audit_service import audit_service
 router = APIRouter()
 
 
+def _wrapped_key_hex(key_id: str) -> str | None:
+    """Return the KEK-wrapped DEK blob as hex for persistence.
+
+    The wrapped blob is useless without the KEK held in HSM/Vault — persisting
+    it (instead of the plaintext key hex) is the envelope-encryption-safe
+    representation. Fixes the previous behaviour where ``encrypted_key``
+    stored the raw DEK plaintext at rest.
+    """
+    wrapped = kms_service.export_wrapped(key_id)
+    return wrapped.hex() if wrapped is not None else None
+
+
 @router.post("/keys", status_code=status.HTTP_201_CREATED)
 async def create_dek(
     product_id: uuid.UUID,
@@ -24,15 +36,15 @@ async def create_dek(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new Data Encryption Key for a product."""
-    # Generate DEK
+    # Generate DEK (wrapped with KEK inside kms_service)
     result = kms_service.generate_data_key(str(product_id))
     key_id = result["key_id"]
 
-    # Store DEK metadata
+    # Store DEK metadata — persist the KEK-wrapped blob, never the plaintext key
     dek = DataEncryptionKey(
         key_id=key_id,
         product_id=product_id,
-        encrypted_key=result["key_bytes"].hex(),  # In production: encrypted by KEK
+        encrypted_key=_wrapped_key_hex(key_id),
         status=DEKStatus.ACTIVE.value,
     )
     db.add(dek)
@@ -125,7 +137,7 @@ async def rotate_dek(
         key_id=new_key_id,
         product_id=dek.product_id,
         key_version=dek.key_version + 1,
-        encrypted_key=new_result["key_bytes"].hex(),
+        encrypted_key=_wrapped_key_hex(new_key_id),
         status=DEKStatus.ACTIVE.value,
     )
     db.add(new_dek)

@@ -14,12 +14,29 @@ export interface AuditRecord {
   created_at: string;
 }
 
+export interface AnchorBackendDisclosure {
+  backend: string;
+  backend_label: string;
+  is_consortium_chain: boolean;
+}
+
 export interface AnchorResult {
   anchored: number;
   merkle_root: string;
   tx_hash: string | null;
   success: boolean;
   error: string | null;
+  anchor_id?: string | null;
+  confirmed?: boolean;
+  backend?: AnchorBackendDisclosure | null;
+}
+
+export interface AuditVerifyResult {
+  verified: boolean;
+  tx_hash: string | null;
+  record_id: string;
+  backend?: AnchorBackendDisclosure | null;
+  verification_note?: string | null;
 }
 
 export const auditApi = {
@@ -39,7 +56,7 @@ export const auditApi = {
   anchor: (ids: string[]): Promise<AnchorResult> =>
     api.post('/audit/anchor', { record_ids: ids }),
 
-  verify: (id: string): Promise<{ verified: boolean; tx_hash: string | null; record_id: string }> =>
+  verify: (id: string): Promise<AuditVerifyResult> =>
     api.get(`/audit/verify/${id}`),
 
   getMerkleProof: (id: string): Promise<{ record_id: string; record_hash: string; tx_hash: string }> =>

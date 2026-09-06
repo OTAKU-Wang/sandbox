@@ -57,6 +57,12 @@ class PIIDetectionResult:
     has_pii: bool
     matches: list[PIIMatch] = field(default_factory=list)
     redacted_text: str = ""
+    # Honest engine disclosure (T9): which NER engine actually ran.
+    # One of: "regex_only" (NER layer off), "rule" (rule-based patterns),
+    # "lac" (Baidu LAC model) or "transformers" (HF pipeline). A result whose
+    # matches are layer="ner" must report ner_engine="rule" — never a model
+    # label, so consumers cannot mistake regex/rule detection for model NER.
+    ner_engine: str = "none"
 
     @property
     def match_count(self) -> int:
@@ -153,31 +159,113 @@ class PIINERService:
     Layer 1: Regex (fast, deterministic) — structured PII
     Layer 2: NER (context-aware) — unstructured PII (names, addresses, orgs)
 
+    The Layer-2 engine is selected via ``ner_engine``:
+      - "auto" (default): prefer LAC (lightweight) when importable, else rule
+      - "lac": Baidu LAC model; honest fallback to rule when unavailable
+      - "transformers": HuggingFace NER pipeline; honest fallback to rule
+      - "rule": rule-based NERPatterns only
+      - "regex"/"off": disable the NER layer
+
+    Every result reports ``ner_engine`` — the engine that actually ran — so a
+    rule-based result is never presented as model-based detection (T9).
+
     Usage:
         service = PIINERService()
         result = service.detect("张三的手机号是13800138000")
         # result.matches contains both phone and person name
+        # result.ner_engine == "rule" (LAC not installed) or "lac"
     """
 
-    def __init__(self, enable_ner: bool = True, use_ml: bool = False, model_name: str = "", threshold: float = 0.5):
+    # LAC tag → (PIIType, Severity, confidence) mapping
+    _LAC_TAG_MAP: dict[str, tuple] = {
+        "PER": (PIIType.PERSON_NAME, Severity.HIGH, 0.9),
+        "LOC": (PIIType.ADDRESS, Severity.HIGH, 0.8),
+        "GPE": (PIIType.ADDRESS, Severity.HIGH, 0.8),
+        "ORG": (PIIType.ORGANIZATION, Severity.MEDIUM, 0.8),
+        "TIME": (PIIType.DATE_OF_BIRTH, Severity.MEDIUM, 0.9),
+    }
+
+    def __init__(
+        self,
+        enable_ner: bool = True,
+        use_ml: bool = False,
+        model_name: str = "",
+        threshold: float = 0.5,
+        ner_engine: str = "auto",
+    ):
         self.enable_ner = enable_ner
         self._regex_patterns = RegexPatterns.PATTERNS
         self._ner_patterns = NERPatterns()
         self._use_ml = use_ml
+        self._model_name = model_name
         self._ml_pipeline = None
+        self._lac = None
         self._threshold = threshold
-        if use_ml:
-            try:
-                from transformers import pipeline as hf_pipeline
-                self._ml_pipeline = hf_pipeline(
-                    "ner",
-                    model=model_name or "bert-base-chinese-pii-ner",
-                    aggregation_strategy="simple",
-                )
-                logger.info("PII NER ML model loaded: %s", model_name or "bert-base-chinese-pii-ner")
-            except Exception as e:
-                logger.warning("ML NER model load failed, falling back to regex: %s", e)
-                self._use_ml = False
+        self._active_engine = self._resolve_engine(ner_engine)
+
+    def _resolve_engine(self, ner_engine: str) -> str:
+        """Resolve the requested engine to the one that will actually run.
+
+        Returns "regex_only" when the NER layer is disabled, otherwise one of
+        "rule" / "lac" / "transformers". The resolved value is what the result
+        reports — a requested-but-unavailable model engine honestly downgrades
+        to "rule".
+        """
+        if not self.enable_ner:
+            return "regex_only"
+
+        engine = (ner_engine or "auto").lower()
+        if engine in {"regex", "off", "none"}:
+            return "regex_only"
+        if engine == "lac":
+            if self._load_lac():
+                return "lac"
+            logger.warning("LAC NER requested but unavailable — falling back to rule NER")
+            return "rule"
+        if engine == "transformers":
+            if self._load_transformers():
+                return "transformers"
+            logger.warning("Transformers NER requested but unavailable — falling back to rule NER")
+            return "rule"
+
+        # auto: honour legacy use_ml → transformers, else prefer LAC, else rule
+        if self._use_ml and self._load_transformers():
+            return "transformers"
+        if self._load_lac():
+            return "lac"
+        return "rule"
+
+    def _load_lac(self) -> bool:
+        """Lazily load the Baidu LAC model (optional dependency)."""
+        if self._lac is not None:
+            return True
+        try:
+            from LAC import LAC as _LAC  # type: ignore[import-not-found]
+            self._lac = _LAC(mode="lac")
+            logger.info("PII NER LAC model loaded")
+            return True
+        except Exception as e:
+            logger.warning("LAC NER load failed, falling back to rule NER: %s", e)
+            self._lac = None
+            return False
+
+    def _load_transformers(self) -> bool:
+        """Lazily load the HuggingFace NER pipeline (optional dependency)."""
+        if self._ml_pipeline is not None:
+            return True
+        try:
+            from transformers import pipeline as hf_pipeline
+            self._ml_pipeline = hf_pipeline(
+                "ner",
+                model=self._model_name or "bert-base-chinese-pii-ner",
+                aggregation_strategy="simple",
+            )
+            logger.info("PII NER ML model loaded: %s", self._model_name or "bert-base-chinese-pii-ner")
+            return True
+        except Exception as e:
+            logger.warning("ML NER model load failed, falling back to rule NER: %s", e)
+            self._ml_pipeline = None
+            return False
 
     def detect(self, text: str) -> PIIDetectionResult:
         """Detect PII in text using both regex and NER layers.
@@ -189,7 +277,7 @@ class PIINERService:
             PIIDetectionResult with all detected matches
         """
         if not text or not text.strip():
-            return PIIDetectionResult(has_pii=False, redacted_text=text)
+            return PIIDetectionResult(has_pii=False, redacted_text=text, ner_engine=self._active_engine)
 
         matches: list[PIIMatch] = []
 
@@ -215,6 +303,7 @@ class PIINERService:
             has_pii=len(matches) > 0,
             matches=matches,
             redacted_text=redacted,
+            ner_engine=self._active_engine,
         )
 
     def _detect_regex(self, text: str) -> list[PIIMatch]:
@@ -234,13 +323,65 @@ class PIINERService:
         return matches
 
     def _detect_ner(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
-        """Layer 2: Detect unstructured PII using NER patterns or ML model.
+        """Layer 2: Detect unstructured PII using the resolved NER engine.
 
-        Skips regions already matched by regex to avoid duplicates.
+        Dispatches on ``self._active_engine`` (set at init). Skips regions
+        already matched by regex to avoid duplicates.
         """
-        if self._use_ml and self._ml_pipeline:
+        if self._active_engine == "lac":
+            return self._detect_ner_lac(text, regex_matches)
+        if self._active_engine == "transformers":
             return self._detect_ner_ml(text, regex_matches)
         return self._detect_ner_regex(text, regex_matches)
+
+    def _detect_ner_lac(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
+        """Layer 2 LAC: Detect PII using the Baidu LAC model (Chinese NER).
+
+        LAC returns ``(words, tags)``; we map PER/LOC/GPE/ORG/TIME tags to the
+        corresponding PII types. Matches are labelled ``layer="ner_lac"``.
+        If LAC is not loaded (model unavailable), honestly falls back to the
+        rule-based NER layer.
+        """
+        if not self._lac:
+            return self._detect_ner_regex(text, regex_matches)
+
+        matches: list[PIIMatch] = []
+        regex_positions: set[int] = set()
+        for m in regex_matches:
+            regex_positions.update(range(m.start, m.end))
+
+        try:
+            words, tags = self._lac.run(text)
+            pos = 0
+            for word, tag in zip(words, tags):
+                mapped = self._LAC_TAG_MAP.get(tag)
+                if not mapped:
+                    pos = text.find(word, pos)
+                    if pos >= 0:
+                        pos += len(word)
+                    continue
+                pii_type, severity, confidence = mapped
+                start = text.find(word, pos)
+                if start < 0:
+                    continue
+                end = start + len(word)
+                pos = end
+                if any(p in regex_positions for p in range(start, end)):
+                    continue
+                matches.append(PIIMatch(
+                    pii_type=pii_type,
+                    value=word,
+                    start=start,
+                    end=end,
+                    severity=severity,
+                    layer="ner_lac",
+                    confidence=confidence,
+                ))
+        except Exception as e:
+            logger.warning("LAC NER inference failed, falling back to rule NER: %s", e)
+            return self._detect_ner_regex(text, regex_matches)
+
+        return matches
 
     def _detect_ner_ml(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
         """Layer 2 ML: Detect PII using HuggingFace NER model."""
@@ -437,6 +578,7 @@ try:
         use_ml=_settings.PII_NER_USE_ML,
         model_name=_settings.PII_NER_MODEL_NAME,
         threshold=_settings.PII_NER_CONFIDENCE_THRESHOLD,
+        ner_engine=_settings.PII_NER_ENGINE,
     )
 except Exception:
     pii_ner_service = PIINERService()

@@ -16,10 +16,31 @@ from app.core.deps import require_roles
 from app.models.user import User, UserRole
 from app.models.audit_log import AuditLog
 from app.services.audit_service import audit_service
-from app.services.blockchain_adapter import blockchain_adapter
+from app.services.blockchain_adapter import blockchain_adapter, ChainBackend
 from app.services.merkle_service import merkle_service
 
 router = APIRouter()
+
+# Honest anchoring-backend disclosure (T8 / F1). The active backend may be only
+# the local PG append-only tamper-evident log — callers must never mistake it
+# for a real consortium-chain anchor. Every anchoring/verification response
+# carries these fields so the effective backend is explicit.
+_BACKEND_LABELS = {
+    ChainBackend.PG_APPEND_ONLY.value: "本地防篡改追加日志（非联盟链，非区块链上链）",
+    ChainBackend.FISCO_BCOS.value: "FISCO BCOS 联盟链",
+    ChainBackend.ANT_CHAIN.value: "蚂蚁链 AntChain",
+}
+_CONSORTIUM_CHAIN_BACKENDS = {ChainBackend.FISCO_BCOS.value, ChainBackend.ANT_CHAIN.value}
+
+
+def _backend_disclosure(backend: ChainBackend) -> dict:
+    """Return an honest disclosure block for an anchoring backend."""
+    value = backend.value
+    return {
+        "backend": value,
+        "backend_label": _BACKEND_LABELS.get(value, value),
+        "is_consortium_chain": value in _CONSORTIUM_CHAIN_BACKENDS,
+    }
 
 
 class AnchorRequest(BaseModel):
@@ -156,6 +177,7 @@ async def anchor_audit_records(
         "tx_hash": anchor_result.anchor.tx_hash if anchor_result.anchor else None,
         "anchor_id": anchor_result.anchor.anchor_id if anchor_result.anchor else None,
         "confirmed": anchor_result.anchor.confirmed if anchor_result.anchor else False,
+        "backend": _backend_disclosure(anchor_result.anchor.backend) if anchor_result.anchor else None,
     }
 
 
@@ -192,15 +214,26 @@ async def verify_audit_record(
 
     # Verify via blockchain adapter (find anchor by tx_hash)
     verified = False
+    anchor_backend = None
     for aid, record in blockchain_adapter._anchors.items():
         if record.tx_hash == log.blockchain_tx_hash:
             verified = await blockchain_adapter.verify(aid, merkle_root.encode())
+            anchor_backend = _backend_disclosure(record.backend)
             break
+
+    if anchor_backend and not anchor_backend["is_consortium_chain"]:
+        note = "本地防篡改日志校验通过（非联盟链上链，见 backend 标注）"
+    elif anchor_backend:
+        note = "联盟链存证校验通过"
+    else:
+        note = "未找到与该 tx_hash 匹配的锚定记录"
 
     return {
         "verified": verified,
         "tx_hash": log.blockchain_tx_hash,
         "record_id": str(log.id),
+        "backend": anchor_backend,
+        "verification_note": note,
     }
 
 
@@ -256,6 +289,7 @@ async def get_merkle_proof(
         "proof_path": proof.proof_path if proof else [],
         "leaf_index": proof.leaf_index if proof else target_index,
         "total_leaves": len(all_hashes),
+        "backend": _backend_disclosure(blockchain_adapter.get_backend_type()),
     }
 
 
@@ -414,4 +448,5 @@ async def get_compliance_report(
             "anchored_records": anchored,
             "coverage_pct": round(anchored / total * 100, 1) if total > 0 else 0,
         },
+        "anchoring_backend": _backend_disclosure(blockchain_adapter.get_backend_type()),
     }

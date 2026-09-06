@@ -40,6 +40,30 @@ class ComplianceReportService:
             "data_protection": data_protection,
             "compliance_status": compliance_status,
             "recommendations": recommendations,
+            "anchoring": self._build_anchoring_disclosure(),
+        }
+
+    def _build_anchoring_disclosure(self) -> dict:
+        """Honest disclosure of the anchoring backend (T8/F1).
+
+        The report discloses whether its anchoring evidence is a real
+        consortium-chain anchor or only the local PG append-only tamper-evident
+        log — never implying "已上链" for the local backend.
+        """
+        from app.services.blockchain_adapter import blockchain_adapter, ChainBackend
+
+        backend = blockchain_adapter.get_backend_type()
+        value = backend.value
+        labels = {
+            ChainBackend.PG_APPEND_ONLY.value: "本地防篡改追加日志（非联盟链，非区块链上链）",
+            ChainBackend.FISCO_BCOS.value: "FISCO BCOS 联盟链",
+            ChainBackend.ANT_CHAIN.value: "蚂蚁链 AntChain",
+        }
+        return {
+            "backend": value,
+            "backend_label": labels.get(value, value),
+            "is_consortium_chain": value
+            in {ChainBackend.FISCO_BCOS.value, ChainBackend.ANT_CHAIN.value},
         }
 
     async def _build_audit_summary(self, db: AsyncSession, start: datetime, end: datetime) -> dict:
