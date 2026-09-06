@@ -722,4 +722,18 @@ W13 (egress 审计) ∥ W14 (节点运维)
 
 ## 八、执行记录
 
-（待实施轮次填写）
+### Round 42 执行记录（2026-09-06）—— M1：W1 + W2 + W4 + W6
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 |
+|---|---|---|---|---|
+| W4 admin 认证治理 | ✅ | `ADMIN_PAGES_ENABLED=False` 默认；`_register_admin_pages()` 门禁函数；生产开启 RAISE（validate_security_config） | test_admin_auth 4 passed | 无回归 |
+| W6 Git 卫生 | ✅ | 解除追踪 cds.db/cds_dev.db/.env.prod/files(1).zip/specs.zip；.gitignore 补 `*.db/.env.*/!.env.example/!.env.prod.example/*.zip`；新增脱敏 `.env.prod.example` | 验收命令：`git ls-files` 中 db/zip/env.prod 清零 | 无回归 |
+| W1 可观测性 | ✅ | `app/core/metrics.py`（9 指标，基数红线内）+ `telemetry.py`（RequestID + Metrics 中间件）+ `/metrics` 端点（可选 Bearer token）+ structlog JSON（`LOG_JSON`，默认不变）+ 三处业务打点（状态迁移/输出审查 verdict/KMS 分发）；compose/helm 四同步 | test_observability 7 passed | 无回归 |
+| W2 错误契约 | ✅ | `app/core/errors.py`（408/409/410/429/503+Retry-After）+ `error_handlers.py` 统一 `{code,message,detail,request_id}` + legacy `detail` 兼容（HTTPException/422 保留原形，ctx ValueError 跨版本序列化消毒）+ `docs/error-codes.md` + SDK `CDSApiError`（code/request_id/retry_after 解析，legacy 回退 `HTTP_{status}`） | test_error_contract 17 passed | test_sdk_client / session_lifecycle / sandbox_sessions / exec-usage 全绿 |
+
+**实现注记（与方案偏差，以代码为准回写）**：
+- 路由模板标签：远程 FastAPI 版本的 `include_router` 产生 `_IncludedRouter` 包装（`route.path=None`、`scope["route"]` 为未加前缀的内部路径）——按方案预设的 `scope["route"]` 读取不可行。实际实现用 **path_params 反推模板**（`/<uuid>` + `{"session_id": uuid}` → `/{session_id}`），全版本可移植，红线（标签永为模板）成立。
+- 422 兼容：`exc.errors()` 在部分 FastAPI 版本的 ctx 含原始 ValueError 对象（JSON 不可序列化）——handler 内统一 `str()` 消毒。
+- W2 状态语义对齐：410 `SESSION_TERMINATED` 类已建，既有 e2e 依赖的 404 行为保持不变（`docs/error-codes.md` 已登记 `SESSION_TERMINATED_OBSERVED` 过渡决策），迁移到 410 留给独立 PR。
+
+**未实施项**：W3（Redis 限流/配额持久化）、W5（基线迁移）、W7（CI）、P1 全部（W8–W14）、密钥轮换执行与 filter-repo 历史清洗（独立决策项）。
