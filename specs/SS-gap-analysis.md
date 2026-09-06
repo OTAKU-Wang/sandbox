@@ -1613,13 +1613,44 @@ Round 39 落地了会话可用性 P0 三件套后，按 Sandboxie/CubeSandbox �
 |---|---|
 | 本地：SDK + 模板注册表（纯 Python） | **15 passed / 2 skipped**（POSIX 项 Windows 跳过） |
 | 本地：exec/logs/usage 端点（TestClient + 假运行时） | **13 passed / 15 skipped**（POSIX 链路远程跑） |
-| 远程统一验证（实时 API e2e + 全量 pytest） | 后台脱离运行中，结果落 `/root/cds-test/verify_r40.log`（完成后回填） |
+| 实时 API e2e（远程，CDS_BASE_URL 指向 18765） | 首轮 **16/17**——唯一失败为 create-with-template 500，暴露 3 个真实缺陷（见下），修复后复跑后台进行中 |
+| 远程全量 pytest（修复前快照） | **2319 passed / 9 failed / 17 errors / 1 skipped**——基线 8 个 cgroup 门禁 failed 之外新增 1 个 failed 待复跑定位（首轮日志 tail 截断，复跑将保留完整日志） |
 
-**仍未实施**：WebSocket PTY 交互终端（exec 轮询为过渡形态）、前端会话工作台集成（Round 41 目标）、overlayfs 层叠快照（P2，硬件/内核门禁）、自动定时快照、输出文件浏览 API。
+**统一测试暴露并已修复的三个缺陷（本 round 最高价值产出——只有真实沙箱才能抓到）**：
+
+1. **create-with-template 500（MissingGreenlet）**：种子分支改 `resource_limits` 后直接 `model_validate`——flush 使服务端列 `updated_at` 过期，pydantic 属性读取触发 greenlet 外懒加载 IO。修复：响应校验前 `flush+refresh`（对齐既有 create 流模式）。
+2. **快照回滚丢失空运行时目录**：`_tar_bytes` 只归档文件，回滚清空工作区后 `tmp/`（exec 暂存目录）消失，下一次执行 `FileNotFoundError: tmp/exec.sh`。修复：归档包含目录项（字典序保证父先于子），回滚后对既有归档兜底重建 `tmp/`、`files/`。
+3. **`files/` 目录从未挂载进 bwrap 沙箱**：上传文件仅存主机侧，与 Round 39"沙箱可见"声明相悖——exec e2e 步骤 `ls files/` 抓到。修复：三个 bwrap 构建器（ProcessAdapter/L0 `_build_l0_bwrap_args`、BwrapAdapter/L3 `build_bwrap_args`、TEEAdapter 软件路径）统一加 `/workspace/files` 读写挂载（目录存在性守卫）。**教训：Round 39 的 e2e 只验证了主机侧文件 API 往返，从未在沙箱内验证可见性。**
+
+**仍未实施**：WebSocket PTY 交互终端（exec 轮询为过渡形态）、overlayfs 层叠快照（P2，硬件/内核门禁）、自动定时快照、输出文件浏览 API。
 
 ---
 
-## 38. 最终验证状态
+## 38. Round 41 会话工作台前端集成修复记录
+
+### 触发条件
+
+Round 39/40 的后端可用性面（files/snapshots/pause/exec/logs/usage/templates）已完整，但前端 SessionDetail 仍是"裸会话详情"——能力不可达即不可用。Round 41 将全部后端能力接入 UI（visual-engineering 委托实现）。
+
+### 已完成
+
+1. **sandboxApi.ts**：+206 行类型化方法——exec（含 output_blocked/blocked_reason）、logs（since 增量）、usage、templates、files（multipart 上传、blob 下载并读取 `X-CDS-Output-Review` 头显示脱敏提示、409 DLP 阻断结构化透出）、snapshots 四操作、pause/resume/refresh；CreateSessionRequest 增加可选 `template`。
+2. **SessionDetail.tsx 工作台**（+769 行）：文件面板（列表/加密徽章/上传/下载/删除 + "输出审查阻断"状态与发现数提示）、快照面板（创建/回滚确认（警告内容丢弃）/删除）、生命周期工具栏（pause→ready/running、resume→suspended、refresh→active 状态门控）、终端风格 exec 控制台（exit_code/duration/阻断告警）、审计日志查看器（action 筛选 + since 增量加载）、用量摘要行（工作区/上传/快照/续期秒数）。
+3. **SessionList.tsx**：创建会话弹窗增加模板下拉（数据源 GET /session-templates，默认空）。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `tsc -b` | **零错误**（自验通过） |
+| `vite build` | 被预存问题阻断（rolldown win32 原生绑定缺失，与本轮无关） |
+| 实时 API 联调 | 与 Round 40 后端修复同批验证（后台进行中） |
+
+**仍未实施**：WebSocket PTY 终端 UI（xterm.js + 流式 exec）、执行历史时间线、模板自定义管理界面。
+
+---
+
+## 39. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1663,7 +1694,8 @@ Round 39 落地了会话可用性 P0 三件套后，按 Sandboxie/CubeSandbox �
 | Round 36 远程 Linux 验证（100.112.3.247） | 通过 | 远程 compileall 通过；RAG+安全矩阵聚焦 54 passed；全量 **2271 passed / 10 failed / 16 errors**（+60 passed vs 远程旧基线，失败集完全相同，零新增回归）；剩余失败全部环境门禁（cgroup v1 只读 / e2e 无 CDS 服务） |
 | Round 37 远程 e2e 闭环 + 合约签名修复 | 通过 | 三文件 e2e 57 passed（3 failed 清零）；合约相关 6 文件 53 passed 零回归；实时 API full-lifecycle **16/16**（真实 SM2 双方签名闭环）；test_p0 15 passed；全量 2275 passed / 8 failed / 16 errors（8 failed 全为 cgroup 环境门禁，16 errors 为无实时 API 的预期形态且已 16/16 单独验证） |
 | Round 39 可用性三件套 | 通过 | 新单测 21 passed（远程 Linux）；实时 e2e **17/17**（含 files/快照回滚/暂停恢复全链 + T5 阻断 + Alembic 0002 实跑）；受影响回归全绿；全量见 pytest_r39.log |
-| Round 40 交互与生态 | 本地通过，远程统一验证后台运行 | 本地 28 passed（SDK/模板/exec/logs/usage 端点 + e2e 扩展逻辑）；远程 verify_r40.log 完成后回填 |
+| Round 40 交互与生态 | 本地通过；远程统一测试暴露 3 个真实缺陷并修复 | 本地 28 passed；实时 e2e 首轮 16/17 → 抓出 MissingGreenlet 500 / 回滚丢空目录 / files 未挂载沙箱 三缺陷（全部修复，见 §37）；全量修复前快照 2319 passed / 9 failed / 17 errors（8 个 cgroup 门禁 + 1 待复跑定位）；修复后复跑后台进行中，结果回填 verify_r40_final.log |
+| Round 41 前端工作台 | 通过（类型层） | tsc -b 零错误自验；API 面与 Round 40 后端一一对应；实时联调与 Round 40 复跑同批进行 |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
@@ -1672,7 +1704,7 @@ Round 39 落地了会话可用性 P0 三件套后，按 Sandboxie/CubeSandbox �
 
 ---
 
-## 39. 后续循环规则
+## 40. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。

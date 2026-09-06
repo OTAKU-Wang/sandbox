@@ -514,3 +514,17 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 **验证**：本地 28 passed（15 SDK/模板 + 13 端点）；远程统一验证（实时 e2e + 全量）后台脱离运行，落 verify_r40.log。
 
 **仍未实施**：WebSocket PTY 终端、前端会话工作台（Round 41）、overlayfs 快照（P2）、定时自动快照、输出文件浏览 API。
+
+### Round 41 执行记录（2026-09-06 追加）—— 统一测试缺陷修复 + 前端会话工作台
+
+**统一测试价值实证**：Round 40 的实时 e2e（远程）抓出三个单测无法覆盖的真实缺陷，全部修复：
+
+| 缺陷 | 根因 | 修复 |
+|---|---|---|
+| create-with-template 500 | 模板种子分支缺 flush+refresh，`updated_at` 过期后 pydantic 懒加载触发 MissingGreenlet | 响应校验前 flush+refresh（对齐 create 流既有模式） |
+| 回滚后 exec 报 FileNotFoundError | 快照只归档文件、丢弃空目录，`tmp/`（exec 暂存）消失 | 归档目录项 + 回滚后兜底重建 tmp//files/ |
+| 上传文件沙箱内不可见 | 三个 bwrap 构建器均未挂载 `files/`（R39 e2e 只验了主机侧往返） | 全部构建器加 `/workspace/files` 读写挂载 |
+
+**前端工作台**（visual-engineering 委托）：sandboxApi.ts 全端点类型化（exec/logs/usage/templates/files/snapshots/lifecycle）；SessionDetail 升级为完整工作台（文件/快照/exec 终端/审计日志/用量/生命周期控制）；SessionList 创建弹窗加模板选择。`tsc -b` 零错误。
+
+**仍未实施**：PTY 流式终端 UI、执行历史时间线、overlayfs 快照（P2）、模板管理界面。
