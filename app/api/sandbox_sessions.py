@@ -8,7 +8,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1233,3 +1233,397 @@ async def cleanup_expired_sessions(
     cleaned = await _cleanup_service(db)
     await db.flush()
     return {"cleaned": cleaned}
+
+# ════════════════════════════════════════════════════════════════
+# Round 39 (usability): session files / snapshots / pause-resume-refresh
+# ════════════════════════════════════════════════════════════════
+
+
+def _can_operate_session(user: User, session: SandboxSession) -> bool:
+    """Owner or operator/admin — mirrors the frontend canOperate semantics."""
+    return session.user_id == user.id or user.role in (UserRole.OPERATOR, UserRole.ADMIN)
+
+
+async def _load_operable_session(
+    db: AsyncSession, session_id: uuid.UUID, current_user: User
+) -> SandboxSession:
+    result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sandbox session not found")
+    if not _can_operate_session(current_user, session):
+        raise HTTPException(status_code=403, detail="Not your session")
+    return session
+
+
+def _session_workspace_or_400(session: SandboxSession) -> Path:
+    """Resolve the on-host workspace for a provisioned session."""
+    from app.services.sandbox_runtime import sandbox_runtime
+
+    if not session.container_id:
+        raise HTTPException(status_code=400, detail="Session has no provisioned container")
+    workspace = sandbox_runtime.get_workspace(session.container_id, session.sandbox_level)
+    if not workspace:
+        raise HTTPException(status_code=400, detail="Session workspace not found on host")
+    return workspace
+
+
+async def _session_dek(session: SandboxSession) -> bytes | None:
+    """Resolve the session workspace DEK (same chain as RAG corpora)."""
+    from app.services.rag_service import _session_workspace_dek
+
+    workspace = _session_workspace_or_400(session)
+    return await _session_workspace_dek(workspace)
+
+
+def _active_or_suspended(session: SandboxSession) -> None:
+    current = SessionStatus(session.status)
+    if not session_state_machine.is_active(current):
+        raise HTTPException(
+            status_code=400, detail=f"Session in terminal state (status: {session.status})"
+        )
+
+
+@router.get("/{session_id}/files")
+async def list_session_files(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List files uploaded into the session workspace (sandbox-visible)."""
+    session = await _load_operable_session(db, session_id, current_user)
+    workspace = _session_workspace_or_400(session)
+    from app.services import session_files as sf
+
+    return {"session_id": str(session_id), "files": sf.list_files(workspace)}
+
+
+@router.post("/{session_id}/files")
+async def upload_session_file(
+    session_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a file into the session workspace (DEK-encrypted at rest).
+
+    The sandbox reads it from ``workspace/files/<name>``; when the session
+    has a workspace DEK the content is encrypted exactly like provision-time
+    workspace data and is decrypted by sandbox code via ``CDS_DEK_HEX``.
+    """
+    session = await _load_operable_session(db, session_id, current_user)
+    _active_or_suspended(session)
+    workspace = _session_workspace_or_400(session)
+    dek = await _session_dek(session)
+
+    data = await file.read()
+    from app.services import session_files as sf
+
+    try:
+        meta = sf.write_file(workspace, file.filename or "", data, dek=dek)
+    except sf.SessionFileError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await audit_service.log(
+        db, action="sandbox.file_upload", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"filename": meta["filename"], "size": meta["size"], "encrypted": meta["encrypted"]},
+    )
+    await db.flush()
+    return {"session_id": str(session_id), **meta}
+
+
+@router.get("/{session_id}/files/{filename}")
+async def download_session_file(
+    session_id: uuid.UUID,
+    filename: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Download a workspace file — content passes the T5 output review first.
+
+    Blocked (critical DLP finding) content is NEVER released; the response is
+    409 with the review findings instead.
+    """
+    from fastapi import Response
+
+    session = await _load_operable_session(db, session_id, current_user)
+    workspace = _session_workspace_or_400(session)
+    dek = await _session_dek(session)
+
+    from app.services import session_files as sf
+
+    try:
+        content, meta = sf.read_file(workspace, filename, dek=dek)
+    except sf.SessionFileError as e:
+        status_code = 404 if "not found" in str(e) else 400
+        raise HTTPException(status_code=status_code, detail=str(e))
+
+    # T5 output review on the decoded text (critical findings block release).
+    from app.services.output_inspection import output_inspector
+
+    text = content.decode("utf-8", errors="replace")
+    review = output_inspector.inspect(
+        text,
+        user_id=str(current_user.id),
+        session_id=str(session.id),
+        sandbox_mode=getattr(session, "sandbox_mode", None) or "structured_query",
+    )
+    findings = list(getattr(review, "findings", []) or [])
+
+    def _sev_value(f) -> str:
+        sev = getattr(f, "severity", "")
+        return getattr(sev, "value", None) or str(sev)
+
+    blocked = any(_sev_value(f).lower() == "critical" for f in findings)
+    if blocked:
+        await audit_service.log(
+            db, action="sandbox.file_download_blocked", resource_type="sandbox_session",
+            user_id=current_user.id, session_id=session.id,
+            detail={"filename": filename, "findings": len(findings)},
+        )
+        await db.flush()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Output review blocked the file download",
+                "filename": filename,
+                "findings_count": len(findings),
+                "findings": [
+                    {"severity": _sev_value(f),
+                     "type": getattr(getattr(f, "type", None), "value", None) or str(getattr(f, "type", "")),
+                     "message": getattr(f, "message", "")}
+                    for f in findings[:20]
+                ],
+            },
+        )
+
+    await audit_service.log(
+        db, action="sandbox.file_download", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"filename": filename, "size": len(content), "findings": len(findings)},
+    )
+    await db.flush()
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-CDS-Output-Review": f"passed; findings={len(findings)}",
+    }
+    return Response(content=content, media_type="application/octet-stream", headers=headers)
+
+
+@router.delete("/{session_id}/files/{filename}")
+async def delete_session_file(
+    session_id: uuid.UUID,
+    filename: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    session = await _load_operable_session(db, session_id, current_user)
+    workspace = _session_workspace_or_400(session)
+    from app.services import session_files as sf
+
+    removed = sf.delete_file(workspace, filename)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"file not found: {filename}")
+    await audit_service.log(
+        db, action="sandbox.file_delete", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"filename": filename},
+    )
+    await db.flush()
+    return {"session_id": str(session_id), "deleted": filename}
+
+
+@router.get("/{session_id}/snapshots")
+async def list_session_snapshots(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    session = await _load_operable_session(db, session_id, current_user)
+    workspace = _session_workspace_or_400(session)
+    from app.services import session_snapshots as ss
+
+    return {"session_id": str(session_id), "snapshots": ss.list_snapshots(workspace)}
+
+
+@router.post("/{session_id}/snapshots")
+async def create_session_snapshot(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Snapshot the session workspace (content is DEK-encrypted at rest)."""
+    session = await _load_operable_session(db, session_id, current_user)
+    _active_or_suspended(session)
+    workspace = _session_workspace_or_400(session)
+    from app.services import session_snapshots as ss
+
+    try:
+        manifest = ss.create_snapshot(workspace, session_id=str(session.id))
+    except ss.SnapshotError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await audit_service.log(
+        db, action="sandbox.snapshot_create", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"snapshot_id": manifest["snapshot_id"], "bytes": manifest["bytes"],
+                "file_count": manifest["file_count"]},
+    )
+    await db.flush()
+    return {"session_id": str(session_id), **manifest}
+
+
+@router.post("/{session_id}/snapshots/{snapshot_id}/rollback")
+async def rollback_session_snapshot(
+    session_id: uuid.UUID,
+    snapshot_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Restore the workspace from a snapshot (current workspace content is
+    discarded — the archive checksum is verified before any deletion)."""
+    session = await _load_operable_session(db, session_id, current_user)
+    _active_or_suspended(session)
+    workspace = _session_workspace_or_400(session)
+    from app.services import session_snapshots as ss
+
+    try:
+        result = ss.rollback(workspace, snapshot_id)
+    except ss.SnapshotError as e:
+        status_code = 404 if "not found" in str(e) else 400
+        raise HTTPException(status_code=status_code, detail=str(e))
+
+    await audit_service.log(
+        db, action="sandbox.snapshot_rollback", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"snapshot_id": snapshot_id, "discarded_files": result.get("discarded_files", 0)},
+    )
+    await db.flush()
+    return {"session_id": str(session_id), **result}
+
+
+@router.delete("/{session_id}/snapshots/{snapshot_id}")
+async def delete_session_snapshot(
+    session_id: uuid.UUID,
+    snapshot_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    session = await _load_operable_session(db, session_id, current_user)
+    workspace = _session_workspace_or_400(session)
+    from app.services import session_snapshots as ss
+
+    removed = ss.delete_snapshot(workspace, snapshot_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"snapshot not found: {snapshot_id}")
+    await audit_service.log(
+        db, action="sandbox.snapshot_delete", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"snapshot_id": snapshot_id},
+    )
+    await db.flush()
+    return {"session_id": str(session_id), "deleted": snapshot_id}
+
+
+@router.post("/{session_id}/pause")
+async def pause_sandbox_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Pause a session (READY/RUNNING → SUSPENDED): execution is gated while
+    workspace, files, snapshots and keys are all preserved."""
+    session = await _load_operable_session(db, session_id, current_user)
+    current = SessionStatus(session.status)
+    if not session_state_machine.is_active(current):
+        raise HTTPException(status_code=400, detail=f"Session in terminal state (status: {session.status})")
+    result = session_state_machine.validate_transition(current, SessionStatus.SUSPENDED)
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+
+    session.pre_pause_status = session.status
+    session.status = SessionStatus.SUSPENDED.value
+    await db.flush()
+    await db.refresh(session)
+    await audit_service.log(
+        db, action="sandbox.pause", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"pre_pause_status": session.pre_pause_status},
+    )
+    return SandboxSessionResponse.model_validate(session)
+
+
+@router.post("/{session_id}/resume")
+async def resume_sandbox_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Resume a paused session → restore the pre-pause status (fallback READY)."""
+    session = await _load_operable_session(db, session_id, current_user)
+    current = SessionStatus(session.status)
+    if current != SessionStatus.SUSPENDED:
+        raise HTTPException(status_code=400, detail=f"Session not suspended (status: {session.status})")
+
+    target_raw = session.pre_pause_status or SessionStatus.READY.value
+    try:
+        target = SessionStatus(target_raw)
+    except ValueError:
+        target = SessionStatus.READY
+    if target not in (SessionStatus.READY, SessionStatus.RUNNING):
+        target = SessionStatus.READY
+    result = session_state_machine.validate_transition(current, target)
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+
+    session.status = target.value
+    session.pre_pause_status = None
+    await db.flush()
+    await db.refresh(session)
+    await audit_service.log(
+        db, action="sandbox.resume", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"resumed_to": target.value},
+    )
+    return SandboxSessionResponse.model_validate(session)
+
+
+@router.post("/{session_id}/refreshes")
+async def refresh_sandbox_session(
+    session_id: uuid.UUID,
+    extend_seconds: int | None = Body(None, embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Extend the session expiry (default: one more timeout_seconds window).
+
+    The background lifecycle sweep computes expiry from
+    ``created_at + timeout_seconds + extended_seconds``; total extension is
+    capped at ``CDS_SESSION_MAX_EXTENDED_SECONDS``.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    session = await _load_operable_session(db, session_id, current_user)
+    _active_or_suspended(session)
+
+    extend = int(session.timeout_seconds) if extend_seconds is None else int(extend_seconds)
+    if extend <= 0:
+        raise HTTPException(status_code=400, detail="extend_seconds must be positive")
+    current_ext = int(session.extended_seconds or 0)
+    if current_ext + extend > settings.SESSION_MAX_EXTENDED_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"total extension would exceed the cap "
+                    f"({settings.SESSION_MAX_EXTENDED_SECONDS}s); current={current_ext}s"),
+        )
+    session.extended_seconds = current_ext + extend
+    await db.flush()
+    await db.refresh(session)
+    await audit_service.log(
+        db, action="sandbox.refresh", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={"extend_seconds": extend, "extended_seconds": session.extended_seconds},
+    )
+    return SandboxSessionResponse.model_validate(session)

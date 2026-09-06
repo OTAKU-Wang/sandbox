@@ -60,6 +60,11 @@ class SandboxSession(Base):
     container_id: Mapped[str | None] = mapped_column(String(255))  # Docker/container ID
     session_key_id: Mapped[str | None] = mapped_column(String(255))  # KMS session key ID
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=3600)
+    # Round 39 (usability): extra wall-clock seconds granted via POST
+    # /{id}/refreshes — extends the effective expiry beyond timeout_seconds.
+    extended_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Round 39 (usability): status to restore on resume (pause stores it).
+    pre_pause_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     resource_limits: Mapped[dict | None] = mapped_column(JSON)  # CPU/memory/disk limits
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

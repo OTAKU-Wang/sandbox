@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     # sessions, dev sessions and contracts.
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 300
 
+    # Session usability (Round 39): per-session file store and snapshot limits.
+    # Uploaded files live inside the session workspace (sandbox-visible) and are
+    # encrypted at rest with the session DEK; snapshots are tar archives of the
+    # workspace stored outside the sandbox bind (DEK-encrypted content only).
+    SESSION_FILE_MAX_BYTES: int = 50 * 1024 * 1024
+    SESSION_MAX_FILES: int = 200
+    SESSION_MAX_SNAPSHOTS: int = 10
+    # Hard cap for total refresh extension per session (POST /{id}/refreshes).
+    SESSION_MAX_EXTENDED_SECONDS: int = 7 * 24 * 3600
+
     # KMS (gap B1): fail-closed — reject session key distribution without a
     # TEE attestation. Software-only sandbox levels (L0/L3) produce no quote,
     # so deployments relying on them must explicitly disable this.

@@ -56,6 +56,8 @@ class SandboxSessionResponse(BaseModel):
     container_id: str | None
     session_key_id: str | None = None
     timeout_seconds: int
+    extended_seconds: int = 0
+    pre_pause_status: str | None = None
     resource_limits: dict | None
     error_message: str | None
     started_at: datetime | None

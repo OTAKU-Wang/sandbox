@@ -89,7 +89,10 @@ def is_session_expired(session) -> bool:
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
     elapsed = datetime.now(timezone.utc) - created
-    timeout = timedelta(seconds=session.timeout_seconds)
+    # Round 39: POST /{id}/refreshes grants extra wall-clock seconds beyond
+    # the base timeout; total extension is capped by the refresh endpoint.
+    extended = getattr(session, "extended_seconds", 0) or 0
+    timeout = timedelta(seconds=session.timeout_seconds + extended)
     return elapsed > timeout
 
 
