@@ -435,12 +435,24 @@ class TestFullLifecycle:
             "sandbox_level": "L3",
             "sandbox_mode": "structured_query",
             "timeout_seconds": 3600,
+            "template": "python-analysis",
         }, headers=auth(buyer_token))
         assert resp.status_code == 201, f"Create session failed: {resp.text}"
         sid = resp.json()["id"]
         status = resp.json()["status"]
         assert status in ("ready", "running", "provisioning", "pending"), \
             f"Session not active: {status}"
+
+        # ── templates: registry + seeded starter files (Round 40) ──
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/session-templates",
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200, "template registry route must not be shadowed"
+        assert any(t["name"] == "python-analysis" for t in resp.json()["templates"])
+
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/files", headers=auth(buyer_token))
+        assert resp.status_code == 200
+        assert any(f["filename"] == "analysis.py" for f in resp.json()["files"]), \
+            "template seeding must place analysis.py into the workspace"
 
         # ── files: upload → list → download ──────────────────────
         csv_payload = b"id,amount\n1,900\n2,800\n"
@@ -488,6 +500,30 @@ class TestFullLifecycle:
         names = [f["filename"] for f in resp.json()["files"]]
         assert "usability.csv" in names and "post-snap.txt" not in names, \
             "rollback must restore the snapshot state"
+
+        # ── exec → logs → usage (Round 40) ───────────────────────
+        if status == "running":
+            resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/exec",
+                              json={"command": "ls files/", "timeout_seconds": 30},
+                              headers=auth(buyer_token))
+            assert resp.status_code == 200, f"Exec failed: {resp.text}"
+            exec_body = resp.json()
+            assert exec_body["exit_code"] == 0, f"Exec failed inside sandbox: {exec_body}"
+            assert "usability.csv" in exec_body["output"], \
+                "exec output must list the uploaded file"
+
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/logs",
+                          params={"limit": 50}, headers=auth(buyer_token))
+        assert resp.status_code == 200, f"Logs failed: {resp.text}"
+        actions = [entry["action"] for entry in resp.json()["logs"]]
+        assert "sandbox.create" in actions and "sandbox.file_upload" in actions
+
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/usage",
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200, f"Usage failed: {resp.text}"
+        usage = resp.json()
+        assert usage["workspace"]["files"] >= 1
+        assert usage["snapshots"]["count"] >= 1
 
         # ── pause → refresh → resume (state permitting) ──────────
         if status in ("ready", "running"):
