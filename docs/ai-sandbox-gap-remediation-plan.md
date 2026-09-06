@@ -524,6 +524,9 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 | create-with-template 500 | 模板种子分支缺 flush+refresh，`updated_at` 过期后 pydantic 懒加载触发 MissingGreenlet | 响应校验前 flush+refresh（对齐 create 流既有模式） |
 | 回滚后 exec 报 FileNotFoundError | 快照只归档文件、丢弃空目录，`tmp/`（exec 暂存）消失 | 归档目录项 + 回滚后兜底重建 tmp//files/ |
 | 上传文件沙箱内不可见 | 三个 bwrap 构建器均未挂载 `files/`（R39 e2e 只验了主机侧往返） | 全部构建器加 `/workspace/files` 读写挂载 |
+| is_session_expired TypeError | R39 引入：`getattr` 默认值对 MagicMock 失效，timedelta 收到 MagicMock | int 边界整型化 + 兜底；勘误 R37/39 基线门禁集实为 7 个非 8 个 |
+
+**最终验证（verify_r40_final.log）**：实时 e2e **17/17**；全量 2319 passed / 7 failed（全 cgroup 门禁）/ 17 errors / 1 skipped。
 
 **前端工作台**（visual-engineering 委托）：sandboxApi.ts 全端点类型化（exec/logs/usage/templates/files/snapshots/lifecycle）；SessionDetail 升级为完整工作台（文件/快照/exec 终端/审计日志/用量/生命周期控制）；SessionList 创建弹窗加模板选择。`tsc -b` 零错误。
 

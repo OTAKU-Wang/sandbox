@@ -1607,20 +1607,21 @@ Round 39 落地了会话可用性 P0 三件套后，按 Sandboxie/CubeSandbox �
 5. **快照 GC**：`terminate_session` 终止时移除快照归档目录（`CDS_SESSION_SNAPSHOT_GC_ON_TERMINATE=true` 默认开；置 false 保留"终止后恢复"运维逃生口）。
 6. **Python SDK（`sdk/`）**：`cds-sdk` 包（仅依赖 httpx）：会话生命周期（create 含 template / execute / exec_command / pause / resume / refresh / terminate / wait_for_status 轮询）、文件（upload 支持 bytes/文件对象/路径、download 返回 bytes、delete）、快照四操作、logs/usage、错误统一 `CDSError(status, detail)`；`pip install ./sdk` 即用。
 
-### 验证
+### 验证（最终回填）
 
 | 命令 | 结果 |
 |---|---|
-| 本地：SDK + 模板注册表（纯 Python） | **15 passed / 2 skipped**（POSIX 项 Windows 跳过） |
-| 本地：exec/logs/usage 端点（TestClient + 假运行时） | **13 passed / 15 skipped**（POSIX 链路远程跑） |
-| 实时 API e2e（远程，CDS_BASE_URL 指向 18765） | 首轮 **16/17**——唯一失败为 create-with-template 500，暴露 3 个真实缺陷（见下），修复后复跑后台进行中 |
-| 远程全量 pytest（修复前快照） | **2319 passed / 9 failed / 17 errors / 1 skipped**——基线 8 个 cgroup 门禁 failed 之外新增 1 个 failed 待复跑定位（首轮日志 tail 截断，复跑将保留完整日志） |
+| 实时 API e2e（远程，三缺陷修复后最终复跑） | **17/17 passed**（86.08s）——模板种子/exec/logs/usage 全链在真实沙箱上绿 |
+| 远程全量 pytest（最终复跑，完整日志） | **2319 passed / 9 failed / 17 errors / 1 skipped**（1130s）；9 failed 中 2 个为 is_session_expired 回归（缺陷 4，已修复），其余 7 个全部为 cgroup v1 只读环境门禁（5 ProcessAdapter + 2 bwrap hardening） |
+| 修复后：tests/test_sandbox_lifecycle.py | 本地 10 passed；远程同绿 |
+| 本地：SDK + 模板注册表 + exec/logs/usage 端点 | **28 passed / 17 skipped**（POSIX 项远程全跑） |
 
-**统一测试暴露并已修复的三个缺陷（本 round 最高价值产出——只有真实沙箱才能抓到）**：
+**统一测试暴露并已修复的四个缺陷（本 round 最高价值产出——只有真实沙箱和完整日志才能抓到）**：
 
 1. **create-with-template 500（MissingGreenlet）**：种子分支改 `resource_limits` 后直接 `model_validate`——flush 使服务端列 `updated_at` 过期，pydantic 属性读取触发 greenlet 外懒加载 IO。修复：响应校验前 `flush+refresh`（对齐既有 create 流模式）。
 2. **快照回滚丢失空运行时目录**：`_tar_bytes` 只归档文件，回滚清空工作区后 `tmp/`（exec 暂存目录）消失，下一次执行 `FileNotFoundError: tmp/exec.sh`。修复：归档包含目录项（字典序保证父先于子），回滚后对既有归档兜底重建 `tmp/`、`files/`。
 3. **`files/` 目录从未挂载进 bwrap 沙箱**：上传文件仅存主机侧，与 Round 39"沙箱可见"声明相悖——exec e2e 步骤 `ls files/` 抓到。修复：三个 bwrap 构建器（ProcessAdapter/L0 `_build_l0_bwrap_args`、BwrapAdapter/L3 `build_bwrap_args`、TEEAdapter 软件路径）统一加 `/workspace/files` 读写挂载（目录存在性守卫）。**教训：Round 39 的 e2e 只验证了主机侧文件 API 往返，从未在沙箱内验证可见性。**
+4. **is_session_expired MagicMock TypeError**（Round 39 引入）：`getattr(session, "extended_seconds", 0)` 在测试替身（MagicMock）上永远返回 MagicMock 自动属性，`timedelta(seconds=...)` 崩溃。修复：`int()` 边界整型化 + try/except 兜底。**勘误：Round 37/39 的"8 failed 全为 cgroup 门禁"结论不精确——当时日志 tail 截断，真实基线门禁集为 7 个；本轮完整日志首次给出准确清单。**
 
 **仍未实施**：WebSocket PTY 交互终端（exec 轮询为过渡形态）、overlayfs 层叠快照（P2，硬件/内核门禁）、自动定时快照、输出文件浏览 API。
 
@@ -1694,8 +1695,8 @@ Round 39/40 的后端可用性面（files/snapshots/pause/exec/logs/usage/templa
 | Round 36 远程 Linux 验证（100.112.3.247） | 通过 | 远程 compileall 通过；RAG+安全矩阵聚焦 54 passed；全量 **2271 passed / 10 failed / 16 errors**（+60 passed vs 远程旧基线，失败集完全相同，零新增回归）；剩余失败全部环境门禁（cgroup v1 只读 / e2e 无 CDS 服务） |
 | Round 37 远程 e2e 闭环 + 合约签名修复 | 通过 | 三文件 e2e 57 passed（3 failed 清零）；合约相关 6 文件 53 passed 零回归；实时 API full-lifecycle **16/16**（真实 SM2 双方签名闭环）；test_p0 15 passed；全量 2275 passed / 8 failed / 16 errors（8 failed 全为 cgroup 环境门禁，16 errors 为无实时 API 的预期形态且已 16/16 单独验证） |
 | Round 39 可用性三件套 | 通过 | 新单测 21 passed（远程 Linux）；实时 e2e **17/17**（含 files/快照回滚/暂停恢复全链 + T5 阻断 + Alembic 0002 实跑）；受影响回归全绿；全量见 pytest_r39.log |
-| Round 40 交互与生态 | 本地通过；远程统一测试暴露 3 个真实缺陷并修复 | 本地 28 passed；实时 e2e 首轮 16/17 → 抓出 MissingGreenlet 500 / 回滚丢空目录 / files 未挂载沙箱 三缺陷（全部修复，见 §37）；全量修复前快照 2319 passed / 9 failed / 17 errors（8 个 cgroup 门禁 + 1 待复跑定位）；修复后复跑后台进行中，结果回填 verify_r40_final.log |
-| Round 41 前端工作台 | 通过（类型层） | tsc -b 零错误自验；API 面与 Round 40 后端一一对应；实时联调与 Round 40 复跑同批进行 |
+| Round 40 交互与生态 | 通过 | 实时 e2e 最终 **17/17**；全量 2319 passed / 17 errors / 1 skipped，failed 从 9 → **7**（全部 cgroup v1 只读门禁，完整日志首次给出准确清单；第 4 缺陷 is_session_expired MagicMock 回归已修复）；本地 28 passed |
+| Round 41 前端工作台 | 通过（类型层） | tsc -b 零错误自验；API 面与 Round 40 后端一一对应；实时 e2e 17/17 同批确认后端契约 |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 

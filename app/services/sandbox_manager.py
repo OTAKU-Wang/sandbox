@@ -91,8 +91,13 @@ def is_session_expired(session) -> bool:
     elapsed = datetime.now(timezone.utc) - created
     # Round 39: POST /{id}/refreshes grants extra wall-clock seconds beyond
     # the base timeout; total extension is capped by the refresh endpoint.
-    extended = getattr(session, "extended_seconds", 0) or 0
-    timeout = timedelta(seconds=session.timeout_seconds + extended)
+    # int-coerce defensively: session-like test doubles (MagicMock) auto-create
+    # attributes, so getattr's default never fires for them.
+    try:
+        extended = int(getattr(session, "extended_seconds", 0) or 0)
+    except (TypeError, ValueError):
+        extended = 0
+    timeout = timedelta(seconds=int(session.timeout_seconds) + extended)
     return elapsed > timeout
 
 
