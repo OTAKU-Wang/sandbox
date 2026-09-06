@@ -11,22 +11,50 @@ import {
   Form,
   Input,
   InputNumber,
+  List,
+  Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
   Spin,
   Statistic,
   Switch,
+  Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd';
-import { CodeOutlined, DownloadOutlined, FileProtectOutlined, LinkOutlined, StopOutlined } from '@ant-design/icons';
+import type { UploadProps } from 'antd';
+import {
+  CodeOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  FileProtectOutlined,
+  FileTextOutlined,
+  LinkOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RollbackOutlined,
+  StopOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sandboxApi, type SessionExecuteResult } from '../../services/sandboxApi';
+import {
+  sandboxApi,
+  type SessionExecuteResult,
+  type ExecResult,
+  type SessionLogEntry,
+  type SessionFile,
+  type SessionSnapshot,
+} from '../../services/sandboxApi';
 import { useAuthStore } from '../../stores/authStore';
 import { UserRole } from '../../types/enums';
 import { hasAnyRole } from '../../utils/roles';
+import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Paragraph, Text } = Typography;
 const { TextArea } = Input;
@@ -53,6 +81,7 @@ const statusColors: Record<string, string> = {
   failed: 'red',
   terminated: 'default',
   revoked: 'red',
+  expired: 'default',
 };
 
 const statusLabels: Record<string, string> = {
@@ -66,6 +95,7 @@ const statusLabels: Record<string, string> = {
   failed: '失败',
   terminated: '已终止',
   revoked: '已撤销',
+  expired: '已过期',
 };
 
 const modeLabels: Record<string, string> = {
@@ -120,6 +150,14 @@ function splitPorts(value?: string) {
   return splitList(value).map((item) => Number(item)).filter((item) => Number.isInteger(item));
 }
 
+function formatBytes(bytes?: number) {
+  if (bytes === undefined || bytes === null || isNaN(bytes)) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -130,6 +168,23 @@ export default function SessionDetail() {
   const [language, setLanguage] = useState('python');
   const [executeResult, setExecuteResult] = useState<SessionExecuteResult | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
+
+  // --- Exec console state ---
+  const [execCommand, setExecCommand] = useState('ls -la /workspace');
+  const [execTimeout, setExecTimeout] = useState<number | null>(60);
+  const [execResult, setExecResult] = useState<ExecResult | null>(null);
+
+  // --- Logs viewer state ---
+  const [logActionFilter, setLogActionFilter] = useState<string>('');
+  const [logSince, setLogSince] = useState<string | undefined>();
+  const [allLogs, setAllLogs] = useState<SessionLogEntry[]>([]);
+
+  // --- Files ---
+  const [downloadRedactedFile, setDownloadRedactedFile] = useState<string | null>(null);
+
+  // --- Snapshots ---
+  const [createSnapshotOpen, setCreateSnapshotOpen] = useState(false);
+  const [snapshotDescription, setSnapshotDescription] = useState('');
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['sandbox-session', id],
@@ -143,9 +198,90 @@ export default function SessionDetail() {
   const canExecute = !!session && user?.id === session.user_id && session.status === 'running';
   const canUpdateNetwork = !!session && canOperate && ['running', 'ready'].includes(session.status);
 
+  const canExec = !!session && user?.id === session.user_id && ['running', 'ready'].includes(session.status);
+  const canPause = !!session && canOperate && ['ready', 'running'].includes(session.status);
+  const canResume = !!session && canOperate && session.status === 'suspended';
+  const canRefresh = !!session && canOperate && ['pending', 'provisioning', 'ready', 'running', 'suspended'].includes(session.status);
+  const canManageFiles = !!session && canOperate && ['ready', 'running', 'suspended'].includes(session.status);
+  const canManageSnapshots = !!session && canOperate && ['ready', 'running', 'suspended'].includes(session.status);
+
   const { data: networkPolicy } = useQuery({
     queryKey: ['sandbox-session-network-policy', id],
     queryFn: () => sandboxApi.getNetworkPolicy(id!),
+    enabled: !!id && !!session,
+  });
+
+  // --- Usage ---
+  const {
+    data: usage,
+    isFetching: usageFetching,
+    refetch: refetchUsage,
+  } = useQuery({
+    queryKey: ['sandbox-session-usage', id],
+    queryFn: () => sandboxApi.getUsage(id!),
+    enabled: !!id && !!session,
+  });
+
+  // --- Logs ---
+  const {
+    data: logsData,
+    isFetching: logsFetching,
+    refetch: refetchLogs,
+    isError: logsIsError,
+    error: logsError,
+  } = useQuery<import('../../services/sandboxApi').SessionLogsResponse>({
+    queryKey: ['sandbox-session-logs', id, logActionFilter, logSince],
+    queryFn: () => sandboxApi.getLogs(id!, {
+      limit: 50,
+      since: logSince,
+      action: logActionFilter || undefined,
+    }),
+    enabled: !!id && !!session,
+  });
+
+  // Accumulate logs for "load more" pagination
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!logsData) return;
+    if (logSince) {
+      setAllLogs((prev) => [...prev, ...logsData.logs]);
+    } else {
+      setAllLogs(logsData.logs);
+    }
+  }, [logsData, logSince]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const loadMoreLogs = () => {
+    if (logsData?.latest_created_at) {
+      setLogSince(logsData.latest_created_at);
+    }
+  };
+
+  const refreshLogs = () => {
+    setLogSince(undefined);
+    setAllLogs([]);
+    void refetchLogs();
+  };
+
+  // --- Files ---
+  const {
+    data: filesData,
+    isFetching: filesFetching,
+    refetch: refetchFiles,
+  } = useQuery({
+    queryKey: ['sandbox-session-files', id],
+    queryFn: () => sandboxApi.listFiles(id!),
+    enabled: !!id && !!session,
+  });
+
+  // --- Snapshots ---
+  const {
+    data: snapshotsData,
+    isFetching: snapshotsFetching,
+    refetch: refetchSnapshots,
+  } = useQuery({
+    queryKey: ['sandbox-session-snapshots', id],
+    queryFn: () => sandboxApi.listSnapshots(id!),
     enabled: !!id && !!session,
   });
 
@@ -212,10 +348,8 @@ export default function SessionDetail() {
       if (result.output_blocked) message.warning('输出已被安全审查阻断');
       else message.success('执行完成');
     },
-    onError: (error: any) => {
-      const detail = error?.detail;
-      const text = typeof detail === 'string' ? detail : detail?.error || '执行失败';
-      message.error(text);
+    onError: (error: unknown) => {
+      message.error(getErrorMessage(error, '执行失败'));
     },
   });
 
@@ -234,13 +368,151 @@ export default function SessionDetail() {
       message.success('网络策略已更新');
       queryClient.setQueryData(['sandbox-session-network-policy', id], result.network_policy);
     },
-    onError: (error: any) => {
-      const detail = error?.detail;
-      const text = Array.isArray(detail)
-        ? detail.map((item: any) => item.msg || item.message || JSON.stringify(item)).join('; ')
-        : detail || '网络策略更新失败';
-      message.error(text);
+    onError: (error: unknown) => {
+      message.error(getErrorMessage(error, '网络策略更新失败'));
     },
+  });
+
+  const invalidateSessionQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['sandbox-session', id] });
+    queryClient.invalidateQueries({ queryKey: ['sandbox-sessions'] });
+  };
+
+  // --- Pause / Resume / Refresh ---
+  const pauseMutation = useMutation({
+    mutationFn: () => sandboxApi.pauseSession(id!),
+    onSuccess: () => {
+      message.success('会话已暂停');
+      invalidateSessionQueries();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '暂停失败')),
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => sandboxApi.resumeSession(id!),
+    onSuccess: () => {
+      message.success('会话已恢复');
+      invalidateSessionQueries();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '恢复失败')),
+  });
+
+  const refreshMutation = useMutation({
+    mutationFn: () => sandboxApi.refreshSession(id!),
+    onSuccess: () => {
+      message.success('会话超时已延长');
+      invalidateSessionQueries();
+      void refetchUsage();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '续期失败')),
+  });
+
+  // --- Exec (shell) ---
+  const execMutation = useMutation({
+    mutationFn: () => sandboxApi.exec(id!, {
+      command: execCommand,
+      timeout_seconds: execTimeout ?? undefined,
+    }),
+    onSuccess: (result) => {
+      setExecResult(result);
+      if (result.output_blocked) {
+        message.warning('输出已被安全审查阻断');
+      }
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '执行失败')),
+  });
+
+  // --- File upload ---
+  const uploadFileMutation = useMutation({
+    mutationFn: (file: File) => sandboxApi.uploadFile(id!, file),
+    onSuccess: () => {
+      message.success('文件上传成功');
+      void refetchFiles();
+      void refetchUsage();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '文件上传失败')),
+  });
+
+  const handleUpload: UploadProps['beforeUpload'] = (file) => {
+    uploadFileMutation.mutate(file as File);
+    return false;
+  };
+
+  // --- File download ---
+  const downloadFileMutation = useMutation({
+    mutationFn: (filename: string) => sandboxApi.downloadFile(id!, filename),
+    onSuccess: ({ blob, redacted }, filename) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      if (redacted) {
+        setDownloadRedactedFile(filename);
+        message.info('该文件已通过输出审查，内容已脱敏');
+      } else {
+        setDownloadRedactedFile(null);
+        message.success('下载成功');
+      }
+    },
+    onError: (error: unknown, filename) => {
+      const err = error as { status?: number; detail?: { findings_count?: number; error?: string } };
+      if (err.status === 409) {
+        const count = err.detail?.findings_count ?? 0;
+        message.error(`下载失败：输出审查阻断（发现 ${count} 项风险）`);
+      } else {
+        message.error(getErrorMessage(error, `${filename} 下载失败`));
+      }
+    },
+  });
+
+  // --- File delete ---
+  const deleteFileMutation = useMutation({
+    mutationFn: (filename: string) => sandboxApi.deleteFile(id!, filename),
+    onSuccess: () => {
+      message.success('文件已删除');
+      void refetchFiles();
+      void refetchUsage();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '删除失败')),
+  });
+
+  // --- Snapshot create ---
+  const createSnapshotMutation = useMutation({
+    mutationFn: () => sandboxApi.createSnapshot(id!, { description: snapshotDescription || undefined }),
+    onSuccess: () => {
+      message.success('快照已创建');
+      setCreateSnapshotOpen(false);
+      setSnapshotDescription('');
+      void refetchSnapshots();
+      void refetchUsage();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '创建快照失败')),
+  });
+
+  // --- Snapshot rollback ---
+  const rollbackSnapshotMutation = useMutation({
+    mutationFn: (snapshotId: string) => sandboxApi.rollbackSnapshot(id!, snapshotId),
+    onSuccess: () => {
+      message.success('已回滚到快照');
+      void refetchSnapshots();
+      void refetchFiles();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '回滚失败')),
+  });
+
+  // --- Snapshot delete ---
+  const deleteSnapshotMutation = useMutation({
+    mutationFn: (snapshotId: string) => sandboxApi.deleteSnapshot(id!, snapshotId),
+    onSuccess: () => {
+      message.success('快照已删除');
+      void refetchSnapshots();
+      void refetchUsage();
+    },
+    onError: (error: unknown) => message.error(getErrorMessage(error, '删除快照失败')),
   });
 
   if (isLoading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
@@ -274,7 +546,22 @@ export default function SessionDetail() {
           <Button icon={<DownloadOutlined />} loading={proofFetching && proofOpen} onClick={openProofBundle}>
             证明包
           </Button>
-          {canOperate && ['running', 'ready', 'provisioning'].includes(session.status) && (
+          {canPause && (
+            <Button icon={<PauseCircleOutlined />} loading={pauseMutation.isPending} onClick={() => pauseMutation.mutate()}>
+              暂停
+            </Button>
+          )}
+          {canResume && (
+            <Button type="primary" icon={<PlayCircleOutlined />} loading={resumeMutation.isPending} onClick={() => resumeMutation.mutate()}>
+              恢复
+            </Button>
+          )}
+          {canRefresh && (
+            <Button icon={<ReloadOutlined />} loading={refreshMutation.isPending} onClick={() => refreshMutation.mutate()}>
+              续期
+            </Button>
+          )}
+          {canOperate && ['running', 'ready', 'provisioning', 'suspended'].includes(session.status) && (
             <Button danger icon={<StopOutlined />} loading={terminateMutation.isPending} onClick={() => terminateMutation.mutate()}>
               终止
             </Button>
@@ -286,6 +573,47 @@ export default function SessionDetail() {
       {session.error_message && (
         <Alert type="error" showIcon message="会话异常" description={session.error_message} style={{ marginBottom: 16 }} />
       )}
+
+      {/* Usage summary line */}
+      <Card size="small" style={{ marginBottom: 16 }} bodyStyle={{ padding: '8px 16px' }}>
+        <Row gutter={[16, 8]} align="middle">
+          <Col xs={12} sm={8} md={5}>
+            <Text type="secondary">工作区：</Text>
+            <Space size={4}>
+              <Text strong>{usage?.workspace.files ?? '-'}</Text>
+              <Text type="secondary">个文件</Text>
+              <Text type="secondary">/</Text>
+              <Text strong>{formatBytes(usage?.workspace.bytes)}</Text>
+            </Space>
+          </Col>
+          <Col xs={12} sm={8} md={5}>
+            <Text type="secondary">上传：</Text>
+            <Space size={4}>
+              <Text strong>{usage?.uploaded_files.count ?? '-'}</Text>
+              <Text type="secondary">个 /</Text>
+              <Text strong>{formatBytes(usage?.uploaded_files.bytes)}</Text>
+            </Space>
+          </Col>
+          <Col xs={12} sm={8} md={5}>
+            <Text type="secondary">快照：</Text>
+            <Text strong>{usage?.snapshots.count ?? '-'}</Text>
+            <Text type="secondary"> 个 / {formatBytes(usage?.snapshots.bytes)}</Text>
+          </Col>
+          <Col xs={12} sm={8} md={5}>
+            <Text type="secondary">超时：</Text>
+            <Text strong>{usage?.timeout.timeout_seconds ?? '-'}</Text>
+            <Text type="secondary"> 秒</Text>
+            {usage && usage.timeout.extended_seconds > 0 && (
+              <Tag color="green" style={{ marginLeft: 4 }}>+{usage.timeout.extended_seconds}s 续期</Tag>
+            )}
+          </Col>
+          <Col xs={24} md={4} style={{ textAlign: 'right' }}>
+            <Button size="small" icon={<ReloadOutlined />} loading={usageFetching} onClick={() => { void refetchUsage(); }}>
+              刷新
+            </Button>
+          </Col>
+        </Row>
+      </Card>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={16}>
@@ -470,7 +798,418 @@ export default function SessionDetail() {
             </Card>
           </Col>
         </Row>
-      )}
+       )}
+
+      {/* --- Files Panel --- */}
+      <Card
+        title="工作区文件"
+        style={{ marginTop: 16 }}
+        extra={
+          <Space>
+            <Upload
+              beforeUpload={handleUpload}
+              showUploadList={false}
+              disabled={!canManageFiles}
+            >
+              <Button
+                type="primary"
+                icon={<UploadOutlined />}
+                loading={uploadFileMutation.isPending}
+                disabled={!canManageFiles}
+              >
+                上传文件
+              </Button>
+            </Upload>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={filesFetching}
+              onClick={() => { void refetchFiles(); }}
+            >
+              刷新
+            </Button>
+          </Space>
+        }
+      >
+        {downloadRedactedFile && (
+          <Alert
+            type="info"
+            showIcon
+            message="输出审查说明"
+            description={`文件 "${downloadRedactedFile}" 已通过输出审查，部分敏感内容已被脱敏。`}
+            closable
+            onClose={() => setDownloadRedactedFile(null)}
+            style={{ marginBottom: 12 }}
+          />
+        )}
+        <Table
+          rowKey="name"
+          size="small"
+          loading={filesFetching}
+          dataSource={filesData?.files || []}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无文件" /> }}
+          pagination={false}
+          columns={[
+            {
+              title: '文件名',
+              dataIndex: 'name',
+              key: 'name',
+              render: (name: string, record: SessionFile) => (
+                <Space>
+                  <FileTextOutlined />
+                  <Text code>{name}</Text>
+                  {record.encrypted && <Tag color="gold">已加密</Tag>}
+                </Space>
+              ),
+            },
+            {
+              title: '大小',
+              dataIndex: 'size',
+              key: 'size',
+              width: 140,
+              render: (size: number) => formatBytes(size),
+            },
+            {
+              title: '操作',
+              key: 'action',
+              width: 180,
+              render: (_: unknown, record: SessionFile) => (
+                <Space>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    loading={downloadFileMutation.isPending && downloadFileMutation.variables === record.name}
+                    onClick={() => downloadFileMutation.mutate(record.name)}
+                    disabled={!canManageFiles}
+                  >
+                    下载
+                  </Button>
+                  <Popconfirm
+                    title="确认删除此文件？"
+                    description="删除后无法恢复"
+                    onConfirm={() => deleteFileMutation.mutate(record.name)}
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button
+                      type="link"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      loading={deleteFileMutation.isPending && deleteFileMutation.variables === record.name}
+                      disabled={!canManageFiles}
+                    >
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Card>
+
+      {/* --- Snapshots Panel --- */}
+      <Card
+        title="会话快照"
+        style={{ marginTop: 16 }}
+        extra={
+          <Space>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={!canManageSnapshots}
+              onClick={() => setCreateSnapshotOpen(true)}
+            >
+              创建快照
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={snapshotsFetching}
+              onClick={() => { void refetchSnapshots(); }}
+            >
+              刷新
+            </Button>
+          </Space>
+        }
+      >
+        <Table
+          rowKey="id"
+          size="small"
+          loading={snapshotsFetching}
+          dataSource={snapshotsData?.snapshots || []}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无快照" /> }}
+          pagination={false}
+          columns={[
+            {
+              title: '快照 ID',
+              dataIndex: 'id',
+              key: 'id',
+              width: 180,
+              render: (v: string) => <Text code>{v.slice(0, 12)}...</Text>,
+            },
+            {
+              title: '描述',
+              dataIndex: 'description',
+              key: 'description',
+              render: (v?: string) => v || <Text type="secondary">-</Text>,
+            },
+            {
+              title: '文件数',
+              dataIndex: 'file_count',
+              key: 'file_count',
+              width: 100,
+            },
+            {
+              title: '大小',
+              dataIndex: 'size_bytes',
+              key: 'size_bytes',
+              width: 120,
+              render: (v: number) => formatBytes(v),
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'created_at',
+              key: 'created_at',
+              width: 180,
+              render: (v: string) => formatTime(v),
+            },
+            {
+              title: '操作',
+              key: 'action',
+              width: 180,
+              render: (_: unknown, record: SessionSnapshot) => (
+                <Space>
+                  <Popconfirm
+                    title="确认回滚到此快照？"
+                    description="回滚后当前工作区内容将被替换为快照状态，无法撤销。"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => rollbackSnapshotMutation.mutate(record.id)}
+                  >
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RollbackOutlined />}
+                      disabled={!canManageSnapshots}
+                    >
+                      回滚
+                    </Button>
+                  </Popconfirm>
+                  <Popconfirm
+                    title="确认删除此快照？"
+                    description="删除后无法恢复"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => deleteSnapshotMutation.mutate(record.id)}
+                  >
+                    <Button
+                      type="link"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      disabled={!canManageSnapshots}
+                    >
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Card>
+
+      {/* --- Exec Console --- */}
+      <Card
+        title="终端命令"
+        style={{ marginTop: 16 }}
+        extra={<Tag color="blue">exec</Tag>}
+      >
+        {canExec ? (
+          <>
+            <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+              <Input
+                value={execCommand}
+                onChange={(e) => setExecCommand(e.target.value)}
+                placeholder="输入 shell 命令，例如: ls -la /workspace"
+                onPressEnter={() => execMutation.mutate()}
+              />
+              <InputNumber
+                min={1}
+                max={3600}
+                value={execTimeout}
+                onChange={(v) => setExecTimeout(v ?? null)}
+                style={{ width: 130 }}
+                addonBefore="超时(s)"
+              />
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                loading={execMutation.isPending}
+                onClick={() => execMutation.mutate()}
+              >
+                运行
+              </Button>
+            </Space.Compact>
+            {execResult && (
+              <div
+                style={{
+                  background: '#0d1117',
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    background: '#161b22',
+                    borderBottom: '1px solid #30363d',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text type="secondary" style={{ color: '#8b949e', fontSize: 12 }}>
+                    输出
+                  </Text>
+                  <Space size={4}>
+                    <Tag color={execResult.exit_code === 0 ? 'green' : 'red'} style={{ margin: 0 }}>
+                      exit {execResult.exit_code}
+                    </Tag>
+                    {execResult.duration_ms !== undefined && (
+                      <Tag style={{ margin: 0 }}>{execResult.duration_ms}ms</Tag>
+                    )}
+                  </Space>
+                </div>
+                <div style={{ padding: 12, maxHeight: 400, overflow: 'auto' }}>
+                  {execResult.output_blocked ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="输出已被安全审查阻断"
+                      description={execResult.blocked_reason || '输出命中 critical 安全规则，原始内容未释放。'}
+                    />
+                  ) : (
+                    <pre
+                      style={{
+                        margin: 0,
+                        color: '#e6edf3',
+                        fontFamily: 'Consolas, Monaco, monospace',
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {execResult.output || (
+                        <span style={{ color: '#6e7681' }}>（无输出）</span>
+                      )}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="只有会话所有者可在 ready/running 状态执行命令"
+          />
+        )}
+      </Card>
+
+      {/* --- Logs Viewer --- */}
+      <Card
+        title="审计日志"
+        style={{ marginTop: 16 }}
+        extra={
+          <Space>
+            <Input
+              placeholder="筛选动作"
+              value={logActionFilter}
+              onChange={(e) => {
+                setLogActionFilter(e.target.value);
+                setLogSince(undefined);
+                setAllLogs([]);
+              }}
+              style={{ width: 160 }}
+              allowClear
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              loading={logsFetching}
+              onClick={refreshLogs}
+            >
+              刷新
+            </Button>
+          </Space>
+        }
+      >
+        {logsIsError && (
+          <Alert
+            type="error"
+            showIcon
+            message="日志加载失败"
+            description={getErrorMessage(logsError)}
+            style={{ marginBottom: 12 }}
+          />
+        )}
+        <List
+          size="small"
+          loading={logsFetching && allLogs.length === 0}
+          dataSource={allLogs}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无日志" /> }}
+          renderItem={(item) => (
+            <List.Item>
+              <List.Item.Meta
+                avatar={<Tag>{item.action}</Tag>}
+                title={
+                  <Space>
+                    <Text strong>{item.action}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {formatTime(item.created_at)}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      用户: {shortId(item.user_id)}
+                    </Text>
+                  </Space>
+                }
+                description={
+                  item.detail && typeof item.detail === 'object' && Object.keys(item.detail as Record<string, unknown>).length > 0
+                    ? <pre style={{ margin: 0, fontSize: 12, maxHeight: 80, overflow: 'auto' }}>{JSON.stringify(item.detail, null, 2)}</pre>
+                    : <Text type="secondary">-</Text>
+                }
+              />
+            </List.Item>
+          )}
+        />
+        {logsData && logsData.logs.length > 0 && logsData.count > allLogs.length && (
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <Button onClick={loadMoreLogs} loading={logsFetching}>
+              加载更多
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {/* --- Create Snapshot Modal --- */}
+      <Modal
+        title="创建快照"
+        open={createSnapshotOpen}
+        onCancel={() => { setCreateSnapshotOpen(false); setSnapshotDescription(''); }}
+        onOk={() => createSnapshotMutation.mutate()}
+        confirmLoading={createSnapshotMutation.isPending}
+        okText="创建"
+      >
+        <Form layout="vertical">
+          <Form.Item label="描述（可选）">
+            <Input.TextArea
+              rows={3}
+              value={snapshotDescription}
+              onChange={(e) => setSnapshotDescription(e.target.value)}
+              placeholder="输入快照描述，便于后续识别"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Drawer
         title="会话证明包"
@@ -488,7 +1227,7 @@ export default function SessionDetail() {
             type="error"
             showIcon
             message="证明包生成失败"
-            description={(proofError as any)?.detail || (proofError as Error)?.message}
+            description={getErrorMessage(proofError, '未知错误')}
             style={{ marginBottom: 16 }}
           />
         )}

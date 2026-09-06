@@ -9,6 +9,117 @@ export interface CreateSessionRequest {
   sandbox_level: string;
   timeout_seconds?: number;
   resource_limits?: Record<string, unknown> | null;
+  template?: string | null;
+}
+
+// ---------- Exec ----------
+
+export interface ExecRequest {
+  command: string;
+  timeout_seconds?: number;
+}
+
+export interface ExecResult {
+  exit_code: number;
+  output: string;
+  output_blocked: boolean;
+  blocked_reason?: string;
+  duration_ms?: number;
+  security_report?: SecurityReport;
+}
+
+// ---------- Logs ----------
+
+export interface SessionLogEntry {
+  id: string;
+  action: string;
+  detail?: unknown;
+  created_at: string;
+  user_id: string;
+}
+
+export interface SessionLogsResponse {
+  logs: SessionLogEntry[];
+  count: number;
+  latest_created_at?: string;
+}
+
+export interface SessionLogsParams {
+  limit?: number;
+  since?: string;
+  action?: string;
+}
+
+// ---------- Usage ----------
+
+export interface SessionUsageResponse {
+  workspace: {
+    files: number;
+    bytes: number;
+  };
+  uploaded_files: {
+    count: number;
+    bytes: number;
+  };
+  snapshots: {
+    count: number;
+    bytes: number;
+  };
+  timeout: {
+    timeout_seconds: number;
+    extended_seconds: number;
+  };
+}
+
+// ---------- Templates ----------
+
+export interface SessionTemplate {
+  name: string;
+  description: string;
+  files: string[];
+  env: Record<string, string>;
+}
+
+export interface SessionTemplatesResponse {
+  templates: SessionTemplate[];
+}
+
+// ---------- Files ----------
+
+export interface SessionFile {
+  name: string;
+  size: number;
+  encrypted: boolean;
+}
+
+export interface SessionFilesResponse {
+  files: SessionFile[];
+}
+
+export interface FileDownloadBlockedError {
+  status: 409;
+  detail: {
+    findings_count: number;
+    error?: string;
+  };
+}
+
+// ---------- Snapshots ----------
+
+export interface SessionSnapshot {
+  id: string;
+  created_at: string;
+  size_bytes: number;
+  file_count: number;
+  description?: string;
+}
+
+export interface SessionSnapshotsResponse {
+  snapshots: SessionSnapshot[];
+}
+
+export interface CreateSnapshotRequest {
+  description?: string;
 }
 
 export interface DevSession {
@@ -169,4 +280,99 @@ export const sandboxApi = {
 
   devGetTemplate: (name: string): Promise<{ template: string }> =>
     api.get(`/dev-sandbox/templates/${name}`),
+
+  // ---------- Session usability (Rounds 39-40) ----------
+
+  // Exec console
+  exec: (id: string, data: ExecRequest): Promise<ExecResult> =>
+    api.post(`/sandbox-sessions/${id}/exec`, data),
+
+  // Audit logs
+  getLogs: (id: string, params?: SessionLogsParams): Promise<SessionLogsResponse> =>
+    api.get(`/sandbox-sessions/${id}/logs`, { params }),
+
+  // Usage
+  getUsage: (id: string): Promise<SessionUsageResponse> =>
+    api.get(`/sandbox-sessions/${id}/usage`),
+
+  // Session templates
+  getSessionTemplates: (): Promise<SessionTemplatesResponse> =>
+    api.get('/sandbox-sessions/session-templates'),
+
+  // Files
+  listFiles: (id: string): Promise<SessionFilesResponse> =>
+    api.get(`/sandbox-sessions/${id}/files`),
+
+  uploadFile: (id: string, file: File): Promise<SessionFile> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/sandbox-sessions/${id}/files`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // Blob download — returns blob plus redacted flag from response header
+  downloadFile: async (id: string, filename: string): Promise<{ blob: Blob; redacted: boolean }> => {
+    const axios = (await import('axios')).default;
+    const { useAuthStore } = await import('../stores/authStore');
+    const token = useAuthStore.getState().token;
+    const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
+    try {
+      const response = await axios.get(
+        `${baseURL}/sandbox-sessions/${id}/files/${encodeURIComponent(filename)}`,
+        {
+          responseType: 'blob',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        },
+      );
+      const reviewHeader = response.headers['x-cds-output-review'] || response.headers['X-CDS-Output-Review'];
+      const redacted = typeof reviewHeader === 'string' && reviewHeader.startsWith('redacted');
+      return { blob: response.data, redacted };
+    } catch (error: unknown) {
+      // 409 DLP block: the response data is a JSON blob with detail.findings_count
+      const axiosErr = error as { response?: { status: number; data: Blob; headers: Record<string, string> } };
+      if (axiosErr.response?.status === 409 && axiosErr.response.data instanceof Blob) {
+        // Try to parse JSON from blob for findings_count; re-throw with structured info
+        const text = await axiosErr.response.data.text();
+        let detail: { findings_count?: number; error?: string } = {};
+        try {
+          detail = JSON.parse(text);
+        } catch {
+          // ignore parse errors
+        }
+        const blockedErr = new Error('输出审查阻断') as Error & { status: number; detail: typeof detail };
+        blockedErr.status = 409;
+        blockedErr.detail = detail;
+        throw blockedErr;
+      }
+      throw error;
+    }
+  },
+
+  deleteFile: (id: string, filename: string): Promise<void> =>
+    api.delete(`/sandbox-sessions/${id}/files/${encodeURIComponent(filename)}`),
+
+  // Snapshots
+  listSnapshots: (id: string): Promise<SessionSnapshotsResponse> =>
+    api.get(`/sandbox-sessions/${id}/snapshots`),
+
+  createSnapshot: (id: string, data?: CreateSnapshotRequest): Promise<SessionSnapshot> =>
+    api.post(`/sandbox-sessions/${id}/snapshots`, data || {}),
+
+  rollbackSnapshot: (id: string, snapshotId: string): Promise<{ status: string }> =>
+    api.post(`/sandbox-sessions/${id}/snapshots/${snapshotId}/rollback`),
+
+  deleteSnapshot: (id: string, snapshotId: string): Promise<void> =>
+    api.delete(`/sandbox-sessions/${id}/snapshots/${snapshotId}`),
+
+  // Lifecycle
+  pauseSession: (id: string): Promise<SandboxSession> =>
+    api.post(`/sandbox-sessions/${id}/pause`),
+
+  resumeSession: (id: string): Promise<SandboxSession> =>
+    api.post(`/sandbox-sessions/${id}/resume`),
+
+  refreshSession: (id: string): Promise<SandboxSession> =>
+    api.post(`/sandbox-sessions/${id}/refreshes`),
 };

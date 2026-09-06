@@ -82,6 +82,15 @@ export default function SessionList() {
     enabled: canCreateSession,
   });
 
+  const {
+    data: templates,
+    isLoading: templatesLoading,
+  } = useQuery({
+    queryKey: ['sandbox-session-templates'],
+    queryFn: () => sandboxApi.getSessionTemplates(),
+    enabled: canCreateSession,
+  });
+
   const terminateMutation = useMutation({
     mutationFn: (id: string) => sandboxApi.terminate(id),
     onSuccess: () => {
@@ -97,11 +106,13 @@ export default function SessionList() {
       sandbox_level: string;
       contract_id?: string;
       timeout_seconds?: number;
+      template?: string;
     }) => sandboxApi.create({
       data_product_id: values.data_product_id,
       sandbox_level: values.sandbox_level,
       contract_id: values.contract_id || null,
       timeout_seconds: values.timeout_seconds,
+      template: values.template || null,
     }),
     onSuccess: (session) => {
       message.success('沙箱会话已创建');
@@ -237,6 +248,21 @@ export default function SessionList() {
           </Form.Item>
           <Form.Item name="timeout_seconds" label="超时时间（秒）">
             <InputNumber min={60} max={86400} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="template" label="会话模板">
+            <Select
+              allowClear
+              showSearch
+              placeholder="选择模板（可选）"
+              optionFilterProp="label"
+              loading={templatesLoading}
+              notFoundContent={templatesLoading ? '加载中' : '暂无可用模板'}
+              options={(templates?.templates || []).map((t) => ({
+                label: `${t.name} — ${t.description}`,
+                value: t.name,
+                title: `${t.description}\n文件: ${t.files.join(', ')}`,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>
