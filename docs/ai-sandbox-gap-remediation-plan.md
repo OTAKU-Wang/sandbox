@@ -500,4 +500,17 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 
 **验证**：新单测 21 passed（远程 Linux）；实时 full-lifecycle **17/17**（85.99s）；本地 Windows 13 passed + 8 POSIX 项 skip（远程全跑）。
 
-**仍未实施**：下载非 critical 红action、快照 GC 策略、overlayfs 快照（P2 优化）、PTY/SDK/模板环境/日志流式（CubeSandbox 融合 P1/P2）。
+### Round 40 执行记录（2026-09-06 追加）—— 交互与生态（exec/logs/usage/模板/脱敏/GC/SDK）
+
+| 任务 | 状态 | 关键产出 | 对应 specs |
+|---|---|---|---|
+| exec 交互命令 API | ✅ 已实现 | `POST /{id}/exec`：bash + 硬超时 120s + T5 输出网关 + 命令哈希审计；DEK 注入、原始密钥不进 shell | Round 40 |
+| logs / usage 观测 | ✅ 已实现 | `GET /{id}/logs`（since 增量 tail）+ `GET /{id}/usage`（工作区/文件/快照用量） | Round 40 |
+| 会话模板 | ✅ 已实现 | 内置 3 模板 + JSON 扩展 + 编程注册；创建前校验防孤儿容器，provision 后 best-effort 种子；env 注入 execute/exec | Round 40 |
+| 下载脱敏 | ✅ 已实现 | 非 critical → inspector 重写 `[REDACTED:*]` 释放；二进制原文+header 披露；critical 仍 409 | Round 40 |
+| 快照 GC | ✅ 已实现 | terminate 移除归档（开关 `SESSION_SNAPSHOT_GC_ON_TERMINATE`，false=保留终止后恢复） | Round 40 |
+| Python SDK | ✅ 已实现 | `sdk/` cds-sdk 包：会话/文件/快照/exec/logs/usage 全覆盖 + wait_for_status；MockTransport 测试 | Round 40 |
+
+**验证**：本地 28 passed（15 SDK/模板 + 13 端点）；远程统一验证（实时 e2e + 全量）后台脱离运行，落 verify_r40.log。
+
+**仍未实施**：WebSocket PTY 终端、前端会话工作台（Round 41）、overlayfs 快照（P2）、定时自动快照、输出文件浏览 API。

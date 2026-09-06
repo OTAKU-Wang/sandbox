@@ -1583,7 +1583,43 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 37. 最终验证状态
+## 37. Round 40 交互与生态（exec / logs / usage / 模板 / 脱敏下载 / 快照 GC / Python SDK）修复记录
+
+### 触发条件
+
+Round 39 落地了会话可用性 P0 三件套后，按 Sandboxie/CubeSandbox 融合路线继续补齐 P1 交互面：批量执行之外需要交互式命令、日志可观测、预装环境、Python SDK 生态，以及下载脱敏与快照生命周期收尾。用户指令："先实现所有功能 最后再进行统一测试"——本轮连续实现，统一验证后台运行。
+
+### 已完成
+
+1. **exec 交互命令 API（对照 CubeSandbox exec API / Sandboxie 终端能力）**：
+   - `POST /sandbox-sessions/{id}/exec`：bash 命令在活跃沙箱工作区内执行；硬超时上限 `CDS_SESSION_EXEC_TIMEOUT_SECONDS`=120s（请求值与服务端上限取小）；输出上限 `CDS_SESSION_EXEC_MAX_OUTPUT_CHARS`=100k。
+   - 输出与 /execute 同一 T5 DLP 网关：critical 阻断（永不释放），其余经 redaction 释放；审计记录命令 sha256 + 500 字符预览。
+   - 密钥边界：注入 `CDS_DEK_HEX`（文件解密所需），**不**注入原始会话密钥到交互 shell。
+2. **logs / usage 观测端点**：
+   - `GET /{id}/logs?limit&since&action`：会话审计轨迹 tail（follow 式轮询流），`since` 取上页 `latest_created_at` 增量拉取；`GET /{id}/audit`（沙箱内活动事件）保持不变。
+   - `GET /{id}/usage`：工作区文件数/字节、上传文件、快照数/字节、超时/续期状态一览。
+3. **会话模板（对照 CubeSandbox 模板预装环境）**：
+   - 内置注册表：`empty` / `python-analysis`（analysis.py + requirements.txt + README）/ `duckdb-query`（query.py + `CDS_DUCKDB_MODE` env）；`CDS_SESSION_TEMPLATES_JSON` 可扩展覆盖；`register_template()` 供编程注册。
+   - 创建时校验（未知模板 400，**先于** provision，杜绝孤儿容器）；provision 成功后 best-effort 种子写入（失败审计 `sandbox.template_seed_failed`，会话保持可用——便利特性不阻断）；模板 env 持久化于 `resource_limits.template_env` 并注入每次 execute/exec。
+   - 模板文件经 session file store 写入（索引登记、限额生效），**不加密**——样板代码零配置可读。
+   - `GET /session-templates` 列表端点：**注册在 `/{session_id}` 之前**，规避 FastAPI UUID 参数吞噬字面路径（否则 422）。
+4. **下载脱敏（非 critical redaction）**：文本文件命中非 critical 发现时经 inspector 重写为 `[REDACTED:*]` 后释放（`X-CDS-Output-Review: redacted; findings=N` + 审计 `sandbox.file_download_redacted`）；二进制无法可靠脱敏，原文释放并在 header 披露发现数；critical 仍 409 永不释放。
+5. **快照 GC**：`terminate_session` 终止时移除快照归档目录（`CDS_SESSION_SNAPSHOT_GC_ON_TERMINATE=true` 默认开；置 false 保留"终止后恢复"运维逃生口）。
+6. **Python SDK（`sdk/`）**：`cds-sdk` 包（仅依赖 httpx）：会话生命周期（create 含 template / execute / exec_command / pause / resume / refresh / terminate / wait_for_status 轮询）、文件（upload 支持 bytes/文件对象/路径、download 返回 bytes、delete）、快照四操作、logs/usage、错误统一 `CDSError(status, detail)`；`pip install ./sdk` 即用。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| 本地：SDK + 模板注册表（纯 Python） | **15 passed / 2 skipped**（POSIX 项 Windows 跳过） |
+| 本地：exec/logs/usage 端点（TestClient + 假运行时） | **13 passed / 15 skipped**（POSIX 链路远程跑） |
+| 远程统一验证（实时 API e2e + 全量 pytest） | 后台脱离运行中，结果落 `/root/cds-test/verify_r40.log`（完成后回填） |
+
+**仍未实施**：WebSocket PTY 交互终端（exec 轮询为过渡形态）、前端会话工作台集成（Round 41 目标）、overlayfs 层叠快照（P2，硬件/内核门禁）、自动定时快照、输出文件浏览 API。
+
+---
+
+## 38. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1627,6 +1663,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 | Round 36 远程 Linux 验证（100.112.3.247） | 通过 | 远程 compileall 通过；RAG+安全矩阵聚焦 54 passed；全量 **2271 passed / 10 failed / 16 errors**（+60 passed vs 远程旧基线，失败集完全相同，零新增回归）；剩余失败全部环境门禁（cgroup v1 只读 / e2e 无 CDS 服务） |
 | Round 37 远程 e2e 闭环 + 合约签名修复 | 通过 | 三文件 e2e 57 passed（3 failed 清零）；合约相关 6 文件 53 passed 零回归；实时 API full-lifecycle **16/16**（真实 SM2 双方签名闭环）；test_p0 15 passed；全量 2275 passed / 8 failed / 16 errors（8 failed 全为 cgroup 环境门禁，16 errors 为无实时 API 的预期形态且已 16/16 单独验证） |
 | Round 39 可用性三件套 | 通过 | 新单测 21 passed（远程 Linux）；实时 e2e **17/17**（含 files/快照回滚/暂停恢复全链 + T5 阻断 + Alembic 0002 实跑）；受影响回归全绿；全量见 pytest_r39.log |
+| Round 40 交互与生态 | 本地通过，远程统一验证后台运行 | 本地 28 passed（SDK/模板/exec/logs/usage 端点 + e2e 扩展逻辑）；远程 verify_r40.log 完成后回填 |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
@@ -1635,7 +1672,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 38. 后续循环规则
+## 39. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。
