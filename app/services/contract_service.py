@@ -87,11 +87,16 @@ class ContractService:
         result = await db.execute(query)
         return list(result.scalars().all())
 
-    async def sign(self, db: AsyncSession, contract_id: uuid.UUID, user_id: uuid.UUID, signature: str) -> Contract:
+    async def sign(self, db: AsyncSession, contract_id: uuid.UUID, user_id: uuid.UUID,
+                   signature: str, timestamp: str) -> Contract:
         """Sign a contract with SM2 signature verification.
 
         Both parties must sign for the contract to become active.
         Signature is verified against the user's SM2 public key from their certificate.
+
+        The canonical payload embeds the client-supplied ``timestamp`` (the
+        client must be able to construct the payload before signing), and the
+        timestamp is freshness-checked to bound replay.
         """
         contract = await self.get_by_id(db, contract_id)
         if not contract:
@@ -105,10 +110,20 @@ class ContractService:
         if not user_obj:
             raise ValueError("User not found")
 
+        # Replay bound: the signed timestamp must be within ±300s of now.
+        try:
+            signed_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("Signature timestamp must be ISO-8601")
+        if signed_at.tzinfo is None:
+            signed_at = signed_at.replace(tzinfo=timezone.utc)
+        if abs((datetime.now(timezone.utc) - signed_at).total_seconds()) > 300:
+            raise ValueError("Signature timestamp stale — provide a fresh timestamp (±300s)")
+
         party_role = "provider" if user_id == contract.provider_id else "buyer"
         sign_data = crypto_service.contract_sign_data(
             str(contract.id), contract.contract_no, party_role,
-            datetime.now(timezone.utc).isoformat(),
+            timestamp,
             purpose=contract.purpose,
             purpose_scope=contract.purpose_scope,
         )

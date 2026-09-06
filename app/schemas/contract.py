@@ -108,12 +108,26 @@ class ContractCreate(BaseModel):
 
 class ContractSign(BaseModel):
     signature: str  # SM2 signature hex
+    # ISO-8601 UTC timestamp the client signed over. The canonical sign
+    # payload embeds it, so the client can build the payload before signing;
+    # the server enforces freshness (±300s) to bound replay.
+    timestamp: str
 
     @field_validator("signature")
     @classmethod
     def signature_not_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Signature cannot be empty")
+        return v
+
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_parseable(cls, v: str) -> str:
+        from datetime import datetime as _dt
+        try:
+            _dt.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise ValueError(f"timestamp must be ISO-8601: {e}")
         return v
 
 

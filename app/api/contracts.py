@@ -150,7 +150,7 @@ async def sign_contract(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        contract = await contract_service.sign(db, contract_id, current_user.id, body.signature)
+        contract = await contract_service.sign(db, contract_id, current_user.id, body.signature, body.timestamp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
