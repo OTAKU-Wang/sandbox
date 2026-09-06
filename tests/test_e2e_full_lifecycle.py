@@ -40,19 +40,40 @@ def rate_limit_delay():
     time.sleep(2.0)
 
 
+def _auth_post_with_429_retry(url: str, payload: dict):
+    """POST with 20s-step retry on 429 (sliding 60s window must age out)."""
+    for attempt in range(4):
+        resp = httpx.post(url, json=payload)
+        if resp.status_code != 429:
+            return resp
+        time.sleep(20)
+    return resp
+
+
+def _live_429(method, url: str, **kwargs):
+    """Any-method request with 20s-step retry on 429 — for the usability E2E
+    which bursts well past the 60 req/min rate limit."""
+    for attempt in range(4):
+        resp = method(url, **kwargs)
+        if resp.status_code != 429:
+            return resp
+        time.sleep(20)
+    return resp
+
+
 @pytest.fixture
 def provider_token():
     """Register and login as data provider."""
-    resp = request_with_retry(httpx.post, f"{API}/auth/register", json={
+    resp = _auth_post_with_429_retry(f"{API}/auth/register", {
         "username": "provider_e2e",
         "password": "TestPass123!",
         "email": "provider@test.com",
         "role": "data_provider",
     })
-    if resp.status_code == 200:
+    if resp.status_code in (200, 201) and "access_token" in resp.json():
         return resp.json()["access_token"]
     # Already registered, login instead
-    resp = request_with_retry(httpx.post, f"{API}/auth/login", json={
+    resp = _auth_post_with_429_retry(f"{API}/auth/login", {
         "username": "provider_e2e",
         "password": "TestPass123!",
     })
@@ -62,15 +83,15 @@ def provider_token():
 @pytest.fixture
 def buyer_token():
     """Register and login as data buyer."""
-    resp = request_with_retry(httpx.post, f"{API}/auth/register", json={
+    resp = _auth_post_with_429_retry(f"{API}/auth/register", {
         "username": "buyer_e2e",
         "password": "TestPass123!",
         "email": "buyer@test.com",
         "role": "buyer",
     })
-    if resp.status_code == 200:
+    if resp.status_code in (200, 201) and "access_token" in resp.json():
         return resp.json()["access_token"]
-    resp = request_with_retry(httpx.post, f"{API}/auth/login", json={
+    resp = _auth_post_with_429_retry(f"{API}/auth/login", {
         "username": "buyer_e2e",
         "password": "TestPass123!",
     })
@@ -394,7 +415,106 @@ class TestFullLifecycle:
         # This endpoint may not exist yet, so we just check it doesn't 500
         assert resp.status_code in (200, 404)
 
-    def test_16_cleanup(self, provider_token, admin_token):
+    def test_16_sandbox_usability(self, buyer_token):
+        """Round 39 usability closed loop on a LIVE session: files → snapshot →
+        mutate → rollback → verify → pause → refresh → resume → cleanup.
+
+        Requires a provisioned session (bwrap on the verification host); when
+        no live API is reachable this skips instead of erroring.
+        """
+        if not hasattr(TestFullLifecycle, 'product_id') or not hasattr(TestFullLifecycle, 'contract_id'):
+            pytest.skip("Product/contract not created in previous steps")
+        try:
+            _live_429(httpx.get, f"{BASE_URL}/health", timeout=3)
+        except Exception:
+            pytest.skip("Live API not reachable (in-process suite run)")
+
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions", json={
+            "data_product_id": TestFullLifecycle.product_id,
+            "contract_id": TestFullLifecycle.contract_id,
+            "sandbox_level": "L3",
+            "sandbox_mode": "structured_query",
+            "timeout_seconds": 3600,
+        }, headers=auth(buyer_token))
+        assert resp.status_code == 201, f"Create session failed: {resp.text}"
+        sid = resp.json()["id"]
+        status = resp.json()["status"]
+        assert status in ("ready", "running", "provisioning", "pending"), \
+            f"Session not active: {status}"
+
+        # ── files: upload → list → download ──────────────────────
+        csv_payload = b"id,amount\n1,900\n2,800\n"
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/files",
+                          files={"file": ("usability.csv", csv_payload, "text/csv")},
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200, f"File upload failed: {resp.text}"
+        assert resp.json()["filename"] == "usability.csv"
+
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/files", headers=auth(buyer_token))
+        assert resp.status_code == 200
+        assert any(f["filename"] == "usability.csv" for f in resp.json()["files"])
+
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/files/usability.csv",
+                         headers=auth(buyer_token))
+        assert resp.status_code == 200, f"File download failed: {resp.text}"
+        assert resp.content == csv_payload
+
+        # PII upload must be blocked on download by the T5 output review.
+        pii = "身份证 11010119900307867X，手机 13800138000"
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/files",
+                          files={"file": ("pii.txt", pii.encode(), "text/plain")},
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/files/pii.txt",
+                         headers=auth(buyer_token))
+        assert resp.status_code == 409, "PII file download must be blocked by output review"
+
+        # ── snapshot → mutate → rollback → verify ────────────────
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/snapshots",
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200, f"Snapshot failed: {resp.text}"
+        snap_id = resp.json()["snapshot_id"]
+
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/files",
+                          files={"file": ("post-snap.txt", b"after snapshot", "text/plain")},
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200
+
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/snapshots/{snap_id}/rollback",
+                          headers=auth(buyer_token))
+        assert resp.status_code == 200, f"Rollback failed: {resp.text}"
+
+        resp = _live_429(httpx.get, f"{API}/sandbox-sessions/{sid}/files", headers=auth(buyer_token))
+        names = [f["filename"] for f in resp.json()["files"]]
+        assert "usability.csv" in names and "post-snap.txt" not in names, \
+            "rollback must restore the snapshot state"
+
+        # ── pause → refresh → resume (state permitting) ──────────
+        if status in ("ready", "running"):
+            resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/pause", headers=auth(buyer_token))
+            assert resp.status_code == 200, f"Pause failed: {resp.text}"
+            assert resp.json()["status"] == "suspended"
+
+            resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/refreshes",
+                              headers=auth(buyer_token))
+            assert resp.status_code == 200, f"Refresh failed: {resp.text}"
+            assert resp.json()["extended_seconds"] == 3600
+
+            resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/resume", headers=auth(buyer_token))
+            assert resp.status_code == 200
+            assert resp.json()["status"] == status
+
+        # ── cleanup: delete file + snapshot + terminate session ──
+        resp = _live_429(httpx.delete, f"{API}/sandbox-sessions/{sid}/files/usability.csv",
+                            headers=auth(buyer_token))
+        assert resp.status_code == 200
+        resp = _live_429(httpx.delete, f"{API}/sandbox-sessions/{sid}/snapshots/{snap_id}",
+                            headers=auth(buyer_token))
+        assert resp.status_code == 200
+        resp = _live_429(httpx.post, f"{API}/sandbox-sessions/{sid}/terminate", headers=auth(buyer_token))
+        assert resp.status_code == 200
+
+    def test_17_cleanup(self, provider_token, admin_token):
         """Clean up test data."""
         if hasattr(TestFullLifecycle, 'product_id'):
             # Delete product
