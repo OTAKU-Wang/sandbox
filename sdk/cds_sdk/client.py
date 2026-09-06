@@ -14,13 +14,76 @@ _TERMINAL_STATUSES = ("completed", "terminated", "failed", "expired")
 
 
 class CDSError(RuntimeError):
-    """API error with the HTTP status and the server-provided detail."""
+    """Legacy error type (kept for backward compatibility).
+
+    New code should catch :class:`CDSApiError`, which exposes the W2 error
+    contract fields (code / request_id / retry_after).
+    """
 
     def __init__(self, status_code: int, detail: Any, url: str = ""):
         self.status_code = status_code
         self.detail = detail
         self.url = url
         super().__init__(f"CDSError {status_code} on {url}: {detail}")
+
+
+class CDSApiError(CDSError):
+    """Parsed W2 error-contract response.
+
+    Attributes mirror the unified body ``{code, message, detail, request_id}``;
+    ``retry_after`` is populated from the ``Retry-After`` response header when
+    present (429/503). Responses without a ``code`` field (legacy) fall back
+    to ``HTTP_{status}``.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: Any,
+        url: str = "",
+        *,
+        code: str | None = None,
+        message: str | None = None,
+        request_id: str | None = None,
+        retry_after: int | None = None,
+        headers: dict | None = None,
+    ):
+        super().__init__(status_code, detail, url)
+        self.code = code or (f"HTTP_{status_code}" if not isinstance(detail, dict) or "code" not in detail else str(detail["code"]))
+        self.message = message or (
+            str(detail.get("message", detail)) if isinstance(detail, dict) else str(detail)
+        )
+        self.request_id = request_id or (
+            str(detail.get("request_id")) if isinstance(detail, dict) and detail.get("request_id") else None
+        )
+        if retry_after is None and headers:
+            ra = headers.get("Retry-After") or headers.get("retry-after")
+            if ra is not None:
+                try:
+                    retry_after = int(ra)
+                except ValueError:
+                    retry_after = None
+        self.retry_after = retry_after
+        self.headers = headers or {}
+
+
+def _parse_error(resp: httpx.Response, path: str) -> CDSApiError:
+    """Build a CDSApiError from a non-2xx response (W2 shape or legacy)."""
+    try:
+        payload = resp.json()
+        detail = payload.get("detail", payload)
+    except ValueError:
+        payload = None
+        detail = resp.text
+    return CDSApiError(
+        resp.status_code,
+        detail,
+        path,
+        code=str(payload.get("code")) if isinstance(payload, dict) and payload.get("code") else None,
+        message=str(payload.get("message")) if isinstance(payload, dict) and payload.get("message") else None,
+        request_id=str(payload.get("request_id")) if isinstance(payload, dict) and payload.get("request_id") else None,
+        headers=dict(resp.headers),
+    )
 
 
 class CDSClient:
@@ -46,11 +109,7 @@ class CDSClient:
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._client.request(method, path, **kwargs)
         if resp.status_code >= 400:
-            try:
-                detail = resp.json().get("detail", resp.text)
-            except ValueError:
-                detail = resp.text
-            raise CDSError(resp.status_code, detail, path)
+            raise _parse_error(resp, path)
         if resp.status_code == 204 or not resp.content:
             return None
         return resp.json()
@@ -189,11 +248,7 @@ class CDSClient:
     def download_file(self, session_id: str, filename: str) -> bytes:
         resp = self._client.get(f"/api/v1/sandbox-sessions/{session_id}/files/{filename}")
         if resp.status_code >= 400:
-            try:
-                detail = resp.json().get("detail", resp.text)
-            except ValueError:
-                detail = resp.text
-            raise CDSError(resp.status_code, detail, f"/files/{filename}")
+            raise _parse_error(resp, f"/files/{filename}")
         return resp.content
 
     def delete_file(self, session_id: str, filename: str) -> dict:

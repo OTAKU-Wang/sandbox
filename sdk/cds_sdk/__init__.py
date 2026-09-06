@@ -16,7 +16,7 @@ Quickstart::
     result = client.execute(session["id"], "print(open('files/data.csv').read())")
     print(result["output"])
 """
-from .client import CDSClient, CDSError
+from .client import CDSApiError, CDSClient, CDSError
 
-__all__ = ["CDSClient", "CDSError"]
+__all__ = ["CDSClient", "CDSError", "CDSApiError"]
 __version__ = "0.1.0"
