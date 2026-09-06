@@ -1468,6 +1468,20 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 | `python -m compileall -q app/core/config.py` | 通过 |
 | 全量基线（Round 35） | 2143 passed / 75 failed / 16 error 不变（本改动不新增/不消除既有失败，部署文件非测试覆盖路径） |
 
+### 远程 Linux 环境验证（Round 36 追加，2026-09-06）
+
+在远程验证机 `100.112.3.247:22022`（openEuler 22.03 / Python 3.11.9 / bubblewrap 0.4.1 / Docker 26.1.3，`/root/cds-test` 部署目录）同步 T11 RAG 一期 + Round 36 最新代码后执行真实 Linux 验证；全程仅使用 `/root/cds-test` 内 venv，未触碰该机既有 fabric_* 服务栈（Trino/Airflow/MinIO/ES/OPA/MySQL/Postgres/Redis）。
+
+| 验证项 | 结果 |
+|---|---|
+| `compileall -q app tests alembic` | COMPILE_OK |
+| 聚焦新工作：RAG 5 文件（40 用例）+ test_security_config_matrix + test_kms_attestation_required | **54 passed 全绿**（Windows 上部分依赖 `resource` 的用例在 Linux 真实通过） |
+| 全量 `pytest -q`（新代码 Linux 首次完整基线） | **2271 passed / 10 failed / 3 skipped / 16 errors（20:05）** |
+| 与远程旧基线对比（旧代码 2211 passed / 10 failed / 16 errors） | **+60 passed，零新增回归**；10 failed / 16 errors 与旧基线为完全相同的测试集 |
+| 失败根因分类（全部环境门禁，非代码回归） | ① 6 个 bwrap 执行用例：`cgroup creation failed: [Errno 30] Read-only file system '/sys/fs/cgroup/cds-l0'`——该机 `/sys/fs/cgroup` 为只读 tmpfs 且为 cgroup v1（`/proc/1/cgroup` 显示自身即容器），无法创建 cgroup v2 资源限制（bwrap 命名空间/seccomp 隔离本身正常）；② 4+16 个 e2e 用例：`httpx.ConnectTimeout`——需要运行中的 CDS API 服务，该机仅有 fabric 数据栈、未启动 CDS 后端 |
+
+**结论**：T11 RAG 一期与 Round 36 fail-closed 改动在真实 Linux 环境验证通过（+60 用例全绿、零回归）；远程剩余失败全部为环境门禁项，与产品化验收约束（真实集群/服务依赖）一致。远程完整基线已固化为 `pytest_new_baseline.log`（2271/10/16）。
+
 **仍未实施**：T11 二期、T8 真链 e2e、T9 LAC、P2 六方向、FG-001..FG-016（硬件/外部系统/e2e 门禁，按约束持续跟踪为产品化验收项）。真实 TEE/GPU 落地前，`ALLOW_SIMULATION` 等硬件门禁开关保持 true 并如实 WARN。
 
 ---
@@ -1513,6 +1527,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 | Round 32-34 编译/聚焦单测 | 通过 | 本机 compileall 通过；P0 5 测试文件 24 用例 + P1 5 测试文件 24 用例 + Round34 3 测试文件 13 用例全绿；受影响回归 111 passed；全量 2103 passed / 75 failed / 16 error 零回归 |
 | Round 35（RAG 一期）编译/聚焦单测 | 通过 | 本机 `python -m compileall -q app tests alembic` 通过；RAG 5 测试文件 40 用例全绿；受影响回归 111 passed；全量 2143 passed / 75 failed / 16 error（新增恰为 40 个 RAG 用例，失败/error 与基线一致，零回归）；前端新增 ragApi.ts/TaskType 枚举（本机无 node_modules 未构建，编译级） |
 | Round 36（部署 fail-closed）聚焦单测 | 通过 | 本机 `python -m compileall -q app/core/config.py` 通过；test_security_config_matrix + test_kms_attestation_required 14 passed；新增 SECCOMP/HSM 生产 raise 用例通过；受影响回归 67 passed / 7 既有 Windows resource 收集错误（零新增回归）；部署文件（docker-compose.prod.yml/.env.prod）非测试覆盖路径，全量基线 2143/75/16 不变 |
+| Round 36 远程 Linux 验证（100.112.3.247） | 通过 | 远程 compileall 通过；RAG+安全矩阵聚焦 54 passed；全量 **2271 passed / 10 failed / 16 errors**（+60 passed vs 远程旧基线，失败集完全相同，零新增回归）；剩余失败全部环境门禁（cgroup v1 只读 / e2e 无 CDS 服务） |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
