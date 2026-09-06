@@ -35,7 +35,11 @@ async def test_contract_lifecycle_draft_to_active(client: AsyncClient, auth_head
     contract_id, buyer_id = await _setup_contract(client, auth_headers)
 
     # Provider signs — without SM2 certificate, rejected (P0-3 fix)
-    r1 = await client.post(f"/api/v1/contracts/{contract_id}/sign", json={"signature": "aa"}, headers=auth_headers)
+    from datetime import datetime, timezone
+    r1 = await client.post(f"/api/v1/contracts/{contract_id}/sign", json={
+        "signature": "aa",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }, headers=auth_headers)
     assert r1.status_code == 400  # No valid certificate = reject
 
 

@@ -189,7 +189,10 @@ print(json.dumps(data))
     result = resp.json()
     assert result["exit_code"] == 0
     import json
-    output = json.loads(result["output"].strip())
+    # The T5 output review appends an invisible zero-width-character
+    # watermark after the payload (designed); the JSON payload itself is the
+    # first output line.
+    output = json.loads(result["output"].strip().splitlines()[0])
     assert output["records"] == 3
     assert output["items"] == [1, 2, 3]
 

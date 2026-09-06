@@ -79,11 +79,20 @@ def buyer_token():
 
 @pytest.fixture
 def admin_token():
-    """Login as admin."""
-    resp = request_with_retry(httpx.post, f"{API}/auth/login", json={
-        "username": "admin",
-        "password": os.environ.get("CDS_ADMIN_PASSWORD", "AdminPass123!"),
-    })
+    """Login as admin.
+
+    The suite bursts well past the 60 req/min rate limit (per-IP sliding
+    60s window), so on 429 wait long enough for older requests to age out
+    (20s steps; one full window is 60s) instead of fast-retrying.
+    """
+    for attempt in range(4):
+        resp = httpx.post(f"{API}/auth/login", json={
+            "username": "admin",
+            "password": os.environ.get("CDS_ADMIN_PASSWORD", "AdminPass123!"),
+        })
+        if resp.status_code != 429:
+            break
+        time.sleep(20)
     data = resp.json()
     if "access_token" not in data:
         pytest.skip(f"Admin login failed: {resp.status_code} {data}")
@@ -294,19 +303,58 @@ class TestFullLifecycle:
         TestFullLifecycle.contract_id = resp.json()["id"]
 
     def test_14_contract_activate(self, provider_token, buyer_token):
-        """Activate contract (triggers auto-fulfillment)."""
+        """Activate contract via REAL SM2 signatures from both parties.
+
+        Mirrors an external client: generate SM2 keypairs, build the canonical
+        sign payload (CDS-SIGN|id|no|role|timestamp[|purpose...]) from the
+        contract detail, sign it server-side via /auth/sign-data, then submit
+        {signature, timestamp}. The server verifies the SM2 signature against
+        the stored public key and enforces timestamp freshness (±300s).
+        """
         if not hasattr(TestFullLifecycle, 'contract_id'):
             pytest.skip("Contract not created in previous step")
-        # Both parties must sign
+
+        from datetime import datetime, timezone
+
+        def _sm2_sign(token: str, party_role: str) -> dict:
+            # 1. Generate this user's SM2 keypair (public key stored server-side)
+            resp = request_with_retry(httpx.post,
+                f"{API}/auth/generate-sm2-keys", headers=auth(token))
+            assert resp.status_code == 200, f"SM2 keygen failed: {resp.text}"
+            private_key = resp.json()["private_key"]
+
+            # 2. Fetch contract detail to build the canonical payload
+            resp = request_with_retry(httpx.get,
+                f"{API}/contracts/{TestFullLifecycle.contract_id}", headers=auth(token))
+            assert resp.status_code == 200, f"Get contract failed: {resp.text}"
+            c = resp.json()
+
+            # 3. Build the canonical payload exactly as the server verifies it
+            ts = datetime.now(timezone.utc).isoformat()
+            payload = f"CDS-SIGN|{c['id']}|{c['contract_no']}|{party_role}|{ts}"
+            if c.get("purpose"):
+                payload += f"|purpose:{c['purpose']}"
+            if c.get("purpose_scope"):
+                payload += f"|purpose_scope:{','.join(str(s) for s in c['purpose_scope'])}"
+
+            # 4. Sign with the private key via the sign-data endpoint
+            resp = request_with_retry(httpx.post,
+                f"{API}/auth/sign-data",
+                json={"data": payload, "private_key": private_key},
+                headers=auth(token))
+            assert resp.status_code == 200, f"SM2 sign failed: {resp.text}"
+            return {"signature": resp.json()["signature"], "timestamp": ts}
+
+        # Both parties sign with real SM2 signatures
         resp = request_with_retry(httpx.post,
             f"{API}/contracts/{TestFullLifecycle.contract_id}/sign",
-            json={"signature": "test-provider-sig"},
+            json=_sm2_sign(provider_token, "provider"),
             headers=auth(provider_token),
         )
         assert resp.status_code == 200, f"Provider sign failed: {resp.text}"
         resp = request_with_retry(httpx.post,
             f"{API}/contracts/{TestFullLifecycle.contract_id}/sign",
-            json={"signature": "test-buyer-sig"},
+            json=_sm2_sign(buyer_token, "buyer"),
             headers=auth(buyer_token),
         )
         assert resp.status_code == 200, f"Buyer sign failed: {resp.text}"

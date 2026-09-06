@@ -103,23 +103,69 @@ async def test_e2e_duckdb_blocked_operations(client: AsyncClient, operator_heade
 
 @pytest.mark.asyncio
 async def test_e2e_duckdb_buyer_read_only(client: AsyncClient, operator_headers: dict, auth_headers: dict):
-    """E2E: buyer can query but not create tables."""
+    """E2E: buyer can query their own session read-only; ownership enforced (G-073).
+
+    The session owner (a data_provider) queries via the read-only SQL
+    allowlist; destructive SQL is rejected with 400. Operators/admins bypass
+    ownership by design; another data_provider on the same session gets 403.
+    """
     session_id = "e2e-buyer-1"
 
-    # Operator creates table
-    await client.post("/api/v1/sandbox-db/create-table", json={
+    # Buyer (data_provider) creates a table in their own session — buyer
+    # becomes the engine owner (create-table allows DATA_PROVIDER).
+    resp = await client.post("/api/v1/sandbox-db/create-table", json={
         "session_id": session_id,
         "table_name": "t",
         "data": [{"x": 42}],
-    }, headers=operator_headers)
+    }, headers=auth_headers)
+    assert resp.status_code == 200
 
-    # Buyer can query
+    # Destructive SQL rejected by the read-only allowlist
+    resp = await client.post("/api/v1/sandbox-db/query", json={
+        "session_id": session_id,
+        "sql": "DELETE FROM t",
+    }, headers=auth_headers)
+    assert resp.status_code == 400
+    assert "not allowed" in resp.json()["detail"].lower()
+
+    # Buyer can query their own session
     resp = await client.post("/api/v1/sandbox-db/query", json={
         "session_id": session_id,
         "sql": "SELECT * FROM t",
     }, headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["row_count"] == 1
+
+    # Operator/admin bypass ownership checks by design
+    resp = await client.post("/api/v1/sandbox-db/query", json={
+        "session_id": session_id,
+        "sql": "SELECT * FROM t",
+    }, headers=operator_headers)
+    assert resp.status_code == 200
+
+    # Another data_provider is not the owner — 403 (G-073)
+    other_h, _ = await _register_other_provider(client)
+    resp = await client.post("/api/v1/sandbox-db/query", json={
+        "session_id": session_id,
+        "sql": "SELECT * FROM t",
+    }, headers=other_h)
+    assert resp.status_code == 403
+    assert "not your sandbox database session" in resp.json()["detail"].lower()
+
+
+async def _register_other_provider(client: AsyncClient) -> tuple[dict, str]:
+    """Register a second data_provider and return (headers, user_id)."""
+    import uuid as _uuid
+    unique = _uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/auth/register", json={
+        "username": f"other_{unique}",
+        "email": f"other_{unique}@example.com",
+        "password": "testpass123",
+        "role": "data_provider",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    return {"Authorization": f"Bearer {data['access_token']}"}, data["user"]["id"]
 
 
 # ─── Task Queue E2E ──────────────────────────────────────────────────

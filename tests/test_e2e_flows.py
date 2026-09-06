@@ -47,10 +47,34 @@ async def _generate_sm2_keys(client: AsyncClient, headers: dict) -> str:
 
 
 async def _sign_contract(client: AsyncClient, contract_id: str, headers: dict, private_key: str):
-    """Sign a contract using SM2 keys."""
-    # First sign the contract data
+    """Sign a contract using SM2 keys, mirroring an external client.
+
+    Builds the canonical payload (CDS-SIGN|id|contract_no|role|timestamp
+    [|purpose...]) from the contract detail, signs it via /auth/sign-data,
+    then submits {signature, timestamp} to /contracts/{id}/sign.
+    """
+    from datetime import datetime, timezone
+
+    detail = await client.get(f"/api/v1/contracts/{contract_id}", headers=headers)
+    if detail.status_code != 200:
+        return detail
+    c = detail.json()
+
+    resp = await client.get("/api/v1/auth/me", headers=headers)
+    if resp.status_code != 200:
+        return resp
+    user_id = resp.json()["id"]
+    party_role = "provider" if user_id == c["provider_id"] else "buyer"
+
+    ts = datetime.now(timezone.utc).isoformat()
+    payload = f"CDS-SIGN|{c['id']}|{c['contract_no']}|{party_role}|{ts}"
+    if c.get("purpose"):
+        payload += f"|purpose:{c['purpose']}"
+    if c.get("purpose_scope"):
+        payload += f"|purpose_scope:{','.join(str(s) for s in c['purpose_scope'])}"
+
     sign_resp = await client.post("/api/v1/auth/sign-data", json={
-        "data": contract_id,
+        "data": payload,
         "private_key": private_key,
     }, headers=headers)
     if sign_resp.status_code != 200:
@@ -58,7 +82,7 @@ async def _sign_contract(client: AsyncClient, contract_id: str, headers: dict, p
     signature = sign_resp.json()["signature"]
     # Then submit the signature to the contract
     return await client.post(f"/api/v1/contracts/{contract_id}/sign",
-                            json={"signature": signature}, headers=headers)
+                            json={"signature": signature, "timestamp": ts}, headers=headers)
 
 
 async def _create_resource(client: AsyncClient, headers: dict, name: str = "E2E Resource") -> dict:
@@ -398,7 +422,12 @@ async def test_e2e_product_owner_only_can_delete(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_e2e_data_product_lifecycle(client: AsyncClient, admin_headers: dict):
-    """Create → Update → Publish → Use in contract → Delete."""
+    """Create → Update → Publish → Use in sandbox session → deletion policy.
+
+    Deletion follows the designed lifecycle policy (Round 13 hardening):
+    only DRAFT products can be deleted — a published product returns 409,
+    and a draft product deletes cleanly (204 → 404).
+    """
     headers, _ = await _register(client, "data_provider", "lifecycle")
 
     # Create
@@ -422,12 +451,17 @@ async def test_e2e_data_product_lifecycle(client: AsyncClient, admin_headers: di
     }, headers=headers)
     assert resp.status_code == 201
 
-    # Delete
+    # A published (non-draft) product cannot be deleted — 409 by design
     resp = await client.delete(f"/api/v1/data-products/{product['id']}", headers=headers)
+    assert resp.status_code == 409
+
+    # A draft product deletes cleanly
+    draft = await _create_product(client, headers, "Lifecycle Draft Product")
+    resp = await client.delete(f"/api/v1/data-products/{draft['id']}", headers=headers)
     assert resp.status_code == 204
 
     # Verify deleted
-    resp = await client.get(f"/api/v1/data-products/{product['id']}", headers=headers)
+    resp = await client.get(f"/api/v1/data-products/{draft['id']}", headers=headers)
     assert resp.status_code == 404
 
 

@@ -110,8 +110,10 @@ async def test_sign_contract(client: AsyncClient, auth_headers: dict):
     contract_id = contract_resp.json()["id"]
 
     # Provider signs — without SM2 certificate, should be rejected (P0-3 fix)
+    from datetime import datetime, timezone
     resp = await client.post(f"/api/v1/contracts/{contract_id}/sign", json={
         "signature": "04aabbccdd",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }, headers=auth_headers)
     # After P0-3: signing without valid certificate returns 400
     assert resp.status_code == 400

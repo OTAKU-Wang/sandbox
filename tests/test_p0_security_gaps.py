@@ -15,6 +15,7 @@ Gaps covered:
 """
 import pytest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -118,6 +119,7 @@ class TestSM2SignatureNoFallback:
                 contract_id=contract_id,
                 user_id=user_id,
                 signature="fake_sig",
+                timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
 
