@@ -52,6 +52,16 @@ export const SandboxSessionStatus = {
 } as const;
 export type SandboxSessionStatus = typeof SandboxSessionStatus[keyof typeof SandboxSessionStatus];
 
+export const TaskType = {
+  QUERY: 'query',
+  TRAIN: 'train',
+  ANALYZE: 'analyze',
+  EXPORT: 'export',
+  CUSTOM: 'custom',
+  RAG_QUERY: 'rag_query',
+} as const;
+export type TaskType = typeof TaskType[keyof typeof TaskType];
+
 export const ProductType = {
   STRUCTURED: 'structured',
   UNSTRUCTURED: 'unstructured',
