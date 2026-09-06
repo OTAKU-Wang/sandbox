@@ -200,7 +200,7 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | DP 预算状态 | PostgreSQL `MATERIALIZED VIEW dp_budget_status` | SQLAlchemy 模型表 `dp_budget_status`，由 Ledger 写穿透维护 | 项目单测使用 SQLite，开发模式依赖 `Base.metadata.create_all()`；真实物化视图会破坏跨数据库测试。表快照能提供同等读模型。 |
 | FISCO BCOS 存证 | 强依赖真实联盟链节点 | PG append-only 哈希链为默认真实适配器，FISCO 作为可替换适配器 | 当前目标是逻辑正确和单测可跑；无链环境时 PG 哈希链更稳定，也满足不可篡改审计的本地验证。 |
 | SGX/GPU/PG-in-TEE | 真实硬件运行时 | 保留接口、模拟器和降级路径 | 真实硬件无法通过普通单元测试验证，不应阻塞软件闭环；后续用硬件集成测试覆盖。 |
-| L1 TEE 无硬件行为 | 规格默认 L1 是真实 TEE | 无 TEE 环境时 L1 明确作为普通软件密态沙箱运行，使用 `software_hash` attestation；有硬件信号且配置 runner/attester 时才进入硬件路径 | 防止无硬件环境伪造 SGX 证明；同时让部署在普通节点、SGX/TDX/SEV-SNP/iTrustee 节点上都有可解释、可单测的行为。 |
+| L1 TEE 无硬件行为 | 规格默认 L1 是真实 TEE | 无 TEE 环境时 L1 明确作为普通软件密态沙箱运行，使用 `software_hash` attestation；有硬件信号且配置 runner/attester 时才进入硬件路径 | 防止无硬件环境伪造 SGX 证明；同时让部署在普通节点、SGX/TDX/SEV-SNP/iTrustee 节点上都有可解释、可单测的行为。**产品决策（2026-09-06）：TEE 硬件为可选开启（opt-in）功能，不作为部署与验收的必需硬件要求**——未配置 `CDS_TEE_HARDWARE_*_CMD` hook 时沙箱全功能可用（软件机密模式、诚实标注 `hardware_available=False`），回归由 `test_sandbox_runtime.py::test_tee_adapter_no_hardware_uses_software_confidential_quote` 与 `test_tee_capability.py` 覆盖。 |
 | K8s/K3s 分布式沙箱 | 真实 K8s/K3s 集群运行沙箱 pod | 当前单元测试覆盖 hardened manifest、NetworkPolicy、ResourceQuota、ready gate、状态映射、runtime 路由、产品入口、kubeconfig 和 Cilium FQDN allowlist；243 可作为后续 K3s e2e 节点 | 当前完成标准是逻辑正确、编译通过、单元测试可跑；已提供适配中国网络的 K3s/k3d 安装脚本，真实集群部署验证不作为本轮阻塞项。 |
 | PG materialized view refresh | 定时刷新或手动 refresh | 写路径同步刷新状态表 | DP 预算属于使用控制关键路径，写穿透比定时刷新更适合实时拒绝。 |
 | 过度细分场景模式 | 9-13 种模式强拆运行时 | 核心场景运行时 + 配置参数 | 降低重复实现，保持策略与输出审查可按配置扩展。 |
@@ -1520,7 +1520,32 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 35. 最终验证状态
+## 35. Round 38 TEE 硬件可选化产品决策确认记录
+
+### 触发条件
+
+用户产品决策："TEE 硬件作为可选开启功能即可，不要求硬件必须有 TEE"。
+
+### 已完成
+
+1. **审计确认代码已完整实现可选语义**（零行为变更）：
+   - 硬件路径仅在 `capability.hardware_available AND CDS_TEE_HARDWARE_EXEC_CMD`（运营者显式配置 hook）时激活（`sandbox_runtime.py` TEEAdapter）。
+   - 未配置 hook 时 L1 明确降级 `software_confidential` + 诚实标注（`hardware_available=False`、`tee_provider="software_confidential"`），沙箱全功能可用。
+   - `VerificationLevel.FULL`（硬件 attestation 级验证）无任何强制调用方，纯可选能力；`KMS_REQUIRE_ATTESTATION` 在默认 `ALLOW_SIMULATION=true` 下接受软件 quote。
+   - 远程 Linux 全量 2275 passed 本身即无 TEE 硬件环境下取得。
+2. **决策显式化**：`app/core/config.py` TEE 段注释明确"Hardware TEE is an OPTIONAL opt-in capability, NOT a deployment requirement"及 `TEE_MODE=auto/hardware` 语义（`hardware` 模式为运营者显式选择 TEE 保证时的 fail-closed 声明，非默认要求）；设计裁剪表"L1 TEE 无硬件行为"行补充产品决策与回归测试证据。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `python -m compileall -q app/core/config.py` | 通过 |
+| 既有回归：test_sandbox_runtime（TEE adapter 无 hook 降级 / hook opt-in 激活）+ test_tee_capability | 全绿（Round 21/35 基线覆盖，本轮零行为变更） |
+| 远程全量基线 | 2275 passed / 8 failed / 16 errors（cgroup 环境门禁，与 Round 37 一致） |
+
+---
+
+## 36. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1571,7 +1596,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 36. 后续循环规则
+## 37. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。

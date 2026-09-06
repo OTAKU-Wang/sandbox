@@ -82,8 +82,16 @@ class Settings(BaseSettings):
     FEDERATION_JWT_KEY_REQUIRED: bool = True    # refuse static federation JWT key in prod
 
     # TEE runtime
-    # auto: use hardware when detected and command hooks are configured; otherwise
-    # fall back to ordinary software confidential sandbox isolation.
+    # Hardware TEE is an OPTIONAL opt-in capability, NOT a deployment
+    # requirement: with no hardware hooks configured (the default), L1 runs
+    # as an ordinary software-confidential sandbox with honest labeling
+    # (tee_mode="software_confidential", hardware_available=False) and the
+    # product is fully functional without TEE hardware.
+    # TEE_MODE:
+    #   auto: use hardware only when detected AND the operator has explicitly
+    #         configured the command hooks below; otherwise software path.
+    #   hardware: demand the hardware path (fails closed without it) — an
+    #         explicit operator choice for TEE-guaranteed deployments.
     TEE_MODE: str = "auto"
     TEE_ALLOW_SOFTWARE_FALLBACK: bool = True
     TEE_HARDWARE_PROVISION_CMD: str = ""
