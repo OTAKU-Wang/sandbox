@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 from app.core.database import engine, Base
 from app.core.security import setup_security
 from app.core.redis import get_redis, close_redis
-from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users
+from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
 from app.api import network_policy as network_policy_api
 from app.api import admin
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert  # Ensure tables are created
@@ -183,6 +183,7 @@ app.include_router(field_exposure.router, prefix="/api/v1/field-exposure", tags=
 app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["connectors"])
 app.include_router(network_policy_api.router, prefix="/api/v1/network-policies", tags=["network-policies"])
 app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"])
+app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
 
 # Frontend admin UI (FE-1~FE-5)
 from fastapi.staticfiles import StaticFiles

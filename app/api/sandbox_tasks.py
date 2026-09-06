@@ -68,10 +68,18 @@ async def create_task(
     language: str | None = None,
     timeout_seconds: int = 3600,
     purpose: str | None = None,
+    rag_query: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new sandbox task."""
+    """Create a new sandbox task.
+
+    Gap T11: ``task_type="rag_query"`` takes a natural-language ``rag_query``
+    instead of user ``code`` — the RAG service generates a self-contained
+    runner that retrieves from the session's encrypted corpus INSIDE the
+    sandbox and answers extractively. It flows through the same pipeline
+    (code scan → sandbox run → output gateway) as any other task.
+    """
     # Validate session
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
@@ -83,8 +91,26 @@ async def create_task(
         raise HTTPException(status_code=400, detail=f"Session not ready for tasks (status: {session.status})")
     if not session.container_id:
         raise HTTPException(status_code=400, detail="Session has no container")
-    if not code or not code.strip():
-        raise HTTPException(status_code=422, detail="code cannot be empty")
+
+    # Gap T11: RAG tasks carry a natural-language query instead of code.
+    is_rag = task_type == TaskType.RAG_QUERY.value
+    if is_rag:
+        if code and code.strip():
+            raise HTTPException(status_code=400, detail="code must not be set for task_type=rag_query")
+        if not rag_query or not rag_query.strip():
+            raise HTTPException(status_code=422, detail="rag_query cannot be empty")
+        from app.core.config import get_settings as _get_rag_settings
+        rag_query = rag_query.strip()
+        if len(rag_query) > _get_rag_settings().RAG_QUERY_MAX_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"rag_query exceeds max length ({_get_rag_settings().RAG_QUERY_MAX_CHARS} chars)",
+            )
+        language = "python"
+    else:
+        if not code or not code.strip():
+            raise HTTPException(status_code=422, detail="code cannot be empty")
+
     if timeout_seconds <= 0:
         raise HTTPException(status_code=422, detail="timeout_seconds must be positive")
     if timeout_seconds > session.timeout_seconds:
@@ -97,9 +123,12 @@ async def create_task(
     # Gap A4: enforce the contract purpose limitation for this session.
     await _enforce_task_purpose(db, session, purpose)
 
-    # Hash code if provided
-    code_hash = None
+    # Resolve the code to store/scan: user code for regular tasks, a generated
+    # self-contained RAG runner for RAG_QUERY tasks.
     from app.utils.crypto import sm3_hash
+    if is_rag:
+        from app.services.rag_service import build_rag_runner
+        code = build_rag_runner(rag_query)
     code_hash = sm3_hash(code.encode())
 
     task_id = f"task-{uuid.uuid4().hex[:12]}"
@@ -129,7 +158,12 @@ async def create_task(
     await audit_service.log(
         db, action="sandbox_task.create", resource_type="sandbox_task",
         user_id=current_user.id, resource_id=task_id,
-        detail={"session_id": str(session_id), "task_type": task_type, "purpose": purpose},
+        detail={
+            "session_id": str(session_id),
+            "task_type": task_type,
+            "purpose": purpose,
+            "rag_query_chars": len(rag_query) if is_rag else None,
+        },
     )
 
     return {
@@ -272,6 +306,9 @@ async def submit_task(
             "language": task.language or "python",
             "sandbox_mode": session.sandbox_mode,
             "timeout_seconds": task.timeout_seconds,
+            # Gap T11: system-generated RAG runners are validated against the
+            # trusted template instead of the general user-code import whitelist.
+            "rag_query": task.task_type == "rag_query",
         },
         timeout=task.timeout_seconds,
     )

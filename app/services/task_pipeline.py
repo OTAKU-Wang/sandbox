@@ -323,6 +323,23 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
 
         runtime = await get_sandbox_manager()
         container_id = session.container_id
+
+        # Gap T11: materialize the session's RAG corpus into the sandbox
+        # workspace input (re-encrypted with the session DEK, exactly like
+        # provision) before executing the runner. Missing corpus → the runner
+        # fails closed with a clear missing-index error.
+        rag_corpus = None
+        if task.payload.get("rag_query"):
+            try:
+                from app.services.rag_service import prepare_corpus_for_task
+                workspace = runtime.get_workspace(container_id, session.sandbox_level)
+                if workspace:
+                    rag_corpus = await prepare_corpus_for_task(db, session, workspace)
+                if not rag_corpus:
+                    logger.warning("[Pipeline] RAG corpus unavailable for task %s", task_id)
+            except Exception as e:
+                logger.warning("[Pipeline] RAG corpus materialization failed for task %s: %s", task_id, e)
+
         try:
             from app.services.task_code_security import decrypt_task_code
             code_content = decrypt_task_code(orm_task.code_content)
@@ -410,6 +427,7 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
                 "user_id": str(orm_task.user_id),
                 "sandbox_session_id": str(orm_task.session_id),
                 "sandbox_mode": getattr(session, "sandbox_mode", None),
+                "rag_corpus": rag_corpus,
             }
         except Exception as e:
             orm_task.status = ORMTaskStatus.FAILED.value
@@ -419,7 +437,12 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
 
 
 async def _code_scanning_handler(task: PipelineTask) -> tuple[TaskStatus, dict | None]:
-    """CODE_SCANNING handler — validates code before execution."""
+    """CODE_SCANNING handler — validates code before execution.
+
+    Gap T11: system-generated RAG runners are validated byte-exactly against
+    the trusted template (``validate_rag_runner``) instead of the general
+    user-code import whitelist — the whitelist is never widened.
+    """
     from app.services.code_scanner import CodeScanner
     from app.core.database import async_session
     from app.services.audit_service import audit_service
@@ -429,6 +452,31 @@ async def _code_scanning_handler(task: PipelineTask) -> tuple[TaskStatus, dict |
     sandbox_mode = task.payload.get("sandbox_mode", "structured_query")
     if not code:
         return TaskStatus.CODE_SCANNING, {"scan": "skipped", "reason": "no code"}
+
+    if task.payload.get("rag_query"):
+        from app.services.rag_service import validate_rag_runner
+        try:
+            passed, reason, _query = validate_rag_runner(code)
+            async with async_session() as db:
+                await audit_service.log(
+                    db, action="sandbox_task.code_scanning", resource_type="sandbox_task",
+                    user_id=task.session_id, resource_id=task.task_id,
+                    detail={
+                        "rag_runner": True,
+                        "passed": passed,
+                        "reason": reason,
+                    },
+                )
+                await db.commit()
+            if not passed:
+                return TaskStatus.REJECTED, {
+                    "reason": f"RAG runner validation failed: {reason}",
+                    "rag_runner": True,
+                }
+            return TaskStatus.CODE_SCANNING, {"scan": "rag_runner_verified", "reason": reason}
+        except Exception as e:
+            logger.warning("[Pipeline] RAG runner validation error: %s", e)
+            return TaskStatus.FAILED, {"reason": f"RAG runner validation error: {e}"}
 
     scanner = CodeScanner()
     try:

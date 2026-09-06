@@ -1591,6 +1591,28 @@ class SandboxRuntime:
             raise ValueError(f"Unsupported sandbox level: {level}")
         return adapter
 
+    def get_workspace(self, container_id: str, level: str):
+        """Resolve the on-host workspace dir for a container (gap T11).
+
+        Delegates to the level adapter's ``_resolve_workspace`` so RAG corpus
+        materialization can write into the exact directory the sandbox binds.
+        Returns a ``pathlib.Path`` or None when unresolved.
+        """
+        from pathlib import Path as _Path
+
+        try:
+            adapter = self.get_adapter(level)
+        except ValueError:
+            return None
+        resolve = getattr(adapter, "_resolve_workspace", None)
+        if resolve is None:
+            return None
+        try:
+            result = resolve(container_id)
+            return _Path(result) if result else None
+        except Exception:
+            return None
+
     def provision(self, session_id: uuid.UUID, level: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
         return self.get_adapter(level).provision(str(session_id), data_path, timeout, user_id=user_id)
 

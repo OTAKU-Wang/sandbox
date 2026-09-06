@@ -17,6 +17,10 @@ class TaskType(str, Enum):
     ANALYZE = "analyze"
     EXPORT = "export"
     CUSTOM = "custom"
+    # Gap T11 (RAG phase 1): in-domain retrieval-QA. The submitted `rag_query`
+    # is turned into a self-contained runner by the RAG service and executed
+    # inside the sandbox with the corpus never leaving the domain.
+    RAG_QUERY = "rag_query"
 
 
 class TaskStatus(str, Enum):

@@ -134,6 +134,20 @@ class Settings(BaseSettings):
     DP_MAX_EPSILON_PER_CONSUMPTION: float | None = None
     DP_MAX_EPSILON_ALLOCATION: float | None = None
 
+    # RAG (gap T11, phase 1): in-domain retrieval-QA. Corpus never leaves the
+    # sandbox; outputs always go through the contract output gateway. The
+    # embedding engine is reported honestly on every result (auto probes for a
+    # transformers backend, otherwise self-implemented char n-gram TF).
+    RAG_DEFAULT_TOP_K: int = 5
+    RAG_CHUNK_SIZE: int = 256
+    RAG_CHUNK_OVERLAP: int = 32
+    RAG_MAX_CORPUS_BYTES: int = 10 * 1024 * 1024
+    RAG_MAX_DOCS: int = 200
+    RAG_QUERY_MAX_CHARS: int = 2000
+    RAG_EMBEDDING_BACKEND: str = "auto"  # auto / tf / transformers / regex
+    RAG_EMBEDDING_MODEL: str = "shibing624/text2vec-base-chinese"
+    RAG_REQUIRE_ENCRYPTION: bool = True
+
     # Streaming output proxy (mitmproxy addon)
     STREAMING_PROXY_ENABLED: bool = False
     STREAMING_PROXY_PORT: int = 8080
@@ -185,6 +199,15 @@ class Settings(BaseSettings):
             issues.append("WARN: HSM_SOFTWARE_FALLBACK_ALLOWED=true — software KEK/signing fallback is enabled (degraded crypto strength)")
         if not self.FEDERATION_JWT_KEY_REQUIRED:
             issues.append("WARN: FEDERATION_JWT_KEY_REQUIRED=false — static federation JWT fallback is permitted in production")
+
+        # Gap T11: embedding backend must be a known engine (auto resolves to
+        # a concrete honest engine at runtime; unknown values would fail closed
+        # confusingly later).
+        _rag_engines = {"auto", "tf", "transformers", "regex"}
+        if self.RAG_EMBEDDING_BACKEND not in _rag_engines:
+            raise ValueError(
+                f"RAG_EMBEDDING_BACKEND={self.RAG_EMBEDDING_BACKEND!r} is not one of {sorted(_rag_engines)}"
+            )
         return issues
 
 
