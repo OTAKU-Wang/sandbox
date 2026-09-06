@@ -19,6 +19,47 @@ from app.services.sandbox_manager import get_resource_limits
 router = APIRouter()
 
 
+async def _enforce_task_purpose(db: AsyncSession, session: SandboxSession, purpose: str | None) -> None:
+    """Gap A4: validate a task's declared purpose against the session contract.
+
+    - No contract / contract without purpose limitation → unrestricted.
+    - Contract has purpose_scope → task purpose must be one of them.
+    - Contract has a single purpose → task purpose must match exactly.
+    - Contract limits purpose but task declares none → rejected.
+    """
+    if not session.contract_id:
+        return
+    from app.models.contract import Contract
+    try:
+        cid = uuid.UUID(str(session.contract_id))
+    except (TypeError, ValueError):
+        return
+    result = await db.execute(select(Contract).where(Contract.id == cid))
+    contract = result.scalar_one_or_none()
+    if not contract or not contract.purpose:
+        return  # no purpose limitation → unrestricted
+
+    if not purpose:
+        raise HTTPException(
+            status_code=400,
+            detail="Task must declare a purpose (the governing contract has a purpose limitation)",
+        )
+
+    scope = [str(p) for p in (contract.purpose_scope or [])]
+    if scope:
+        if purpose not in scope:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Purpose '{purpose}' is not within contract purpose_scope {scope}",
+            )
+        return
+    if purpose != contract.purpose:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Purpose '{purpose}' does not match contract purpose '{contract.purpose}'",
+        )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_task(
     session_id: uuid.UUID,
@@ -26,6 +67,7 @@ async def create_task(
     code: str | None = None,
     language: str | None = None,
     timeout_seconds: int = 3600,
+    purpose: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -52,6 +94,9 @@ async def create_task(
         raise HTTPException(status_code=400, detail=f"Task timeout exceeds sandbox level max ({level_max}s)")
     language = (language or "python").lower()
 
+    # Gap A4: enforce the contract purpose limitation for this session.
+    await _enforce_task_purpose(db, session, purpose)
+
     # Hash code if provided
     code_hash = None
     from app.utils.crypto import sm3_hash
@@ -70,6 +115,7 @@ async def create_task(
         code_content=encrypted_code,
         language=language,
         timeout_seconds=timeout_seconds,
+        purpose=purpose,
     )
     db.add(task)
 
@@ -83,7 +129,7 @@ async def create_task(
     await audit_service.log(
         db, action="sandbox_task.create", resource_type="sandbox_task",
         user_id=current_user.id, resource_id=task_id,
-        detail={"session_id": str(session_id), "task_type": task_type},
+        detail={"session_id": str(session_id), "task_type": task_type, "purpose": purpose},
     )
 
     return {
@@ -91,6 +137,7 @@ async def create_task(
         "session_id": str(session_id),
         "status": task.status,
         "task_type": task.task_type,
+        "purpose": task.purpose,
         "created_at": task.created_at.isoformat(),
     }
 
@@ -239,7 +286,12 @@ async def get_task_result(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get the execution result of a task."""
+    """Get the execution result of a task.
+
+    Gap E1: completed results are gated on a persisted PASSING output
+    inspection verdict — previously the endpoint returned whatever the
+    worker had written, trusting a status flag set out-of-band.
+    """
     result = await db.execute(
         select(SandboxTask).where(
             SandboxTask.task_id == task_id,
@@ -259,6 +311,29 @@ async def get_task_result(
             "message": f"Task is still {task.status}",
         }
 
+    inspection_summary = None
+    if task.status == TaskStatus.COMPLETED.value:
+        usage = task.resource_usage if isinstance(task.resource_usage, dict) else {}
+        output_security = usage.get("output_security") if isinstance(usage, dict) else None
+        output_security = output_security if isinstance(output_security, dict) else {}
+        report = output_security.get("inspection_report")
+        report = report if isinstance(report, dict) else None
+        verdict = report.get("passed") if report is not None else None
+        if verdict is not True:
+            raise HTTPException(
+                status_code=409,
+                detail="Output inspection verdict missing or failed — result withheld",
+            )
+        inspection_summary = {
+            "passed": True,
+            "findings_count": report.get("findings_count", 0),
+            "watermark": report.get("watermark"),
+            "signature": report.get("signature"),
+            "policy": report.get("policy"),
+            "row_limit_truncated": bool(report.get("policy_row_limit_truncated")),
+            "redacted_output": output_security.get("redacted_output"),
+        }
+
     return {
         "task_id": task.task_id,
         "status": task.status,
@@ -267,6 +342,7 @@ async def get_task_result(
         "error_message": task.error_message,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "output_inspection": inspection_summary,
     }
 
 

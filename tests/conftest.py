@@ -4,6 +4,15 @@ import uuid
 from typing import AsyncGenerator
 
 os.environ["TESTING"] = "1"
+# P0 fail-closed switches (plan docs/ai-sandbox-gap-remediation-plan.md §5.1):
+# the existing test baseline runs with the relaxed values that dev uses.
+# Enforcement behaviour is covered by dedicated tests that monkeypatch the
+# cached Settings object.
+os.environ.setdefault("CDS_KMS_REQUIRE_ATTESTATION", "false")
+os.environ.setdefault("CDS_DEV_SANDBOX_REQUIRE_CONTRACT", "false")
+# Training runs in deterministic-proxy mode in the test environment (torch is
+# not installed); the fail-closed switch is covered by dedicated tests.
+os.environ.setdefault("CDS_TRAINING_REQUIRE_TORCH", "false")
 
 import pytest
 import pytest_asyncio

@@ -156,6 +156,16 @@ class TaskWorker:
                     passed = True
                     redacted_output = ""
 
+                # Gap E1: enforce the contract's output policy (row limit) on
+                # the legacy worker path — same primitive as the pipeline.
+                try:
+                    from app.services.output_policy import enforce_text_output_policy
+                    redacted_output, report = await enforce_text_output_policy(
+                        db, str(task.session_id), redacted_output, report
+                    )
+                except Exception as policy_err:
+                    logger.warning(f"Task {task_id} output policy enforcement failed: {policy_err}")
+
                 task.status = TaskStatus.COMPLETED.value if passed else TaskStatus.FAILED.value
                 if not passed:
                     task.error_message = "Output inspection failed"

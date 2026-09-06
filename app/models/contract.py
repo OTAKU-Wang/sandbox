@@ -61,6 +61,17 @@ class Contract(Base):
     allowed_output_formats: Mapped[str | None] = mapped_column(String(256), default="csv,json")  # e.g. "csv,json,parquet"
     inspection_rule_set: Mapped[dict | None] = mapped_column(JSON)  # Inspection rules config
 
+    # Gap A1: contract validity deadline — ACTIVE contracts past this point
+    # are auto-terminated by the session lifecycle sweep. Optional; sourced
+    # from terms["valid_until"] at activation when present.
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Gap A4: purpose limitation — 用途限定（如 statistical_analysis /
+    # model_training / member_matching）。空值 = 不限；设置了 purpose 后，
+    # 任务提交必须声明匹配的用途，且用途进入供需/平台签名原文。
+    purpose: Mapped[str | None] = mapped_column(String(64))
+    purpose_scope: Mapped[list | None] = mapped_column(JSON)  # 允许的用途列表
+
     # Signatures
     provider_signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     buyer_signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

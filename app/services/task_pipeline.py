@@ -334,18 +334,18 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
 
             session_key = None
             if session.session_key_id:
-                attestation = None
-                if session.sandbox_level in {"L1", "L2"}:
-                    limits = session.resource_limits or {}
-                    record = limits.get("attestation") if isinstance(limits, dict) else None
-                    quote = record.get("quote") if isinstance(record, dict) else None
-                    if isinstance(quote, str) and quote:
-                        attestation = quote.encode("utf-8")
-                    if not attestation:
-                        orm_task.status = ORMTaskStatus.FAILED.value
-                        orm_task.error_message = "Sandbox attestation quote missing; key distribution denied"
-                        await db.commit()
-                        return TaskStatus.FAILED, {"error": orm_task.error_message}
+                # Gap B1: pass the stored quote whenever present (not only
+                # TEE levels); L1/L2 without a quote still hard-fail.
+                from app.services.sandbox_manager import (
+                    attestation_from_session,
+                    attestation_required_for_level,
+                )
+                attestation = attestation_from_session(session)
+                if attestation_required_for_level(session.sandbox_level) and not attestation:
+                    orm_task.status = ORMTaskStatus.FAILED.value
+                    orm_task.error_message = "Sandbox attestation quote missing; key distribution denied"
+                    await db.commit()
+                    return TaskStatus.FAILED, {"error": orm_task.error_message}
                 session_key = kms_service.distribute_key(
                     session.session_key_id,
                     str(session.id),
@@ -489,7 +489,13 @@ async def _preparing_handler(task: PipelineTask) -> tuple[TaskStatus, dict | Non
 
 
 async def _output_inspecting_handler(task: PipelineTask) -> tuple[TaskStatus, dict | None]:
-    """OUTPUT_INSPECTING handler — inspects execution output for sensitive data."""
+    """OUTPUT_INSPECTING handler — inspects execution output for sensitive data.
+
+    Gap E1: output is additionally clamped against the contract's OutputPolicy
+    (max_output_rows / allowed_output_formats) resolved via
+    app.services.output_policy, and the applied policy is recorded in the
+    persisted inspection report.
+    """
     output = task.result.get("output", "") if task.result else ""
     task_result = task.result or {}
     if task.result is not None:
@@ -527,12 +533,27 @@ async def _output_inspecting_handler(task: PipelineTask) -> tuple[TaskStatus, di
             redacted_output = ""
             passed = True
 
+        # Gap E1: enforce the contract's output policy (row limit) on the
+        # redacted output and annotate the report with the applied policy.
+        output_rows = int(task_result.get("output_rows", 0) or 0)
+        try:
+            from app.core.database import async_session as _policy_db_session
+            from app.services.output_policy import enforce_text_output_policy
+            async with _policy_db_session() as policy_db:
+                redacted_output, report = await enforce_text_output_policy(
+                    policy_db, session_id, redacted_output, report
+                )
+                if report.get("policy_row_limit_truncated"):
+                    output_rows = min(output_rows, int(report["policy_row_limit"]))
+        except Exception as policy_err:
+            logger.warning("[Pipeline] Output policy enforcement failed (task=%s): %s", task.task_id, policy_err)
+
         await _finalize_orm_output_inspection(
             orm_task_id,
             passed=passed,
             report=report,
             redacted_output=redacted_output,
-            output_rows=task_result.get("output_rows", 0),
+            output_rows=output_rows,
             resource_base={
                 "duration_ms": task_result.get("duration_ms", 0),
                 "sandbox_level": task_result.get("sandbox_level", "L3"),

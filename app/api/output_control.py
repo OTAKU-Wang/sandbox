@@ -296,14 +296,34 @@ async def process_output_gateway(
 ):
     """Process output through the gateway: format validation + row limiting + conversion.
 
-    Enforces contract-derived limits (max_output_rows, allowed_output_formats).
-    Returns processed output in the requested format.
+    Gap E1: limits are bounded by the CONTRACT governing the session — the
+    request may only narrow the contract's allowance, never widen it
+    (previously max_output_rows/formats were caller-supplied and trusted).
     """
     await _authorize_output_session(db, body.session_id, current_user)
+
+    from app.services.output_policy import (
+        build_output_policy,
+        session_contract_id,
+        clamp_gateway_request,
+    )
+    contract_id = await session_contract_id(db, body.session_id) if body.session_id else None
+    contract_policy = await build_output_policy(db, contract_id)
+    effective_rows, effective_formats = clamp_gateway_request(
+        body.max_output_rows, body.allowed_output_formats, contract_policy,
+    )
+    effective_epsilon = body.dp_epsilon_budget
+    if contract_policy.dp_epsilon_budget is not None:
+        effective_epsilon = (
+            min(body.dp_epsilon_budget, contract_policy.dp_epsilon_budget)
+            if body.dp_epsilon_budget is not None
+            else contract_policy.dp_epsilon_budget
+        )
     policy = OutputPolicy(
-        max_output_rows=body.max_output_rows,
-        allowed_output_formats=body.allowed_output_formats or ["csv", "json"],
-        dp_epsilon_budget=body.dp_epsilon_budget,
+        max_output_rows=effective_rows,
+        allowed_output_formats=effective_formats,
+        dp_epsilon_budget=effective_epsilon,
+        inspection_rule_set=contract_policy.inspection_rule_set,
     )
 
     result = output_gateway.process(
@@ -330,6 +350,10 @@ async def process_output_gateway(
             "watermark": result.watermark,
             "signature": result.signature,
             "error": result.error,
+            "contract_id": contract_id,
+            "effective_max_output_rows": effective_rows,
+            "effective_output_formats": effective_formats,
+            "requested_max_output_rows": body.max_output_rows,
         },
     )
 

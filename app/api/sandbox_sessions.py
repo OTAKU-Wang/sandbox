@@ -22,7 +22,7 @@ from app.models.audit_log import AuditLog
 from app.schemas.sandbox_session import SandboxExecuteRequest, SandboxSessionCreate, SandboxSessionResponse
 from app.services.audit_service import audit_service
 from app.services.kms_service import kms_service
-from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits
+from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits, attestation_required_for_level as _attestation_required_for_level, attestation_from_provision as _attestation_from_provision, attestation_from_session as _attestation_from_session
 from app.services.session_state_machine import session_state_machine
 from app.models.kms import KeyDistribution, KeyMetadata, KeyType, KeyStatus
 from app.models.network_policy import NetworkPolicy
@@ -188,19 +188,6 @@ def _operation_allowed_by_contract(session_mode: str, allowed_operations: str | 
     return not allowed_ops.isdisjoint(mode_ops)
 
 
-def _attestation_required_for_level(sandbox_level: str) -> bool:
-    return sandbox_level in {SandboxLevel.L1.value, SandboxLevel.L2.value}
-
-
-def _attestation_from_provision(provision_result: dict) -> bytes | None:
-    quote = provision_result.get("attestation_quote")
-    if isinstance(quote, bytes):
-        return quote
-    if isinstance(quote, str) and quote:
-        return quote.encode("utf-8")
-    return None
-
-
 def _attestation_record_from_provision(provision_result: dict) -> dict | None:
     quote = provision_result.get("attestation_quote")
     if not quote:
@@ -211,19 +198,6 @@ def _attestation_record_from_provision(provision_result: dict) -> dict | None:
         "measurement": provision_result.get("attestation_measurement") or provision_result.get("mrenclave"),
         "is_simulation": bool(provision_result.get("is_simulation")),
     }
-
-
-def _attestation_from_session(session: SandboxSession) -> bytes | None:
-    limits = session.resource_limits or {}
-    record = limits.get("attestation") if isinstance(limits, dict) else None
-    if not isinstance(record, dict):
-        return None
-    quote = record.get("quote")
-    if isinstance(quote, bytes):
-        return quote
-    if isinstance(quote, str) and quote:
-        return quote.encode("utf-8")
-    return None
 
 
 async def _execute_runtime_with_context(
@@ -431,10 +405,12 @@ async def create_sandbox_session(
         )
         return SandboxSessionResponse.model_validate(session)
 
+    # Gap B1: pass the attestation whenever the runtime produced one, not
+    # only for TEE levels — KMS enforces fail-closed when configured.
     distributed_key = kms_service.distribute_key(
         session_key_result["key_id"],
         str(session.id),
-        attestation=attestation if _attestation_required_for_level(body.sandbox_level) else None,
+        attestation=attestation,
     )
     if not distributed_key:
         kms_service.destroy_key(session_key_result["key_id"])
@@ -462,13 +438,16 @@ async def create_sandbox_session(
 
     session.session_key_id = session_key_result["key_id"]
 
-    # Record key metadata
+    # Record key metadata (gap B3: persist the KEK-wrapped blob so the key
+    # survives restarts; nulled on destroy by the lifecycle terminator)
     key_meta = KeyMetadata(
         key_id=session_key_result["key_id"],
         key_type=KeyType.SESSION.value,
         status=KeyStatus.ACTIVE.value,
         session_id=session.id,
         product_id=body.data_product_id,
+        wrapped_payload=kms_service.export_wrapped(session_key_result["key_id"]),
+        sm2_encrypted_payload=kms_service.export_sm2_ciphertext(session_key_result["key_id"]),
     )
     db.add(key_meta)
 
@@ -974,7 +953,8 @@ async def execute_in_sandbox(
     # Retrieve session key through the KMS distribution path for in-memory injection only.
     session_key = None
     if session.session_key_id:
-        attestation = _attestation_from_session(session) if _attestation_required_for_level(session.sandbox_level) else None
+        # Gap B1: pass the stored quote whenever present (not only TEE levels).
+        attestation = _attestation_from_session(session)
         if _attestation_required_for_level(session.sandbox_level) and not attestation:
             raise HTTPException(status_code=503, detail="Sandbox attestation quote missing; key distribution denied")
         try:
@@ -1242,69 +1222,14 @@ async def cleanup_expired_sessions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Clean up expired sandbox sessions. Called by background scheduler or admin."""
-    query = select(SandboxSession).where(
-        SandboxSession.status.in_([
-            SessionStatus.PENDING.value,
-            SessionStatus.PROVISIONING.value,
-            SessionStatus.RUNNING.value,
-        ])
-    )
-    result = await db.execute(query)
-    sessions = result.scalars().all()
+    """Clean up expired sandbox sessions.
 
-    cleaned = 0
-    for session in sessions:
-        if is_session_expired(session):
-            # Validate state transition via state machine
-            current = SessionStatus(session.status)
-            result = session_state_machine.validate_transition(current, SessionStatus.TERMINATED)
-            if not result.success:
-                logger.warning(f"[cleanup] Cannot terminate expired session {session.id}: {result.error}")
-                continue
-            session.status = SessionStatus.TERMINATED.value
-            session.ended_at = datetime.now(timezone.utc)
-            session.error_message = "Session expired (timeout)"
+    Kept for manual/admin triggering; the background session lifecycle loop
+    (app/services/session_lifecycle.py, registered in the app lifespan) runs
+    the same service function periodically.
+    """
+    from app.services.session_lifecycle import cleanup_expired_sessions as _cleanup_service
 
-            # Destroy container
-            if session.container_id:
-                try:
-                    runtime = await get_sandbox_manager()
-                    runtime.terminate(session.container_id)
-                except Exception:
-                    pass
-
-            # Destroy session key
-            if session.session_key_id:
-                kms_service.destroy_key(session.session_key_id)
-                key_result = await db.execute(select(KeyMetadata).where(KeyMetadata.key_id == session.session_key_id))
-                key_meta = key_result.scalar_one_or_none()
-                if key_meta:
-                    key_meta.status = KeyStatus.DESTROYED.value
-                    key_meta.destroyed_at = datetime.now(timezone.utc)
-                    key_meta.destroy_reason = "session_expired"
-
-            # Remove network policy enforcement and mark policy inactive
-            try:
-                await network_policy_engine.remove_policy(str(session.id))
-            except Exception as e:
-                logger.warning("[cleanup] Failed to remove network policy for %s: %s", session.id, e)
-            net_result = await db.execute(
-                select(NetworkPolicy).where(NetworkPolicy.session_id == str(session.id))
-            )
-            net_policy = net_result.scalar_one_or_none()
-            if net_policy:
-                net_policy.active = False
-
-            limits = get_resource_limits(session.sandbox_level)
-            release_tenant_usage(
-                str(session.user_id),
-                cpu_cores=limits["cpu_cores"],
-                memory_mb=limits["memory_mb"],
-                disk_mb=limits["disk_mb"],
-            )
-
-            cleaned += 1
-
+    cleaned = await _cleanup_service(db)
     await db.flush()
     return {"cleaned": cleaned}

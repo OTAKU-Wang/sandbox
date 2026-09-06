@@ -83,9 +83,43 @@ def is_session_expired(session) -> bool:
     if not session.created_at:
         return False
 
-    elapsed = datetime.now(timezone.utc) - session.created_at
+    # SQLite DateTime(timezone=True) round-trips as naive — normalise to UTC
+    # so the comparison never fails with a naive/aware mismatch.
+    created = session.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    elapsed = datetime.now(timezone.utc) - created
     timeout = timedelta(seconds=session.timeout_seconds)
     return elapsed > timeout
+
+
+def attestation_required_for_level(sandbox_level: str) -> bool:
+    """Levels that must present TEE attestation before key distribution (P0-9)."""
+    return sandbox_level in {SandboxLevel.L1.value, SandboxLevel.L2.value}
+
+
+def attestation_from_provision(provision_result: dict) -> bytes | None:
+    """Extract the raw attestation quote bytes from a provision result."""
+    quote = (provision_result or {}).get("attestation_quote")
+    if isinstance(quote, bytes):
+        return quote
+    if isinstance(quote, str) and quote:
+        return quote.encode("utf-8")
+    return None
+
+
+def attestation_from_session(session) -> bytes | None:
+    """Extract the stored attestation quote for a sandbox session."""
+    limits = getattr(session, "resource_limits", None) or {}
+    record = limits.get("attestation") if isinstance(limits, dict) else None
+    if not isinstance(record, dict):
+        return None
+    quote = record.get("quote")
+    if isinstance(quote, bytes):
+        return quote
+    if isinstance(quote, str) and quote:
+        return quote.encode("utf-8")
+    return None
 
 
 sandbox_manager = None

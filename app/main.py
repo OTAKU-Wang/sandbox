@@ -19,8 +19,9 @@ from app.models import pipeline_task, training_job, field_exposure as field_expo
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: validate security configuration
-    issues = settings.validate_jwt_security()
+    # Startup: validate security configuration (T12 — surfaces every enabled
+    # simulation/fallback so no degradation is silent)
+    issues = settings.validate_security_config()
     for issue in issues:
         logger.warning(f"[SECURITY] {issue}")
 
@@ -65,6 +66,29 @@ async def lifespan(app: FastAPI):
     _ttl_task = _asyncio.create_task(_ttl_cleanup_loop())
     logger.info("[MAIN] KMS TTL cleanup started")
 
+    # Startup: restore persisted wrapped keys (gap B3 — restart recovery)
+    try:
+        from app.core.database import async_session as _async_session
+        from app.services.kms_recovery import restore_wrapped_keys
+        async with _async_session() as db:
+            restored_keys = await restore_wrapped_keys(db)
+            await db.commit()
+        if restored_keys:
+            logger.info("[MAIN] Restored %d wrapped keys from persistence", restored_keys)
+    except Exception as e:
+        logger.error(f"[MAIN] Wrapped key restore failed: {e}")
+
+    # Startup: session lifecycle cleanup loop (gap A2/D1 — expired sessions,
+    # dev sessions and contracts). Disabled under TESTING (tests disable the
+    # lifespan anyway; this guard covers direct TestClient usage).
+    _session_cleanup_task = None
+    if os.environ.get("TESTING") != "1":
+        from app.services.session_lifecycle import session_cleanup_loop
+        _session_cleanup_task = _asyncio.create_task(
+            session_cleanup_loop(settings.SESSION_CLEANUP_INTERVAL_SECONDS)
+        )
+        logger.info("[MAIN] Session lifecycle cleanup started")
+
     # Startup: CDC agent (Kafka producer lifecycle)
     try:
         from app.services.cdc_agent import cdc_agent
@@ -74,6 +98,13 @@ async def lifespan(app: FastAPI):
         logger.error(f"CDCAgent start failed: {e}")
 
     yield
+    # Shutdown: session lifecycle cleanup
+    if _session_cleanup_task is not None:
+        _session_cleanup_task.cancel()
+        try:
+            await _session_cleanup_task
+        except _asyncio.CancelledError:
+            pass
     # Shutdown: KMS TTL cleanup
     _ttl_task.cancel()
     try:

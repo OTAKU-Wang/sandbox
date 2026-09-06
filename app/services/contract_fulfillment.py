@@ -141,8 +141,15 @@ class ContractFulfillmentService:
         key_result = kms_service.generate_session_key(str(session.id))
         session.session_key_id = key_result["key_id"]
 
-        # Distribute key
-        distributed_key = kms_service.distribute_key(key_result["key_id"], str(session.id))
+        # Distribute key (gap B1: pass the provision attestation when the
+        # runtime produced one — KMS rejects unattested distribution when
+        # CDS_KMS_REQUIRE_ATTESTATION is enabled)
+        from app.services.sandbox_manager import attestation_from_provision
+        distributed_key = kms_service.distribute_key(
+            key_result["key_id"],
+            str(session.id),
+            attestation=attestation_from_provision(provision_result),
+        )
         if not distributed_key:
             kms_service.destroy_key(key_result["key_id"])
             session.session_key_id = None
@@ -163,13 +170,16 @@ class ContractFulfillmentService:
             await db.flush()
             raise RuntimeError(session.error_message)
 
-        # Record key metadata
+        # Record key metadata (gap B3: persist the wrapped blob for restart
+        # recovery — crypto-erased on destroy by the lifecycle terminator)
         key_meta = KeyMetadata(
             key_id=key_result["key_id"],
             key_type=KeyType.SESSION.value,
             status=KeyStatus.ACTIVE.value,
             session_id=session.id,
             product_id=product_uuid,
+            wrapped_payload=kms_service.export_wrapped(key_result["key_id"]),
+            sm2_encrypted_payload=kms_service.export_sm2_ciphertext(key_result["key_id"]),
         )
         db.add(key_meta)
 
@@ -225,41 +235,26 @@ class ContractFulfillmentService:
         return {"allowed": True, "reason": "Contract constraints satisfied"}
 
     async def terminate_contract_sessions(self, db: AsyncSession, contract_id: uuid.UUID) -> int:
-        """Terminate all active sessions for a contract. Returns count of terminated sessions."""
+        """Terminate all active sessions for a contract. Returns count of terminated sessions.
+
+        Gap A1: delegates to the single termination primitive in
+        session_lifecycle so container/key/network-policy/quota/tasks are all
+        released — not just the status flag.
+        """
+        from app.services.session_lifecycle import terminate_session, ACTIVE_SESSION_STATUSES
+
         result = await db.execute(
             select(SandboxSession).where(
                 SandboxSession.contract_id == str(contract_id),
-                SandboxSession.status.in_([
-                    SessionStatus.PROVISIONING.value,
-                    SessionStatus.RUNNING.value,
-                ]),
+                SandboxSession.status.in_(ACTIVE_SESSION_STATUSES),
             )
         )
         sessions = result.scalars().all()
 
         terminated = 0
-        runtime = await get_sandbox_manager()
         for session in sessions:
-            session.status = SessionStatus.TERMINATED.value
-            session.ended_at = datetime.now(timezone.utc)
-            session.error_message = "Contract terminated"
-
-            if session.container_id:
-                try:
-                    runtime.terminate(session.container_id)
-                except Exception as e:
-                    logger.error(f"Failed to terminate container {session.container_id}: {e}")
-
-            if session.session_key_id:
-                kms_service.destroy_key(session.session_key_id)
-                key_result = await db.execute(select(KeyMetadata).where(KeyMetadata.key_id == session.session_key_id))
-                key_meta = key_result.scalar_one_or_none()
-                if key_meta:
-                    key_meta.status = KeyStatus.DESTROYED.value
-                    key_meta.destroyed_at = datetime.now(timezone.utc)
-                    key_meta.destroy_reason = "contract_terminated"
-
-            terminated += 1
+            if await terminate_session(session, db, reason=f"contract_terminated:{contract_id}"):
+                terminated += 1
 
         await db.flush()
 

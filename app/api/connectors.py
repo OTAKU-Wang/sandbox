@@ -465,7 +465,14 @@ async def connector_create_session(
 
     key_result = kms_service.generate_session_key(str(session.id))
     session.session_key_id = key_result["key_id"]
-    distributed_key = kms_service.distribute_key(key_result["key_id"], str(session.id))
+    # Gap B1: pass the provision attestation when available — KMS rejects
+    # unattested distribution when CDS_KMS_REQUIRE_ATTESTATION is enabled.
+    from app.services.sandbox_manager import attestation_from_provision
+    distributed_key = kms_service.distribute_key(
+        key_result["key_id"],
+        str(session.id),
+        attestation=attestation_from_provision(provision_result),
+    )
     if not distributed_key:
         kms_service.destroy_key(key_result["key_id"])
         session.session_key_id = None
@@ -491,12 +498,15 @@ async def connector_create_session(
         )
         raise HTTPException(status_code=503, detail=session.error_message)
 
+    # Gap B3: persist the wrapped blob alongside the metadata
     db.add(KeyMetadata(
         key_id=key_result["key_id"],
         key_type=KeyType.SESSION.value,
         status=KeyStatus.ACTIVE.value,
         session_id=session.id,
         product_id=product_id,
+        wrapped_payload=kms_service.export_wrapped(key_result["key_id"]),
+        sm2_encrypted_payload=kms_service.export_sm2_ciphertext(key_result["key_id"]),
     ))
 
     db.add(NetworkPolicy(

@@ -13,6 +13,7 @@ from app.services.policy_compiler import policy_compiler
 from app.services.crypto_service import crypto_service
 from app.services.dp_budget import dp_budget_ledger
 from app.services.blockchain_service import blockchain_service
+from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,9 @@ class ContractService:
         party_role = "provider" if user_id == contract.provider_id else "buyer"
         sign_data = crypto_service.contract_sign_data(
             str(contract.id), contract.contract_no, party_role,
-            datetime.now(timezone.utc).isoformat()
+            datetime.now(timezone.utc).isoformat(),
+            purpose=contract.purpose,
+            purpose_scope=contract.purpose_scope,
         )
 
         if not signature or signature == "demo-signature":
@@ -141,6 +144,9 @@ class ContractService:
         if contract.provider_signature and contract.buyer_signature:
             await self.validate_activation_ready(db, contract)
             contract.status = ContractStatus.ACTIVE.value
+            # Gap A1: pick up the validity deadline from contract terms so the
+            # lifecycle sweep can auto-terminate the contract when it lapses.
+            self._apply_valid_until_from_terms(contract)
             # Platform witness signature
             contract.platform_signature = self._platform_witness_sign(contract)
             contract.platform_signed_at = datetime.now(timezone.utc)
@@ -171,6 +177,13 @@ class ContractService:
         return contract
 
     async def terminate(self, db: AsyncSession, contract_id: uuid.UUID, user_id: uuid.UUID) -> Contract:
+        """Terminate a contract and cascade-reclaim everything it granted (gap A1).
+
+        Cascade: active sandbox sessions (container/key/network-policy/quota
+        via the lifecycle terminator), policy bundles (DB revocation + OPA
+        removal), plus an audit entry. Previously this only flipped the status
+        flag — running buyer sessions kept operating after termination.
+        """
         contract = await self.get_by_id(db, contract_id)
         if not contract:
             raise ValueError("Contract not found")
@@ -178,9 +191,94 @@ class ContractService:
             raise ValueError("User is not a party to this contract")
 
         contract.status = ContractStatus.TERMINATED.value
+
+        # Cascade 1: terminate active sessions under this contract
+        terminated_sessions = 0
+        try:
+            from app.services.contract_fulfillment import contract_fulfillment
+            terminated_sessions = await contract_fulfillment.terminate_contract_sessions(db, contract_id)
+        except Exception as e:
+            logger.error(f"[Contract] Session cascade failed for {contract_id}: {e}")
+
+        # Cascade 2: revoke policy bundles (DB + OPA)
+        revoked_bundles = await self._revoke_policy_bundles(db, contract)
+
+        await audit_service.log(
+            db, action="contract.terminate_cascade", resource_type="contract",
+            user_id=user_id, resource_id=str(contract_id),
+            detail={
+                "sessions_terminated": terminated_sessions,
+                "policy_bundles_revoked": revoked_bundles,
+            },
+        )
+
         await db.flush()
         await db.refresh(contract)
         return contract
+
+    async def _revoke_policy_bundles(self, db: AsyncSession, contract: Contract) -> int:
+        """Revoke compiled policy bundles for a contract (DB + OPA)."""
+        from app.models.policy_bundle import PolicyBundle
+        from app.services.opa_client import opa_client
+
+        result = await db.execute(select(PolicyBundle).where(PolicyBundle.contract_id == contract.id))
+        bundles = result.scalars().all()
+        revoked = 0
+        for bundle in bundles:
+            bundle.revoked_at = datetime.now(timezone.utc)
+            try:
+                await opa_client.delete_policy(bundle.policy_id)
+            except Exception as e:
+                logger.warning(f"[Contract] OPA policy deletion failed for {bundle.policy_id}: {e}")
+            revoked += 1
+        return revoked
+
+    async def terminate_expired_contracts(self, db: AsyncSession) -> int:
+        """Auto-terminate ACTIVE contracts past their valid_until (gap A1).
+
+        Called by the session lifecycle sweep. Returns the number of
+        contracts terminated.
+        """
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            select(Contract).where(
+                Contract.status == ContractStatus.ACTIVE.value,
+                Contract.valid_until.isnot(None),
+                Contract.valid_until < now,
+            )
+        )
+        count = 0
+        for contract in result.scalars().all():
+            try:
+                await self.terminate(db, contract.id, contract.provider_id)
+                count += 1
+                logger.info(
+                    "[Contract] Contract %s auto-terminated (valid_until=%s)",
+                    contract.contract_no, contract.valid_until.isoformat(),
+                )
+            except Exception as e:
+                logger.error(f"[Contract] Auto-termination failed for {contract.id}: {e}")
+        return count
+
+    def _apply_valid_until_from_terms(self, contract: Contract) -> None:
+        """Populate contract.valid_until from terms['valid_until'] when present.
+
+        Accepts an ISO-8601 datetime string. Malformed values are logged and
+        ignored (contract stays open-ended until updated).
+        """
+        if contract.valid_until:
+            return
+        terms = contract.terms or {}
+        raw = terms.get("valid_until") if isinstance(terms, dict) else None
+        if not raw:
+            return
+        try:
+            contract.valid_until = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            logger.warning(
+                "[Contract] Ignoring malformed terms.valid_until for %s: %r",
+                contract.contract_no, raw,
+            )
 
     def _platform_witness_sign(self, contract: Contract) -> str:
         """Generate platform witness SM2 signature for a contract (P0-2: HSM-first)."""

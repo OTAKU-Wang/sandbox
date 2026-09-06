@@ -9,10 +9,13 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.config import get_settings
 from app.core.path_security import sanitize_filename, PathTraversalError
 from app.models.user import User
 from app.models.data_product import DataProduct
 from app.models.data_resource import DataResource, ResourceStatus
+from app.models.contract import Contract, ContractStatus
+from app.services.audit_service import audit_service
 from app.services.data_product_sandbox import (
     dev_sandbox,
     DevMode,
@@ -25,9 +28,68 @@ from app.services.data_product_sandbox import (
 router = APIRouter()
 
 
+async def _resolve_dev_contract(
+    db,
+    body: "CreateDevSessionRequest",
+    data_product: DataProduct,
+    current_user: User,
+) -> Contract | None:
+    """Gap A3: enforce the contract gate for dev sandboxes carrying data.
+
+    When DEV_SANDBOX_REQUIRE_CONTRACT is enabled (production default), a dev
+    session that loads a data product must reference an effective contract
+    that covers the product. Returns None when the gate is disabled.
+    """
+    if not get_settings().DEV_SANDBOX_REQUIRE_CONTRACT:
+        return None
+
+    if not body.contract_id:
+        raise HTTPException(
+            status_code=400,
+            detail="contract_id is required when attaching a data product "
+                   "(DEV_SANDBOX_REQUIRE_CONTRACT is enabled)",
+        )
+
+    result = await db.execute(select(Contract).where(Contract.id == body.contract_id))
+    contract = result.scalar_one_or_none()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    if contract.status not in (ContractStatus.SIGNED.value, ContractStatus.ACTIVE.value):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Contract status '{contract.status}' does not permit sandbox access",
+        )
+    if contract.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not a party to this contract")
+    covered_ids = [str(p) for p in (contract.product_ids or [])]
+    if str(data_product.id) not in covered_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="Contract does not cover this data product",
+        )
+    return contract
+
+
+def _dev_dp_budget(body: "CreateDevSessionRequest", contract: Contract | None) -> float | None:
+    """DP budget for a dev session — inherited from the contract, never self-declared.
+
+    Gap A3: the request body value was previously trusted directly, letting a
+    client grant itself unlimited DP budget.
+    """
+    if contract is not None and contract.dp_epsilon_budget is not None:
+        return float(contract.dp_epsilon_budget)
+    if contract is not None:
+        # Contract governs this session but has no DP budget — no DP allowed.
+        return None
+    return body.dp_epsilon_budget
+
+
 class CreateDevSessionRequest(BaseModel):
     mode: str  # structured | unstructured | semi_structured
     data_product_id: uuid.UUID | None = None  # Link to a data product for data access
+    # Gap A3: contract covering the data product — required when the
+    # data_product_id is set and DEV_SANDBOX_REQUIRE_CONTRACT is enabled.
+    contract_id: uuid.UUID | None = None
     sandbox_level: str = "L3"
     max_duration_seconds: int = 7200
     max_input_files: int = 100
@@ -65,6 +127,8 @@ async def create_dev_session(
     # Resolve data path from data product if provided
     data_path = None
     data_product = None
+    contract = None
+    effective_dp_budget = body.dp_epsilon_budget
     if body.data_product_id:
         result = await db.execute(select(DataProduct).where(DataProduct.id == body.data_product_id))
         data_product = result.scalar_one_or_none()
@@ -72,6 +136,13 @@ async def create_dev_session(
             raise HTTPException(status_code=404, detail="Data product not found")
         if data_product.provider_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not the owner of this data product")
+
+        # Gap A3: contract enforcement for dev sandboxes carrying provider
+        # data. Previously this path only checked product ownership — the DP
+        # budget was self-declared by the request and no contract was needed,
+        # bypassing the contract gate that governs every other sandbox entry.
+        contract = await _resolve_dev_contract(db, body, data_product, current_user)
+        effective_dp_budget = _dev_dp_budget(body, contract)
 
         # Load and decrypt the associated data resource
         if data_product.resource_id:
@@ -98,7 +169,7 @@ async def create_dev_session(
         sandbox_level=body.sandbox_level,
         max_duration_seconds=body.max_duration_seconds,
         max_input_files=body.max_input_files,
-        dp_epsilon_budget=body.dp_epsilon_budget,
+        dp_epsilon_budget=effective_dp_budget,
     )
     session = dev_sandbox.create_session(
         config,
@@ -109,6 +180,22 @@ async def create_dev_session(
     if data_product:
         session.metadata["data_product_id"] = str(data_product.id)
         session.metadata["data_product_name"] = data_product.name
+        if contract:
+            session.metadata["contract_id"] = str(contract.id)
+    await audit_service.log(
+        db,
+        action="dev_session.create",
+        resource_type="dev_sandbox_session",
+        user_id=current_user.id,
+        detail={
+            "session_id": session.session_id,
+            "mode": body.mode,
+            "data_product_id": str(data_product.id) if data_product else None,
+            "contract_id": str(contract.id) if contract else None,
+            "dp_epsilon_budget": effective_dp_budget,
+            "contract_enforced": get_settings().DEV_SANDBOX_REQUIRE_CONTRACT,
+        },
+    )
     return DevSessionResponse(
         session_id=session.session_id,
         mode=session.config.mode,

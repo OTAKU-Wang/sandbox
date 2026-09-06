@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func, JSON, Index
+from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func, JSON, Index, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -66,6 +66,14 @@ class DataEncryptionKey(Base):
     encryption_cert_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("certificates.id"), nullable=True, index=True,
     )  # Certificate whose public key SM2-encrypts this DEK
+
+    # Gap B3 persistence: KEK-wrapped key blob for restart recovery. Plaintext
+    # key material is NEVER stored here — only the envelope blob (decryptable
+    # solely with the KEK held in HSM/Vault). Nulled on destroy (crypto-erase)
+    # by the session lifecycle terminator.
+    wrapped_payload: Mapped[bytes | None] = mapped_column(LargeBinary)
+    sm2_encrypted_payload: Mapped[bytes | None] = mapped_column(LargeBinary)
+
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=DEKStatus.ACTIVE.value)
     max_usage: Mapped[int] = mapped_column(Integer, default=10000)  # Max usage count
     usage_count: Mapped[int] = mapped_column(Integer, default=0)

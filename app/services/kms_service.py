@@ -177,8 +177,10 @@ class KMSService:
         Key is passed via environment variable (CDS_SESSION_KEY) at execution
         time — never written to disk. Returns hex string or None if key not found.
 
-        P0-9: If attestation or tee_quote is provided, verify TEE attestation
-        before distributing the key. Invalid attestation causes rejection.
+        P0-9 / gap B1: fail-closed attestation gate. When
+        ``CDS_KMS_REQUIRE_ATTESTATION=true`` (default), distribution without
+        any attestation evidence is rejected — the previous behaviour of
+        silently handing out keys when no quote was supplied defeated P0-9.
 
         Args:
             key_id: Key to distribute
@@ -186,6 +188,17 @@ class KMSService:
             attestation: Raw TEE quote bytes (P0-9)
             tee_quote: Parsed TEEQuote object (P0-9, alternative to raw bytes)
         """
+        # P0-9 / gap B1: unattested distribution gate (fail-closed)
+        if not (attestation or tee_quote):
+            from app.core.config import get_settings
+            if get_settings().KMS_REQUIRE_ATTESTATION:
+                logger.warning(
+                    "[KMS] Rejected UNATTESTED key distribution (key=%s, session=%s): "
+                    "no TEE quote provided and KMS_REQUIRE_ATTESTATION is enabled",
+                    key_id, session_id,
+                )
+                return None
+
         # P0-9: Verify TEE attestation if provided
         if attestation or tee_quote:
             verified = self._verify_attestation(attestation, tee_quote, key_id, session_id)
@@ -255,6 +268,19 @@ class KMSService:
             if tee_quote is None:
                 return False
 
+            # Gap B2/T12: reject software-simulated quotes when simulation is
+            # disallowed (production TEE posture) — the simulator's hash quote
+            # is not hardware-backed evidence.
+            if tee_quote.quote_type == QuoteType.SOFTWARE_HASH:
+                from app.core.config import get_settings
+                if not get_settings().ALLOW_SIMULATION:
+                    logger.warning(
+                        "[KMS] Rejected software-simulated attestation (key=%s, session=%s) "
+                        "because ALLOW_SIMULATION=false",
+                        key_id, session_id,
+                    )
+                    return False
+
             policy = AttestationPolicy(require_fresh_quote=True, max_quote_age_seconds=300)
             service = AttestationService(policy=policy)
             result = service.verify_quote(tee_quote)
@@ -293,6 +319,33 @@ class KMSService:
         if found:
             logger.info(f"[KMS] Destroyed key {key_id}")
         return found
+
+    def export_wrapped(self, key_id: str) -> bytes | None:
+        """Return a copy of the KEK-wrapped key blob for persistence (gap B3).
+
+        The blob alone is useless without the KEK held in HSM/Vault — this is
+        envelope-encryption safe. Returns None when the key is not in memory.
+        """
+        blob = self._wrapped_keys.get(key_id)
+        return bytes(blob) if blob is not None else None
+
+    def export_sm2_ciphertext(self, key_id: str) -> bytes | None:
+        """Return a copy of the SM2-encrypted DEK blob for persistence."""
+        blob = self._sm2_encrypted_keys.get(key_id)
+        return bytes(blob) if blob is not None else None
+
+    def import_wrapped(self, key_id: str, wrapped: bytes, sm2_ciphertext: bytes | None = None) -> bool:
+        """Restore a persisted wrapped key blob into the in-memory store (gap B3).
+
+        Returns True when the blob was imported.
+        """
+        if not key_id or not wrapped:
+            return False
+        self._wrapped_keys[key_id] = bytes(wrapped)
+        if sm2_ciphertext:
+            self._sm2_encrypted_keys[key_id] = bytes(sm2_ciphertext)
+        logger.info(f"[KMS] Imported wrapped key {key_id} from persistence")
+        return True
 
     async def cleanup_expired_distributions(self, db) -> int:
         """Revoke expired key distributions (TTL enforcement).
