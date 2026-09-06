@@ -1545,7 +1545,45 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 36. 最终验证状态
+## 36. Round 39 沙箱可用性 P0 三件套（会话文件 / 快照回滚 / 暂停恢复）修复记录
+
+### 触发条件
+
+对照 Sandboxie 概念图与 CubeSandbox 特性做"从 demo 到真可用"差距分析：隔离与策略层 CDS 已等价覆盖（namespaces/seccomp/cgroups/netns/DNS 代理），结构性缺口为**用户可用的沙箱交互生命周期**——文件存取、快照回滚、暂停恢复。用户确认实施 P0 三件套。
+
+### 已完成
+
+1. **会话文件 API（对照 Sandboxie"写入虚拟化/文件重定向"、CubeSandbox files API）**：
+   - `POST/GET/DELETE /sandbox-sessions/{id}/files[/{name}]`：上传落 workspace `files/`（沙箱可见）、列表、下载、删除；owner/operator 鉴权，活跃态门禁。
+   - 静态加密：上传文件用会话 DEK 以 `[nonce12][tag16][ct]`（与 provision 同构）加密落盘，沙箱内经 `CDS_DEK_HEX` 解密（与 RAG 同模式）；`.files_index.json` 记录加密态与 SHA256（仅元数据，列表排除）。
+   - **下载过 T5 输出审查**：解码文本过 OutputInspector，critical finding → 409（内容永不释放，审计 `sandbox.file_download_blocked`）；通过 → 原文返回 + `X-CDS-Output-Review: passed` 头。
+   - 防护：文件名遍历/分隔符/控制字符拒绝、单文件 50MB、单会话 200 文件（可配 `CDS_SESSION_FILE_MAX_BYTES`/`SESSION_MAX_FILES`）。
+2. **快照/回滚（对照 Sandboxie"快照回滚/删除即可回退"、CubeSandbox snapshots API）**：
+   - `POST/GET /{id}/snapshots`、`POST /{id}/snapshots/{sid}/rollback`、`DELETE`：确定性 tar.gz 归档整个 workspace（内容均为 DEK 密文，归档静态安全）。
+   - 归档存于沙箱 bind **之外**（`<workspace.parent>/_cds_snapshots/<ws>/`）——沙箱内代码不可读写篡改，回滚可安全原地替换；manifest 含 sha256，**回滚前强制完整性校验**（篡改拒绝）。
+   - 保留策略：超 `CDS_SESSION_MAX_SNAPSHOTS`（默认 10）驱逐最旧；设计裁剪记录：copy-snapshot 先行（Windows/Linux 皆可测），overlayfs 层叠为 P2 优化路径。
+3. **暂停/恢复/续期（对照 Sandboxie"暂停恢复"、CubeSandbox pause/resume/refreshes）**：
+   - `POST /{id}/pause|resume`：复用既有状态机 `READY/RUNNING→SUSPENDED→恢复`（零状态机改动）；`pre_pause_status` 新列记住恢复目标（fallback READY）。
+   - `POST /{id}/refreshes`：`extended_seconds` 新列延长有效期（默认一个 timeout 窗口，总上限 `CDS_SESSION_MAX_EXTENDED_SECONDS`=7 天）；`is_session_expired` 改为 `created_at + timeout + extended`。
+   - 执行门禁零改动即生效（execute 要求 RUNNING，SUSPENDED 自动 400）；workspace/文件/快照/密钥在暂停期全部保留。
+4. **迁移**：`alembic/versions/0002_session_usability.py`（additive 两列），已在远程 live DB 实跑（stamp 0001 → upgrade head → PRAGMA 验证列存在）。
+5. **e2e**：`test_16_sandbox_usability` 加入实时 API full-lifecycle（文件上传/列表/下载 → PII 下载被 T5 阻断 → 快照 → 变更 → 回滚验证 → 暂停 → 续期 → 恢复 → 清理；buyer 创建会话满足合约门禁）；原 cleanup 顺延 test_17；auth fixture 429 步进重试（20s×4）。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| 新增单测：test_session_files / test_session_snapshots / test_session_pause_resume | **21 passed**（远程 Linux 全绿；Windows 跳过 POSIX-only 的 sandbox_security 路径 8 项） |
+| 实时 API full-lifecycle（含 test_16_sandbox_usability） | **17 passed**（85.99s，含真实 bwrap provision、T5 阻断、快照回滚、暂停恢复全链） |
+| Alembic 0002 迁移（远程 live SQLite） | stamp 0001 → upgrade head 通过，PRAGMA 确认两列存在 |
+| 受影响回归：test_sandbox_levels / test_session_lifecycle / test_contract_fulfillment 等 | 本地 13 passed + 远程全量确认 |
+| 远程全量 pytest | 见下方补充（进行中，完成后更新） |
+
+**仍未实施**：会话文件下载的红action（当前仅阻断 critical，非 critical 以原文返回 + findings 头标注）；快照 GC（terminate 后归档留存，待清理策略）；overlayfs 快照优化（P2）；交互式 PTY/终端、Python SDK、模板预装环境、日志流式推送（CubeSandbox 融合 P1/P2 项）。
+
+---
+
+## 37. 最终验证状态
 
 | 验证项 | 结果 | 备注 |
 |---|---|---|
@@ -1588,6 +1626,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 | Round 36（部署 fail-closed）聚焦单测 | 通过 | 本机 `python -m compileall -q app/core/config.py` 通过；test_security_config_matrix + test_kms_attestation_required 14 passed；新增 SECCOMP/HSM 生产 raise 用例通过；受影响回归 67 passed / 7 既有 Windows resource 收集错误（零新增回归）；部署文件（docker-compose.prod.yml/.env.prod）非测试覆盖路径，全量基线 2143/75/16 不变 |
 | Round 36 远程 Linux 验证（100.112.3.247） | 通过 | 远程 compileall 通过；RAG+安全矩阵聚焦 54 passed；全量 **2271 passed / 10 failed / 16 errors**（+60 passed vs 远程旧基线，失败集完全相同，零新增回归）；剩余失败全部环境门禁（cgroup v1 只读 / e2e 无 CDS 服务） |
 | Round 37 远程 e2e 闭环 + 合约签名修复 | 通过 | 三文件 e2e 57 passed（3 failed 清零）；合约相关 6 文件 53 passed 零回归；实时 API full-lifecycle **16/16**（真实 SM2 双方签名闭环）；test_p0 15 passed；全量 2275 passed / 8 failed / 16 errors（8 failed 全为 cgroup 环境门禁，16 errors 为无实时 API 的预期形态且已 16/16 单独验证） |
+| Round 39 可用性三件套 | 通过 | 新单测 21 passed（远程 Linux）；实时 e2e **17/17**（含 files/快照回滚/暂停恢复全链 + T5 阻断 + Alembic 0002 实跑）；受影响回归全绿；全量见 pytest_r39.log |
 | 非 e2e 单测 | 通过 | 2041 passed, 1 skipped, 91 deselected；1 个延迟回收测试 warning |
 | e2e | 未运行 | 按当前任务要求暂不跑 e2e |
 
@@ -1596,7 +1635,7 @@ Round 34 完成后 P0/P1 软件闭环清零，剩余唯一软件大项为 T11 RA
 
 ---
 
-## 37. 后续循环规则
+## 38. 后续循环规则
 
 1. 任一测试失败，新增或重开 active gap，并记录失败命令和失败点。
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。

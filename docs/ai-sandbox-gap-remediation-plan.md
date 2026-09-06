@@ -488,3 +488,16 @@ T5 (输出网关) ┘（与 T2 并行，无依赖）
 3. **实时 API e2e 的环境隔离**：独立 SQLite 文件 + 空闲端口，admin 直接播种；该机 fabric_* 服务栈与共享端口全程未动，验证后 API 进程已停止。
 
 **验证**：三文件 e2e 57 passed（原 3 failed 清零）；合约 6 文件 53 passed 零回归；实时 full-lifecycle 16/16；test_p0 15 passed；全量 2275 passed / 8 failed / 16 errors / 1 skipped——8 failed 全为 cgroup v1 只读环境门禁（bwrap 命名空间/seccomp 隔离本身正常），16 errors 为进程内套件无实时 API 的预期形态（已由实时 API 16/16 单独覆盖）。
+
+### Round 39 执行记录（2026-09-06 追加）—— 沙箱可用性 P0 三件套
+
+| 任务 | 状态 | 关键产出 | 对应 specs |
+|---|---|---|---|
+| 会话文件 API（对照 CubeSandbox files / Sandboxie 写入虚拟化） | ✅ 已实现 | `app/services/session_files.py` + 4 端点；上传 DEK 加密落盘（provision 同构）、下载过 T5（critical→409 永不释放）、遍历/大小/数量防护、`.files_index.json` 元数据 | Round 39 |
+| 快照/回滚（对照 Sandboxie 快照回滚） | ✅ 已实现 | `app/services/session_snapshots.py` + 4 端点；确定性 tar.gz 存于 bind 外、sha256 完整性强制校验、保留策略驱逐；copy-snapshot 先行、overlayfs 为 P2 优化 | Round 39 |
+| 暂停/恢复/续期 | ✅ 已实现 | 复用状态机 SUSPENDED 转换（零状态机改动）+ `pre_pause_status`/`extended_seconds` 两列（Alembic 0002 远程实跑）；`is_session_expired` 尊重 extended；execute 门禁天然拦截暂停态 | Round 39 |
+| e2e 扩展 | ✅ 已实现 | `test_16_sandbox_usability`（实时 API 全链：文件→PII 阻断→快照→回滚验证→暂停→续期→恢复→清理）；cleanup 顺延 test_17；auth fixture 429 步进重试 | Round 39 |
+
+**验证**：新单测 21 passed（远程 Linux）；实时 full-lifecycle **17/17**（85.99s）；本地 Windows 13 passed + 8 POSIX 项 skip（远程全跑）。
+
+**仍未实施**：下载非 critical 红action、快照 GC 策略、overlayfs 快照（P2 优化）、PTY/SDK/模板环境/日志流式（CubeSandbox 融合 P1/P2）。
