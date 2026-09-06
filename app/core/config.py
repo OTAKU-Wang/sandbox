@@ -72,6 +72,18 @@ class Settings(BaseSettings):
     # Hard cap for total refresh extension per session (POST /{id}/refreshes).
     SESSION_MAX_EXTENDED_SECONDS: int = 7 * 24 * 3600
 
+    # Session usability (Round 40): exec / templates / snapshot GC.
+    # exec runs a shell command inside the live sandbox with a short hard cap —
+    # it is an interactive tool, not a batch runner (use /execute for that).
+    SESSION_EXEC_TIMEOUT_SECONDS: int = 120
+    SESSION_EXEC_MAX_OUTPUT_CHARS: int = 100_000
+    # Optional JSON override of the built-in session template registry
+    # ({"name": {"description": ..., "files": {...}, "env": {...}}}).
+    SESSION_TEMPLATES_JSON: str = ""
+    # Whether session termination garbage-collects the snapshot archives.
+    # Set false to keep "restore after terminate" possible for operators.
+    SESSION_SNAPSHOT_GC_ON_TERMINATE: bool = True
+
     # KMS (gap B1): fail-closed — reject session key distribution without a
     # TEE attestation. Software-only sandbox levels (L0/L3) produce no quote,
     # so deployments relying on them must explicitly disable this.

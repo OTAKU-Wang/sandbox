@@ -22,6 +22,9 @@ class SandboxSessionCreate(BaseModel):
     contract_id: str | None = None
     timeout_seconds: int = 3600
     resource_limits: dict | None = None
+    # Round 40 usability: optional preinstalled workspace template
+    # (see GET /sandbox-sessions/session-templates for valid names).
+    template: str | None = None
 
     @field_validator("sandbox_level")
     @classmethod
@@ -77,4 +80,34 @@ class SandboxExecuteRequest(BaseModel):
     def code_not_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("code cannot be empty")
+        return v
+
+
+class SandboxExecRequest(BaseModel):
+    """Round 40 usability: run a shell command inside the live sandbox.
+
+    Unlike ``/execute`` (batch code with full output-gateway pipeline), ``exec``
+    is the interactive building block: short hard-capped timeout, output still
+    passes the T5 DLP review before release.
+    """
+
+    command: str
+    timeout_seconds: int | None = None
+
+    @field_validator("command")
+    @classmethod
+    def command_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("command cannot be empty")
+        if len(v) > 8192:
+            raise ValueError("command too long (max 8192 chars)")
+        return v
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def valid_timeout(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v < 1 or v > 600:
+            raise ValueError("timeout_seconds must be between 1 and 600")
         return v

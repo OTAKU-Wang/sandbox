@@ -19,7 +19,7 @@ from app.models.data_product import DataProduct
 from app.models.contract import Contract, ContractStatus
 from app.models.sandbox_session import SandboxSession, SessionStatus, SandboxLevel
 from app.models.audit_log import AuditLog
-from app.schemas.sandbox_session import SandboxExecuteRequest, SandboxSessionCreate, SandboxSessionResponse
+from app.schemas.sandbox_session import SandboxExecRequest, SandboxExecuteRequest, SandboxSessionCreate, SandboxSessionResponse
 from app.services.audit_service import audit_service
 from app.services.kms_service import kms_service
 from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits, attestation_required_for_level as _attestation_required_for_level, attestation_from_provision as _attestation_from_provision, attestation_from_session as _attestation_from_session
@@ -274,6 +274,17 @@ async def create_sandbox_session(
 
     contract = await _validate_session_contract(db, body, current_user)
 
+    # Round 40 usability: validate the template name before anything is
+    # provisioned so an unknown name cannot leave an orphaned container.
+    if body.template:
+        from app.services import session_templates as st
+
+        if st.get_template(body.template) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown session template: {body.template!r} (see GET /sandbox-sessions/session-templates)",
+            )
+
     # Per-user concurrency limit: max 5 active sessions per user
     MAX_ACTIVE_SESSIONS = 5
     active_count_result = await db.execute(
@@ -467,6 +478,28 @@ async def create_sandbox_session(
     policy_config = NetworkPolicyConfig(mode="deny_all")
     await network_policy_engine.create_policy(str(session.id), policy_config)
 
+    # Round 40 usability: seed the workspace with the requested template.
+    # Convenience feature — seeding failures are audited, not fatal, so the
+    # session stays usable without the starter files.
+    if body.template:
+        from app.services import session_templates as st
+
+        try:
+            workspace = _session_workspace_or_400(session)
+            seeded = st.seed_workspace(workspace, st.get_template(body.template) or {})
+            session.resource_limits = {
+                **(session.resource_limits or {}),
+                "template": body.template,
+                "template_env": seeded.get("env") or {},
+            }
+        except Exception as e:
+            logger.warning("[sandbox] Template seeding failed for %s: %s", session.id, e)
+            await audit_service.log(
+                db, action="sandbox.template_seed_failed", resource_type="sandbox_session",
+                user_id=current_user.id, session_id=session.id,
+                detail={"template": body.template, "error": str(e)},
+            )
+
     await audit_service.log(
         db, action="sandbox.create", resource_type="sandbox_session",
         user_id=current_user.id, session_id=session.id,
@@ -506,6 +539,21 @@ async def list_sandbox_sessions(
     result = await db.execute(query)
     items = [SandboxSessionResponse.model_validate(s) for s in result.scalars().all()]
     return {"items": items, "total": total, "page": skip // limit + 1, "page_size": limit}
+
+
+@router.get("/session-templates")
+async def list_session_templates(
+    current_user: User = Depends(get_current_user),
+):
+    """List available workspace templates for session creation (Round 40).
+
+    NOTE: registered before the ``/{session_id}`` route on purpose — a literal
+    path appended after ``/{session_id}`` would be shadowed by the UUID
+    parameter match (FastAPI returns 422 instead of falling through).
+    """
+    from app.services import session_templates as st
+
+    return {"templates": st.list_templates()}
 
 
 @router.get("/{session_id}", response_model=SandboxSessionResponse)
@@ -990,6 +1038,8 @@ async def execute_in_sandbox(
     if enc_config:
         env_vars["CDS_DEK_HEX"] = enc_config["dek_hex"]
         env_vars["CDS_KEY_ID"] = enc_config.get("key_id", "sandbox-default")
+    # Round 40: template env vars recorded at create time
+    env_vars.update(_session_template_env(session))
 
     from app.services.sandbox_runtime import SceneRuntimeFactory
     scene_runtime = SceneRuntimeFactory.create(sandbox_mode)
@@ -1284,6 +1334,16 @@ def _active_or_suspended(session: SandboxSession) -> None:
         )
 
 
+def _session_template_env(session: SandboxSession) -> dict[str, str]:
+    """Environment variables recorded at create time by the session template
+    (Round 40) — merged into every /execute and /exec call."""
+    limits = getattr(session, "resource_limits", None) or {}
+    env = limits.get("template_env") if isinstance(limits, dict) else None
+    if not isinstance(env, dict):
+        return {}
+    return {str(k): str(v) for k, v in env.items()}
+
+
 @router.get("/{session_id}/files")
 async def list_session_files(
     session_id: uuid.UUID,
@@ -1404,9 +1464,33 @@ async def download_session_file(
         detail={"filename": filename, "size": len(content), "findings": len(findings)},
     )
     await db.flush()
+
+    # Round 40: non-critical findings are REDACTED, not blocked — clean text
+    # is rewritten through the inspector's redaction (e.g. [REDACTED:email]);
+    # binary content cannot be redacted reliably, so it is released as-is and
+    # the review header discloses the findings. Critical findings still 409
+    # above (never released).
+    review_header = f"passed; findings={len(findings)}"
+    if findings:
+        redacted = getattr(review, "redacted_output", None)
+        try:
+            content.decode("utf-8")
+            is_text = True
+        except UnicodeDecodeError:
+            is_text = False
+        if is_text and redacted is not None:
+            content = redacted.encode("utf-8")
+            review_header = f"redacted; findings={len(findings)}"
+            await audit_service.log(
+                db, action="sandbox.file_download_redacted", resource_type="sandbox_session",
+                user_id=current_user.id, session_id=session.id,
+                detail={"filename": filename, "findings": len(findings)},
+            )
+            await db.flush()
+
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
-        "X-CDS-Output-Review": f"passed; findings={len(findings)}",
+        "X-CDS-Output-Review": review_header,
     }
     return Response(content=content, media_type="application/octet-stream", headers=headers)
 
@@ -1627,3 +1711,215 @@ async def refresh_sandbox_session(
         detail={"extend_seconds": extend, "extended_seconds": session.extended_seconds},
     )
     return SandboxSessionResponse.model_validate(session)
+
+
+# ════════════════════════════════════════════════════════════════
+# Round 40 (usability): exec / logs / usage
+# ════════════════════════════════════════════════════════════════
+
+
+@router.post("/{session_id}/exec")
+async def exec_in_sandbox(
+    session_id: uuid.UUID,
+    body: SandboxExecRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run a shell command inside the live sandbox workspace (Round 40).
+
+    The interactive building block (CubeSandbox-style exec API): short
+    hard-capped timeout, captured output passes the same T5 DLP review as
+    ``/execute`` before release. ``CDS_DEK_HEX`` is injected so shell code
+    can decrypt uploaded files; the raw session key is NOT injected into
+    interactive shells.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    session = await _load_operable_session(db, session_id, current_user)
+    current = SessionStatus(session.status)
+    if not session_state_machine.is_active(current):
+        raise HTTPException(status_code=400, detail=f"Session in terminal state (status: {session.status})")
+    if session.status != SessionStatus.RUNNING.value:
+        raise HTTPException(status_code=400, detail=f"Session not running (status: {session.status})")
+    if not session.container_id:
+        raise HTTPException(status_code=400, detail="Session has no container")
+
+    timeout = body.timeout_seconds or settings.SESSION_EXEC_TIMEOUT_SECONDS
+    timeout = max(1, min(int(timeout), int(settings.SESSION_EXEC_TIMEOUT_SECONDS)))
+
+    env_vars = {
+        "CDS_SESSION_ID": str(session_id),
+        "CDS_SANDBOX_LEVEL": session.sandbox_level,
+        "CDS_USER_ID": str(current_user.id),
+    }
+    enc_config = get_encryption_config_for_session(str(session_id))
+    if enc_config:
+        env_vars["CDS_DEK_HEX"] = enc_config["dek_hex"]
+    env_vars.update(_session_template_env(session))
+
+    runtime = await get_sandbox_manager()
+    started = datetime.now(timezone.utc)
+    exec_result = await _execute_runtime_with_context(
+        runtime,
+        session.container_id,
+        body.command,
+        "bash",
+        env_vars=env_vars,
+        timeout=timeout,
+    )
+    duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+
+    output = exec_result.get("output") or ""
+    if not isinstance(output, str):
+        output = json.dumps(output, ensure_ascii=False, default=str)
+    max_chars = int(settings.SESSION_EXEC_MAX_OUTPUT_CHARS)
+    truncated = len(output) > max_chars
+    if truncated:
+        output = output[:max_chars]
+
+    # T5 DLP review on the captured output (same gateway semantics as /execute).
+    sandbox_mode = getattr(session, "sandbox_mode", None) or "structured_query"
+    security_report: dict = {"passed": True, "blocked": False, "findings": [], "findings_count": 0}
+    output_blocked = False
+    if output:
+        try:
+            from app.services.output_security import (
+                inspect_text_output,
+                inspection_to_report,
+                should_block,
+            )
+
+            inspection = inspect_text_output(
+                output,
+                user_id=str(current_user.id),
+                session_id=str(session.id),
+                sandbox_mode=sandbox_mode,
+            )
+            report = inspection_to_report(inspection)
+            if should_block(inspection):
+                output = ""
+                output_blocked = True
+            else:
+                output = inspection.redacted_output or ""
+            security_report = report
+        except Exception as e:
+            output = ""
+            output_blocked = True
+            security_report = {"passed": False, "blocked": True, "error": str(e)}
+
+    await audit_service.log(
+        db, action="sandbox.exec", resource_type="sandbox_session",
+        user_id=current_user.id, session_id=session.id,
+        detail={
+            "command_sha256": hashlib.sha256(body.command.encode("utf-8")).hexdigest(),
+            "command_preview": body.command[:500],
+            "timeout_seconds": timeout,
+            "exit_code": exec_result.get("exit_code"),
+            "output_truncated": truncated,
+            "output_blocked": output_blocked,
+        },
+    )
+    await db.flush()
+
+    return {
+        "session_id": str(session_id),
+        "command": body.command,
+        "exit_code": exec_result.get("exit_code", -1),
+        "output": output,
+        "output_truncated": truncated,
+        "output_blocked": output_blocked,
+        "blocked_reason": "output_inspection_blocked" if output_blocked else None,
+        "duration_ms": duration_ms,
+        "timeout_seconds": timeout,
+        "security_report": security_report,
+    }
+
+
+@router.get("/{session_id}/logs")
+async def get_session_logs(
+    session_id: uuid.UUID,
+    limit: int = Query(100, ge=1, le=500),
+    since: str | None = Query(None, max_length=64),
+    action: str | None = Query(None, max_length=128),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Tail the session's audit trail (Round 40 log-polling stream).
+
+    Poll with ``since=<previous latest created_at>`` for follow-style
+    streaming; ``action`` filters (e.g. ``sandbox.exec``). In-sandbox
+    activity events (data_access/network/application) remain on
+    ``GET /{session_id}/audit``.
+    """
+    session = await _load_operable_session(db, session_id, current_user)
+
+    query = select(AuditLog).where(AuditLog.session_id == session_id)
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"invalid since timestamp: {since!r}")
+        query = query.where(AuditLog.created_at >= since_dt)
+    if action:
+        query = query.where(AuditLog.action == action)
+    query = query.order_by(AuditLog.created_at.desc()).limit(limit)
+
+    rows = (await db.execute(query)).scalars().all()
+    return {
+        "session_id": str(session_id),
+        "logs": [
+            {
+                "id": str(row.id),
+                "action": row.action,
+                "detail": row.detail,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "user_id": str(row.user_id) if row.user_id else None,
+            }
+            for row in rows
+        ],
+        "count": len(rows),
+        "latest_created_at": rows[0].created_at.isoformat() if rows and rows[0].created_at else None,
+    }
+
+
+@router.get("/{session_id}/usage")
+async def get_session_usage(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Workspace / files / snapshots usage snapshot for one session (Round 40)."""
+    session = await _load_operable_session(db, session_id, current_user)
+    workspace = _session_workspace_or_400(session)
+
+    from app.services import session_files as sf
+    from app.services import session_snapshots as ss
+
+    workspace_files = 0
+    workspace_bytes = 0
+    for p in workspace.rglob("*"):
+        if p.is_file():
+            workspace_files += 1
+            try:
+                workspace_bytes += p.stat().st_size
+            except OSError:  # pragma: no cover - racing deletion
+                pass
+
+    files = sf.list_files(workspace)
+    snapshots = ss.list_snapshots(workspace)
+
+    return {
+        "session_id": str(session_id),
+        "status": session.status,
+        "workspace": {"files": workspace_files, "bytes": workspace_bytes},
+        "uploaded_files": {"count": len(files), "bytes": sum(int(f["size"]) for f in files)},
+        "snapshots": {
+            "count": len(snapshots),
+            "bytes": sum(int(s.get("bytes") or 0) for s in snapshots),
+        },
+        "timeout": {
+            "timeout_seconds": session.timeout_seconds,
+            "extended_seconds": int(getattr(session, "extended_seconds", 0) or 0),
+        },
+    }

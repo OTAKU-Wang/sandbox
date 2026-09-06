@@ -13,6 +13,7 @@ tenant quota. It is reused by the contract-termination cascade (gap A1).
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +76,28 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
             runtime.terminate(session.container_id)
         except Exception as e:
             logger.warning("[SessionLifecycle] Container termination failed for %s: %s", session.id, e)
+
+        # Round 40: snapshot GC — remove the workspace snapshot archives so
+        # terminated sessions stop holding disk. Operators who want
+        # "restore after terminate" durability can set
+        # CDS_SESSION_SNAPSHOT_GC_ON_TERMINATE=false.
+        try:
+            from app.core.config import get_settings
+
+            if get_settings().SESSION_SNAPSHOT_GC_ON_TERMINATE:
+                import shutil
+
+                from app.services.sandbox_runtime import sandbox_runtime
+                from app.services.session_snapshots import snapshots_dir
+
+                workspace = sandbox_runtime.get_workspace(session.container_id, session.sandbox_level)
+                if workspace:
+                    sdir = snapshots_dir(Path(workspace))
+                    if sdir.exists():
+                        shutil.rmtree(sdir, ignore_errors=True)
+                        logger.info("[SessionLifecycle] Snapshot GC removed %s", sdir)
+        except Exception as e:
+            logger.warning("[SessionLifecycle] Snapshot GC failed for %s: %s", session.id, e)
 
     # Destroy session key + crypto-erase persisted wrapped payload (gap B3)
     if session.session_key_id:
