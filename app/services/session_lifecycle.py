@@ -65,9 +65,12 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
         logger.warning("[SessionLifecycle] Cannot terminate session %s: %s", session.id, transition.error)
         return False
 
+    from app.core.metrics import record_session_transition
+
     session.status = SessionStatus.TERMINATED.value
     session.ended_at = datetime.now(timezone.utc)
     session.error_message = session.error_message or reason
+    record_session_transition(current.value, SessionStatus.TERMINATED.value)
 
     # Destroy container
     if session.container_id:

@@ -44,3 +44,11 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Secrets / databases / archives (W6 git hygiene)
+*.db
+.env.prod
+.env.*
+!.env.example
+!.env.prod.example
+*.zip

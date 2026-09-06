@@ -101,7 +101,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── 应用层 ───
+  # ─── 应用�?───
   cds-api:
     image: cds-api:latest
     ports:
@@ -111,6 +111,7 @@ services:
       # validate_security_config posture matrix (is_prod gate) and the JWT
       # secret requirement. Keep false unless actively debugging the stack.
       CDS_DEBUG: "false"
+  CDS_LOG_JSON: "true"
       CDS_DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@postgres:5432/cds
       CDS_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CDS_CLICKHOUSE_URL: http://clickhouse:8123/cds_audit
@@ -121,16 +122,16 @@ services:
       CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY}
-      # P0 hardening switches — production fail-closed posture.
+      # P0 hardening switches �?production fail-closed posture.
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "true"
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
       # Fail-closed simulation/fallback switches (validate_security_config
       # surfaces every enabled one at startup so degradation is never silent).
-      # SECCOMP: never silently retry an exec without seccomp — fail closed.
+      # SECCOMP: never silently retry an exec without seccomp �?fail closed.
       CDS_SECCOMP_FALLBACK_ALLOWED: "false"
       # HSM: Vault is a required compose service, so an in-memory software KEK
-      # fallback is unacceptable in production — fail closed to real Vault.
+      # fallback is unacceptable in production �?fail closed to real Vault.
       CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
       # Hardware-gated switches. These stay TRUE until a real TEE/GPU backend is
       # provisioned (productization acceptance, FG-001/FG-002): the software-only

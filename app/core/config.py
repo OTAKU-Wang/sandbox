@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "CDS - Confidential Data Sandbox"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
+    # W4: legacy Jinja admin pages (/admin/*, FE-1~FE-5 leftovers) — the React
+    # frontend is the real admin UI. These pages have NO authentication, so the
+    # default is off and production enabling is rejected at startup.
+    ADMIN_PAGES_ENABLED: bool = False
+
+    # W1: observability — Prometheus metrics + structured logs.
+    METRICS_ENABLED: bool = True
+    METRICS_API_TOKEN: str | None = None  # set to require bearer auth on /metrics
+    LOG_JSON: bool = False
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://cds:cds@localhost:5432/cds"
@@ -242,6 +251,14 @@ class Settings(BaseSettings):
             )
         if not self.FEDERATION_JWT_KEY_REQUIRED:
             issues.append("WARN: FEDERATION_JWT_KEY_REQUIRED=false — static federation JWT fallback is permitted in production")
+
+        # W4: unauthenticated legacy admin pages must never serve in production.
+        if self.ADMIN_PAGES_ENABLED:
+            raise ValueError(
+                "ADMIN_PAGES_ENABLED=true is not permitted in production: the legacy "
+                "/admin/* pages have no authentication. Use the React frontend "
+                "(cds-frontend) as the admin UI."
+            )
 
         # Gap T11: embedding backend must be a known engine (auto resolves to
         # a concrete honest engine at runtime; unknown values would fail closed

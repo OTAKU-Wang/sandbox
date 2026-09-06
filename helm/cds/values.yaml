@@ -1,4 +1,4 @@
-# CDS Helm Chart â€” Default Values
+# CDS Helm Chart â€?Default Values
 replicaCount: 2
 
 image:
@@ -25,10 +25,12 @@ api:
   env:
     CDS_DEBUG: "false"
     LOG_LEVEL: info
-    # P0 hardening switches â€” production fail-closed posture.
+    # P0 hardening switches â€?production fail-closed posture.
     # NOTE: KMS_REQUIRE_ATTESTATION=true rejects key distribution for
     # software-only sandbox levels (L0/L3); deployments that rely on them must
     # explicitly set this to "false" (see docs/ai-sandbox-gap-remediation-plan.md).
+  CDS_LOG_JSON: "false"  # set "true" for structured JSON logs (W1)
+  # CDS_METRICS_API_TOKEN: ""  # set a bearer token to protect /metrics
     CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
     CDS_KMS_REQUIRE_ATTESTATION: "true"
     CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"

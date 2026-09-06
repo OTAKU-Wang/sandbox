@@ -53,3 +53,6 @@ peft>=0.7.0
 
 # === Kafka (CDC) ===
 aiokafka>=0.10.0
+
+# === Observability (W1) ===
+prometheus-client>=0.20.0

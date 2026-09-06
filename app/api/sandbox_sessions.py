@@ -358,6 +358,9 @@ async def create_sandbox_session(
     )
     session.container_id = provision_result.get("container_id")
     session.status = provision_result.get("status", SessionStatus.RUNNING.value)
+    from app.core.metrics import record_session_transition
+
+    record_session_transition(SessionStatus.PROVISIONING.value, session.status)
     if provision_result.get("error") or not session.container_id or session.status == SessionStatus.FAILED.value:
         session.status = SessionStatus.FAILED.value
         session.error_message = provision_result.get("error") or "Sandbox provision failed"
@@ -407,6 +410,9 @@ async def create_sandbox_session(
         session.container_id = None
         session.status = SessionStatus.FAILED.value
         session.error_message = "Sandbox attestation quote missing; key distribution denied"
+        from app.core.metrics import record_kms_distribution
+
+        record_kms_distribution("rejected")
         await db.flush()
         await db.refresh(session)
         await audit_service.log(
@@ -423,6 +429,9 @@ async def create_sandbox_session(
         str(session.id),
         attestation=attestation,
     )
+    from app.core.metrics import record_kms_distribution
+
+    record_kms_distribution("success" if distributed_key else "failed")
     if not distributed_key:
         kms_service.destroy_key(session_key_result["key_id"])
         try:
@@ -1020,6 +1029,9 @@ async def execute_in_sandbox(
         except Exception as e:
             logger.warning("[sandbox] Session key distribution failed: %s", e)
             session_key = None
+        from app.core.metrics import record_kms_distribution
+
+        record_kms_distribution("success" if session_key else "failed")
         if not session_key:
             raise HTTPException(status_code=503, detail="Session key distribution failed")
 
@@ -1110,13 +1122,17 @@ async def execute_in_sandbox(
                 sandbox_mode=sandbox_mode,
             )
             report = inspection_to_report(inspection)
+            from app.core.metrics import record_output_inspection
+
             if should_block(inspection):
                 exec_result["output"] = ""
                 exec_result["output_blocked"] = True
                 exec_result["blocked_reason"] = "output_inspection_blocked"
+                record_output_inspection("blocked")
             else:
                 exec_result["output"] = inspection.redacted_output or ""
                 exec_result["output_blocked"] = False
+                record_output_inspection("redacted" if inspection.redacted_output != output else "passed")
             exec_result["security_report"] = report
         else:
             exec_result["security_report"] = {
@@ -1442,7 +1458,10 @@ async def download_session_file(
         return getattr(sev, "value", None) or str(sev)
 
     blocked = any(_sev_value(f).lower() == "critical" for f in findings)
+    from app.core.metrics import record_output_inspection
+
     if blocked:
+        record_output_inspection("blocked")
         await audit_service.log(
             db, action="sandbox.file_download_blocked", resource_type="sandbox_session",
             user_id=current_user.id, session_id=session.id,
@@ -1470,6 +1489,8 @@ async def download_session_file(
         detail={"filename": filename, "size": len(content), "findings": len(findings)},
     )
     await db.flush()
+    if not findings:
+        record_output_inspection("passed")
 
     # Round 40: non-critical findings are REDACTED, not blocked — clean text
     # is rewritten through the inspector's redaction (e.g. [REDACTED:email]);
@@ -1487,6 +1508,7 @@ async def download_session_file(
         if is_text and redacted is not None:
             content = redacted.encode("utf-8")
             review_header = f"redacted; findings={len(findings)}"
+            record_output_inspection("redacted")
             await audit_service.log(
                 db, action="sandbox.file_download_redacted", resource_type="sandbox_session",
                 user_id=current_user.id, session_id=session.id,
@@ -1634,6 +1656,9 @@ async def pause_sandbox_session(
 
     session.pre_pause_status = session.status
     session.status = SessionStatus.SUSPENDED.value
+    from app.core.metrics import record_session_transition
+
+    record_session_transition(session.pre_pause_status, SessionStatus.SUSPENDED.value)
     await db.flush()
     await db.refresh(session)
     await audit_service.log(
@@ -1669,6 +1694,9 @@ async def resume_sandbox_session(
 
     session.status = target.value
     session.pre_pause_status = None
+    from app.core.metrics import record_session_transition
+
+    record_session_transition(SessionStatus.SUSPENDED.value, target.value)
     await db.flush()
     await db.refresh(session)
     await audit_service.log(
@@ -1803,11 +1831,15 @@ async def exec_in_sandbox(
                 sandbox_mode=sandbox_mode,
             )
             report = inspection_to_report(inspection)
+            from app.core.metrics import record_output_inspection
+
             if should_block(inspection):
                 output = ""
                 output_blocked = True
+                record_output_inspection("blocked")
             else:
                 output = inspection.redacted_output or ""
+                record_output_inspection("redacted" if inspection.redacted_output != output else "passed")
             security_report = report
         except Exception as e:
             output = ""

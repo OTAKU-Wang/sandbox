@@ -14,6 +14,7 @@ from app.core.redis import get_redis, close_redis
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
 from app.api import network_policy as network_policy_api
 from app.api import admin
+from app.api import metrics
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert  # Ensure tables are created
 
 
@@ -142,23 +143,37 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Apply security middleware (disable rate limiting in test mode)
+# W1: telemetry middlewares. Starlette makes the LAST added middleware the
+# OUTERMOST, so add Metrics first and RequestID second. Metrics is disabled
+# under TESTING (TestClient assertions stay deterministic).
 is_testing = os.environ.get("TESTING") == "1" or os.environ.get("PYTEST_CURRENT_TEST")
+from app.core.telemetry import MetricsMiddleware, RequestIDMiddleware  # noqa: E402
+
+app.add_middleware(
+    MetricsMiddleware,
+    enabled=(not is_testing) and settings.METRICS_ENABLED,
+)
+app.add_middleware(RequestIDMiddleware)
+
+# Apply security middleware (disable rate limiting in test mode)
 setup_security(app, allowed_origins=settings.CORS_ALLOWED_ORIGINS, enable_rate_limit=not is_testing)
 
+# W1: logging pipeline (no-op unless CDS_LOG_JSON=true)
+from app.core.logging import setup_logging  # noqa: E402
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all exception handler — prevents stack traces from leaking to clients."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )
+setup_logging(settings.LOG_JSON)
+
+
+# W2: unified error contract — {code, message, detail, request_id} bodies,
+# Retry-After for transient locks, 410 semantics for terminal states.
+from app.core.error_handlers import register_exception_handlers  # noqa: E402
+
+register_exception_handlers(app)
 
 
 # Register routers
 app.include_router(health.router, tags=["health"])
+app.include_router(metrics.router, tags=["metrics"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(data_products.router, prefix="/api/v1/data-products", tags=["data-products"])
@@ -191,4 +206,15 @@ from pathlib import Path as _Path
 _static_dir = _Path(__file__).parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
-app.include_router(admin.router)
+# W4: legacy Jinja admin pages carry no authentication — off by default, and
+# validate_security_config() rejects enabling them in production. Factored
+# into a function so tests can exercise the gate on a fresh app instance.
+def _register_admin_pages(target_app: FastAPI) -> None:
+    if settings.ADMIN_PAGES_ENABLED:
+        logger.warning(
+            "[SECURITY] Admin legacy pages enabled at /admin/* — NOT for production use"
+        )
+        target_app.include_router(admin.router)
+
+
+_register_admin_pages(app)
