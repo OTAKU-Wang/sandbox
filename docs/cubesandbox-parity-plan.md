@@ -737,3 +737,52 @@ W13 (egress 审计) ∥ W14 (节点运维)
 - W2 状态语义对齐：410 `SESSION_TERMINATED` 类已建，既有 e2e 依赖的 404 行为保持不变（`docs/error-codes.md` 已登记 `SESSION_TERMINATED_OBSERVED` 过渡决策），迁移到 410 留给独立 PR。
 
 **未实施项**：W3（Redis 限流/配额持久化）、W5（基线迁移）、W7（CI）、P1 全部（W8–W14）、密钥轮换执行与 filter-repo 历史清洗（独立决策项）。
+
+### Round 43 执行记录（2026-09-07，Linux/Python 3.14）—— M2（P0 清零）+ M3/M4（P1 全部）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 |
+|---|---|---|---|
+| W3 Redis 分布式限流 + 配额持久化 | ✅ | `security.py` RateLimitMiddleware 重写（Redis Lua 固定窗口，auth/user/ip 三桶，429+Retry-After+W2 shape，fail-open+节流 WARNING）；`sandbox_manager` 写透 Redis hash（`cds:tenant_quota:*`）+ `restore_tenant_quotas` + `rebuild_tenant_quotas`（DB 重建）；lifespan 启动恢复；fakeredis[lua] 依赖 | test_rate_limit_distributed 7 + test_tenant_quota_persistence 4 全绿 |
+| W5 Alembic 基线迁移 | ✅ | `0000_baseline_all_tables`（30 表，剥离 0001/0002 加列并重排链 0000→0001→0002）；`scripts/verify_schema_parity.py`（Alembic vs create_all 双库比对）；`ALEMBIC_COMPARE_TYPES` 开关（SQLite UUID→NUMERIC 误报，PG 类型检查归 W17）；runbook 迁移手册一节 | test_migrations 3（upgrade head/parity/downgrade base）全绿 |
+| W7 CI 流水线 | ✅ | `.github/workflows/ci.yml`（backend/frontend/secrets 三 job；CPU torch 安装；迁移链+parity+24 文件门禁集+informational 全量；gitleaks）；`ci/known-failures.md` 基线；runbook CI 复现段；pytest-timeout=600 | 门禁集本地 139 passed / 2 skipped；首次 Actions 绿 run 待 push 验证（诚实标注） |
+| P0 统一测试清零 | ✅ | 修复 `llm_sft_runtime` `mia_status` UnboundLocalError 真实缺陷（cpu_trainer 路径补 `mia_status="proxy_estimate"`）；`test_admin_frontend` 8 例过时测试对齐 W4 门禁设计；412 个误提交 `.pyc` 解除追踪（W6 补刀） | 全量 **2359 passed / 0 failed / 3 skipped**（基线 2319/7 → 0 失败） |
+| W8 游标分页 | ✅ | `app/core/pagination.py`（keyset: created_at DESC,id DESC；SQLite 用 epoch 秒比较规避秒级文本与微秒绑定词法错位——实测修复边界行重复）；4 端点接入（sessions/products/contracts 光标可选增量，connectors 由无界改为 le=500+光标）；`X-Next-Cursor` 头；SDK `iter_sessions()` 自动翻页 | test_pagination 6 全绿（无重无漏/越界 422/坏游标 400/中页删除容忍/SDK） |
+| W9 空闲自动暂停 | ✅ | 迁移 0003（`idle_policy`/`auto_resume`）；`SESSION_DEFAULT_IDLE_POLICY=kill` 保守默认；cleanup 分支 pause/terminate（已 SUSPENDED 过期仍 terminate 防泄漏）；auto_resume 唤醒链强制合约 ACTIVE/SIGNED 重验（终止合约 → 410 SESSION_TERMINATED + 审计），唤醒附带一个新超时窗口；dev_sandbox 诚实拒绝 pause | test_idle_autopause 7 全绿 |
+| W10 WebSocket 流式执行 | ✅ | `ProcessAdapter.execute_streaming`（复用抽取的 `_prepare_exec_command`——execute/streaming 同一 bwrap+seccomp 构建，杜绝漂移；逐行 on_line 回调，审查拒绝即 kill 进程 fail-closed）；facade 分发（非 L0 诚实 unsupported）；`POST /auth/ws-ticket`（30s 一次性 jti，Redis 燃烧）；`WS /{id}/exec/stream`（JSON 帧协议/4401/4409/4408/并发上限 3/心跳 30s）；前端 `ExecStreamTerminal.tsx`（xterm.js，ticket 生命周期/自动重连一次/阻断提示） | test_exec_stream 5 全绿；tsc -b 零错误；vite build 成功 |
+| W11 异步操作模型 | ✅ | 迁移 0004 `session_operations` 表；`session_operations` service（同步路径行为不变+operation 记录，异步 202+后台 task 自持 session+先 commit 再 spawn）；快照/回滚接入 `?async=true`；回滚互斥 503 OPERATION_LOCKED+Retry-After；`GET /operations/{op_id}` 归属校验；SDK `wait_for_operation` | test_async_operations 6 全绿 |
+| W12 保留 GC Janitor | ✅ | `retention_janitor.purge_cycle`（audit/merkle 默认永留、alert 180d、dry_run 默认、批删有界、删除即审计 `retention.purge`、PG advisory lock）；挂入 cleanup loop；`docs/retention.md` 审批流程 | test_retention_janitor 4 全绿 |
+| W13 出站访问审计 | ✅ | `egress_audit.py`（JSONL 队列写 maxsize=1000 满则丢弃+计数、secret 参数脱敏 `***`、凭据只记 ID）；DNS 代理 allow/deny + 策略生命周期打点；`GET /network-policies/session/{id}/egress-audit`；shutdown flush；resolv.conf 静默回退补 debug 日志 | test_egress_audit 6 全绿 |
+| W14 节点运维 | ✅ | 迁移 0005（`scheduling_disabled`/`health_state`）；`/api/v1/sandbox-nodes`（list/isolate/unisolate，admin）；选择器过滤隔离节点，全隔离 → `NO_NODE_AVAILABLE` 429（诚实区分"无节点"与"全被摘除"）；stale 心跳检测（alert+审计，告警不自动恢复——W18 留差异化） | test_node_operations 6 全绿 |
+
+**实现偏差回写（以代码为准）**：
+1. **W8**：4 个列表端点中 3 个原本已有 offset 分页（`{items,total,page,page_size}`，前端依赖）——光标模式作为增量选项（传 `cursor`（空串=第一页）进入 keyset，不传保持旧行为），而非方案预设的"未传 cursor 即第一页"；connectors 由无界改为有界。基线表数为 30（方案写 31，`models/key_metadata.py` 未使用不进 metadata）。
+2. **W10**：L0 runtime 原本无流式能力（`subprocess.run` 全量捕获）——新增 `execute_streaming` 并把命令构建抽取为 `_prepare_exec_command` 供 execute/streaming 共用；WS 仅在 L0 开放，其他级别返回 `STREAM_UNSUPPORTED`（诚实标注，不伪造流式）。心跳断连后进程继续（输出进日志，可经 /logs 补查）。
+3. **W14**：会话与节点无外键映射（仅 active_tasks 计数），stale 检测按"节点心跳过期"而非方案原稿"会话级映射"实现；`last_heartbeat` 列已存在（Round 前序），迁移只加两列。
+4. **迁移链**：0000（W5 基线）→0001→0002→0003（W9）→0004（W11）→0005（W14）；`alembic check` 在 SQLite 需 `ALEMBIC_COMPARE_TYPES=0`（UUID→NUMERIC 方言误报，PG 检查归 W17 环境验收）。
+5. **执行环境偏差**：visual-engineering 委托通道在本环境不可用（类别模型缺失）——W10 前端终端由主 agent 直接实现。
+
+**配置四同步**：新增键（RATE_LIMIT_*、SESSION_DEFAULT_IDLE_POLICY、EXEC_STREAM_MAX_CONCURRENT、RETENTION_*、EGRESS_AUDIT_*、NODE_STALE_SECONDS）已同步 `.env.example` / `docker-compose.yml` / `docker-compose.prod.yml` / `helm/cds/values.yaml`。
+
+**最终回归（Linux，排除 e2e 集群文件）**：**2399 passed / 0 failed / 3 skipped** —— 相对 P0 收口（2359/0）新增恰为 40 个 P1 用例，零回归；`compileall` 全绿；`alembic upgrade head` + parity 脚本全绿。
+
+**未实施项**：P2（W15 共享卷、W16 多副本队列、W17 K8s/Helm 完备化、W18 故障恢复、W19 国密 AEAD 审计）按方案"立项另估"留待 M5+；T8 真链 e2e / T9 LAC 模型实际安装 / T11 二期（前序方案范围）依环境验收项跟踪；W6 密钥轮换执行与 filter-repo 历史清洗为独立决策项；CI 首次绿 run 需 push 到 GitHub 后确认。
+
+### Round 44 执行记录（2026-09-07，Linux/Python 3.14）—— M5（P2 全部，应用户要求提前实施）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 |
+|---|---|---|---|
+| W16 多副本任务队列 | ✅ | `task_queue` 表 + 迁移 0006；`enqueue/claim_next/complete/fail/requeue_stale`（PG 走 FOR UPDATE SKIP LOCKED，SQLite 条件 UPDATE 乐观抢占；attempts+退避重试+visibility timeout 崩溃回收）；复用既有 Redis 队列（test_task_queue.py）不变 | test_durable_task_queue 6 全绿；parity 32 表 |
+| W18 节点故障自动摘除 | ✅ | `recover_stale_nodes`：stale 后心跳仍沉默 > 2×NODE_STALE_SECONDS → status=OFFLINE + health_state=offline + critical 告警（node-offline 去重键）+ `node.auto_offline` 审计；挂入 cleanup 循环（stale 检测之后）；幂等 | test_node_operations +1（hopeless→offline、grace 内保留 stale、二次清扫零动作） |
+| W15 共享卷 | ✅ | `shared_volumes`/`shared_volume_attachments` 表 + 迁移 0007；卷生命周期（同名冲突 409、路径穿越校验、删除级联清理目录）；attach/detach（owner 校验、卷级/附加级 RO 粒度）；`resolve_binds` → bwrap `--bind/--ro-bind /workspace/shared/<name>`；REST/WS 执行端点自动带上挂载；L0 限定（非 L0 容器诚实不支持） | test_shared_volumes 5 全绿（含 bwrap 命令断言 + 真实 L0 执行 exit 0）；parity 34 表 |
+| W19 审计日志加密 | ✅ | 复用 `app/utils/crypto.py` SM4Cipher（开发环境 AES-256-GCM 等价实现，生产 Tongsuo SM4-GCM）；JSONL 每行 `nonce‖tag‖ciphertext` base64；密钥 = SHA-256(CDS_AUDIT_ENCRYPTION_KEY，缺省回落 JWT_SECRET)；读取端透明解密（密钥不符→跳过该记录不崩溃）；开关默认关 | test_egress_audit_crypto 4（落盘无明文/透明读回/错钥跳过/明文兼容/防篡改） |
+| W17 Helm 完备化 | ✅ | 新增 `configmap.yaml`（api.env 渲染）、`hpa.yaml`（v2，2→6 副本 @80% CPU）、`pdb.yaml`（minAvailable 1）；deployment-api 增 securityContext（runAsNonRoot/no-priv-esc/drop ALL）+ topologySpreadConstraints（zone）；修复 values.yaml 历史 YAML 缩进坏块（此前无效嵌套）；W13-W19 env 键入 chart | test_helm_chart 5（YAML 严格解析/键存在/清单标记/模板配平 if-range-with↔end）；helm 真实渲染留集群验收 |
+| 最终统一回归 | ✅ | **2420 passed / 0 failed / 3 skipped**（+21 = 6+1+5+4+5）；compileall 全绿；迁移链 0000→0007 upgrade+parity 全绿；中途引入 6 个失败（helper 缺 db 参数）已定位修复回归清零 | 见 known-failures 基线 |
+
+**实现偏差回写**：
+1. **W16**：与既有 Redis 异步调度（test_task_queue.py，前序轮次）并存——DB 队列面向跨副本可恢复任务，Redis 面向进程内高频事件；未做互斥改造（各自语义不同，诚实并存）。
+2. **W15**：`size_limit_mb` 为登记性元数据（配额执行留 P3，需 fs quota 后端）；卷挂载仅 L0 bwrap 路径生效，L1/L2/L3 不支持（诚实 unsupported）；WS/REST 执行端点自动解析挂载，会话创建不隐式挂卷。
+3. **W17**：`AUDIT_ENCRYPTION_KEY` 属秘密，不入 values.yaml env（走 existingSecret）；values.yaml 修复属真实缺陷修复（该文件此前无法通过 YAML 解析）。
+4. **迁移链**：0000→…→0007（新增 0006 task_queue、0007 shared_volumes）。
+5. **环境偏差**：helm 二进制缺失 → 模板校验采用 YAML 解析 + 标记断言 + 配平检查，真实渲染（helm template/lint）留集群环境验收。
+
+**未实施项**：T8 真链 e2e / T9 LAC 安装 / FG-001..016 / W17 集群渲染（环境验收项）；W6 密钥轮换执行与 filter-repo（用户决策项）。方案内全部软件可实现工项（P0/P1/P2，W1-W19）至此清零。

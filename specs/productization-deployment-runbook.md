@@ -1,7 +1,25 @@
 # CDS 密态沙箱产品化部署 Runbook
 
-> 更新时间：2026-06-09  
+> 更新时间：2026-09-07  
 > 目标：把本地开发、243 验证、K3s/K8s 预生产和生产 Helm 交付的环境变量、安全默认值、部署步骤、回滚方式和验证命令集中到一份可执行清单。
+
+---
+
+## 0. 数据库迁移（W5 基线）
+
+Alembic 链（`alembic/versions/`）自 `0000_baseline_all_tables` 起，可从空库建出全部表：
+
+```bash
+alembic upgrade head                      # 空库：0000 建全部表 → 0001/0002 加列
+python scripts/verify_schema_parity.py    # Alembic 链 vs create_all 结构比对（CI 门禁）
+```
+
+| 场景 | 操作 |
+|---|---|
+| 全新生产库 | `alembic upgrade head`（生产禁止 create_all，见 `app/main.py` 分支条件） |
+| 既有 dev/test 库（create_all 建的） | `alembic stamp head`（列已在，不重放） |
+| 模型改动后 | `alembic revision --autogenerate` → **人工核对** → `upgrade head` → parity 脚本 |
+| 漂移检测 | `alembic check`（CI 中执行；模型与迁移不一致时失败） |
 
 ---
 
@@ -170,6 +188,28 @@ helm template cds helm/cds >/tmp/cds-helm-rendered.yaml
 ```
 
 如果当前机器未安装 Docker 或 Helm，可在 243 或 CI 中执行对应命令。
+
+CI（W7，`.github/workflows/ci.yml`）在 push/PR 时自动执行上述门禁，本地复现：
+
+```bash
+pip install -r requirements.txt
+python -m compileall -q app tests alembic
+CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" alembic upgrade head
+CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" ALEMBIC_COMPARE_TYPES=0 alembic check
+python scripts/verify_schema_parity.py
+python -m pytest tests/test_observability.py tests/test_error_contract.py \
+  tests/test_admin_auth.py tests/test_session_lifecycle.py \
+  tests/test_contract_terminate_cascade.py tests/test_dev_sandbox_contract.py \
+  tests/test_kms_attestation_required.py tests/test_output_gateway_enforcement.py \
+  tests/test_contract_purpose.py tests/test_security_config_matrix.py \
+  tests/test_training_fail_closed.py tests/test_field_classification_policy.py \
+  tests/test_dp_guardrails.py tests/test_kms_dek_wrapped.py \
+  tests/test_pii_ner_engine.py tests/test_blockchain_backend_disclosure.py \
+  tests/test_rag_embedding.py tests/test_rag_service.py tests/test_rag_runner.py \
+  tests/test_rag_task.py tests/test_rag_ingest.py \
+  tests/test_rate_limit_distributed.py tests/test_tenant_quota_persistence.py \
+  tests/test_migrations.py -q
+```
 
 ---
 
