@@ -37,6 +37,9 @@ test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expi
 # Patch the module-level engine so lifespan uses the test DB
 original_engine = db_module.engine
 db_module.engine = test_engine
+# W11: background services open their own session via app.core.database.async_session;
+# point it at the test factory so async operation runners work in tests.
+db_module.async_session = test_session_factory
 
 # Disable lifespan to avoid double table creation
 app.router.lifespan_context = None

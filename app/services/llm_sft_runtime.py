@@ -421,6 +421,7 @@ class LLMSFTRuntime:
                     )
                     self._metrics.append(metrics)
                 memorization_score = cpu_result.memorization_score
+                mia_status = "proxy_estimate"
             else:
                 # Fallback: simulation-based training
                 batches = dataloader.get_batches()
