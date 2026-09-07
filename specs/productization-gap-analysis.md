@@ -1,8 +1,9 @@
 # CDS 密态沙箱产品化 Gap 分析与修复计划
 
-> 更新时间：2026-06-09  
+> 更新时间：2026-09-07  
 > 范围：产品化可用性、运营运维、安全合规、部署交付、前端体验、可观测性与验收测试  
-> 当前原则：先修复不依赖真实 TEE/GPU/K8s/联盟链/SIEM 的软件闭环；真实硬件、真实外部系统、性能长稳和 e2e 作为产品化验收项持续跟踪。
+> 当前原则：先修复不依赖真实 TEE/GPU/K8s/联盟链/SIEM 的软件闭环；真实硬件、真实外部系统、性能长稳和 e2e 作为产品化验收项持续跟踪。  
+> 产品化基线：自 Round P10 起，产品化能力对齐升级为 **CDS × CubeSandbox 能力对齐方案**（`docs/cubesandbox-parity-plan.md`），分 M1（W1/W2/W4/W6）与 M2（W3/W5/W7）落地。**M1+M2 已完成**，P0 产品化基线清零（详见 §5「产品化基线执行记录」）。
 
 ---
 
@@ -30,10 +31,10 @@
 | P-GAP-002 | 产品化部署 runbook、环境变量、安全默认值和验收命令未集中成一份交付文档 | P1 | 软件可闭环 | 配置分散在 README/specs/scripts | 有单独部署检查清单，覆盖本地/243/K3s/生产模式、安全必填项和回滚方式 | Fixed |
 | P-GAP-003 | 前端关键页面缺少统一错误态/加载态/空状态审计 | P2 | 软件可闭环 | 已有基础页面，未形成系统性 QA 清单 | 角色工作台、目录、合约、沙箱、监控、输出审查均有清晰空/错/加载态 | Fixed |
 | P-GAP-004 | 真实 TEE/GPU-TEE/HSM/联盟链/SIEM 集成验收未完成 | P0 | 环境验收 | 软件 hook/fallback 已实现 | 真实环境通过 e2e，证书链/密钥释放/链回执/SIEM 事件可验证 | Deferred |
-| P-GAP-005 | K3s/K8s 真实集群 e2e 与 NetworkPolicy/FQDN/ResourceQuota 生效验证未固化 | P0 | 环境验收 | manifest 和单测已完成，243 可部署 | 243 或专用节点一键部署并跑沙箱生命周期 e2e | Deferred |
+| P-GAP-005 | K3s/K8s 真实集群 e2e 与 NetworkPolicy/FQDN/ResourceQuota 生效验证未固化 | P0 | 环境验收 | manifest 和单测已完成，243 可部署；**W5 已补 Alembic 基线迁移（31 表），生产空库可一键建表** | 243 或专用节点一键部署并跑沙箱生命周期 e2e | Deferred |
 | P-GAP-006 | 性能容量和长稳基线缺失 | P1 | 环境验收 | 聚焦测试通过，未压测 | 形成并发沙箱数、启动延迟、查询延迟、审查吞吐、故障恢复和 24h 长稳报告 | Deferred |
 | P-GAP-007 | 安全认证/供应链证据包缺失 | P0 | 环境验收 | 代码级安全修复充分，缺扫描证据 | SBOM、SAST、依赖漏洞、镜像扫描、K8s CIS、渗透测试报告可归档 | Deferred |
-| P-GAP-008 | 全量 CI/e2e 回归矩阵未固定 | P1 | 环境验收 | 当前按任务要求只跑聚焦单测 | CI 或 243 自动跑最小生命周期、联邦、链存证、训练、输出审查、K3s e2e | Deferred |
+| P-GAP-008 | 全量 CI/e2e 回归矩阵未固定 | P1 | 软件可闭环 | **W7 已上线 `.github/workflows/ci.yml`**（backend 编译+迁移+分层测试门禁 / frontend build / gitleaks）；e2e 矩阵仍需 243 环境 | CI 或 243 自动跑最小生命周期、联邦、链存证、训练、输出审查、K3s e2e | Fixed* |
 | P-GAP-009 | 前端服务层与后端路由/字段契约存在脱节，部分交互会触发隐藏 404 或展示误导性状态 | P1 | 软件可闭环 | KMS/证书、连接器、联邦、训练页面和服务层存在路由、请求参数、返回字段不一致 | 关键页面操作对齐真实后端接口；状态类接口返回完整对象；敏感操作有确认；loading 精确到当前行；隐藏服务方法不再指向不存在路由 | Fixed |
 | P-GAP-010 | 产品化 API 和运行时配置仍暴露 `mock/stub` 主命名，容易被集成方误解为未真实实现 | P2 | 软件可闭环 | 测试数据生成和 GPU-TEE factory 主路径仍使用 mock/stub 名称 | 正式 API 使用 synthetic/local/software 命名；旧 mock/stub 仅作为 deprecated/compatibility alias；返回体明确 synthetic 语义 | Fixed |
 | P-GAP-011 | 发版前缺少可签署的安全产品设计复核、残余风险说明和发布门禁清单 | P0 | 软件可闭环 | runbook 有部署步骤，但缺 Go/No-Go、安全口径、P0/P1 门禁和发布后观察项 | 有独立安全复核文档和发版门禁清单，明确试点/生产边界、残余风险、证据要求和签署项 | Fixed |
@@ -161,7 +162,26 @@
 无软件可闭环 Active gap。以下项目保留为真实环境验收，不通过代码编译阶段伪造完成：
 
 - `P-GAP-004` 真实 TEE/GPU-TEE/HSM/联盟链/SIEM 集成验收。
-- `P-GAP-005` K3s/K8s 真实集群 e2e 与 NetworkPolicy/FQDN/ResourceQuota 生效验证。
+- `P-GAP-005` K3s/K8s 真实集群 e2e 与 NetworkPolicy/FQDN/ResourceQuota 生效验证（W5 已补迁移基线，集群 e2e 仍待环境）。
 - `P-GAP-006` 性能容量和长稳基线。
 - `P-GAP-007` 安全认证/供应链证据包。
-- `P-GAP-008` 全量 CI/e2e 回归矩阵。
+- `P-GAP-008` CI 流水线已上线（W7），真实集群 e2e 矩阵仍待 243 环境验收。
+
+---
+
+## 5. 产品化基线执行记录（CDS × CubeSandbox 对齐，P0 清零）
+
+自 Round P10 之后，产品化能力对齐按 `docs/cubesandbox-parity-plan.md` 执行。P0 产品化基线（M1+M2）已全部落地，**软件可闭环的 P0 项清零**：
+
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| **M1**（Round 42） | W4 admin 认证治理 · W6 Git 卫生与密钥止血 · W1 可观测性（/metrics + Request-ID + 结构化日志） · W2 统一错误契约（错误码目录 + 408/409/410/429/503+Retry-After） | ✅ |
+| **M2**（Round 43） | W3 Redis 分布式限流 + 租户配额持久化 · W5 Alembic 基线迁移（31 表 + 对拍脚本） · W7 CI 流水线（backend/frontend/secrets） | ✅ |
+
+**本轮（Round 43 = M2）关键产出（详见 parity 方案 §八 Round 43）：**
+- W3：`RateLimitMiddleware` Redis 固定窗口（auth/user/ip 三作用域，fail-open 降级）；租户配额 Redis hash 持久化 + `rebuild_tenant_quotas` 恢复路径；新增 `test_rate_limit_distributed.py`(14) / `test_tenant_quota_persistence.py`(9)。
+- W5：`alembic/versions/0000_baseline_all_tables.py`（链首基线）→ 空库 `upgrade head` 建 31 表；`scripts/verify_schema_parity.py` 双库对拍；`docs/migrations.md`；新增 `test_migrations.py`(4)。
+- W7：`.github/workflows/ci.yml` 分层门禁；`ci/known-failures.md` 基线（2319 passed/7 failed/17 errors）；`pyproject.toml` timeout=600。
+- 验证：新测试 + 核心回归 **184 passed**；`compileall` 通过；`alembic upgrade head`/`check`/parity 全绿。
+
+**P1（W8 分页 / W9 空闲自动暂停 / W10 WS 流 / W11 异步操作 / W12 保留 GC / W13 出站审计 / W14 节点运维）与 P2 路线图仍待后续轮次。**
