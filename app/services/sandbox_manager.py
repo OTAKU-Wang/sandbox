@@ -135,13 +135,28 @@ _manager_lock = asyncio.Lock()
 
 # Per-tenant resource quota tracking
 # Key: user_id, Value: dict with aggregated resource usage
+# W3: the local dict stays the synchronous read path for the existing
+# callers; every mutation is written through to the Redis hash
+# ``cds:tenant_quota:{user_id}`` so usage survives restarts and is visible
+# to replicas. restore_tenant_quotas() seeds the dict back from Redis.
 _tenant_quotas: dict[str, dict] = {}
+TENANT_QUOTA_KEY_PREFIX = "cds:tenant_quota:"
 TENANT_DEFAULTS = {
     "max_sessions": 5,
     "max_cpu_cores": 8,
     "max_memory_mb": 8192,
     "max_disk_mb": 20480,
 }
+
+_QUOTA_INT_FIELDS = (
+    "max_sessions",
+    "max_cpu_cores",
+    "max_memory_mb",
+    "max_disk_mb",
+    "used_cpu_cores",
+    "used_memory_mb",
+    "used_disk_mb",
+)
 
 
 def get_tenant_quota(user_id: str) -> dict:
@@ -151,12 +166,52 @@ def get_tenant_quota(user_id: str) -> dict:
     return _tenant_quotas[user_id]
 
 
+async def _persist_tenant_quota(user_id: str) -> None:
+    """Write the current local usage snapshot to Redis (best-effort)."""
+    try:
+        from app.core.redis import get_redis
+
+        redis = await get_redis()
+        quota = _tenant_quotas.get(user_id)
+        if quota is None:
+            await redis.delete(TENANT_QUOTA_KEY_PREFIX + user_id)
+            return
+        await redis.hset(
+            TENANT_QUOTA_KEY_PREFIX + user_id,
+            mapping={k: str(v) for k, v in quota.items()},
+        )
+    except Exception as e:
+        logger.warning("Tenant quota persist failed for %s: %s", user_id, e)
+
+
+def _schedule_quota_persist(user_id: str) -> asyncio.Task | None:
+    """Fire-and-forget write-through; tracked in _persist_tasks for flushing."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    task = loop.create_task(_persist_tenant_quota(user_id))
+    _persist_tasks.add(task)
+    task.add_done_callback(_persist_tasks.discard)
+    return task
+
+
+_persist_tasks: set[asyncio.Task] = set()
+
+
+async def flush_quota_persistence() -> None:
+    """Await all pending write-through tasks (determinism for tests/shutdown)."""
+    if _persist_tasks:
+        await asyncio.gather(*list(_persist_tasks), return_exceptions=True)
+
+
 def update_tenant_usage(user_id: str, cpu_cores: int = 0, memory_mb: int = 0, disk_mb: int = 0):
     """Update aggregated resource usage for a tenant."""
     quota = get_tenant_quota(user_id)
     quota["used_cpu_cores"] = quota.get("used_cpu_cores", 0) + cpu_cores
     quota["used_memory_mb"] = quota.get("used_memory_mb", 0) + memory_mb
     quota["used_disk_mb"] = quota.get("used_disk_mb", 0) + disk_mb
+    _schedule_quota_persist(user_id)
 
 
 def check_tenant_quota(user_id: str, cpu_cores: int, memory_mb: int, disk_mb: int) -> tuple[bool, str]:
@@ -184,6 +239,73 @@ def release_tenant_usage(user_id: str, cpu_cores: int = 0, memory_mb: int = 0, d
     quota["used_cpu_cores"] = max(0, quota.get("used_cpu_cores", 0) - cpu_cores)
     quota["used_memory_mb"] = max(0, quota.get("used_memory_mb", 0) - memory_mb)
     quota["used_disk_mb"] = max(0, quota.get("used_disk_mb", 0) - disk_mb)
+    _schedule_quota_persist(user_id)
+
+
+async def restore_tenant_quotas() -> int:
+    """Load persisted per-tenant usage from Redis into the local cache.
+
+    Restart-recovery path: returns how many tenants were restored.
+    """
+    from app.core.redis import get_redis
+
+    redis = await get_redis()
+    restored = 0
+    async for key in redis.scan_iter(match=f"{TENANT_QUOTA_KEY_PREFIX}*"):
+        user_id = key[len(TENANT_QUOTA_KEY_PREFIX):]
+        data = await redis.hgetall(key)
+        if not data:
+            continue
+        quota = TENANT_DEFAULTS.copy()
+        for field in _QUOTA_INT_FIELDS:
+            if field in data:
+                try:
+                    quota[field] = int(float(data[field]))
+                except (TypeError, ValueError):
+                    pass
+        _tenant_quotas[user_id] = quota
+        restored += 1
+    return restored
+
+
+async def rebuild_tenant_quotas(db) -> int:
+    """Recompute per-tenant usage from non-terminal sessions in the DB.
+
+    Redis-loss recovery path: the DB is the source of truth for what is
+    currently running. Returns the number of tenants with usage.
+    """
+    from sqlalchemy import select
+
+    from app.models.sandbox_session import SandboxSession, SessionStatus
+
+    active_states = [
+        SessionStatus.PENDING.value,
+        SessionStatus.PROVISIONING.value,
+        SessionStatus.RUNNING.value,
+        SessionStatus.SUSPENDED.value,
+    ]
+    result = await db.execute(
+        select(SandboxSession).where(SandboxSession.status.in_(active_states))
+    )
+    sessions = result.scalars().all()
+
+    usage: dict[str, dict[str, int]] = {}
+    for session in sessions:
+        user_key = str(session.user_id)
+        limits = session.resource_limits if isinstance(session.resource_limits, dict) else {}
+        bucket = usage.setdefault(user_key, {"used_cpu_cores": 0, "used_memory_mb": 0, "used_disk_mb": 0})
+        bucket["used_cpu_cores"] += int(limits.get("cpu_cores", 0) or 0)
+        bucket["used_memory_mb"] += int(limits.get("memory_mb", 0) or 0)
+        bucket["used_disk_mb"] += int(limits.get("disk_mb", 0) or 0)
+
+    touched = set(usage)
+    touched.update(_tenant_quotas)
+    for user_id in touched:
+        quota = get_tenant_quota(user_id)
+        for field in ("used_cpu_cores", "used_memory_mb", "used_disk_mb"):
+            quota[field] = usage.get(user_id, {}).get(field, 0)
+        await _persist_tenant_quota(user_id)
+    return len(usage)
 
 
 async def get_sandbox_manager():
