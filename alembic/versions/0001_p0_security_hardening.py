@@ -1,7 +1,7 @@
 """P0 security hardening — additive columns for gap A1/A3/B3.
 
 Revision ID: 0001_p0_security_hardening
-Revises: None (first migration in the chain)
+Revises: 0000_baseline_all_tables (chain root — creates all live tables)
 Create Date: 2026-09-06
 
 NOTE ON THIS MIGRATION
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "0001_p0_security_hardening"
-down_revision = None
+down_revision = "0000_baseline_all_tables"
 branch_labels = None
 depends_on = None
 
