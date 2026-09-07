@@ -12,10 +12,16 @@ from app.core.database import engine, Base
 from app.core.security import setup_security
 from app.core.redis import get_redis, close_redis
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
+from app.api import session_stream  # W10: WebSocket exec stream
+from app.api import sandbox_nodes  # W14: node operations
+from app.api import shared_volumes  # W15: shared volumes
 from app.api import network_policy as network_policy_api
 from app.api import admin
 from app.api import metrics
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert  # Ensure tables are created
+from app.models import session_operation  # W11: async operation records
+from app.models import task_queue as task_queue_models  # W16: durable queue table
+from app.models import shared_volume  # W15: shared volume tables
 
 
 @asynccontextmanager
@@ -34,6 +40,23 @@ async def lifespan(app: FastAPI):
         quota_manager._redis = redis_client
     except Exception as e:
         logger.error(f"Redis initialization failed: {e}")
+
+    # W3: seed per-tenant usage from the Redis write-through (restart
+    # recovery); an empty Redis store falls back to a rebuild from the DB.
+    try:
+        from app.core.database import async_session as _quota_session
+        from app.services.sandbox_manager import restore_tenant_quotas, rebuild_tenant_quotas
+        _restored = await restore_tenant_quotas()
+        if _restored == 0:
+            async with _quota_session() as _quota_db:
+                _rebuilt = await rebuild_tenant_quotas(_quota_db)
+                await _quota_db.commit()
+            if _rebuilt:
+                logger.info("[MAIN] Tenant quotas rebuilt from DB for %d tenants", _rebuilt)
+        else:
+            logger.info("[MAIN] Tenant quotas restored from Redis for %d tenants", _restored)
+    except Exception as e:
+        logger.error(f"[MAIN] Tenant quota restore failed: {e}")
 
     # Startup: create tables only in dev/test. Production must use Alembic.
     allow_create_all = (
@@ -111,6 +134,12 @@ async def lifespan(app: FastAPI):
     try:
         await _ttl_task
     except _asyncio.CancelledError:
+        pass
+    # Shutdown: egress audit flush (W13)
+    try:
+        from app.services.egress_audit import shutdown_egress_audit
+        await shutdown_egress_audit()
+    except Exception:
         pass
     # Shutdown: CDC agent
     try:
@@ -199,6 +228,11 @@ app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["connec
 app.include_router(network_policy_api.router, prefix="/api/v1/network-policies", tags=["network-policies"])
 app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
+
+# W10: WebSocket exec stream (mounted without prefix — paths are absolute)
+app.include_router(session_stream.router)
+app.include_router(sandbox_nodes.router, prefix="/api/v1/sandbox-nodes", tags=["sandbox-nodes"])
+app.include_router(shared_volumes.router, prefix="/api/v1/shared-volumes", tags=["shared-volumes"])
 
 # Frontend admin UI (FE-1~FE-5)
 from fastapi.staticfiles import StaticFiles

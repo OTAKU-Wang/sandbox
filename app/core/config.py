@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     METRICS_API_TOKEN: str | None = None  # set to require bearer auth on /metrics
     LOG_JSON: bool = False
 
+    # W3: distributed rate limiting. Fixed windows are stored in Redis so
+    # limits hold across replicas and restarts; Redis outage degrades to the
+    # in-process fallback (fail-open — availability over strictness, see
+    # docs/error-codes.md).
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_PER_MINUTE_IP: int = 60     # anonymous (IP scope)
+    RATE_LIMIT_PER_MINUTE_USER: int = 600  # authenticated (user scope)
+    RATE_LIMIT_AUTH_PER_MINUTE: int = 10   # /api/v1/auth/login dedicated bucket
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://cds:cds@localhost:5432/cds"
     DATABASE_ECHO: bool = False
@@ -70,6 +79,40 @@ class Settings(BaseSettings):
     # Session lifecycle (gap A2/D1): background sweep interval for expired
     # sessions, dev sessions and contracts.
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 300
+
+    # W9: idle expiry behavior for sessions that do not declare their own
+    # idle_policy. "kill" terminates (CDS historical default); "pause"
+    # suspends preserving state (CubeSandbox onTimeout=pause semantics).
+    SESSION_DEFAULT_IDLE_POLICY: str = "kill"
+
+    # W10: concurrent WebSocket exec streams allowed per session.
+    EXEC_STREAM_MAX_CONCURRENT: int = 3
+
+    # W13: egress audit JSONL trail for sandbox network decisions.
+    EGRESS_AUDIT_ENABLED: bool = True
+    EGRESS_AUDIT_LOG_PATH: str = "./logs/cds-egress/access.jsonl"
+
+    # W14: a node whose heartbeat is older than this is health_state=stale
+    # (alert-only detection; no automatic recovery).
+    NODE_STALE_SECONDS: int = 300
+
+    # W15: filesystem root backing shared volumes (bind-mounted into L0).
+    SHARED_VOLUME_ROOT: str = "./data/shared-volumes"
+
+    # W19: encrypt the egress audit JSONL at rest (SM4-GCM via
+    # app/utils/crypto.py; key derived from CDS_AUDIT_ENCRYPTION_KEY).
+    EGRESS_AUDIT_ENCRYPTION_ENABLED: bool = False
+    AUDIT_ENCRYPTION_KEY: str = ""
+
+    # W12: retention janitor. 0 = never purge (audit logs and merkle leaves
+    # default to keep-forever — audit evidence must not self-destruct).
+    # DRY_RUN defaults to true: real deletion is an explicit operator turn.
+    RETENTION_JANITOR_ENABLED: bool = True
+    AUDIT_LOG_RETENTION_DAYS: int = 0
+    ALERT_RETENTION_DAYS: int = 180
+    MERKLE_LEAF_RETENTION_DAYS: int = 0
+    RETENTION_JANITOR_DRY_RUN: bool = True
+    RETENTION_JANITOR_BATCH: int = 1000
 
     # Session usability (Round 39): per-session file store and snapshot limits.
     # Uploaded files live inside the session workspace (sandbox-visible) and are

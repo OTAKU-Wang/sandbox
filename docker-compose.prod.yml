@@ -101,7 +101,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── 应用�?───
+  # ─── 应用�?───
   cds-api:
     image: cds-api:latest
     ports:
@@ -122,16 +122,37 @@ services:
       CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY}
-      # P0 hardening switches �?production fail-closed posture.
+      # P0 hardening switches �?production fail-closed posture.
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "true"
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+      # W3: stricter login throttle; per-scope limits sized for one replica.
+      CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
+      CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+      # W12 retention: audit/merkle keep-forever; alerts 180d. dry-run stays
+      # true until a compliance review flips it explicitly.
+      CDS_RETENTION_JANITOR_ENABLED: "true"
+      CDS_AUDIT_LOG_RETENTION_DAYS: "0"
+      CDS_MERKLE_LEAF_RETENTION_DAYS: "0"
+      CDS_ALERT_RETENTION_DAYS: "180"
+      CDS_RETENTION_JANITOR_DRY_RUN: "true"
+      CDS_RETENTION_JANITOR_BATCH: "1000"
+      CDS_EGRESS_AUDIT_ENABLED: "true"
+      CDS_NODE_STALE_SECONDS: "300"
+      CDS_SHARED_VOLUME_ROOT: /data/shared-volumes
+      CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED: "true"
+      CDS_EGRESS_AUDIT_LOG_PATH: /data/egress-audit/access.jsonl
+
+      CDS_RATE_LIMIT_ENABLED: "true"
+      CDS_RATE_LIMIT_PER_MINUTE_IP: "60"
+      CDS_RATE_LIMIT_PER_MINUTE_USER: "600"
+      CDS_RATE_LIMIT_AUTH_PER_MINUTE: "10"
       # Fail-closed simulation/fallback switches (validate_security_config
       # surfaces every enabled one at startup so degradation is never silent).
-      # SECCOMP: never silently retry an exec without seccomp �?fail closed.
+      # SECCOMP: never silently retry an exec without seccomp �?fail closed.
       CDS_SECCOMP_FALLBACK_ALLOWED: "false"
       # HSM: Vault is a required compose service, so an in-memory software KEK
-      # fallback is unacceptable in production �?fail closed to real Vault.
+      # fallback is unacceptable in production �?fail closed to real Vault.
       CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
       # Hardware-gated switches. These stay TRUE until a real TEE/GPU backend is
       # provisioned (productization acceptance, FG-001/FG-002): the software-only

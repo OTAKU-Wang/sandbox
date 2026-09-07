@@ -76,10 +76,9 @@ spec:
                   optional: true
             - name: CDS_OPA_URL
               value: "http://{{ include "cds.fullname" . }}-opa:{{ .Values.opa.port }}"
-            - name: CDS_DEBUG
-              value: {{ .Values.api.env.CDS_DEBUG | quote }}
-            - name: LOG_LEVEL
-              value: {{ .Values.api.env.LOG_LEVEL | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cds.fullname" . }}-config
           livenessProbe:
             httpGet:
               path: /health
@@ -94,9 +93,23 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - name: sandbox-workspace
               mountPath: /tmp/cds_sandbox
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "cds.api.selectorLabels" . | nindent 14 }}
       volumes:
         - name: sandbox-workspace
           persistentVolumeClaim:

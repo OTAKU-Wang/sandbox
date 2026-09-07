@@ -1,5 +1,15 @@
-# CDS Helm Chart �?Default Values
+# CDS Helm Chart �?Default Values
 replicaCount: 2
+
+# W17: availability hardening
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  minAvailable: 1
 
 image:
   api:
@@ -25,15 +35,30 @@ api:
   env:
     CDS_DEBUG: "false"
     LOG_LEVEL: info
-    # P0 hardening switches �?production fail-closed posture.
-    # NOTE: KMS_REQUIRE_ATTESTATION=true rejects key distribution for
-    # software-only sandbox levels (L0/L3); deployments that rely on them must
-    # explicitly set this to "false" (see docs/ai-sandbox-gap-remediation-plan.md).
-  CDS_LOG_JSON: "false"  # set "true" for structured JSON logs (W1)
-  # CDS_METRICS_API_TOKEN: ""  # set a bearer token to protect /metrics
+    CDS_LOG_JSON: "false"
     CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
     CDS_KMS_REQUIRE_ATTESTATION: "true"
     CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+    # W3 rate limiting (Redis fixed window, fail-open on Redis outage)
+    CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
+    CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+    # W12 retention janitor (see docs/retention.md)
+    CDS_RETENTION_JANITOR_ENABLED: "true"
+    CDS_AUDIT_LOG_RETENTION_DAYS: "0"
+    CDS_MERKLE_LEAF_RETENTION_DAYS: "0"
+    CDS_ALERT_RETENTION_DAYS: "180"
+    CDS_RETENTION_JANITOR_DRY_RUN: "true"
+    CDS_RETENTION_JANITOR_BATCH: "1000"
+    CDS_EGRESS_AUDIT_ENABLED: "true"
+    CDS_NODE_STALE_SECONDS: "300"
+    CDS_SHARED_VOLUME_ROOT: /data/shared-volumes
+    CDS_EGRESS_AUDIT_LOG_PATH: /data/egress-audit/access.jsonl
+    CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED: "true"
+
+    CDS_RATE_LIMIT_ENABLED: "true"
+    CDS_RATE_LIMIT_PER_MINUTE_IP: "60"
+    CDS_RATE_LIMIT_PER_MINUTE_USER: "600"
+    CDS_RATE_LIMIT_AUTH_PER_MINUTE: "10"
 
 # ─── Frontend Service ───
 frontend:

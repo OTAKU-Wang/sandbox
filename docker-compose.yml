@@ -124,6 +124,22 @@ services:
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "false"
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "false"
+      # W3 rate limiting (dev: defaults are fine, keys shown for discoverability)
+      CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
+      CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+      # W12 retention (dry-run default; flip after compliance review)
+      CDS_RETENTION_JANITOR_ENABLED: "true"
+      CDS_RETENTION_JANITOR_DRY_RUN: "true"
+      # W13 egress audit (dev: plaintext JSONL under ./logs)
+      CDS_EGRESS_AUDIT_ENABLED: "true"
+      # W14 node stale detection
+      CDS_NODE_STALE_SECONDS: "300"
+      # W15/W19 volumes + audit encryption
+      CDS_SHARED_VOLUME_ROOT: /data/shared-volumes
+      CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED: "true"
+
+      CDS_RATE_LIMIT_ENABLED: "true"
+      CDS_RATE_LIMIT_AUTH_PER_MINUTE: "10"
     depends_on:
       postgres:
         condition: service_healthy
