@@ -153,6 +153,22 @@ async def get_policy_by_session(
     return NetworkPolicyResponse.model_validate(policy)
 
 
+@router.get("/session/{session_id}/egress-audit")
+async def get_session_egress_audit(
+    session_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    since: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Tail the W13 egress audit JSONL for one session (newest first)."""
+    from app.services.egress_audit import read_egress_records
+
+    await _get_authorized_session(db, session_id, current_user, write=False)
+    records = read_egress_records(session_id, limit=limit, since=since)
+    return {"session_id": session_id, "records": records, "count": len(records)}
+
+
 @router.get("/{policy_id}", response_model=NetworkPolicyResponse)
 async def get_network_policy(
     policy_id: uuid.UUID,

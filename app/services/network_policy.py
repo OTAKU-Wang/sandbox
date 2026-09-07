@@ -41,8 +41,8 @@ def _get_system_dns() -> str:
                     parts = line.split()
                     if len(parts) >= 2:
                         return parts[1]
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.debug("system resolv.conf unreadable, using default upstream DNS: %s", exc)
     return _UPSTREAM_DNS
 
 
@@ -66,9 +66,11 @@ class DNSProxyProtocol(asyncio.DatagramProtocol):
     to upstream DNS.
     """
 
-    def __init__(self, allowed_domains: list[str], upstream_dns: str | None = None):
+    def __init__(self, allowed_domains: list[str], upstream_dns: str | None = None,
+                 session_id: str = ""):
         self.allowed_domains = [d.lower().rstrip(".") for d in allowed_domains]
         self.upstream_dns = upstream_dns or _get_system_dns()
+        self.session_id = session_id
         self.transport: asyncio.DatagramTransport | None = None
         self._pending: dict[int, tuple[asyncio.DatagramTransport, tuple]] = {}
         self._query_id_map: dict[int, int] = {}  # new_id -> original_id
@@ -103,7 +105,20 @@ class DNSProxyProtocol(asyncio.DatagramProtocol):
             if self.transport:
                 self.transport.sendto(response, client_addr)
             logger.debug(f"[dns-proxy] BLOCKED {domain} -> NXDOMAIN")
+            from app.services.egress_audit import log_egress_event
+            log_egress_event(
+                session_id=self.session_id, event_type="security_event",
+                host=domain_lower, path="dns-query", verdict="deny",
+                rule_id="domain_allowlist", detail={"protocol": "dns"},
+            )
             return
+
+        from app.services.egress_audit import log_egress_event
+        log_egress_event(
+            session_id=self.session_id, event_type="access",
+            host=domain_lower, path="dns-query", verdict="allow",
+            rule_id="domain_allowlist", detail={"protocol": "dns"},
+        )
 
         # Forward to upstream DNS
         try:
@@ -298,6 +313,12 @@ class NetworkPolicyEngine:
             "dns_proxy_port": None,
         }
 
+        from app.services.egress_audit import log_egress_event
+        log_egress_event(
+            session_id=session_id, event_type="access",
+            verdict="policy_applied", rule_id=f"mode:{config.mode}",
+            detail={"mode": config.mode},
+        )
         if config.mode == "deny_all":
             logger.info(f"[net-policy] {session_id}: deny_all (no network)")
             return result
@@ -547,7 +568,7 @@ class NetworkPolicyEngine:
 
         loop = asyncio.get_event_loop()
         transport, protocol = await loop.create_datagram_endpoint(
-            lambda: DNSProxyProtocol(config.allowed_domains),
+            lambda: DNSProxyProtocol(config.allowed_domains, session_id=session_id),
             local_addr=("127.0.0.1", port),
         )
 
