@@ -19,9 +19,10 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ResourceExhausted
 from app.models.sandbox_node import SandboxNode, NodeStatus
 
 logger = logging.getLogger(__name__)
@@ -86,9 +87,10 @@ class NodeSelector:
         Returns:
             SelectionResult with the selected node and scored candidates
         """
-        # Query online nodes
+        # Query online nodes (W14: isolated nodes are excluded from scheduling)
         query = select(SandboxNode).where(
-            SandboxNode.status == NodeStatus.ONLINE.value
+            SandboxNode.status == NodeStatus.ONLINE.value,
+            SandboxNode.scheduling_disabled == False,  # noqa: E712 — SQLAlchemy boolean filter
         )
 
         if exclude_nodes:
@@ -98,6 +100,21 @@ class NodeSelector:
         nodes = list(result.scalars().all())
 
         if not nodes:
+            # W14: distinguish "cluster empty" from "all nodes isolated" —
+            # an operator-cordon must surface as an actionable, explicit error.
+            disabled_count_result = await db.execute(
+                select(func.count()).select_from(SandboxNode).where(
+                    SandboxNode.status == NodeStatus.ONLINE.value,
+                    SandboxNode.scheduling_disabled == True,  # noqa: E712
+                )
+            )
+            disabled_count = disabled_count_result.scalar() or 0
+            if disabled_count:
+                raise ResourceExhausted(
+                    f"All {disabled_count} online nodes are isolated (scheduling disabled)",
+                    code="NO_NODE_AVAILABLE",
+                    detail={"disabled_count": disabled_count},
+                )
             return SelectionResult(
                 selected=None,
                 candidates=[],

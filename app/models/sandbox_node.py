@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Float, Integer, Boolean, JSON, func, Index
+from sqlalchemy import String, DateTime, Float, Integer, Boolean, JSON, func, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -64,6 +64,10 @@ class SandboxNode(Base):
     # Health
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_rate: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0 - 1.0
+
+    # W14: operations — isolate/unisolate and health observation.
+    scheduling_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    health_state: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown", server_default="unknown")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
