@@ -52,3 +52,6 @@ Thumbs.db
 !.env.example
 !.env.prod.example
 *.zip
+
+# Runtime artifacts (W13 egress audit trail, app logs)
+logs/
