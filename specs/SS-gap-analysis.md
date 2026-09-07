@@ -1711,3 +1711,27 @@ Round 39/40 的后端可用性面（files/snapshots/pause/exec/logs/usage/templa
 2. 修完一轮后必须更新本文件的 Active Gap 表和 Round 记录。
 3. 对明显不合理或无法单测验证的硬件/基础设施规格，直接做合理化实现并记录裁剪理由。
 4. e2e、真实硬件、真实链节点验证不进入当前完成标准。
+
+---
+
+## 41. Round 45+ 新一轮产品化规划（2026-09-07）
+
+全量扫描（文档比对 + 代码审计 + 关键断言复核）后，新一轮产品化 spec 已建立：**`specs/sandbox-productization-round3-spec.md`**（Round 45 起，前序为 `docs/ai-sandbox-gap-remediation-plan.md` Round 32–41 与 `docs/cubesandbox-parity-plan.md` Round 42–44）。
+
+本轮扫描新发现、此前未登记于任何 tracker 的缺陷（详见 spec §1.2 C 类）：
+
+| # | 缺陷 | 影响 |
+|---|---|---|
+| C1 | `docker-compose.prod.yml` 第 113 行 `CDS_LOG_JSON` 缩进错误，YAML 实测解析失败 | 生产 compose 部署路径整体不可用（P0，spec N1） |
+| C2 | Helm chart：ClickHouse 无模板、OPA Service 悬空、Bitnami 依赖未 vendor | values 高估拓扑（spec N4） |
+| C3 | 五处半接线/死代码：`chain_attestation`（无调用方、表不在 alembic）、`merkle_pipeline`（未 start）、`STREAMING_PROXY_ENABLED`（无消费方）、`DockerAdapter`（未注册）、`models/key_metadata.py`（无导入方） | 维护负担与误解（spec N2） |
+| C4 | `mpc_service` 纯内存态，重启丢份额 | API 契约暗示持久（spec N3） |
+| C5 | 后端-only 路由无 UI（compliance/data_pipeline/mpc/sandbox_db/sandbox_nodes/shared_volumes/network_policies/gateway/rag）；SDK 仅覆盖 sandbox-sessions；前端 vitest 未入 CI | 已实现能力不可见（spec N8/N9） |
+| C6 | 无 MFA / SM2 证书登录 | 认证强度缺口（spec N14，P2） |
+| C7 | `k8s/secrets.yaml` 硬编码 dev 密钥、vault-init 单 share | dev 边界需显式文档（spec N4） |
+
+能力面未产化项（spec §1.2 A/B 类）：推理服务沙箱（设计场景五，ABSENT）、RAG 二期生成式、智能体执行框架、HE/MPC 计算、K8s Python client 化 + 流式/卷、GPU 插件、overlayfs 快照。硬件/外部系统项继续按 FG-001..016 环境验收轨道跟踪，不伪造。
+
+**配套清单（2026-09-07）**：全部 mock/模拟/回退路径的逐项问题分析与真实化实现计划见 **`docs/mock-remediation-plan.md`**（MR-A1..A15 / MR-B1；含 S4 类新发现：SM4-GCM 全线实为 AES-GCM、SFT 训练永远模拟、DP 管线 no-op、MIA shadow_model 死门禁、联邦静态键门禁空转、链上存证纯内存、mTLS 未强制、硬编码列加密 DEK、checkpoint 明文伪造、SM2 签名永远软件等）。M-01..M-28 清单即 Active Gap 的 mock 维度登记；每轮合入后在本文件 Active Gap 表同步。
+
+Round 45 起的执行记录按 spec §九 逐轮追加；本文件 Active Gap 表在每轮合入后同步更新。

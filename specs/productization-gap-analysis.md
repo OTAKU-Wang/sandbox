@@ -185,3 +185,7 @@
 - 验证：新测试 + 核心回归 **184 passed**；`compileall` 通过；`alembic upgrade head`/`check`/parity 全绿。
 
 **P1（W8 分页 / W9 空闲自动暂停 / W10 WS 流 / W11 异步操作 / W12 保留 GC / W13 出站审计 / W14 节点运维）与 P2 路线图仍待后续轮次。**
+
+> **2026-09-07 更新**：新一轮全量复扫（Round 44 之后，CubeSandbox 对齐 W1–W19 完成）发现若干此前未登记的代码级缺陷（生产 compose YAML 解析失败、Helm 拓扑失真、五处半接线/死代码、MPC 无持久化、后端-only 路由无前端/SDK 面）及能力缺口（推理服务沙箱、RAG 二期、智能体框架、HE/MPC、K8s client 化）。Round 45+ 的新一轮产品化方案见 **`specs/sandbox-productization-round3-spec.md`**（含扫描结论、差距矩阵、P0/P1/P2 任务卡与环境验收轨道）。
+>
+> **mock/模拟维度**（2026-09-07 补充）：全部"宣称实现实为模拟/回退/死代码"路径的逐项问题分析与真实化实现计划见 **`docs/mock-remediation-plan.md`**（M-01..M-28 清单 + MR-A1..A15/MR-B1 任务，含 SM4-GCM 真后端、SFT 真实训练、DP 管线接线、证明白名单强制、链存证持久化、mTLS 强制等）。P-GAP-004/005 的软件前置项已在本文件登记。
