@@ -34,8 +34,10 @@ structlog>=24.0.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-cov>=5.0.0
+pytest-timeout>=2.3.0  # CI session guard (pyproject timeout=600)
 httpx  # for TestClient
 aiosqlite>=0.20.0  # SQLite async for tests
+fakeredis[lua]>=2.21.0  # W3: in-process Redis double (lua extra for EVAL) for rate-limit/quota tests
 
 # === 任务队列 ===
 celery[redis]>=5.3.0

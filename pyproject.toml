@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+timeout = 600
+markers = [
+    "slow: long-running tests (full migration chain, schema parity)",
+]
 
 [tool.ruff]
 line-length = 120
