@@ -75,6 +75,17 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return UserResponse.model_validate(current_user)
 
 
+@router.post("/ws-ticket")
+async def create_ws_ticket(current_user: User = Depends(get_current_user)):
+    """W10: mint a 30s single-use WebSocket ticket for the exec stream."""
+    from app.api.session_stream import issue_ws_ticket
+
+    result = await issue_ws_ticket(str(current_user.id), current_user.role)
+    if "error" in result:
+        raise HTTPException(status_code=503, detail=result["error"])
+    return result
+
+
 @router.patch("/users/{user_id}/role", response_model=UserResponse)
 async def update_user_role(
     user_id: uuid.UUID,

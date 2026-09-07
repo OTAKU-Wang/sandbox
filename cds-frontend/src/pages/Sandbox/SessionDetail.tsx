@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import ExecStreamTerminal from '../../components/Sandbox/ExecStreamTerminal';
 import {
   Alert,
   Button,
@@ -799,6 +800,15 @@ export default function SessionDetail() {
           </Col>
         </Row>
        )}
+
+      {/* --- W10: streaming exec terminal --- */}
+      <Card title="流式终端" style={{ marginTop: 16 }}>
+        {session && user?.id === session.user_id && session.status === 'running' ? (
+          <ExecStreamTerminal sessionId={session.id} />
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="会话所有者且状态为 running 时可用流式终端" />
+        )}
+      </Card>
 
       {/* --- Files Panel --- */}
       <Card

@@ -62,6 +62,7 @@ def _build_l0_bwrap_args(
     env_vars: dict[str, str] | None = None,
     isolate_network: bool = True,
     dns_proxy_port: int | None = None,
+    extra_binds: list[tuple[Path, str, bool]] | None = None,
 ) -> tuple[list[str], int | None]:
     """Build hardened bwrap arguments for L0 sandbox.
 
@@ -136,6 +137,16 @@ def _build_l0_bwrap_args(
         *(["--bind", str(workspace / "files"), "/workspace/files"]
           if (workspace / "files").is_dir()
           else []),
+        # W15 shared volumes (owner-attached): ro or rw per attachment
+        *[
+            bind_arg
+            for host_path, guest_path, read_only in (extra_binds or [])
+            for bind_arg in (
+                ("--ro-bind", str(host_path), guest_path)
+                if read_only
+                else ("--bind", str(host_path), guest_path)
+            )
+        ],
 
         # tmpfs for /home
         "--tmpfs", "/home:size=10m",
@@ -223,29 +234,23 @@ class ProcessAdapter(RuntimeAdapter):
                     return candidate
         return None
 
-    async def execute(self, container_id: str, code: str, language: str = "python",
-                      session_key: str | None = None, env_vars: dict[str, str] | None = None,
-                      timeout: int | None = None,
-                      isolate_network: bool = True,
-                      dns_proxy_port: int | None = None) -> dict:
-        from app.services.sandbox_security import OutputLimiter
+    def _prepare_exec_command(self, workspace: Path, container_id: str, code: str, language: str,
+                              session_key: str | None, env_vars: dict[str, str] | None,
+                              isolate_network: bool, dns_proxy_port: int | None,
+                              extra_binds: list[tuple[Path, str, bool]] | None = None):
+        """Build the isolation command for one execution (shared by execute()
+        and execute_streaming() so both paths use identical hardening).
 
-        workspace = self._resolve_workspace(container_id)
-        if not workspace or not workspace.exists():
-            return {"output": "Workspace not found", "exit_code": -1, "duration_ms": 0}
-
-        effective_timeout = timeout or 120
-
+        Returns (cmd, env, seccomp_fd). Raises RuntimeError when no isolation
+        is available and the unsandboxed fallback is disabled.
+        """
         ext_map = {"python": "py", "sql": "sql", "shell": "sh", "bash": "sh"}
         ext = ext_map.get(language, "py")
         code_file = workspace / "tmp" / f"exec.{ext}"
         code_file.write_text(code)
 
-        output_limiter = OutputLimiter(max_bytes=10 * 1024 * 1024)
-
         seccomp_fd = None
         if self._bwrap_available:
-            # Hardened execution via bwrap namespace isolation
             bwrap_args, seccomp_fd = _build_l0_bwrap_args(
                 workspace=workspace,
                 code_file=f"/workspace/tmp/exec.{ext}",
@@ -254,45 +259,64 @@ class ProcessAdapter(RuntimeAdapter):
                 env_vars=env_vars,
                 isolate_network=isolate_network,
                 dns_proxy_port=dns_proxy_port,
+                extra_binds=extra_binds,
             )
-            cmd = bwrap_args
-            env = os.environ.copy()
+            return bwrap_args, os.environ.copy(), seccomp_fd
+
+        if not self._allow_unsandboxed_fallback:
+            raise RuntimeError(
+                "SECURITY ERROR: bwrap not installed and L0 unsandboxed fallback is disabled. "
+                "Install bubblewrap or enable allow_unsandboxed_fallback for development only."
+            )
+
+        if language == "python":
+            cmd = ["python3", str(code_file)]
+        elif language == "sql":
+            from app.services.sandbox_security import _build_sql_runner
+            sql_wrapper = workspace / "tmp" / "exec_sql.py"
+            sql_wrapper.write_text(_build_sql_runner(str(code_file)))
+            cmd = ["python3", str(sql_wrapper)]
         else:
-            if not self._allow_unsandboxed_fallback:
-                return {
-                    "output": "SECURITY ERROR: bwrap not installed and L0 unsandboxed fallback is disabled. "
-                              "Install bubblewrap or enable allow_unsandboxed_fallback for development only.",
-                    "exit_code": -1,
-                    "duration_ms": 0,
-                    "sandbox_level": "L0",
-                }
+            cmd = ["bash", str(code_file)]
 
-            # Development fallback: direct execution with best-effort cgroup enforcement.
-            if language == "python":
-                cmd = ["python3", str(code_file)]
-            elif language == "sql":
-                from app.services.sandbox_security import _build_sql_runner
-                sql_wrapper = workspace / "tmp" / "exec_sql.py"
-                sql_wrapper.write_text(_build_sql_runner(str(code_file)))
-                cmd = ["python3", str(sql_wrapper)]
-            else:
-                cmd = ["bash", str(code_file)]
+        session_id = container_id[3:] if container_id.startswith("l0-") else container_id
+        cgroup_path = self._cgroup_root / session_id
+        if cgroup_path.exists():
+            cmd = self._build_cgroup_exec(cgroup_path, cmd)
 
-            # Prepend cgroup execution if cgroups available
-            session_id = container_id[3:] if container_id.startswith("l0-") else container_id
-            cgroup_path = self._cgroup_root / session_id
-            if cgroup_path.exists():
-                cmd = self._build_cgroup_exec(cgroup_path, cmd)
+        env = os.environ.copy()
+        if session_key:
+            env["CDS_SESSION_KEY"] = session_key
+        if env_vars:
+            env.update(env_vars)
+        return cmd, env, None
 
-            env = os.environ.copy()
-            if session_key:
-                env["CDS_SESSION_KEY"] = session_key
-            if env_vars:
-                env.update(env_vars)
+    async def execute(self, container_id: str, code: str, language: str = "python",
+                      session_key: str | None = None, env_vars: dict[str, str] | None = None,
+                      timeout: int | None = None,
+                      isolate_network: bool = True,
+                      dns_proxy_port: int | None = None,
+                      extra_binds: list[tuple[Path, str, bool]] | None = None) -> dict:
+        from app.services.sandbox_security import OutputLimiter
+
+        workspace = self._resolve_workspace(container_id)
+        if not workspace or not workspace.exists():
+            return {"output": "Workspace not found", "exit_code": -1, "duration_ms": 0}
+
+        effective_timeout = timeout or 120
 
         try:
-            start = datetime.now()
-            extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
+            cmd, env, seccomp_fd = self._prepare_exec_command(
+                workspace, container_id, code, language, session_key, env_vars,
+                isolate_network, dns_proxy_port, extra_binds=extra_binds,
+            )
+        except RuntimeError as e:
+            return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
+
+        output_limiter = OutputLimiter(max_bytes=10 * 1024 * 1024)
+        start = datetime.now()
+        extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
+        try:
             result = await asyncio.wait_for(
                 asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, env=env, pass_fds=extra_fds),
                 timeout=effective_timeout,
@@ -331,6 +355,102 @@ class ProcessAdapter(RuntimeAdapter):
             }
         except Exception as e:
             return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
+
+    async def execute_streaming(self, container_id: str, code: str, language: str,
+                                *, session_key: str | None = None,
+                                env_vars: dict[str, str] | None = None,
+                                timeout: int | None = None,
+                                extra_binds: list[tuple[Path, str, bool]] | None = None,
+                                on_line) -> dict:
+        """W10: streaming execution — every output line is pushed to
+        ``on_line(stream_name, line)`` as it arrives (same isolation
+        construction as execute(): bwrap + seccomp + cgroup).
+
+        The callback may raise (e.g. OutputBlockedError) — the process is
+        killed, remaining output discarded, and the exception propagates to
+        the caller (fail-closed, T5 semantics).
+        """
+        workspace = self._resolve_workspace(container_id)
+        if not workspace or not workspace.exists():
+            await on_line("stderr", "Workspace not found")
+            return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
+
+        effective_timeout = timeout or 120
+        try:
+            cmd, env, seccomp_fd = self._prepare_exec_command(
+                workspace, container_id, code, language, session_key, env_vars,
+                isolate_network=True, dns_proxy_port=None, extra_binds=extra_binds,
+            )
+        except RuntimeError as e:
+            await on_line("stderr", str(e))
+            return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
+
+        extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
+        started = datetime.now()
+        saw_einval = False
+        proc_holder: dict[str, asyncio.subprocess.Process] = {}
+
+        async def _run_once(command: list[str]) -> int:
+            nonlocal saw_einval
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                pass_fds=extra_fds,
+            )
+            proc_holder["proc"] = proc
+
+            async def _pump(stream: asyncio.StreamReader, name: str) -> None:
+                try:
+                    nonlocal saw_einval
+                    while True:
+                        raw = await stream.readline()
+                        if not raw:
+                            break
+                        line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                        if "EINVAL" in line:
+                            saw_einval = True
+                        await on_line(name, line)
+                except BaseException:
+                    # Fail-closed: kill the process the moment the reviewer
+                    # rejects a line (T5 semantics) so no further output is
+                    # produced or streamed.
+                    if proc.returncode is None:
+                        proc.kill()
+                    raise
+
+            out_task = asyncio.create_task(_pump(proc.stdout, "stdout"))
+            err_task = asyncio.create_task(_pump(proc.stderr, "stderr"))
+            timed_out = False
+            try:
+                exit_code = await asyncio.wait_for(proc.wait(), timeout=effective_timeout)
+            except asyncio.TimeoutError:
+                timed_out = True
+                proc.kill()
+                await proc.wait()
+                exit_code = -1
+                await on_line("stderr", f"Execution timed out ({effective_timeout}s)")
+            pump_results = await asyncio.gather(out_task, err_task, return_exceptions=True)
+            for outcome in pump_results:
+                if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
+                    raise outcome
+            return -1 if timed_out else exit_code
+
+        try:
+            exit_code = await _run_once(cmd)
+            # Mirror execute(): retry without seccomp on kernel EINVAL
+            # (SECCOMP_FALLBACK_ALLOWED gated, fail-closed default).
+            if exit_code != 0 and saw_einval and seccomp_fd is not None and _seccomp_fallback_allowed():
+                cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
+                exit_code = await _run_once(cmd_no_seccomp)
+        except BaseException:
+            proc = proc_holder.get("proc")
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+            raise
+        duration = int((datetime.now() - started).total_seconds() * 1000)
+        return {"exit_code": exit_code, "duration_ms": duration, "sandbox_level": "L0", "blocked": False}
 
     def terminate(self, container_id: str) -> bool:
         session_id = container_id.replace("l0-", "")
@@ -1637,6 +1757,7 @@ class SandboxRuntime:
         timeout: int | None = None,
         isolate_network: bool = True,
         dns_proxy_port: int | None = None,
+        extra_binds: list[tuple[Path, str, bool]] | None = None,
     ) -> dict:
         import inspect
 
@@ -1649,6 +1770,7 @@ class SandboxRuntime:
             "timeout": timeout,
             "isolate_network": isolate_network,
             "dns_proxy_port": dns_proxy_port,
+            "extra_binds": extra_binds,
         }
         for name, value in optional.items():
             if accepts_kwargs or name in params:
@@ -1666,12 +1788,13 @@ class SandboxRuntime:
         timeout: int | None = None,
         isolate_network: bool = True,
         dns_proxy_port: int | None = None,
+        extra_binds: list[tuple[Path, str, bool]] | None = None,
     ) -> dict:
         if container_id.startswith("l0-"):
-            return await self._execute_adapter(
-                self._adapters[SandboxLevel.L0.value], container_id, code, language,
+            return await self._execute_adapter(                self._adapters[SandboxLevel.L0.value], container_id, code, language,
                 session_key=session_key, env_vars=env_vars, timeout=timeout,
                 isolate_network=isolate_network, dns_proxy_port=dns_proxy_port,
+                extra_binds=extra_binds,
             )
         if container_id.startswith("tee-"):
             return await self._execute_adapter(
@@ -1698,6 +1821,35 @@ class SandboxRuntime:
             "exit_code": -1,
             "duration_ms": 0,
             "sandbox_level": "unknown",
+        }
+
+    async def execute_streaming(
+        self,
+        container_id: str,
+        code: str,
+        language: str = "bash",
+        *,
+        env_vars: dict[str, str] | None = None,
+        timeout: int | None = None,
+        extra_binds: list[tuple[Path, str, bool]] | None = None,
+        on_line,
+    ) -> dict:
+        """W10: facade dispatch for streaming execution (L0 only; other
+        adapters return an unsupported marker the caller reports honestly)."""
+        if container_id.startswith("l0-"):
+            adapter = self._adapters[SandboxLevel.L0.value]
+            streaming = getattr(adapter, "execute_streaming", None)
+            if streaming is None:
+                return {"exit_code": -1, "duration_ms": 0, "blocked": False, "error": "adapter does not support streaming"}
+            return await streaming(
+                container_id, code, language, env_vars=env_vars, timeout=timeout,
+                extra_binds=extra_binds, on_line=on_line,
+            )
+        return {
+            "exit_code": -1,
+            "duration_ms": 0,
+            "blocked": False,
+            "error": f"streaming exec not supported for container {container_id[:5]}…",
         }
 
     def terminate(self, container_id: str) -> bool:
