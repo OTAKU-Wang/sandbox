@@ -6,7 +6,7 @@ Error model: any non-2xx response raises :class:`CDSError` with the parsed
 from __future__ import annotations
 
 import time
-from typing import Any, BinaryIO, Iterable
+from typing import Any, BinaryIO, Iterable, Iterator
 
 import httpx
 
@@ -114,6 +114,13 @@ class CDSClient:
             return None
         return resp.json()
 
+    def _request_with_headers(self, method: str, path: str, **kwargs: Any) -> tuple[Any, dict]:
+        resp = self._client.request(method, path, **kwargs)
+        if resp.status_code >= 400:
+            raise _parse_error(resp, path)
+        body = None if resp.status_code == 204 or not resp.content else resp.json()
+        return body, dict(resp.headers)
+
     def close(self) -> None:
         self._client.close()
 
@@ -140,6 +147,8 @@ class CDSClient:
         timeout_seconds: int = 3600,
         template: str | None = None,
         resource_limits: dict | None = None,
+        idle_policy: str | None = None,
+        auto_resume: bool = False,
     ) -> dict:
         body: dict[str, Any] = {
             "data_product_id": data_product_id,
@@ -153,14 +162,42 @@ class CDSClient:
             body["template"] = template
         if resource_limits:
             body["resource_limits"] = resource_limits
+        if idle_policy:
+            body["idle_policy"] = idle_policy
+        if auto_resume:
+            body["auto_resume"] = True
         return self._request("POST", "/api/v1/sandbox-sessions", json=body)
 
     def get_session(self, session_id: str) -> dict:
         return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}")
 
     def list_sessions(
-        self, *, status: str | None = None, page: int = 1, page_size: int = 20
+        self,
+        *,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+        cursor: str | None = None,
+        limit: int | None = None,
     ) -> dict:
+        """List sessions.
+
+        Offset mode (legacy): pass page/page_size — returns the full
+        envelope with total. Keyset mode (W8): pass cursor (and optionally
+        limit) — the response carries ``next_cursor`` when a further page
+        exists; iterate with :meth:`iter_sessions` instead for auto-paging.
+        """
+        if cursor is not None or (limit is not None and page == 1 and page_size == 20):
+            params: dict[str, Any] = {"limit": limit if limit is not None else page_size}
+            if status:
+                params["status"] = status
+            if cursor:
+                params["cursor"] = cursor
+            body, headers = self._request_with_headers(
+                "GET", "/api/v1/sandbox-sessions", params=params
+            )
+            body["next_cursor"] = headers.get("x-next-cursor")
+            return body
         return self._request(
             "GET",
             "/api/v1/sandbox-sessions",
@@ -170,6 +207,18 @@ class CDSClient:
                 **({"status": status} if status else {}),
             },
         )
+
+    def iter_sessions(
+        self, *, status: str | None = None, page_size: int = 100
+    ) -> Iterator[dict]:
+        """Yield every visible session via keyset pagination (W8)."""
+        cursor: str | None = ""  # empty string = keyset page 1
+        while True:
+            body = self.list_sessions(status=status, cursor=cursor, limit=page_size)
+            yield from body.get("items", [])
+            cursor = body.get("next_cursor")
+            if not cursor:
+                return
 
     def terminate_session(self, session_id: str) -> dict:
         return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/terminate")
@@ -258,8 +307,26 @@ class CDSClient:
     def list_snapshots(self, session_id: str) -> list[dict]:
         return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/snapshots")["snapshots"]
 
-    def create_snapshot(self, session_id: str) -> dict:
-        return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/snapshots")
+    def create_snapshot(self, session_id: str, *, async_mode: bool = False) -> dict:
+        params = {"async": "true"} if async_mode else None
+        return self._request(
+            "POST", f"/api/v1/sandbox-sessions/{session_id}/snapshots", params=params
+        )
+
+    def get_operation(self, operation_id: str) -> dict:
+        return self._request("GET", f"/api/v1/sandbox-sessions/operations/{operation_id}")
+
+    def wait_for_operation(self, operation_id: str, *, timeout: float = 120.0,
+                           interval: float = 0.5) -> dict:
+        """Poll an operation until it reaches a terminal state (W11)."""
+        deadline = time.monotonic() + timeout
+        while True:
+            op = self.get_operation(operation_id)
+            if op.get("status") in ("succeeded", "failed"):
+                return op
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"operation {operation_id} did not finish within {timeout}s")
+            time.sleep(interval)
 
     def rollback_snapshot(self, session_id: str, snapshot_id: str) -> dict:
         return self._request(

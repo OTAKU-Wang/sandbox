@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status, Query
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,7 +15,6 @@ from app.services.audit_service import audit_service
 from app.services.contract_fulfillment import contract_fulfillment
 from app.services.dp_budget import dp_budget_ledger
 from app.models.contract import Contract
-from sqlalchemy import select, func
 
 router = APIRouter()
 
@@ -100,29 +100,44 @@ async def create_contract(
 @router.get("")
 async def list_contracts(
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     status: str | None = Query(None),
     contract_type: str | None = Query(None),
+    cursor: str | None = Query(None),
+    response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(Contract)
-    count_query = select(func.count()).select_from(Contract)
+    filters = []
     if not _can_view_all_contracts(current_user):
-        party_filter = (Contract.provider_id == current_user.id) | (Contract.buyer_id == current_user.id)
-        query = query.where(party_filter)
-        count_query = count_query.where(party_filter)
+        filters.append((Contract.provider_id == current_user.id) | (Contract.buyer_id == current_user.id))
     if status:
-        query = query.where(Contract.status == status)
-        count_query = count_query.where(Contract.status == status)
+        filters.append(Contract.status == status)
     if contract_type:
-        query = query.where(Contract.contract_type == contract_type)
-        count_query = count_query.where(Contract.contract_type == contract_type)
+        filters.append(Contract.contract_type == contract_type)
 
+    # W8: opt-in keyset mode — envelope unchanged, paging info in header.
+    if cursor is not None:
+        from app.core.pagination import paginate_keyset
+
+        rows, next_cursor = await paginate_keyset(
+            db, Contract, cursor=cursor, limit=limit,
+            where=and_(*filters) if filters else None,
+        )
+        if next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
+        return {
+            "items": [ContractResponse.model_validate(c) for c in rows],
+            "total": None,
+            "page": None,
+            "page_size": limit,
+        }
+
+    count_query = select(func.count()).select_from(Contract).where(*filters)
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    query = query.offset(skip).limit(limit)
+    query = select(Contract).where(*filters).offset(skip).limit(limit)
     result = await db.execute(query)
     items = [ContractResponse.model_validate(c) for c in result.scalars().all()]
     return {"items": items, "total": total, "page": skip // limit + 1, "page_size": limit}

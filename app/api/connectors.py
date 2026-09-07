@@ -11,7 +11,7 @@ import uuid
 import hashlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, Header
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -188,20 +188,24 @@ async def register_connector(
 @router.get("/")
 async def list_connectors(
     status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None),
+    response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """List all registered connectors (admin only)."""
-    query = select(Connector)
-    if status_filter:
-        query = query.where(Connector.status == status_filter)
-    query = query.order_by(Connector.created_at.desc())
-    result = await db.execute(query)
+    # W8: the list was previously unbounded; it is now capped and supports
+    # opt-in keyset traversal via cursor + X-Next-Cursor.
+    from app.core.pagination import paginate_keyset
 
-    items = []
-    for c in result.scalars().all():
-        items.append(_connector_payload(c))
-    return {"items": items, "total": len(items)}
+    where = Connector.status == status_filter if status_filter else None
+    rows, next_cursor = await paginate_keyset(db, Connector, cursor=cursor, limit=limit, where=where)
+    if next_cursor:
+        response.headers["X-Next-Cursor"] = next_cursor
+    items = [_connector_payload(c) for c in rows]
+    total = len(items) if cursor is None and next_cursor is None else None
+    return {"items": items, "total": total}
 
 
 @router.get("/{connector_id}")

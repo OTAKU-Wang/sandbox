@@ -8,7 +8,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import JSONResponse
+
+import asyncio
+
+from app.core.errors import OperationLocked
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -209,6 +214,7 @@ async def _execute_runtime_with_context(
     session_key: str | None = None,
     env_vars: dict[str, str] | None = None,
     timeout: int | None = None,
+    db=None,
 ) -> dict:
     import inspect
 
@@ -219,6 +225,20 @@ async def _execute_runtime_with_context(
     for name, value in optional.items():
         if accepts_kwargs or name in params:
             kwargs[name] = value
+
+    if db is not None and container_id.startswith("l0-"):
+        from uuid import UUID as _UUID
+
+        from app.services import shared_volumes
+
+        try:
+            binds = await shared_volumes.resolve_binds(
+                db, _UUID(container_id.removeprefix("l0-"))
+            )
+        except ValueError:
+            binds = []
+        if binds and ("extra_binds" in params or accepts_kwargs):
+            kwargs["extra_binds"] = binds
     return await runtime.execute(container_id, code, language, **kwargs)
 
 
@@ -318,6 +338,8 @@ async def create_sandbox_session(
         contract_id=str(contract.id) if contract else None,
         timeout_seconds=body.timeout_seconds,
         resource_limits=effective_limits,
+        idle_policy=body.idle_policy,
+        auto_resume=body.auto_resume,
         status=SessionStatus.PROVISIONING.value,
     )
     db.add(session)
@@ -533,8 +555,10 @@ async def create_sandbox_session(
 @router.get("")
 async def list_sandbox_sessions(
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     status: str | None = Query(None),
+    cursor: str | None = Query(None),
+    response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -546,6 +570,24 @@ async def list_sandbox_sessions(
     if status:
         base = base.where(SandboxSession.status == status)
         count_base = count_base.where(SandboxSession.status == status)
+
+    # W8: opt-in keyset mode — response envelope unchanged, paging info goes
+    # to the X-Next-Cursor header (total is not computed in cursor mode).
+    if cursor is not None:
+        from app.core.pagination import paginate_keyset
+
+        try:
+            rows, next_cursor = await paginate_keyset(db, SandboxSession, cursor=cursor, limit=limit)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid pagination cursor")
+        if next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
+        return {
+            "items": [SandboxSessionResponse.model_validate(s) for s in rows],
+            "total": None,
+            "page": None,
+            "page_size": limit,
+        }
 
     total_result = await db.execute(count_base)
     total = total_result.scalar() or 0
@@ -985,6 +1027,7 @@ async def execute_in_sandbox(
         raise HTTPException(status_code=404, detail="Sandbox session not found")
     if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your session")
+    await _maybe_auto_resume(session, db)
     # State machine validation: only RUNNING sessions can execute
     current = SessionStatus(session.status)
     if not session_state_machine.is_active(current):
@@ -1075,6 +1118,7 @@ async def execute_in_sandbox(
         session_key=session_key,
         env_vars=env_vars,
         timeout=session.timeout_seconds,
+        db=db,
     )
     exec_result = await scene_runtime.post_execute(exec_result, scene_context)
 
@@ -1325,6 +1369,7 @@ async def _load_operable_session(
         raise HTTPException(status_code=404, detail="Sandbox session not found")
     if not _can_operate_session(current_user, session):
         raise HTTPException(status_code=403, detail="Not your session")
+    await _maybe_auto_resume(session, db)
     return session
 
 
@@ -1354,6 +1399,81 @@ def _active_or_suspended(session: SandboxSession) -> None:
         raise HTTPException(
             status_code=400, detail=f"Session in terminal state (status: {session.status})"
         )
+
+
+async def _maybe_auto_resume(session: SandboxSession, db: AsyncSession) -> None:
+    """W9: wake an auto-resumable suspended session on interaction.
+
+    Safety chain (order fixed): ① the governing contract must still be
+    ACTIVE/SIGNED — a terminated contract means the data-access grant is
+    gone and the session stays asleep (410, client stops retrying);
+    ② transition back to the pre-pause state; ③ grant one fresh timeout
+    window so the resumed session does not instantly re-expire (Round 39
+    refreshes cap still applies).
+    """
+    if session.status != SessionStatus.SUSPENDED.value or not session.auto_resume:
+        return
+
+    from app.core.errors import SessionTerminated
+
+    contract_active = False
+    if session.contract_id:
+        try:
+            contract_uuid = uuid.UUID(str(session.contract_id))
+        except ValueError:
+            contract_uuid = None
+        if contract_uuid is not None:
+            from app.models.contract import Contract, ContractStatus
+
+            c_result = await db.execute(select(Contract).where(Contract.id == contract_uuid))
+            contract = c_result.scalar_one_or_none()
+            contract_active = bool(
+                contract
+                and contract.status in (ContractStatus.ACTIVE.value, ContractStatus.SIGNED.value)
+            )
+
+    if not contract_active:
+        from app.services.audit_service import audit_service
+
+        await audit_service.log(
+            db, action="session.auto_resume_rejected", resource_type="sandbox_session",
+            user_id=session.user_id, session_id=session.id,
+            detail={"reason": "contract_not_active", "contract_id": session.contract_id},
+        )
+        raise SessionTerminated(
+            "Session is suspended (idle auto-pause) and its governing contract "
+            "is not active — auto-resume rejected; resume manually or contact "
+            "the contract parties."
+        )
+
+    try:
+        target = SessionStatus(session.pre_pause_status or SessionStatus.READY.value)
+    except ValueError:
+        target = SessionStatus.READY
+    if target not in (SessionStatus.READY, SessionStatus.RUNNING):
+        target = SessionStatus.READY
+    transition = session_state_machine.validate_transition(SessionStatus.SUSPENDED, target)
+    if not transition.success:
+        return
+
+    from app.core.config import get_settings
+    from app.core.metrics import record_session_transition
+
+    session.status = target.value
+    session.pre_pause_status = None
+    record_session_transition(SessionStatus.SUSPENDED.value, target.value)
+    current_ext = int(session.extended_seconds or 0)
+    max_ext = get_settings().SESSION_MAX_EXTENDED_SECONDS
+    session.extended_seconds = min(current_ext + int(session.timeout_seconds), max_ext)
+    await db.flush()
+    await db.refresh(session)
+    from app.services.audit_service import audit_service
+
+    await audit_service.log(
+        db, action="session.auto_resume", resource_type="sandbox_session",
+        user_id=session.user_id, session_id=session.id,
+        detail={"resumed_to": target.value, "contract_id": session.contract_id},
+    )
 
 
 def _session_template_env(session: SandboxSession) -> dict[str, str]:
@@ -1562,57 +1682,119 @@ async def list_session_snapshots(
 @router.post("/{session_id}/snapshots")
 async def create_session_snapshot(
     session_id: uuid.UUID,
+    async_mode: bool = Query(False, alias="async"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Snapshot the session workspace (content is DEK-encrypted at rest)."""
+    """Snapshot the session workspace (content is DEK-encrypted at rest).
+
+    W11: pass ``?async=true`` to get ``202 {operation_id}`` and poll
+    ``GET /operations/{op_id}``; the default synchronous behavior is
+    unchanged (an operation record is still written for audit parity).
+    """
     session = await _load_operable_session(db, session_id, current_user)
     _active_or_suspended(session)
     workspace = _session_workspace_or_400(session)
     from app.services import session_snapshots as ss
+    from app.services import session_operations as ops
+
+    async def _run(op):
+        manifest = await asyncio.to_thread(ss.create_snapshot, workspace, str(session.id))
+        op.progress = 0.9
+        return {"snapshot_id": manifest["snapshot_id"], **manifest}
 
     try:
-        manifest = ss.create_snapshot(workspace, session_id=str(session.id))
+        op = await ops.submit_operation(db, session.id, "snapshot", run_async=async_mode, executor=_run)
     except ss.SnapshotError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    if async_mode:
+        return JSONResponse(status_code=202, content=ops.operation_payload(op))
+
+    manifest = dict(op.result_ref or {})
+    if op.status == "failed":
+        raise HTTPException(status_code=400, detail=op.error or "snapshot failed")
 
     await audit_service.log(
         db, action="sandbox.snapshot_create", resource_type="sandbox_session",
         user_id=current_user.id, session_id=session.id,
-        detail={"snapshot_id": manifest["snapshot_id"], "bytes": manifest["bytes"],
-                "file_count": manifest["file_count"]},
+        detail={"snapshot_id": manifest.get("snapshot_id"), "bytes": manifest.get("bytes"),
+                "file_count": manifest.get("file_count"), "operation_id": str(op.op_id)},
     )
     await db.flush()
-    return {"session_id": str(session_id), **manifest}
+    return {"session_id": str(session_id), "operation_id": str(op.op_id), **manifest}
+
+
+@router.get("/operations/{op_id}")
+async def get_session_operation(
+    op_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Poll a session operation (W11 async model)."""
+    from app.services import session_operations as ops
+
+    op = await ops.get_operation(db, op_id)
+    if not op:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    result = await db.execute(select(SandboxSession).where(SandboxSession.id == op.session_id))
+    session = result.scalar_one_or_none()
+    if not session or not _can_operate_session(current_user, session):
+        raise HTTPException(status_code=404, detail="Operation not found")
+    return ops.operation_payload(op)
 
 
 @router.post("/{session_id}/snapshots/{snapshot_id}/rollback")
 async def rollback_session_snapshot(
     session_id: uuid.UUID,
     snapshot_id: str,
+    async_mode: bool = Query(False, alias="async"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Restore the workspace from a snapshot (current workspace content is
-    discarded — the archive checksum is verified before any deletion)."""
+    discarded — the archive checksum is verified before any deletion).
+
+    W11: concurrent rollbacks on one session are mutually exclusive
+    (503 OPERATION_LOCKED + Retry-After); ``?async=true`` returns 202.
+    """
     session = await _load_operable_session(db, session_id, current_user)
     _active_or_suspended(session)
     workspace = _session_workspace_or_400(session)
     from app.services import session_snapshots as ss
+    from app.services import session_operations as ops
+
+    async def _run(op):
+        result = await asyncio.to_thread(ss.rollback, workspace, snapshot_id)
+        op.progress = 0.9
+        return {"snapshot_id": snapshot_id, **result}
 
     try:
-        result = ss.rollback(workspace, snapshot_id)
+        op = await ops.submit_operation(db, session.id, "rollback", run_async=async_mode, executor=_run)
+    except OperationLocked as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"code": e.code, "message": str(e), "retry_after": e.retry_after},
+            headers={"Retry-After": str(e.retry_after)},
+        )
     except ss.SnapshotError as e:
-        status_code = 404 if "not found" in str(e) else 400
-        raise HTTPException(status_code=status_code, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if async_mode:
+        return JSONResponse(status_code=202, content=ops.operation_payload(op))
+
+    result = dict(op.result_ref or {})
+    if op.status == "failed":
+        raise HTTPException(status_code=400, detail=op.error or "rollback failed")
 
     await audit_service.log(
         db, action="sandbox.snapshot_rollback", resource_type="sandbox_session",
         user_id=current_user.id, session_id=session.id,
-        detail={"snapshot_id": snapshot_id, "discarded_files": result.get("discarded_files", 0)},
+        detail={"snapshot_id": snapshot_id, "discarded_files": result.get("discarded_files", 0),
+                "operation_id": str(op.op_id)},
     )
     await db.flush()
-    return {"session_id": str(session_id), **result}
+    return {"session_id": str(session_id), "operation_id": str(op.op_id), **result}
 
 
 @router.delete("/{session_id}/snapshots/{snapshot_id}")
@@ -1801,6 +1983,7 @@ async def exec_in_sandbox(
         "bash",
         env_vars=env_vars,
         timeout=timeout,
+        db=db,
     )
     duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
 

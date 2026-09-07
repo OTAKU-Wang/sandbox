@@ -1,7 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import select, func, or_
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -140,37 +140,53 @@ async def create_data_product(
 @router.get("")
 async def list_data_products(
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     q: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
     product_type: str | None = Query(None),
+    cursor: str | None = Query(None),
+    response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(DataProduct)
-    count_query = select(func.count()).select_from(DataProduct)
+    filters = []
     visibility_filter = _visible_product_filter(current_user)
     if visibility_filter is not None:
-        query = query.where(visibility_filter)
-        count_query = count_query.where(visibility_filter)
+        filters.append(visibility_filter)
     if status_filter:
-        query = query.where(DataProduct.status == status_filter)
-        count_query = count_query.where(DataProduct.status == status_filter)
+        filters.append(DataProduct.status == status_filter)
+    search_filter = None
     if q:
         search_filter = or_(
             DataProduct.name.ilike(f"%{q}%"),
             DataProduct.description.ilike(f"%{q}%"),
         )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
+        filters.append(search_filter)
     if product_type:
-        query = query.where(DataProduct.product_type == product_type)
-        count_query = count_query.where(DataProduct.product_type == product_type)
+        filters.append(DataProduct.product_type == product_type)
 
+    # W8: opt-in keyset mode — envelope unchanged, paging info in header.
+    if cursor is not None:
+        from app.core.pagination import paginate_keyset
+
+        rows, next_cursor = await paginate_keyset(
+            db, DataProduct, cursor=cursor, limit=limit,
+            where=and_(*filters) if filters else None,
+        )
+        if next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
+        return {
+            "items": [DataProductResponse.model_validate(p) for p in rows],
+            "total": None,
+            "page": None,
+            "page_size": limit,
+        }
+
+    count_query = select(func.count()).select_from(DataProduct).where(*filters)
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    query = query.offset(skip).limit(limit)
+    query = select(DataProduct).where(*filters).offset(skip).limit(limit)
     result = await db.execute(query)
     items = [DataProductResponse.model_validate(p) for p in result.scalars().all()]
     return {"items": items, "total": total, "page": skip // limit + 1, "page_size": limit}

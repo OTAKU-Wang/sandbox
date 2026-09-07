@@ -94,6 +94,10 @@ class CreateDevSessionRequest(BaseModel):
     max_duration_seconds: int = 7200
     max_input_files: int = 100
     dp_epsilon_budget: float | None = None
+    # W9 sync: accepted for API parity. Dev sessions only support kill expiry;
+    # "pause" is rejected at creation (honest failure — no fake pause).
+    idle_policy: str | None = None
+    auto_resume: bool = False
 
 
 class ExecuteCodeRequest(BaseModel):
@@ -123,6 +127,11 @@ async def create_dev_session(
     """
     if body.mode not in (DevMode.STRUCTURED, DevMode.UNSTRUCTURED, DevMode.SEMI_STRUCTURED):
         raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
+
+    # W9 sync: dev sessions are ephemeral and support kill-only expiry —
+    # pause semantics would be a lie here, so reject it explicitly.
+    if body.idle_policy == "pause":
+        raise HTTPException(status_code=400, detail="dev sandbox sessions do not support idle_policy='pause'")
 
     # Resolve data path from data product if provided
     data_path = None

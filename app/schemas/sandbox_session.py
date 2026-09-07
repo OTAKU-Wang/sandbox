@@ -25,6 +25,16 @@ class SandboxSessionCreate(BaseModel):
     # Round 40 usability: optional preinstalled workspace template
     # (see GET /sandbox-sessions/session-templates for valid names).
     template: str | None = None
+    # W9: idle expiry behavior + wake-on-touch.
+    idle_policy: str | None = None  # "kill" | "pause" (None = platform default)
+    auto_resume: bool = False
+
+    @field_validator("idle_policy")
+    @classmethod
+    def valid_idle_policy(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("kill", "pause"):
+            raise ValueError("idle_policy must be 'kill' or 'pause'")
+        return v
 
     @field_validator("sandbox_level")
     @classmethod

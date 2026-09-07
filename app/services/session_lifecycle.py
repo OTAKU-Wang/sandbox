@@ -157,22 +157,62 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
     return True
 
 
-async def cleanup_expired_sessions(db: AsyncSession) -> int:
-    """Terminate all expired sandbox sessions.
+async def pause_session(session: SandboxSession, db: AsyncSession, reason: str) -> bool:
+    """Pause a live session (state preserved, workspace/keys kept).
 
-    Returns the number of sessions cleaned.
+    W9 idle auto-pause primitive — mirrors the POST /{id}/pause route
+    semantics without its authorization layer.
+
+    Returns:
+        True when the state machine accepted RUNNING/READY → SUSPENDED.
     """
+    current = SessionStatus(session.status)
+    if current not in (SessionStatus.RUNNING, SessionStatus.READY):
+        return False
+    transition = session_state_machine.validate_transition(current, SessionStatus.SUSPENDED)
+    if not transition.success:
+        logger.warning("[SessionLifecycle] Cannot pause session %s: %s", session.id, transition.error)
+        return False
+
+    from app.core.metrics import record_session_transition
+
+    session.pre_pause_status = session.status
+    session.status = SessionStatus.SUSPENDED.value
+    record_session_transition(current.value, SessionStatus.SUSPENDED.value)
+    await db.flush()
+    logger.info("[SessionLifecycle] Session %s auto-paused (%s)", session.id, reason)
+    return True
+
+
+async def cleanup_expired_sessions(db: AsyncSession) -> int:
+    """Reclaim expired sandbox sessions (W9 policy aware).
+
+    Sessions with ``idle_policy="pause"`` (or the global default when set)
+    are SUSPENDED instead of terminated — workspace, files and keys are
+    preserved for auto_resume. Sessions already SUSPENDED past expiry are
+    terminated: pause has preserved state once, but resources must not be
+    held indefinitely.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
     result = await db.execute(
         select(SandboxSession).where(SandboxSession.status.in_(ACTIVE_SESSION_STATUSES))
     )
     cleaned_ids: list[str] = []
+    paused_ids: list[str] = []
     for session in result.scalars().all():
         if not is_session_expired(session):
             continue
+        policy = session.idle_policy or settings.SESSION_DEFAULT_IDLE_POLICY
+        if policy == "pause" and session.status != SessionStatus.SUSPENDED.value:
+            if await pause_session(session, db, reason="session_idle_autopause"):
+                paused_ids.append(str(session.id))
+                continue
         if await terminate_session(session, db, reason="session_expired"):
             cleaned_ids.append(str(session.id))
 
-    if cleaned_ids:
+    if cleaned_ids or paused_ids:
         from app.services.audit_service import audit_service
         await audit_service.log(
             db,
@@ -180,7 +220,9 @@ async def cleanup_expired_sessions(db: AsyncSession) -> int:
             resource_type="sandbox_session",
             detail={
                 "cleaned": len(cleaned_ids),
+                "auto_paused": len(paused_ids),
                 "session_ids": cleaned_ids,
+                "paused_session_ids": paused_ids,
                 "cleanup_time": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -251,11 +293,30 @@ async def session_cleanup_loop(interval_seconds: float = 300.0) -> None:
                 cleaned = await cleanup_expired_sessions(db)
                 dev_cleaned = await cleanup_expired_dev_sessions()
                 contracts_expired = await _terminate_expired_contracts(db)
+                # W14: heartbeat-overdue nodes get health_state=stale + alert
+                try:
+                    from app.api.sandbox_nodes import detect_stale_nodes, recover_stale_nodes
+                    await detect_stale_nodes(db)
+                    # W18: hopeless heartbeats take the node offline
+                    await recover_stale_nodes(db)
+                except Exception as e:
+                    logger.error("[SessionLifecycle] Node stale detection failed: %s", e)
+                # W12: retention janitor rides the same sweep (same cadence,
+                # fewer background tasks); it self-audits.
+                janitor_results: dict[str, int] = {}
+                try:
+                    from app.core.config import get_settings
+                    from app.services.retention_janitor import purge_cycle
+
+                    if get_settings().RETENTION_JANITOR_ENABLED:
+                        janitor_results = await purge_cycle(db)
+                except Exception as e:
+                    logger.error("[SessionLifecycle] Retention janitor failed: %s", e)
                 await db.commit()
-            if cleaned or dev_cleaned or contracts_expired:
+            if cleaned or dev_cleaned or contracts_expired or any(v for v in janitor_results.values()):
                 logger.info(
-                    "[SessionLifecycle] Sweep: %d sessions, %d dev sessions, %d contracts expired",
-                    cleaned, dev_cleaned, contracts_expired,
+                    "[SessionLifecycle] Sweep: %d sessions, %d dev sessions, %d contracts expired, janitor=%s",
+                    cleaned, dev_cleaned, contracts_expired, janitor_results,
                 )
         except asyncio.CancelledError:
             break

@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func, JSON, Index
+from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func, JSON, Index, Boolean
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -65,6 +66,12 @@ class SandboxSession(Base):
     extended_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Round 39 (usability): status to restore on resume (pause stores it).
     pre_pause_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # W9 (parity plan): idle expiry behavior. "kill" (default) terminates the
+    # session when expired; "pause" suspends it preserving state. auto_resume
+    # lets a subsequent interaction wake a suspended session — gated on the
+    # governing contract still being ACTIVE.
+    idle_policy: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    auto_resume: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("0"))
     resource_limits: Mapped[dict | None] = mapped_column(JSON)  # CPU/memory/disk limits
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
