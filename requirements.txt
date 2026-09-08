@@ -48,6 +48,10 @@ hvac>=2.0.0
 # === DuckDB ===
 duckdb>=1.0.0
 
+# === Inference (N5) ===
+onnx>=1.16.0       # model validation at registration
+onnxruntime>=1.17.0  # in-sandbox CPU inference runner
+
 # === PII NER ML & CPU Training ===
 transformers>=4.36.0
 torch>=2.0.0

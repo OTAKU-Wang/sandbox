@@ -18,7 +18,8 @@ from app.api import shared_volumes  # W15: shared volumes
 from app.api import network_policy as network_policy_api
 from app.api import admin
 from app.api import metrics
-from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key  # Ensure tables are created
+from app.api import inference  # N5: inference service sandbox
+from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model  # Ensure tables are created
 from app.models import session_operation  # W11: async operation records
 from app.models import task_queue as task_queue_models  # W16: durable queue table
 from app.models import shared_volume  # W15: shared volume tables
@@ -247,6 +248,7 @@ app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["connec
 app.include_router(network_policy_api.router, prefix="/api/v1/network-policies", tags=["network-policies"])
 app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
+app.include_router(inference.router, prefix="/api/v1/inference", tags=["inference"])
 
 # W10: WebSocket exec stream (mounted without prefix — paths are absolute)
 app.include_router(session_stream.router)

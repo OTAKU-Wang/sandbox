@@ -366,3 +366,15 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 **配置四同步**：`MERKLE_PIPELINE_ENABLED=false` 已同步 .env.example / docker-compose.yml / docker-compose.prod.yml / helm/cds/values.yaml。
 **禁项自检**：无裸 `except: pass` 新增、未删既有测试、未放宽 W2/T5 门禁；N2/N3 移除均为无引用死代码（grep 三向验证）。
 **偏差说明**：N3 表主键按既有 API 契约用 String(64)/String(128)（服务生成的短 hex key_id/share_id 原样返回），未按 spec 字面用 UUID 列——API 行为不变优先。
+
+### Round 45 M2 执行记录（2026-09-08）—— N5 推理服务沙箱一期 + N9 SDK 扩面
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N5 推理服务沙箱一期 | ✅ 已实现 | `app/models/trained_model.py`（`trained_models` + `inference_usage`）+ 迁移 `0009_trained_models`（38 表 parity OK）；`TaskType.INFERENCE`；`app/services/inference_service.py`（模型注册/吊销/查询、ONNX `onnx.checker` 注册校验、`prepare_model_for_task` 加密产物分发同 RAG corpus 模式、`build_inference_runner`/`validate_inference_runner` 字节级模板校验、计量）；`app/api/inference.py`（`POST/GET /models`、`POST /{id}/invoke` 合约+purpose 门禁→复用买方会话→提交 INFERENCE 任务→输出过网关、`POST /{id}/revoke`、`GET /metering`）；`task_pipeline` 接线（code_scanning inference 分支 + running handler 模型物化 + 用量完成更新）；依赖 `onnx`/`onnxruntime` 入 requirements | tests/test_inference_service.py 13 passed（真实 ONNX Add 模型子进程执行、模板篡改拒绝、注册/损坏 400、buyer 403、无会话 409、revoked 409、purpose 门禁 400、计量、物化+DEK 重加密、未知模型 None） | 待全量回归确认 | N5 前端（TrainingDashboard"注册为推理模型"动作 + invoke 面板，visual-engineering 独立验收）；自动创建推理会话（本轮复用买方既有会话，无则 409，见偏差） |
+| N9 SDK 扩面 | ✅ 已实现 | `sdk/cds_sdk/client.py` 新增：`login/register` 类方法（自动持有 refresh_token）、`refresh_token`、contracts（list/get/`sign_data`（规范签名原文，与后端一致）/sign/activate/terminate）、tasks（create/submit/get/result，含 `rag_query`）、`get_proof_bundle`、inference（`list_models`/`invoke_model`/`get_inference_metering`）；`_request`/`_request_with_headers` 增加 429/410/503 自动重试（尊重 Retry-After）；`sdk/README.md` 能力表更新 + 4 个示例 | tests/test_sdk_client.py 18 passed（login/refresh/sign_data/terminate 体/rag_task 参数/result+proof path/invoke 体/429 重试成功/重试耗尽 410） | 待全量回归确认 | JS SDK（P2 N16） |
+
+**偏差说明（N5）**：
+- invoke 复用买方在（product, contract）下的既有 READY/RUNNING 会话；无会话返回 409 并提示先 `POST /sandbox-sessions` 创建——未复制 100 行会话置备逻辑，诚实最小闭环（spec 允许"复用常驻 warm session"；自动创建留待后续）。
+- 一期模型格式白名单 `onnx/pickle/safetensors`，仅 onnx 可执行；pickle/safetensors 注册时 fail-closed 拒绝（torch runner 未落地前诚实不接受）。
+- 推理 runner 无 onnxruntime 时失败关闭（不模拟）；结构化输入输出契约为 `{inputs: {onnx输入名: 数值数组}}`。

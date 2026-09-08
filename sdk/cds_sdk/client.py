@@ -67,6 +67,16 @@ class CDSApiError(CDSError):
         self.headers = headers or {}
 
 
+def _retry_after_seconds(resp: httpx.Response) -> float:
+    ra = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+    if ra is not None:
+        try:
+            return max(0.0, float(ra))
+        except ValueError:
+            pass
+    return 1.0
+
+
 def _parse_error(resp: httpx.Response, path: str) -> CDSApiError:
     """Build a CDSApiError from a non-2xx response (W2 shape or legacy)."""
     try:
@@ -97,7 +107,11 @@ class CDSClient:
         timeout: float = 120.0,
         headers: dict[str, str] | None = None,
         transport: httpx.BaseTransport | None = None,
+        max_retries: int = 3,
     ):
+        self._access_token = token
+        self._refresh_token: str | None = None
+        self._max_retries = max_retries
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -107,7 +121,11 @@ class CDSClient:
 
     # ── low level ────────────────────────────────────────────────────────
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        retries = kwargs.pop("_retries", self._max_retries)
         resp = self._client.request(method, path, **kwargs)
+        if resp.status_code in (429, 410, 503) and retries > 0:
+            time.sleep(min(_retry_after_seconds(resp), 5.0))
+            return self._request(method, path, _retries=retries - 1, **kwargs)
         if resp.status_code >= 400:
             raise _parse_error(resp, path)
         if resp.status_code == 204 or not resp.content:
@@ -115,9 +133,11 @@ class CDSClient:
         return resp.json()
 
     def _request_with_headers(self, method: str, path: str, **kwargs: Any) -> tuple[Any, dict]:
+        retries = kwargs.pop("_retries", self._max_retries)
         resp = self._client.request(method, path, **kwargs)
-        if resp.status_code >= 400:
-            raise _parse_error(resp, path)
+        if resp.status_code in (429, 410, 503) and retries > 0:
+            time.sleep(min(_retry_after_seconds(resp), 5.0))
+            return self._request_with_headers(method, path, _retries=retries - 1, **kwargs)
         body = None if resp.status_code == 204 or not resp.content else resp.json()
         return body, dict(resp.headers)
 
@@ -359,3 +379,165 @@ class CDSClient:
 
     def usage(self, session_id: str) -> dict:
         return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/usage")
+
+    # ── auth (N9) ────────────────────────────────────────────────────────
+    def refresh_token(self) -> dict:
+        """Exchange the refresh token for a fresh access+refresh pair (N9)."""
+        if not self._refresh_token:
+            raise CDSApiError(401, {"message": "no refresh token available"}, "")
+        resp = self._client.request(
+            "POST", "/api/v1/auth/refresh", json={"refresh_token": self._refresh_token}
+        )
+        if resp.status_code >= 400:
+            raise _parse_error(resp, "/api/v1/auth/refresh")
+        body = resp.json()
+        self._set_tokens(body.get("access_token"), body.get("refresh_token"))
+        return body
+
+    def _set_tokens(self, access_token: str | None, refresh_token: str | None) -> None:
+        if access_token:
+            self._access_token = access_token
+            self._client.headers["Authorization"] = f"Bearer {access_token}"
+        if refresh_token:
+            self._refresh_token = refresh_token
+
+    @classmethod
+    def login(cls, base_url: str, username: str, password: str, **kwargs: Any) -> "CDSClient":
+        """Authenticate and return a ready CDSClient (N9)."""
+        probe = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=kwargs.get("timeout", 120.0),
+            transport=kwargs.get("transport"),
+        )
+        try:
+            resp = probe.post("/api/v1/auth/login", json={"username": username, "password": password})
+            if resp.status_code >= 400:
+                raise _parse_error(resp, "/api/v1/auth/login")
+            body = resp.json()
+        finally:
+            probe.close()
+        client = cls(base_url, body["access_token"], **kwargs)
+        client._refresh_token = body.get("refresh_token")
+        return client
+
+    @classmethod
+    def register(cls, base_url: str, username: str, email: str, password: str,
+                 role: str = "buyer", **kwargs: Any) -> "CDSClient":
+        """Register a user and return a ready CDSClient (N9)."""
+        probe = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=kwargs.get("timeout", 120.0),
+            transport=kwargs.get("transport"),
+        )
+        try:
+            resp = probe.post("/api/v1/auth/register", json={
+                "username": username, "email": email, "password": password, "role": role,
+            })
+            if resp.status_code >= 400:
+                raise _parse_error(resp, "/api/v1/auth/register")
+            body = resp.json()
+        finally:
+            probe.close()
+        client = cls(base_url, body["access_token"], **kwargs)
+        client._refresh_token = body.get("refresh_token")
+        return client
+
+    # ── contracts (N9) ───────────────────────────────────────────────────
+    def list_contracts(self, *, status: str | None = None, limit: int = 20) -> dict:
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        return self._request("GET", "/api/v1/contracts", params=params)
+
+    def get_contract(self, contract_id: str) -> dict:
+        return self._request("GET", f"/api/v1/contracts/{contract_id}")
+
+    @staticmethod
+    def sign_data(contract_id: str, contract_no: str, party_role: str, timestamp: str,
+                  purpose: str | None = None, purpose_scope: list | None = None) -> str:
+        """Build the canonical contract sign payload (mirrors backend
+        crypto_service.contract_sign_data). Sign it with your SM2 private key
+        and pass the hex signature to sign_contract."""
+        base = f"CDS-SIGN|{contract_id}|{contract_no}|{party_role}|{timestamp}"
+        if purpose:
+            base += f"|purpose:{purpose}"
+        if purpose_scope:
+            base += f"|purpose_scope:{','.join(str(s) for s in purpose_scope)}"
+        return base
+
+    def sign_contract(self, contract_id: str, signature: str, timestamp: str) -> dict:
+        return self._request(
+            "POST", f"/api/v1/contracts/{contract_id}/sign",
+            json={"signature": signature, "timestamp": timestamp},
+        )
+
+    def activate_contract(self, contract_id: str) -> dict:
+        return self._request("POST", f"/api/v1/contracts/{contract_id}/activate")
+
+    def terminate_contract(self, contract_id: str, reason: str, ticket_id: str | None = None) -> dict:
+        body: dict[str, Any] = {"reason": reason}
+        if ticket_id:
+            body["ticket_id"] = ticket_id
+        return self._request("POST", f"/api/v1/contracts/{contract_id}/terminate", json=body)
+
+    # ── tasks (N9) ───────────────────────────────────────────────────────
+    def create_task(
+        self,
+        session_id: str,
+        task_type: str = "query",
+        *,
+        code: str | None = None,
+        language: str = "python",
+        timeout_seconds: int = 3600,
+        purpose: str | None = None,
+        rag_query: str | None = None,
+    ) -> dict:
+        """Create a sandbox task. ``task_type="rag_query"`` takes ``rag_query``
+        instead of ``code`` (system-generated RAG runner)."""
+        params: dict[str, Any] = {"session_id": session_id, "task_type": task_type}
+        if code is not None:
+            params["code"] = code
+        if language:
+            params["language"] = language
+        if timeout_seconds:
+            params["timeout_seconds"] = timeout_seconds
+        if purpose:
+            params["purpose"] = purpose
+        if rag_query:
+            params["rag_query"] = rag_query
+        return self._request("POST", "/api/v1/sandbox-tasks", params=params)
+
+    def submit_task(self, session_id: str, task_id: str) -> dict:
+        return self._request(
+            "POST", f"/api/v1/sandbox-tasks/{task_id}/submit", params={"session_id": session_id}
+        )
+
+    def get_task(self, session_id: str, task_id: str) -> dict:
+        return self._request(
+            "GET", f"/api/v1/sandbox-tasks/{task_id}", params={"session_id": session_id}
+        )
+
+    def get_task_result(self, session_id: str, task_id: str) -> dict:
+        return self._request(
+            "GET", f"/api/v1/sandbox-tasks/{task_id}/result", params={"session_id": session_id}
+        )
+
+    # ── proof bundle (N9) ────────────────────────────────────────────────
+    def get_proof_bundle(self, session_id: str) -> dict:
+        return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/proof-bundle")
+
+    # ── inference (N5/N9) ────────────────────────────────────────────────
+    def list_models(self) -> list[dict]:
+        return self._request("GET", "/api/v1/inference/models")
+
+    def invoke_model(self, model_id: str, inputs: dict, purpose: str | None = None) -> dict:
+        """Invoke a registered model inside the buyer's sandbox session.
+        Returns the inference task descriptor; poll ``get_task_result`` with
+        the returned session_id/task_id for the output."""
+        body: dict[str, Any] = {"inputs": inputs}
+        if purpose:
+            body["purpose"] = purpose
+        return self._request("POST", f"/api/v1/inference/{model_id}/invoke", json=body)
+
+    def get_inference_metering(self) -> dict:
+        return self._request("GET", "/api/v1/inference/metering")

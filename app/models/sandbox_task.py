@@ -21,6 +21,9 @@ class TaskType(str, Enum):
     # is turned into a self-contained runner by the RAG service and executed
     # inside the sandbox with the corpus never leaving the domain.
     RAG_QUERY = "rag_query"
+    # N5: inference over a registered model (system-generated runner, model
+    # artifact materialized into the workspace before execution).
+    INFERENCE = "inference"
 
 
 class TaskStatus(str, Enum):

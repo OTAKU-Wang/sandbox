@@ -163,3 +163,143 @@ def test_snapshot_and_lifecycle_paths():
     assert ("POST", "/api/v1/sandbox-sessions/s-1/pause") in paths
     assert ("POST", "/api/v1/sandbox-sessions/s-1/refreshes") in paths
     assert ("GET", "/api/v1/sandbox-sessions/session-templates") in paths
+
+
+# ── N9: auth ───────────────────────────────────────────────────────
+def test_login_builds_authed_client():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/auth/login"
+        return httpx.Response(200, json={
+            "access_token": "at-1", "refresh_token": "rt-1", "user": {"id": "u1"},
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as probe:
+        pass
+    client = CDSClient.login("http://test", "u", "p", transport=httpx.MockTransport(handler))
+    assert client._access_token == "at-1"
+    assert client._refresh_token == "rt-1"
+
+
+def test_refresh_exchanges_token():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={"access_token": "at-2", "refresh_token": "rt-2"})
+
+    client = _client(handler)
+    client._refresh_token = "rt-1"
+    body = client.refresh_token()
+    assert body["access_token"] == "at-2"
+    assert client._access_token == "at-2"
+    assert client._client.headers["Authorization"] == "Bearer at-2"
+    client.close()
+
+
+# ── N9: contracts ──────────────────────────────────────────────────
+def test_contract_sign_data_and_sign():
+    from cds_sdk import CDSClient as _C
+    payload = _C.sign_data("c-1", "C-1", "buyer", "2026-09-08T00:00:00+00:00", purpose="statistical_analysis")
+    assert payload.startswith("CDS-SIGN|c-1|C-1|buyer|")
+    assert "purpose:statistical_analysis" in payload
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "c-1", "status": "signed"})
+
+    with _client(handler) as c:
+        r = c.sign_contract("c-1", "deadbeef", "2026-09-08T00:00:00+00:00")
+    assert seen["path"] == "/api/v1/contracts/c-1/sign"
+    assert seen["body"] == {"signature": "deadbeef", "timestamp": "2026-09-08T00:00:00+00:00"}
+    assert r["status"] == "signed"
+
+
+def test_terminate_contract_body():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "c-1", "status": "terminated"})
+
+    with _client(handler) as c:
+        c.terminate_contract("c-1", "migrating", ticket_id="T-9")
+    assert seen["body"] == {"reason": "migrating", "ticket_id": "T-9"}
+
+
+# ── N9: tasks + proof bundle ───────────────────────────────────────
+def test_create_rag_task_passes_query_param():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["params"] = dict(request.url.params)
+        return httpx.Response(201, json={"task_id": "task-1", "task_type": "rag_query"})
+
+    with _client(handler) as c:
+        c.create_task("s-1", "rag_query", rag_query="最近有什么产品")
+    assert seen["path"] == "/api/v1/sandbox-tasks"
+    assert seen["params"]["session_id"] == "s-1"
+    assert seen["params"]["rag_query"] == "最近有什么产品"
+
+
+def test_task_result_and_proof_bundle_paths():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen[request.method] = request.url.path
+        return httpx.Response(200, json={"status": "completed"})
+
+    with _client(handler) as c:
+        c.get_task_result("s-1", "task-1")
+        c.get_proof_bundle("s-1")
+    assert seen["GET"] == "/api/v1/sandbox-sessions/s-1/proof-bundle"
+
+
+# ── N5/N9: inference ───────────────────────────────────────────────
+def test_invoke_model_sends_inputs():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(201, json={"task_id": "task-1", "session_id": "s-1"})
+
+    with _client(handler) as c:
+        r = c.invoke_model("m-1", {"x": [[1.0, 2.0]]}, purpose="statistical_analysis")
+    assert seen["path"] == "/api/v1/inference/m-1/invoke"
+    assert seen["body"] == {"inputs": {"x": [[1.0, 2.0]]}, "purpose": "statistical_analysis"}
+    assert r["task_id"] == "task-1"
+
+
+# ── 429/410 retry semantics ────────────────────────────────────────
+def test_retry_on_429_then_success():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(429, json={"code": "RATE_LIMITED", "message": "slow down"},
+                                  headers={"Retry-After": "0"})
+        return httpx.Response(200, json={"ok": True})
+
+    with _client(handler) as c:
+        r = c.get_session("s-1")
+    assert calls["n"] == 3
+    assert r == {"ok": True}
+
+
+def test_retry_exhausted_raises():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(410, json={"code": "GONE", "message": "stale"})
+
+    with _client(handler) as c:
+        with pytest.raises(CDSError) as exc:
+            c.get_session("s-1")
+    assert calls["n"] == 4  # 1 initial + 3 retries
+    assert exc.value.status_code == 410

@@ -12,6 +12,7 @@ with concurrency control.
 """
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -340,6 +341,25 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
             except Exception as e:
                 logger.warning("[Pipeline] RAG corpus materialization failed for task %s: %s", task_id, e)
 
+        # N5: materialize the registered model + invoke input into the sandbox
+        # workspace (re-encrypted with the session DEK) before executing the
+        # inference runner. Missing/corrupt model → the runner fails closed.
+        inference_model = None
+        if task.payload.get("inference_model_id"):
+            try:
+                from app.services.inference_service import prepare_model_for_task
+                workspace = runtime.get_workspace(container_id, session.sandbox_level)
+                if workspace:
+                    inference_model = await prepare_model_for_task(
+                        db, session, workspace,
+                        uuid.UUID(str(task.payload["inference_model_id"])),
+                        task.payload.get("inference_input") or {},
+                    )
+                if not inference_model:
+                    logger.warning("[Pipeline] Inference model unavailable for task %s", task_id)
+            except Exception as e:
+                logger.warning("[Pipeline] Inference model materialization failed for task %s: %s", task_id, e)
+
         try:
             from app.services.task_code_security import decrypt_task_code
             code_content = decrypt_task_code(orm_task.code_content)
@@ -403,6 +423,18 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
                 orm_task.error_message = output[:2000]
                 orm_task.completed_at = datetime.now(timezone.utc)
             orm_task.output_rows = len(output.splitlines())
+
+            # N5: inference metering — record output rows + success on completion.
+            if task.payload.get("inference_model_id"):
+                try:
+                    from app.services.inference_service import inference_service as _inference_service
+                    await _inference_service.update_usage_on_completion(
+                        db, task_id,
+                        output_rows=len(output.splitlines()),
+                        succeeded=exec_result.get("exit_code", -1) == 0,
+                    )
+                except Exception as e:
+                    logger.warning("[Pipeline] Inference usage update failed: %s", e)
             orm_task.resource_usage = {
                 "duration_ms": exec_result.get("duration_ms", 0),
                 "sandbox_level": exec_result.get("sandbox_level", "L3"),
@@ -477,6 +509,31 @@ async def _code_scanning_handler(task: PipelineTask) -> tuple[TaskStatus, dict |
         except Exception as e:
             logger.warning("[Pipeline] RAG runner validation error: %s", e)
             return TaskStatus.FAILED, {"reason": f"RAG runner validation error: {e}"}
+
+    # N5: system-generated INFERENCE runners are validated byte-exactly
+    # against the trusted template (never the widened user-code whitelist).
+    if task.payload.get("inference_model_id"):
+        from app.services.inference_service import validate_inference_runner
+        try:
+            import uuid as _uuid
+            model_id = _uuid.UUID(str(task.payload["inference_model_id"]))
+            passed, reason = validate_inference_runner(code, model_id)
+            async with async_session() as db:
+                await audit_service.log(
+                    db, action="sandbox_task.code_scanning", resource_type="sandbox_task",
+                    user_id=task.session_id, resource_id=task.task_id,
+                    detail={"inference_runner": True, "passed": passed, "reason": reason},
+                )
+                await db.commit()
+            if not passed:
+                return TaskStatus.REJECTED, {
+                    "reason": f"Inference runner validation failed: {reason}",
+                    "inference_runner": True,
+                }
+            return TaskStatus.CODE_SCANNING, {"scan": "inference_runner_verified", "reason": reason}
+        except Exception as e:
+            logger.warning("[Pipeline] Inference runner validation error: %s", e)
+            return TaskStatus.FAILED, {"reason": f"Inference runner validation error: {e}"}
 
     scanner = CodeScanner()
     try:
