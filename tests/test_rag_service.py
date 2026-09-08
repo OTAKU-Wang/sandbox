@@ -43,9 +43,24 @@ def test_build_corpus_stats_and_engine():
     assert index.chunks
 
 
-def test_build_corpus_rejects_transformers_fail_closed():
-    with pytest.raises(ValueError, match="runner-replicable"):
+def test_build_corpus_transformers_fail_closed_without_shipping():
+    # Phase-1 call sites (no ship_transformers) still reject transformers.
+    with pytest.raises(ValueError, match="requires the model bundle"):
         build_corpus(DOCS, embedding_backend="transformers")
+
+
+def test_build_corpus_transformers_shipping_requires_model(monkeypatch):
+    # ship_transformers=True allows the engine but still fails closed when the
+    # host-side transformers model cannot be resolved (honest — no model, no
+    # corpus; never a silent tf fallback).
+    from app.services.rag_embedding import EngineUnavailable, RAGEmbedder
+
+    def _no_model(self):
+        raise EngineUnavailable("embedding model unavailable (test)")
+
+    monkeypatch.setattr(RAGEmbedder, "_load_transformers", _no_model)
+    with pytest.raises(EngineUnavailable):
+        build_corpus(DOCS, embedding_backend="transformers", ship_transformers=True)
 
 
 def test_rag_index_roundtrip():
@@ -102,8 +117,7 @@ def test_validate_rag_runner_accepts_generated():
 def test_validate_rag_runner_rejects_tamper():
     runner = build_rag_runner("适合一家四口的房子", top_k=2)
     tampered = runner.replace(
-        "import json, math, os, re, sys",
-        "import json, math, os, re, sys\nimport socket",
+        "import sys\n", "import sys\nimport socket\n", 1,
     )
     assert "import socket" in tampered
     ok, reason, _ = validate_rag_runner(tampered)

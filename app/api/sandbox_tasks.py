@@ -69,6 +69,8 @@ async def create_task(
     timeout_seconds: int = 3600,
     purpose: str | None = None,
     rag_query: str | None = None,
+    answer_mode: str | None = None,
+    generative_model_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -77,8 +79,10 @@ async def create_task(
     Gap T11: ``task_type="rag_query"`` takes a natural-language ``rag_query``
     instead of user ``code`` — the RAG service generates a self-contained
     runner that retrieves from the session's encrypted corpus INSIDE the
-    sandbox and answers extractively. It flows through the same pipeline
-    (code scan → sandbox run → output gateway) as any other task.
+    sandbox and answers extractively. N6: ``answer_mode="generative"`` (with a
+    registered ``generative_model_id``) answers via a provider ONNX bundle.
+    It flows through the same pipeline (code scan → sandbox run → output
+    gateway) as any other task.
     """
     # Validate session
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
@@ -107,6 +111,16 @@ async def create_task(
                 detail=f"rag_query exceeds max length ({_get_rag_settings().RAG_QUERY_MAX_CHARS} chars)",
             )
         language = "python"
+        # N6: generative answer mode requires a registered ONNX bundle.
+        mode = (answer_mode or "extractive_retrieval").lower()
+        if mode not in ("extractive_retrieval", "generative"):
+            raise HTTPException(status_code=422, detail=f"Unknown answer_mode {mode!r}")
+        if mode == "generative" and not generative_model_id:
+            raise HTTPException(
+                status_code=400,
+                detail="answer_mode=generative requires a generative_model_id "
+                       "(register a bundle via POST /api/v1/rag/generative-model)",
+            )
     else:
         if not code or not code.strip():
             raise HTTPException(status_code=422, detail="code cannot be empty")
@@ -128,7 +142,11 @@ async def create_task(
     from app.utils.crypto import sm3_hash
     if is_rag:
         from app.services.rag_service import build_rag_runner
-        code = build_rag_runner(rag_query)
+        code = build_rag_runner(
+            rag_query,
+            answer_mode=(answer_mode or "extractive_retrieval").lower(),
+            generative_model_id=generative_model_id,
+        )
     code_hash = sm3_hash(code.encode())
 
     task_id = f"task-{uuid.uuid4().hex[:12]}"
@@ -145,6 +163,8 @@ async def create_task(
         language=language,
         timeout_seconds=timeout_seconds,
         purpose=purpose,
+        rag_answer_mode=(answer_mode or "extractive_retrieval").lower() if is_rag else None,
+        rag_generative_model_id=generative_model_id if is_rag else None,
     )
     db.add(task)
 
@@ -309,6 +329,9 @@ async def submit_task(
             # Gap T11: system-generated RAG runners are validated against the
             # trusted template instead of the general user-code import whitelist.
             "rag_query": task.task_type == "rag_query",
+            # N6: answer mode + generative bundle for RAG phase-2 tasks.
+            "rag_answer_mode": task.rag_answer_mode,
+            "rag_generative_model_id": task.rag_generative_model_id,
         },
         timeout=task.timeout_seconds,
     )

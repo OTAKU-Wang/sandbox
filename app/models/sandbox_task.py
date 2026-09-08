@@ -69,6 +69,11 @@ class SandboxTask(Base):
     dp_epsilon_used: Mapped[float | None] = mapped_column(Numeric(10, 4))  # DP budget consumed
     output_rows: Mapped[int] = mapped_column(Integer, default=0)
 
+    # N6: RAG phase-2 answer mode (extractive_retrieval / generative) and the
+    # generative ONNX bundle referenced when answer_mode=generative.
+    rag_answer_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rag_generative_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Timing
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=3600)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

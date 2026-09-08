@@ -27,7 +27,9 @@ TF_DIM = 512
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _WORD_RE = re.compile(r"[\u4e00-\u9fff]|[a-zA-Z0-9_]+")
 
-_RUNNER_REPLICABLE_ENGINES = {"tf", "regex"}
+# Engines the in-sandbox runner can reproduce. transformers requires the
+# model bundle to be shipped with the corpus (phase 2) — gated in build_corpus.
+_RUNNER_REPLICABLE_ENGINES = {"tf", "regex", "transformers"}
 
 
 class RAGEmbeddingEngine:

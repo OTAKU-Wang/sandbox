@@ -112,7 +112,17 @@ async def test_ingest_corpus_empty_docs(client, db_session, make_user):
 
 
 @pytest.mark.asyncio
-async def test_ingest_corpus_rejects_transformers(client, db_session, make_user):
+async def test_ingest_corpus_rejects_transformers_without_model(client, db_session, make_user, monkeypatch):
+    # N6: transformers corpus build is allowed (model shipped alongside), but
+    # still fails closed when the host-side model cannot be resolved — never a
+    # silent tf fallback, never a network hang in tests.
+    from app.services.rag_embedding import EngineUnavailable, RAGEmbedder
+
+    def _no_model(self):
+        raise EngineUnavailable("embedding model unavailable (test)")
+
+    monkeypatch.setattr(RAGEmbedder, "_load_transformers", _no_model)
+
     headers, user_id = await make_user("data_provider", "prov")
     session = await _mk_session(db_session, user_id)
 
@@ -126,4 +136,4 @@ async def test_ingest_corpus_rejects_transformers(client, db_session, make_user)
         headers=headers,
     )
     assert resp.status_code == 422
-    assert "runner-replicable" in resp.json()["detail"]
+    assert "embedding model unavailable" in resp.json()["detail"]

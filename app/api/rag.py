@@ -8,14 +8,14 @@ workspace at query time — the corpus never leaves the domain.
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
-from app.models.user import User
+from app.core.deps import get_current_user, require_roles
+from app.models.user import User, UserRole
 from app.models.sandbox_session import SandboxSession, SessionStatus
 from app.services.audit_service import audit_service
 
@@ -72,7 +72,11 @@ async def ingest_corpus(
         )
 
     # Build the corpus (runner-replicable embedding engine enforced inside).
-    from app.services.rag_service import build_corpus, corpus_object_name
+    from app.services.rag_service import (
+        build_corpus,
+        corpus_object_name,
+        embedding_model_object_name,
+    )
     from app.services.storage_service import storage_service
 
     try:
@@ -81,14 +85,33 @@ async def ingest_corpus(
             chunk_size=body.chunk_size,
             overlap=body.overlap,
             embedding_backend=body.embedding_backend,
+            ship_transformers=(body.embedding_backend == "transformers"),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        # EngineUnavailable and model-load failures are honest 422s — the
+        # caller asked for an engine the host cannot run (never silent fallback).
+        from app.services.rag_embedding import EngineUnavailable
+        if isinstance(e, EngineUnavailable):
+            raise HTTPException(status_code=422, detail=str(e))
+        raise
 
     # Durable encrypted copy at the deterministic object name (keyed by the
     # session's data product so the runner's materialization can find it).
     object_name = corpus_object_name(str(session.data_product_id))
     stored = storage_service.upload(index.to_json(), object_name, content_type="application/json")
+
+    # Phase 2: when a transformers corpus is built, ship the embedding model
+    # bundle alongside so the in-sandbox runner can reproduce query vectors.
+    embedding_model_ref = None
+    embedding_model_hash = stats.get("embedding_model_hash")
+    if stats.get("embedding_model_bundle"):
+        emb_name = embedding_model_object_name(str(session.data_product_id))
+        emb_stored = storage_service.upload(
+            stats["embedding_model_bundle"], emb_name, content_type="application/octet-stream"
+        )
+        embedding_model_ref = emb_name
 
     await audit_service.log(
         db, action="rag.corpus_ingest", resource_type="rag_corpus",
@@ -99,6 +122,7 @@ async def ingest_corpus(
             "doc_count": stats["doc_count"],
             "chunk_count": stats["chunk_count"],
             "embedding_engine": stats["embedding_engine"],
+            "embedding_model_hash": embedding_model_hash,
             "storage_object_ref": object_name,
             "checksum": stored.get("checksum"),
         },
@@ -110,7 +134,43 @@ async def ingest_corpus(
         "chunk_count": stats["chunk_count"],
         "embedding_engine": stats["embedding_engine"],
         "dim": stats["dim"],
+        "embedding_model_hash": embedding_model_hash,
+        "embedding_model_ref": embedding_model_ref,
         "storage_object_ref": object_name,
         "checksum": stored.get("checksum"),
         "encrypted": stored.get("encrypted", True),
+    }
+
+
+@router.post("/generative-model", status_code=status.HTTP_201_CREATED)
+async def register_generative_model(
+    file: UploadFile = File(...),
+    name: str = Form(..., min_length=1, max_length=255),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
+):
+    """Register a RAG generative answer bundle (zip: model.onnx + vocab.txt).
+
+    The inner ONNX model is validated; the bundle is stored encrypted and
+    materialized into the buyer's workspace when a rag_query uses
+    ``answer_mode="generative"`` with this model_id. Fail-closed without it.
+    """
+    from app.services.rag_generative_service import register_generative_model as _register
+
+    artifact = await file.read()
+    try:
+        model = await _register(db, owner_id=current_user.id, name=name, artifact_bytes=artifact)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await audit_service.log(
+        db, action="rag.generative_model.register", resource_type="rag_generative_model",
+        user_id=current_user.id, resource_id=str(model.model_id),
+        detail={"name": model.name, "vocab_size": model.vocab_size, "size_bytes": model.size_bytes},
+    )
+    return {
+        "model_id": str(model.model_id),
+        "name": model.name,
+        "vocab_size": model.vocab_size,
+        "size_bytes": model.size_bytes,
     }

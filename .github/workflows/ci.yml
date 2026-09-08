@@ -72,6 +72,8 @@ jobs:
             tests/test_rag_runner.py \
             tests/test_rag_task.py \
             tests/test_rag_ingest.py \
+            tests/test_rag_generative.py \
+            tests/test_rag_transformers.py \
             tests/test_rate_limit_distributed.py \
             tests/test_tenant_quota_persistence.py \
             tests/test_migrations.py \

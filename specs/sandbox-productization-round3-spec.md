@@ -378,3 +378,14 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 - invoke 复用买方在（product, contract）下的既有 READY/RUNNING 会话；无会话返回 409 并提示先 `POST /sandbox-sessions` 创建——未复制 100 行会话置备逻辑，诚实最小闭环（spec 允许"复用常驻 warm session"；自动创建留待后续）。
 - 一期模型格式白名单 `onnx/pickle/safetensors`，仅 onnx 可执行；pickle/safetensors 注册时 fail-closed 拒绝（torch runner 未落地前诚实不接受）。
 - 推理 runner 无 onnxruntime 时失败关闭（不模拟）；结构化输入输出契约为 `{inputs: {onnx输入名: 数值数组}}`。
+
+### Round 45 M3 执行记录（2026-09-08）—— N6 RAG 二期（生成式 + 沙箱内嵌入 + 计量）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N6 RAG 二期 | ✅ 已实现 | **生成式答案模式**：`build_rag_runner` 增 `answer_mode`/`generative_model_id`/`embedding_model_hash` 字面量 + runner generative 分支（检索上下文 → 加载 `input/generative_model.bundle`（zip: model.onnx+vocab.txt，N5 同款 onnxruntime 加载器）→ tf 编码 context → Gemm 前向 → argmax 解码 → 答案 + `[CDS-WM:<hash8>]` 文本水印标记，rag_meta `watermark=true`）；`POST /api/v1/rag/generative-model` 注册（zip 校验内嵌 onnx + vocab，存储加密）；无模型时 `answer_mode=generative` → 400 诚实拒绝（不静默回退抽取式）；迁移 `0010_rag_generative`（`rag_generative_models` 表 + `sandbox_tasks.rag_answer_mode/rag_generative_model_id` 列）。**沙箱内嵌入**：runner `_embed_query` 增 transformers 分支（torch AutoModel，从随语料分发的加密 bundle 解密到 temp 加载 + `_EMBEDDING_MODEL_HASH` 校验）；`build_corpus(ship_transformers=True)` 打包并哈希宿主 transformers 模型（`_package_transformers_model`），ingest 上传 `embedding_model.bundle`，`prepare_corpus_for_task` 随语料分发；`RAG_EMBEDDING_BACKEND` 保留（auto/tf/transformers/regex，未按 spec 改名 `RAG_EMBEDDING_ENGINE`，见偏差）。**计量**：`_extract_rag_metrics` 解析 runner rag_meta（retrieved_chunks/top_k/answer_mode/embedding_engine/generative_model/watermark）→ 写入 `sandbox_tasks.resource_usage`；pipeline 增加 generative bundle 物化。 | tests/test_rag_generative.py 5 passed（真实 ONNX Gemm bundle 子进程执行 + 水印 + fail-closed + 模板校验 + API 无模型 400）+ tests/test_rag_transformers.py 3 passed（**tiny BERT 全离线 host↔runner 检索 top-k 一致性**、无 bundle fail-closed、tf→transformers 重建迁移）；既有 RAG 测试更新 2 处（模板 import 行 + transformers 契约） | 待全量回归确认 | 真实生产级嵌入/生成模型属环境项（测试用 tiny 模型验证机制；真实模型由供方注册） |
+
+**偏差说明（N6）**：
+- 配置键沿用既有 `RAG_EMBEDDING_BACKEND`（已支持 auto/tf/transformers/regex + 诚实 engine 标注），未按 spec §7.1 引入 `RAG_EMBEDDING_ENGINE` 新键——既有配置已覆盖语义，改名会破坏存量部署与测试（以代码为准，回写本文件）。
+- 生成式契约：ONNX bundle 输入 `context` float32[1,512]（tf 编码的检索上下文），输出 `answer_logits` float32[1,V]，`vocab.txt` V 行逐行解码；文本水印为确定性 `[CDS-WM:<model hash8>]` 标记。真实生成质量由供方注册的模型决定——机制真实（onnxruntime 前向 + argmax + 词表解码），非模拟。
+- 嵌入一致性以"检索 top-k 一致"验证（runner 不输出 query 向量，避免输出膨胀）；transformers 真实模型向量一致性由供方模型 + 哈希校验保证。

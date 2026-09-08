@@ -53,6 +53,7 @@ class RagIndex:
     engine: str
     dim: int
     chunks: list[RagChunk] = field(default_factory=list)
+    embedding_model_hash: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -60,6 +61,7 @@ class RagIndex:
             "corpus_id": self.corpus_id,
             "engine": self.engine,
             "dim": self.dim,
+            "embedding_model_hash": self.embedding_model_hash,
             "chunks": [
                 {"doc_id": c.doc_id, "text": c.text, "vector": c.vector}
                 for c in self.chunks
@@ -86,6 +88,7 @@ class RagIndex:
             engine=str(data.get("engine", "tf")),
             dim=int(data.get("dim", 0)),
             chunks=chunks,
+            embedding_model_hash=data.get("embedding_model_hash"),
         )
 
     @classmethod
@@ -137,13 +140,17 @@ def chunk_text(text: str, chunk_size: int = 256, overlap: int = 32) -> list[str]
     return chunks
 
 
-def _ensure_runner_replicable_engine(engine: str, *, what: str) -> str:
+def _ensure_runner_replicable_engine(engine: str, *, what: str, ship_transformers: bool = False) -> str:
     if engine not in _RUNNER_REPLICABLE_ENGINES:
         raise ValueError(
-            f"{what}: embedding engine {engine!r} is not supported for phase-1 "
-            f"in-sandbox retrieval (runner-replicable engines: "
-            f"{sorted(_RUNNER_REPLICABLE_ENGINES)}). "
-            f"transformers-based retrieval requires the model in the sandbox image (phase 2)."
+            f"{what}: embedding engine {engine!r} is not supported for in-sandbox "
+            f"retrieval (runner-replicable engines: {sorted(_RUNNER_REPLICABLE_ENGINES)})."
+        )
+    if engine == "transformers" and not ship_transformers:
+        raise ValueError(
+            f"{what}: embedding engine 'transformers' requires the model bundle "
+            f"to be shipped with the corpus (phase 2) — ingest via the API so the "
+            f"model files travel alongside the corpus."
         )
     return engine
 
@@ -154,17 +161,22 @@ def build_corpus(
     overlap: int | None = None,
     embedding_backend: str | None = None,
     corpus_id: str | None = None,
+    ship_transformers: bool = False,
 ) -> tuple[RagIndex, dict]:
     """Build a corpus index from ``docs`` = [{doc_id, text}, ...].
 
-    Returns (RagIndex, stats). The embedding engine is forced to a
-    runner-replicable engine; transformers is rejected fail-closed.
+    Returns (RagIndex, stats). tf/regex are always runner-replicable;
+    ``transformers`` requires ``ship_transformers=True`` — the host embeds with
+    the transformers model and returns the packaged model bundle in stats so
+    the API can ship it to the sandbox (phase 2).
     """
     from app.core.config import get_settings
     settings = get_settings()
 
     embedder = RAGEmbedder(backend=embedding_backend)
-    engine = _ensure_runner_replicable_engine(embedder.resolve_engine(), what="corpus build")
+    engine = _ensure_runner_replicable_engine(
+        embedder.resolve_engine(), what="corpus build", ship_transformers=ship_transformers
+    )
 
     chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
     overlap = overlap if overlap is not None else settings.RAG_CHUNK_OVERLAP
@@ -180,11 +192,19 @@ def build_corpus(
             vec = embedder.embed(piece)
             chunks.append(RagChunk(doc_id=doc_id, text=piece, vector=vec.vector))
 
+    embedding_model_hash = None
+    embedding_model_bundle = None
+    if engine == "transformers":
+        # Package the host-side transformers model so the API can ship it
+        # alongside the corpus; the runner verifies the same hash.
+        embedding_model_bundle, embedding_model_hash = _package_transformers_model(embedder)
+
     index = RagIndex(
         corpus_id=corpus_id or f"corpus-{uuid.uuid4().hex[:12]}",
         engine=engine,
         dim=embedder.embed("").dim,
         chunks=chunks,
+        embedding_model_hash=embedding_model_hash,
     )
     stats = {
         "doc_count": len(docs),
@@ -192,8 +212,41 @@ def build_corpus(
         "embedding_engine": engine,
         "dim": index.dim,
         "docs": doc_stats,
+        "embedding_model_hash": embedding_model_hash,
     }
+    if embedding_model_bundle is not None:
+        stats["embedding_model_bundle"] = embedding_model_bundle
     return index, stats
+
+
+def _package_transformers_model(embedder) -> tuple[bytes, str]:
+    """Save the loaded transformers model/tokenizer into a deterministic zip.
+
+    Returns (bundle_zip_bytes, sha256_of_plaintext_files). The runner decrypts
+    the shipped bundle, hashes the extracted files in the same sorted order,
+    and rejects on mismatch.
+    """
+    import hashlib
+    import io
+    import os as _os
+    import tempfile
+    import zipfile
+
+    tokenizer, model = embedder._load_transformers()
+    tmp = tempfile.mkdtemp(prefix="cds-emb-pkg-")
+    model.save_pretrained(tmp)
+    tokenizer.save_pretrained(tmp)
+    names = sorted(_os.listdir(tmp))
+
+    digest = hashlib.sha256()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for name in names:
+            with open(_os.path.join(tmp, name), "rb") as fh:
+                data = fh.read()
+            digest.update(data)
+            zf.writestr(name, data)
+    return buf.getvalue(), digest.hexdigest()
 
 
 def retrieve(
@@ -204,7 +257,10 @@ def retrieve(
     """Embed the query with the index's engine and return top-k chunks."""
     if not index.chunks:
         return [], index.engine
-    engine = _ensure_runner_replicable_engine(index.engine, what="retrieval")
+    engine = _ensure_runner_replicable_engine(
+        index.engine, what="retrieval",
+        ship_transformers=(index.engine == "transformers"),
+    )
     embedder = RAGEmbedder(backend=engine)
     qvec = embedder.embed(query).vector
     scored: list[tuple[float, RagChunk]] = []
@@ -261,14 +317,22 @@ def build_answer(
 # ── in-sandbox runner ─────────────────────────────────────────
 
 _RUNNER_HEADER = '''\
-# CDS RAG phase-1 runner (system-generated, gap T11).
+# CDS RAG runner (system-generated; phase-1 extractive + phase-2 generative).
 # Retrieves from the session corpus INSIDE the sandbox and answers
-# extractively. Self-contained: stdlib + one AEAD decrypt helper.
-import json, math, os, re, sys
+# extractively (default) or generatively via a provider-registered ONNX
+# bundle. Self-contained: stdlib + AEAD decrypt helper.
+import io
+import json
+import math
+import os
+import re
+import sys
+import zipfile
 
 INDEX_FILENAME = "input/rag_index.json"
 INDEX_VERSION = 1
-ANSWER_MODE = "extractive_retrieval"
+GENERATIVE_BUNDLE_FILE = "input/generative_model.bundle"
+EMBEDDING_MODEL_BUNDLE = "input/embedding_model.bundle"
 
 _CJK_RE = re.compile(r"[\\u4e00-\\u9fff]")
 _WORD_RE = re.compile(r"[\\u4e00-\\u9fff]|[a-zA-Z0-9_]+")
@@ -332,17 +396,73 @@ def _decrypt_workspace_file(raw, dek_hex):
         return AESGCM(dek).decrypt(nonce, ct + tag, None)
 
 
-def _load_index():
-    raw = None
-    with open(INDEX_FILENAME, "rb") as fh:
-        raw = fh.read()
+def _load_bytes(path):
+    raw = open(path, "rb").read()
     dek_hex = os.environ.get("CDS_DEK_HEX", "")
     if dek_hex:
         raw = _decrypt_workspace_file(raw, dek_hex)
+    return raw
+
+
+def _load_index():
+    raw = _load_bytes(INDEX_FILENAME)
     data = json.loads(raw.decode("utf-8"))
     if int(data.get("version", 0)) != INDEX_VERSION:
         raise RuntimeError("rag index version mismatch: %r" % data.get("version"))
     return data
+
+
+def _sha256_of_dir(path):
+    import hashlib
+    h = hashlib.sha256()
+    for p in sorted(os.listdir(path)):
+        with open(os.path.join(path, p), "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()
+
+
+def _load_embedding_model_dir():
+    bundle_bytes = _load_bytes(EMBEDDING_MODEL_BUNDLE)
+    zf = zipfile.ZipFile(io.BytesIO(bundle_bytes))
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="cds-emb-")
+    for name in zf.namelist():
+        if "/" in name or name.startswith("."):
+            continue
+        with open(os.path.join(tmp, name), "wb") as fh:
+            fh.write(zf.read(name))
+    return tmp
+
+
+def _transformers_embed(text):
+    try:
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+    except ImportError:
+        raise RuntimeError(
+            "transformers unavailable in sandbox (embedding engine=transformers); "
+            "install torch+transformers in the sandbox image or rebuild the corpus with tf"
+        )
+    if _EMBEDDING_MODEL_HASH:
+        actual = _sha256_of_dir(_load_embedding_model_dir())
+        if actual != _EMBEDDING_MODEL_HASH:
+            raise RuntimeError("embedding model hash mismatch in sandbox")
+    model_dir = _load_embedding_model_dir()
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    model = AutoModel.from_pretrained(model_dir)
+    model.eval()
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=256, padding=True)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    hidden = outputs.last_hidden_state
+    mask = inputs["attention_mask"].unsqueeze(-1).float()
+    summed = (hidden * mask).sum(dim=1)
+    counts = mask.sum(dim=1).clamp(min=1.0)
+    mean = (summed / counts)[0]
+    norm = torch.linalg.vector_norm(mean)
+    if norm > 0:
+        mean = mean / norm
+    return [float(x) for x in mean.tolist()]
 
 
 def _embed_query(query, engine):
@@ -350,9 +470,37 @@ def _embed_query(query, engine):
         return tf_embed(query)
     if engine == "regex":
         return regex_embed(query)
+    if engine == "transformers":
+        if not os.path.exists(EMBEDDING_MODEL_BUNDLE):
+            raise RuntimeError(
+                "embedding model not shipped into sandbox (engine=transformers); "
+                "rebuild the corpus with tf or re-ingest with the model present"
+            )
+        return _transformers_embed(query)
     raise RuntimeError(
-        "unsupported in-sandbox embedding engine %r (phase 1 supports tf/regex)" % engine
+        "unsupported in-sandbox embedding engine %r (phase 2 supports tf/regex/transformers)" % engine
     )
+
+
+def _generative_answer(context_text):
+    if not _RAG_GENERATIVE_MODEL_ID:
+        raise RuntimeError("generative answer requested but no generative model provisioned")
+    bundle_bytes = _load_bytes(GENERATIVE_BUNDLE_FILE)
+    zf = zipfile.ZipFile(io.BytesIO(bundle_bytes))
+    model_bytes = zf.read("model.onnx")
+    vocab = zf.read("vocab.txt").decode("utf-8").splitlines()
+    try:
+        import numpy as np
+        import onnxruntime as ort
+    except ImportError:
+        raise RuntimeError(
+            "onnxruntime/numpy unavailable in sandbox (generative mode); inference unavailable (fail-closed)"
+        )
+    sess = ort.InferenceSession(model_bytes, providers=["CPUExecutionProvider"])
+    ctx_vec = tf_embed(context_text)
+    logits = sess.run(None, {"context": np.asarray([ctx_vec], dtype=np.float32)})[0]
+    idx = int(np.argmax(logits[0]))
+    return vocab[idx] if 0 <= idx < len(vocab) else "<unk>"
 
 
 def _cosine(a, b):
@@ -381,13 +529,26 @@ def main():
         if doc_id not in sources:
             sources.append(doc_id)
         parts.append((c.get("text") or "").strip())
-    answer = "\\n\\n".join(p for p in parts if p).strip()
+
+    answer_mode = _RAG_ANSWER_MODE
+    if answer_mode == "generative":
+        import hashlib
+        answer = _generative_answer("\\n\\n".join(parts))
+        wm = hashlib.sha256((_RAG_GENERATIVE_MODEL_ID or "").encode()).hexdigest()[:8]
+        answer = "%s [CDS-WM:%s]" % (answer, wm)
+        watermark = True
+    else:
+        answer = "\\n\\n".join(p for p in parts if p).strip()
+        watermark = False
+
     result = {
         "answer": answer,
         "sources": sources,
         "rag_meta": {
             "embedding_engine": engine,
-            "answer_mode": ANSWER_MODE,
+            "answer_mode": answer_mode,
+            "generative_model": _RAG_GENERATIVE_MODEL_ID,
+            "watermark": watermark,
             "top_k": len(top),
             "retrieved_chunks": len(top),
             "source_doc_ids": sources,
@@ -405,13 +566,19 @@ def main():
 # defined (module statements run top-to-bottom).
 
 
-def build_rag_runner(query: str, top_k: int | None = None) -> str:
+def build_rag_runner(
+    query: str,
+    top_k: int | None = None,
+    answer_mode: str = "extractive_retrieval",
+    generative_model_id: str | None = None,
+    embedding_model_hash: str | None = None,
+) -> str:
     """Generate the self-contained runner source for a RAG_QUERY task.
 
-    The query travels inside the generated code as a module-level literal
-    (the code is stored encrypted as ``code_content`` and code-scanned), so
-    the query never lands in a plaintext column. The runner embeds the same
-    tf/regex embedding functions host-side uses, guaranteeing identical
+    The query (and answer mode / model ids) travel inside the generated code
+    as module-level literals (the code is stored encrypted as ``code_content``
+    and code-scanned), so they never land in a plaintext column. The runner
+    embeds the same embedding functions host-side uses, guaranteeing identical
     vectors inside the sandbox.
     """
     from app.core.config import get_settings
@@ -419,11 +586,17 @@ def build_rag_runner(query: str, top_k: int | None = None) -> str:
     effective_top_k = int(top_k or settings.RAG_DEFAULT_TOP_K)
     if effective_top_k < 1:
         effective_top_k = 1
+    mode = answer_mode or "extractive_retrieval"
+    if mode not in ("extractive_retrieval", "generative"):
+        raise ValueError(f"Unknown answer_mode {mode!r}")
     body = textwrap.dedent(_RUNNER_HEADER).rstrip()
     tail = (
         "\n\n# --- generated per-task params ---\n"
         f"_RAG_QUERY = {query!r}\n"
         f"_RAG_TOP_K = {effective_top_k}\n"
+        f"_RAG_ANSWER_MODE = {mode!r}\n"
+        f"_RAG_GENERATIVE_MODEL_ID = {generative_model_id!r}\n"
+        f"_EMBEDDING_MODEL_HASH = {embedding_model_hash!r}\n"
         "\nif __name__ == '__main__':\n    sys.exit(main())\n"
     )
     return body + tail
@@ -432,13 +605,12 @@ def build_rag_runner(query: str, top_k: int | None = None) -> str:
 def validate_rag_runner(code: str) -> tuple[bool, str, str | None]:
     """Verify a RAG runner is EXACTLY the system-generated template.
 
-    RAG runners are system code (a fixed template + the user's query as a
-    string literal), not user-submitted code, so the general-purpose code
-    scanner's import whitelist does not apply. Instead we guarantee safety by
-    byte-exactness: extract the embedded ``_RAG_QUERY`` / ``_RAG_TOP_K``
-    literals, regenerate the runner, and require an exact match. Any tampering
-    with the template — extra imports, calls, network, file writes — makes the
-    byte comparison fail and the runner is rejected.
+    RAG runners are system code (a fixed template + the user's query and
+    answer-mode/model literals), not user-submitted code, so the general code
+    scanner's import whitelist does not apply. Safety is guaranteed by
+    byte-exactness: extract the embedded literals, regenerate the runner, and
+    require an exact match. Any tampering — extra imports, calls, network,
+    file writes — makes the byte comparison fail and the runner is rejected.
 
     Returns (passed, reason, extracted_query).
     """
@@ -451,6 +623,9 @@ def validate_rag_runner(code: str) -> tuple[bool, str, str | None]:
 
     query: str | None = None
     top_k: int | None = None
+    answer_mode: str | None = None
+    generative_model_id: str | None = None
+    embedding_model_hash: str | None = None
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target = node.targets[0]
@@ -462,11 +637,29 @@ def validate_rag_runner(code: str) -> tuple[bool, str, str | None]:
                 if not isinstance(node.value, ast.Constant):
                     return False, "_RAG_TOP_K must be a literal", None
                 top_k = node.value.value
+            elif isinstance(target, ast.Name) and target.id == "_RAG_ANSWER_MODE":
+                if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
+                    return False, "_RAG_ANSWER_MODE must be a string literal", None
+                answer_mode = node.value.value
+            elif isinstance(target, ast.Name) and target.id == "_RAG_GENERATIVE_MODEL_ID":
+                if node.value is None or not isinstance(node.value, ast.Constant):
+                    return False, "_RAG_GENERATIVE_MODEL_ID must be a literal", None
+                generative_model_id = node.value.value
+            elif isinstance(target, ast.Name) and target.id == "_EMBEDDING_MODEL_HASH":
+                if node.value is None or not isinstance(node.value, ast.Constant):
+                    return False, "_EMBEDDING_MODEL_HASH must be a literal", None
+                embedding_model_hash = node.value.value
 
     if query is None:
         return False, "runner missing _RAG_QUERY literal", None
 
-    expected = build_rag_runner(query, top_k=top_k)
+    expected = build_rag_runner(
+        query,
+        top_k=top_k,
+        answer_mode=answer_mode or "extractive_retrieval",
+        generative_model_id=generative_model_id,
+        embedding_model_hash=embedding_model_hash,
+    )
     if code != expected:
         return False, "runner differs from the system-generated template (tampered or stale)", query
     return True, "runner matches the system-generated template", query
@@ -512,13 +705,42 @@ def corpus_object_name(data_product_id: str | object) -> str:
     return f"rag/corpus/{data_product_id}/{INDEX_FILENAME}"
 
 
+def embedding_model_object_name(data_product_id: str | object) -> str:
+    """Deterministic storage location of a session's transformers embedding
+    model bundle (phase 2), sibling to the corpus index."""
+    return f"rag/corpus/{data_product_id}/embedding_model.bundle"
+
+
+def _extract_rag_metrics(output: str) -> dict:
+    """Parse retrieval metrics from a RAG runner's JSON output for metering."""
+    if not output:
+        return {}
+    try:
+        line = [ln for ln in output.strip().splitlines() if ln.strip()][-1]
+        data = json.loads(line)
+    except (ValueError, IndexError):
+        return {}
+    meta = data.get("rag_meta") or {}
+    return {
+        "retrieved_chunks": meta.get("retrieved_chunks"),
+        "top_k": meta.get("top_k"),
+        "answer_mode": meta.get("answer_mode"),
+        "embedding_engine": meta.get("embedding_engine"),
+        "generative_model": meta.get("generative_model"),
+        "watermark": meta.get("watermark"),
+    }
+
+
 async def prepare_corpus_for_task(db, session, workspace: Path) -> dict | None:
     """Materialize a session's corpus index into workspace/input (host side).
 
     Downloads the encrypted index (storage_service envelope), writes the
     plaintext to ``input/rag_index.json`` and re-encrypts it with the session
     DEK exactly like provision does — so the in-sandbox runner decrypts it
-    with ``CDS_DEK_HEX`` and the file is never plaintext at rest.
+    with ``CDS_DEK_HEX`` and the file is never plaintext at rest. For
+    transformers-engine corpora the embedding model bundle is shipped
+    alongside (``input/embedding_model.bundle``) so the runner can reproduce
+    query vectors; the index records the model hash for runner verification.
 
     Returns ``{corpus_id, engine, chunk_count}`` or None when no corpus exists
     (the runner then fails closed with a clear missing-index error).
@@ -548,11 +770,21 @@ async def prepare_corpus_for_task(db, session, workspace: Path) -> dict | None:
     target = input_dir / INDEX_FILENAME
     target.write_bytes(index.to_json())
 
+    if index.engine == "transformers":
+        try:
+            emb_blob = storage_service.download(embedding_model_object_name(str(data_product_id)))
+            if emb_blob:
+                (input_dir / "embedding_model.bundle").write_bytes(emb_blob)
+        except Exception as e:
+            logger.warning("[RAG] Embedding model bundle download failed: %s", e)
+
     dek = await _session_workspace_dek(workspace)
     if dek:
         try:
             from app.services.sandbox_security import encrypt_workspace_file
             encrypt_workspace_file(target, dek)
+            if (input_dir / "embedding_model.bundle").exists():
+                encrypt_workspace_file(input_dir / "embedding_model.bundle", dek)
         except Exception as e:
             logger.warning("[RAG] Corpus workspace re-encryption failed: %s", e)
             return None

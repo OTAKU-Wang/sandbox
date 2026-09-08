@@ -341,6 +341,27 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
             except Exception as e:
                 logger.warning("[Pipeline] RAG corpus materialization failed for task %s: %s", task_id, e)
 
+        # N6: for generative RAG tasks, ship the provider ONNX bundle into the
+        # workspace before executing (fail-closed without it).
+        rag_generative = None
+        if (
+            task.payload.get("rag_query")
+            and task.payload.get("rag_answer_mode") == "generative"
+            and task.payload.get("rag_generative_model_id")
+        ):
+            try:
+                from app.services.rag_generative_service import prepare_rag_generative_model
+                workspace = runtime.get_workspace(container_id, session.sandbox_level)
+                if workspace:
+                    rag_generative = await prepare_rag_generative_model(
+                        db, session, workspace,
+                        uuid.UUID(str(task.payload["rag_generative_model_id"])),
+                    )
+                if not rag_generative:
+                    logger.warning("[Pipeline] RAG generative model unavailable for task %s", task_id)
+            except Exception as e:
+                logger.warning("[Pipeline] RAG generative materialization failed for task %s: %s", task_id, e)
+
         # N5: materialize the registered model + invoke input into the sandbox
         # workspace (re-encrypted with the session DEK) before executing the
         # inference runner. Missing/corrupt model → the runner fails closed.
@@ -440,6 +461,19 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
                 "sandbox_level": exec_result.get("sandbox_level", "L3"),
                 "output_truncated": exec_result.get("output_truncated", False),
             }
+            # N6: RAG retrieval metering — record retrieved chunks, answer
+            # mode and embedding engine from the runner's rag_meta.
+            if task.payload.get("rag_query"):
+                try:
+                    from app.services.rag_service import _extract_rag_metrics
+                    metrics = _extract_rag_metrics(output)
+                    if metrics:
+                        orm_task.resource_usage = {
+                            **(orm_task.resource_usage or {}),
+                            **{k: v for k, v in metrics.items() if v is not None},
+                        }
+                except Exception as e:
+                    logger.warning("[Pipeline] RAG metering extract failed: %s", e)
             await audit_service.log(
                 db, action="sandbox_task.execute", resource_type="sandbox_task",
                 user_id=orm_task.user_id, resource_id=task_id,
