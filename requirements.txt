@@ -51,6 +51,7 @@ duckdb>=1.0.0
 # === Inference (N5) ===
 onnx>=1.16.0       # model validation at registration
 onnxruntime>=1.17.0  # in-sandbox CPU inference runner
+kubernetes>=29.0.0  # N7: k8s sandbox runtime python client (no kubectl subprocess)
 
 # === PII NER ML & CPU Training ===
 transformers>=4.36.0

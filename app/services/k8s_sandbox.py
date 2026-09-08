@@ -65,6 +65,16 @@ LEVEL_RESOURCES = {
     "k8s": {"cpu_req": "250m", "cpu_lim": "1000m", "mem_req": "256Mi", "mem_lim": "512Mi", "disk": "1Gi"},
 }
 
+_QUOTA_HARD = {
+    "requests.cpu": "8",
+    "requests.memory": "8Gi",
+    "limits.cpu": "16",
+    "limits.memory": "16Gi",
+    "requests.ephemeral-storage": "20Gi",
+    "limits.ephemeral-storage": "20Gi",
+    "pods": "10",
+}
+
 
 def _kubectl(
     *args: str,
@@ -133,13 +143,51 @@ class K8sSandboxAdapter:
             else poll_interval_seconds
         )
         self._kubeconfig = kubeconfig or settings.SANDBOX_K8S_KUBECONFIG or None
+        self.storage_class = settings.SANDBOX_K8S_STORAGE_CLASS or None
+        self._k8s = None
+        if settings.K8S_USE_PYTHON_CLIENT:
+            try:
+                from app.services.k8s_client import KubernetesClient, KubernetesClientUnavailable
+                self._k8s = KubernetesClient(kubeconfig=self._kubeconfig, namespace=self.namespace)
+            except KubernetesClientUnavailable as e:
+                logger.warning("[k8s-sandbox] python client unavailable (%s) — falling back to kubectl", e)
+                self._k8s = None
         self._ensure_namespace()
 
     def _kubectl(self, *args: str, **kwargs) -> subprocess.CompletedProcess:
         return _kubectl(*args, kubeconfig=self._kubeconfig, **kwargs)
 
+    def _apply_manifest(self, manifest: dict) -> None:
+        """Create-or-replace a resource via the python client or kubectl."""
+        if self._k8s is not None:
+            self._k8s.apply_manifest(manifest)
+            return
+        result = self._kubectl("apply", "-f", "-", "-n", self.namespace,
+                               input=json.dumps(manifest), capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"kubectl apply failed: {result.stderr}")
+
+    def _delete_resource(self, kind: str, name: str, api_version: str = "v1") -> None:
+        """Delete a namespaced resource (idempotent, missing == success)."""
+        if self._k8s is not None:
+            self._k8s.delete_resource(kind, name, api_version)
+            return
+        extra = ["--grace-period=5"] if kind == "Pod" else []
+        result = self._kubectl(
+            "delete", kind.lower(), name, "-n", self.namespace,
+            "--ignore-not-found", *extra,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"kubectl delete {kind} {name} failed: {result.stderr}")
+
     def _ensure_namespace(self):
         """Ensure the sandbox namespace exists."""
+        if self._k8s is not None:
+            try:
+                self._k8s.ensure_namespace()
+            except Exception as e:
+                logger.warning("[k8s-sandbox] python client namespace ensure failed: %s", e)
+            return
         try:
             result = self._kubectl("get", "namespace", self.namespace, "--ignore-not-found")
             if self.namespace not in (result.stdout or ""):
@@ -178,14 +226,19 @@ class K8sSandboxAdapter:
             # Build pod manifest
             pod_manifest = self._build_pod_manifest(spec, pod_name, resources)
 
-            # Create pod
-            manifest_json = json.dumps(pod_manifest)
-            result = self._kubectl("apply", "-f", "-", "-n", self.namespace,
-                                  input=manifest_json, capture_output=True)
+            # N7: ensure shared-volume PVCs exist before creating the pod.
+            for m in spec.volume_mounts:
+                try:
+                    self._ensure_volume_pvc(m["name"])
+                except Exception as e:
+                    return {"error": f"shared volume PVC failed: {e}", "status": "failed"}
 
-            if result.returncode != 0:
-                logger.error(f"[k8s-sandbox] Failed to create pod {pod_name}: {result.stderr}")
-                return {"error": result.stderr, "status": "failed"}
+            # Create pod
+            try:
+                self._apply_manifest(pod_manifest)
+            except Exception as e:
+                logger.error("[k8s-sandbox] Failed to create pod %s: %s", pod_name, e)
+                return {"error": str(e), "status": "failed"}
             pod_created = True
 
             # Create network policy
@@ -246,41 +299,11 @@ class K8sSandboxAdapter:
     def terminate(self, pod_name: str) -> bool:
         """Delete a sandbox pod and its associated resources."""
         try:
-            # Delete pod
-            pod_result = self._kubectl(
-                "delete", "pod", pod_name, "-n", self.namespace,
-                "--grace-period=5", "--ignore-not-found",
-            )
-            if pod_result.returncode != 0:
-                logger.error("[k8s-sandbox] Failed to delete pod %s: %s", pod_name, pod_result.stderr)
-                return False
-
-            # Delete associated network policy
-            policy_result = self._kubectl(
-                "delete", "networkpolicy", f"{pod_name}-policy", "-n", self.namespace,
-                "--ignore-not-found",
-            )
-            if policy_result.returncode != 0:
-                logger.error(
-                    "[k8s-sandbox] Failed to delete network policy for %s: %s",
-                    pod_name,
-                    policy_result.stderr,
-                )
-                return False
-
+            self._delete_resource("Pod", pod_name)
+            self._delete_resource("NetworkPolicy", f"{pod_name}-policy")
             if self.fqdn_policy_provider == "cilium":
-                fqdn_policy_result = self._kubectl(
-                    "delete", "ciliumnetworkpolicy", f"{pod_name}-fqdn-policy", "-n", self.namespace,
-                    "--ignore-not-found",
-                )
-                if fqdn_policy_result.returncode != 0:
-                    logger.error(
-                        "[k8s-sandbox] Failed to delete FQDN network policy for %s: %s",
-                        pod_name,
-                        fqdn_policy_result.stderr,
-                    )
-                    return False
-
+                self._delete_resource("CiliumNetworkPolicy", f"{pod_name}-fqdn-policy",
+                                      api_version="cilium.io/v2")
             logger.info(f"[k8s-sandbox] Terminated pod {pod_name}")
             return True
         except Exception as e:
@@ -289,6 +312,13 @@ class K8sSandboxAdapter:
 
     def get_status(self, pod_name: str) -> dict:
         """Get pod status."""
+        if self._k8s is not None:
+            try:
+                pod = self._k8s.get_pod(pod_name).to_dict()
+            except Exception as e:
+                return {"phase": "Unknown", "cds_status": "failed", "ready": False, "error": str(e)}
+            return self._status_from_pod_dict(pod)
+
         result = self._kubectl("get", "pod", pod_name, "-n", self.namespace, "-o", "json")
         if result.returncode != 0:
             return {"phase": "Unknown", "cds_status": "failed", "ready": False, "error": result.stderr}
@@ -302,6 +332,12 @@ class K8sSandboxAdapter:
                 "ready": False,
                 "error": f"Invalid kubectl JSON output: {e}",
             }
+        return self._status_from_pod_dict(pod)
+
+    @staticmethod
+    def _status_from_pod_dict(pod: dict) -> dict:
+        """Build the CDS status dict from a V1Pod-shaped dict (both the typed
+        client's to_dict() and kubectl -o json produce this shape)."""
         phase = pod.get("status", {}).get("phase", "Unknown")
         pod_ip = pod.get("status", {}).get("podIP", "")
 
@@ -359,6 +395,22 @@ class K8sSandboxAdapter:
         if user_id:
             label_selector += f",user-id={user_id}"
 
+        if self._k8s is not None:
+            try:
+                pods = self._k8s.list_pods(label_selector=label_selector)
+            except Exception as e:
+                logger.warning("[k8s-sandbox] python client list failed: %s", e)
+                return []
+            return [
+                {
+                    "pod_name": pod.metadata.name,
+                    "phase": pod.status.phase if pod.status else "Unknown",
+                    "user_id": (pod.metadata.labels or {}).get("user-id", ""),
+                    "session_id": (pod.metadata.labels or {}).get("session-id", ""),
+                }
+                for pod in pods
+            ]
+
         result = self._kubectl("get", "pods", "-n", self.namespace,
                               "-l", label_selector, "-o", "json")
         if result.returncode != 0:
@@ -374,6 +426,65 @@ class K8sSandboxAdapter:
             }
             for pod in pods
         ]
+
+    def open_exec_stream(self, pod_name: str):
+        """Open a pod exec WebSocket (python client required) for streaming.
+
+        Raises RuntimeError when the python client is unavailable — the
+        caller falls back to kubectl.
+        """
+        if self._k8s is None:
+            raise RuntimeError("k8s python client unavailable")
+        return self._k8s.exec_stream(pod_name, ["sh", "-s"])
+
+    def exec_script(self, pod_name: str, script_lines: list[str], timeout: int) -> tuple[str, int, str | None]:
+        """Run a shell script inside the pod via the python client (blocking).
+
+        Returns (output, exit_code, error). Reads the ``__CDS_EXIT__:<code>``
+        sentinel the script prints as its last line. Requires the python
+        client — the caller falls back to kubectl when self._k8s is None.
+        """
+        script = "\n".join(script_lines) + "\n"
+        ws = self._k8s.exec_stream(pod_name, ["sh", "-s"])
+        try:
+            ws.write_stdin(script)
+        except Exception as e:
+            try:
+                ws.close()
+            except Exception:
+                pass
+            return ("", -1, f"exec stdin failed: {e}")
+
+        chunks: list[str] = []
+        deadline = time.monotonic() + max(timeout, 1)
+        try:
+            while time.monotonic() < deadline:
+                ws.update(timeout=1)
+                out = ws.read_stdout(timeout=0.2)
+                if out:
+                    chunks.append(out)
+                err = ws.read_stderr(timeout=0.2)
+                if err:
+                    chunks.append(err)
+                if not ws.is_open():
+                    break
+        except Exception as e:
+            return ("".join(chunks), -1, f"exec stream failed: {e}")
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+        output = "".join(chunks)
+        exit_code = -1
+        for line in output.splitlines():
+            if line.startswith("__CDS_EXIT__:"):
+                try:
+                    exit_code = int(line.split(":", 1)[1])
+                except ValueError:
+                    pass
+        return (output, exit_code, None)
 
     def _build_pod_manifest(self, spec: SandboxPodSpec, pod_name: str, resources: dict) -> dict:
         """Build K8s Pod manifest for a sandbox session."""
@@ -464,9 +575,43 @@ class K8sSandboxAdapter:
                 ],
             },
         }
+        # N7: attach shared-volume PVCs (name = PVC claim name, RWX).
+        for m in spec.volume_mounts:
+            manifest["spec"]["volumes"].append({
+                "name": m["name"],
+                "persistentVolumeClaim": {
+                    "claimName": m["name"],
+                    "readOnly": bool(m.get("readOnly", False)),
+                },
+            })
         if runtime_class_name:
             manifest["spec"]["runtimeClassName"] = runtime_class_name
         return manifest
+
+    def _ensure_volume_pvc(self, pvc_name: str, size: str = "1Gi") -> None:
+        """Ensure a ReadWriteMany PVC exists for a shared volume (idempotent).
+
+        Fails closed (honest error) when no storage class can back it — shared
+        volumes must be writable from every sandbox pod on any node.
+        """
+        if self._k8s is not None:
+            self._k8s.ensure_pvc(pvc_name, size=size, storage_class=self.storage_class)
+            return
+        result = self._kubectl("get", "pvc", pvc_name, "-n", self.namespace, "--ignore-not-found")
+        if pvc_name in (result.stdout or ""):
+            return
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "PersistentVolumeClaim",
+            "metadata": {"name": pvc_name, "namespace": self.namespace},
+            "spec": {
+                "accessModes": ["ReadWriteMany"],
+                "resources": {"requests": {"storage": size}},
+            },
+        }
+        if self.storage_class:
+            manifest["spec"]["storageClassName"] = self.storage_class
+        self._apply_manifest(manifest)
 
     def _create_deny_all_policy(self, pod_name: str, user_id: str, session_id: str) -> str | None:
         """Create a deny-all NetworkPolicy for a sandbox pod."""
@@ -487,17 +632,16 @@ class K8sSandboxAdapter:
                 "egress": [],
             },
         }
-        manifest_json = json.dumps(policy)
-        result = self._kubectl("apply", "-f", "-", "-n", self.namespace, input=manifest_json)
-        if result.returncode != 0:
-            return result.stderr or f"Failed to apply NetworkPolicy {pod_name}-policy"
+        try:
+            self._apply_manifest(policy)
+        except Exception as e:
+            return str(e) or f"Failed to apply NetworkPolicy {pod_name}-policy"
         return None
 
     def _create_allowlist_policy(self, pod_name: str, user_id: str, session_id: str,
                                  allowed_ips: list[str], allowed_domains: list[str]) -> str | None:
         """Create an allowlist NetworkPolicy for a sandbox pod."""
         egress_rules = []
-
         # Allow specified IPs
         for ip_cidr in allowed_ips:
             egress_rules.append({
@@ -525,10 +669,10 @@ class K8sSandboxAdapter:
                 "egress": egress_rules,
             },
         }
-        manifest_json = json.dumps(policy)
-        result = self._kubectl("apply", "-f", "-", "-n", self.namespace, input=manifest_json)
-        if result.returncode != 0:
-            return result.stderr or f"Failed to apply NetworkPolicy {pod_name}-policy"
+        try:
+            self._apply_manifest(policy)
+        except Exception as e:
+            return str(e) or f"Failed to apply NetworkPolicy {pod_name}-policy"
         if allowed_domains:
             fqdn_error = self._create_cilium_fqdn_policy(pod_name, user_id, session_id, allowed_domains)
             if fqdn_error:
@@ -572,9 +716,10 @@ class K8sSandboxAdapter:
                 ],
             },
         }
-        result = self._kubectl("apply", "-f", "-", "-n", self.namespace, input=json.dumps(policy))
-        if result.returncode != 0:
-            return result.stderr or f"Failed to apply FQDN policy {pod_name}-fqdn-policy"
+        try:
+            self._apply_manifest(policy)
+        except Exception as e:
+            return str(e) or f"Failed to apply FQDN policy {pod_name}-fqdn-policy"
         return None
 
     def _validate_network_policy_spec(self, spec: SandboxPodSpec) -> str | None:
@@ -608,6 +753,18 @@ class K8sSandboxAdapter:
         quota_name = "quota-cds-sandbox"
 
         # Check if quota exists
+        if self._k8s is not None:
+            try:
+                self._k8s.apply_manifest({
+                    "apiVersion": "v1", "kind": "ResourceQuota",
+                    "metadata": {"name": quota_name, "namespace": self.namespace,
+                                 "labels": {"app": "cds-sandbox"}},
+                    "spec": {"hard": _QUOTA_HARD},
+                })
+                return None
+            except Exception as e:
+                return f"Failed to apply ResourceQuota {quota_name}: {e}"
+
         result = self._kubectl("get", "resourcequota", quota_name, "-n", self.namespace, "--ignore-not-found")
         if result.returncode != 0:
             return result.stderr or f"Failed to read ResourceQuota {quota_name}"
@@ -622,22 +779,12 @@ class K8sSandboxAdapter:
                 "namespace": self.namespace,
                 "labels": {"app": "cds-sandbox"},
             },
-            "spec": {
-                "hard": {
-                    "requests.cpu": "8",
-                    "requests.memory": "8Gi",
-                    "limits.cpu": "16",
-                    "limits.memory": "16Gi",
-                    "requests.ephemeral-storage": "20Gi",
-                    "limits.ephemeral-storage": "20Gi",
-                    "pods": "10",
-                },
-            },
+            "spec": {"hard": _QUOTA_HARD},
         }
-        manifest_json = json.dumps(quota)
-        result = self._kubectl("apply", "-f", "-", "-n", self.namespace, input=manifest_json)
-        if result.returncode != 0:
-            return result.stderr or f"Failed to apply ResourceQuota {quota_name}"
+        try:
+            self._apply_manifest(quota)
+        except Exception as e:
+            return str(e) or f"Failed to apply ResourceQuota {quota_name}"
         logger.info(f"[k8s-sandbox] Created resource quota {quota_name} in namespace {self.namespace}")
         return None
 

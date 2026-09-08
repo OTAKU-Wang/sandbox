@@ -371,12 +371,23 @@ async def create_sandbox_session(
 
     # Provision sandbox container
     runtime = await get_sandbox_manager()
+    # N7: k8s sessions attach shared volumes as RWX PVCs (host binds are
+    # bwrap-only); resolve mounts up front so the pod spec carries them.
+    volume_mounts = None
+    if body.sandbox_level == "k8s":
+        try:
+            from app.services import shared_volumes
+            volume_mounts = await shared_volumes.resolve_mounts(db, session.id)
+        except Exception as e:
+            logger.warning("[Session] shared volume mount resolution failed: %s", e)
+            volume_mounts = []
     provision_result = runtime.provision(
         session_id=session.id,
         level=body.sandbox_level,
         data_path="",
         timeout=body.timeout_seconds,
         user_id=str(current_user.id),
+        volume_mounts=volume_mounts,
     )
     session.container_id = provision_result.get("container_id")
     session.status = provision_result.get("status", SessionStatus.RUNNING.value)

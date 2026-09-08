@@ -389,3 +389,14 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 - 配置键沿用既有 `RAG_EMBEDDING_BACKEND`（已支持 auto/tf/transformers/regex + 诚实 engine 标注），未按 spec §7.1 引入 `RAG_EMBEDDING_ENGINE` 新键——既有配置已覆盖语义，改名会破坏存量部署与测试（以代码为准，回写本文件）。
 - 生成式契约：ONNX bundle 输入 `context` float32[1,512]（tf 编码的检索上下文），输出 `answer_logits` float32[1,V]，`vocab.txt` V 行逐行解码；文本水印为确定性 `[CDS-WM:<model hash8>]` 标记。真实生成质量由供方注册的模型决定——机制真实（onnxruntime 前向 + argmax + 词表解码），非模拟。
 - 嵌入一致性以"检索 top-k 一致"验证（runner 不输出 query 向量，避免输出膨胀）；transformers 真实模型向量一致性由供方模型 + 哈希校验保证。
+
+### Round 45 M4 执行记录（2026-09-08）—— N7 K8s 运行时产化
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N7 K8s 运行时产化 | ✅ 已实现 | **Python client 化**：`app/services/k8s_client.py`（官方 kubernetes 客户端封装：namespace/pod CRUD/status/logs/exec/pvc + dynamic client 统一 apply/delete 含 CRD；无 kubeconfig/in-cluster → `KubernetesClientUnavailable` 诚实降级）；`K8S_USE_PYTHON_CLIENT` 配置（默认 true，异常回退 kubectl 一轮）+ `SANDBOX_K8S_STORAGE_CLASS`（RWX PVC 存储类，缺失诚实报错）；`K8sSandboxAdapter` 全部 kubectl 子进程调用分流到 client 路径（provision/terminate/get_status/list/策略/quota），`_ensure_tenant_quota` 提为 `_QUOTA_HARD` 常量；同步 exec 走 `exec_script`（`__CDS_EXIT__:<code>` 哨兵取真实退出码，kubectl 回退解析哨兵否则用 returncode）。**流式 exec（K8s）**：`K8sRuntimeAdapter.execute_streaming` — pod exec WebSocket（python client）逐行泵送接 W10 帧协议，`on_line` 回调抛错（OutputBlockedError）→ 关闭 ws 并传播（fail-closed，T5 语义）；facade `execute_streaming` 增 k8s 分支；`session_stream` 门禁由 `("L0",)` 放宽为 `("L0","k8s")`，L1/L2 仍 STREAM_UNSUPPORTED。**PVC 共享卷（K8s）**：`shared_volumes.resolve_mounts`（PVC claim `cds-shared-<volume_id>` + guest path + RO 粒度按 attach）；`_build_pod_manifest` 对 volume_mounts 增 `persistentVolumeClaim` 卷条目；provision 前 `ensure_pvc`（RWX，default/配置存储类，无存储类诚实报错）；`SandboxRuntime.provision` 增 `volume_mounts` 透传；k8s 会话创建时解析 mounts；**attach 到 RUNNING k8s 会话返回 409**（Pod 卷在 provision 时固化，运行时无法挂载——诚实拒绝并指引重建会话）。**e2e 固化**：`scripts/e2e-k8s.sh`（precondition→建会话→等 Pod Ready→execute→流式 exec→清理；真实执行留 FG-004）。 | tests/test_k8s_client.py 5 passed（init 诚实降级、namespace、PVC RWX/default/配置类）+ tests/test_k8s_n7.py 9 passed（client 路径 provision/terminate/status/PVC 卷条目/exec 哨兵/流式泵+哨兵剥离+回调 fail-closed/facade k8s 分发/kubectl 回退）；既有 k8s 测试保持绿（conftest 设 `CDS_K8S_USE_PYTHON_CLIENT=false` 走回退路径）；CI gate 增两测试文件；全量回归待确认 | 待全量回归确认 | 真实集群执行（install-k3s.sh + e2e-k8s.sh，FG-004 环境验收）；k8s 会话创建时接入共享卷的"先 attach 后创建"前台流程（当前 attach 接口需 session_id，Pod 卷固化于 provision——运行中 attach 已 409 诚实拒绝，attach-before-create 前台流留待前端/编排层） |
+
+**偏差说明（N7）**：
+- 配置 `K8S_USE_PYTHON_CLIENT`/`SANDBOX_K8S_STORAGE_CLASS` 与既有 `SANDBOX_K8S_*` 一致仅同步 `.env.example`（docker-compose/helm 部署不运行 k8s 集群，四同步按"集群作用域配置"归类，非默认四文件枚举）。
+- 流式 exec 退出码经 `__CDS_EXIT__` 文本哨兵获取（kubernetes ws 协议不暴露 exec 退出码通道）；kubectl 回退路径解析哨兵，缺失时用 subprocess returncode 保持既有语义。
+- PVC RWX 能力无法从 StorageClass 元数据探知——使用配置类或集群 default 类，无类时诚实报错（不猜测）。

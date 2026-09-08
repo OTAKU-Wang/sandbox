@@ -1514,7 +1514,68 @@ class K8sRuntimeAdapter(RuntimeAdapter):
         session_id = container_id.replace("k8s-", "", 1)
         return f"sandbox-{session_id[:16]}"
 
-    def provision(self, session_id: str, data_path: str, timeout: int, user_id: str = "") -> dict:
+    def _build_script(self, code: str, language: str, env_vars: dict, session_key: str | None) -> list[str]:
+        import base64
+        import shlex
+        from app.services.k8s_sandbox import _env_var_name
+
+        merged_env = {
+            "HOME": "/home/sandbox",
+            "TMPDIR": "/tmp",
+            "PYTHONPYCACHEPREFIX": "/tmp/pycache",
+        }
+        merged_env.update(env_vars or {})
+        if session_key:
+            merged_env["CDS_SESSION_KEY"] = session_key
+
+        invalid_env = [name for name in merged_env if not _env_var_name(name)]
+        if invalid_env:
+            raise ValueError(
+                f"Invalid environment variable name(s): {', '.join(sorted(invalid_env))}"
+            )
+
+        lang = (language or "python").lower()
+        encoded_code = base64.b64encode(code.encode("utf-8")).decode("ascii")
+        script_lines = ["set -eu", "umask 077", "mkdir -p /workspace/tmp /workspace/output /tmp/pycache"]
+        for key, value in merged_env.items():
+            script_lines.append(f"export {key}={shlex.quote(str(value))}")
+
+        if lang == "python":
+            script_lines += [
+                "python3 - <<'CDS_DECODE_EOF'",
+                "import base64, pathlib",
+                f"pathlib.Path('/workspace/tmp/cds-exec.py').write_bytes(base64.b64decode('{encoded_code}'))",
+                "CDS_DECODE_EOF",
+                "__cds_rc=0",
+                "python3 /workspace/tmp/cds-exec.py || __cds_rc=$?",
+                'echo "__CDS_EXIT__:$__cds_rc"',
+            ]
+        elif lang in {"bash", "shell", "sh"}:
+            script_lines += [
+                "python3 - <<'CDS_DECODE_EOF'",
+                "import base64, pathlib",
+                f"pathlib.Path('/workspace/tmp/cds-exec.sh').write_bytes(base64.b64decode('{encoded_code}'))",
+                "CDS_DECODE_EOF",
+                "__cds_rc=0",
+                "sh /workspace/tmp/cds-exec.sh || __cds_rc=$?",
+                'echo "__CDS_EXIT__:$__cds_rc"',
+            ]
+        else:
+            raise ValueError(f"Unsupported language for K8s sandbox: {language}")
+        return script_lines
+
+    @staticmethod
+    def _extract_exit_code(output: str) -> int | None:
+        for line in output.splitlines():
+            if line.startswith("__CDS_EXIT__:"):
+                try:
+                    return int(line.split(":", 1)[1])
+                except ValueError:
+                    return None
+        return None
+
+    def provision(self, session_id: str, data_path: str, timeout: int, user_id: str = "",
+                  volume_mounts: list[dict] | None = None) -> dict:
         from app.services.k8s_sandbox import SandboxPodSpec
         k8s = self._get_k8s()
         spec = SandboxPodSpec(
@@ -1522,6 +1583,7 @@ class K8sRuntimeAdapter(RuntimeAdapter):
             user_id=user_id,
             sandbox_level="L3",
             timeout_seconds=timeout,
+            volume_mounts=volume_mounts or [],
         )
         result = k8s.provision(spec)
         if result.get("error"):
@@ -1534,10 +1596,6 @@ class K8sRuntimeAdapter(RuntimeAdapter):
     async def execute(self, container_id: str, code: str, language: str = "python",
                       session_key: str | None = None, env_vars: dict[str, str] | None = None,
                       timeout: int | None = None) -> dict:
-        import base64
-        import shlex
-        from app.services.k8s_sandbox import _env_var_name
-
         k8s = self._get_k8s()
         pod_name = self._pod_name_from_container_id(container_id)
         effective_timeout = timeout or 30
@@ -1561,65 +1619,51 @@ class K8sRuntimeAdapter(RuntimeAdapter):
                 "sandbox_level": "k8s",
             }
 
-        merged_env = {
-            "HOME": "/home/sandbox",
-            "TMPDIR": "/tmp",
-            "PYTHONPYCACHEPREFIX": "/tmp/pycache",
-        }
-        merged_env.update(env_vars or {})
-        if session_key:
-            merged_env["CDS_SESSION_KEY"] = session_key
-
-        invalid_env = [name for name in merged_env if not _env_var_name(name)]
-        if invalid_env:
+        try:
+            script_lines = self._build_script(code, language, env_vars or {}, session_key)
+        except ValueError as e:
             return {
-                "output": f"Invalid environment variable name(s): {', '.join(sorted(invalid_env))}",
+                "output": str(e),
                 "exit_code": -1,
                 "duration_ms": 0,
                 "sandbox_level": "k8s",
             }
 
-        lang = (language or "python").lower()
-        encoded_code = base64.b64encode(code.encode("utf-8")).decode("ascii")
-        script_lines = ["set -eu", "umask 077", "mkdir -p /workspace/tmp /workspace/output /tmp/pycache"]
-        for key, value in merged_env.items():
-            script_lines.append(f"export {key}={shlex.quote(str(value))}")
+        # N7: python-client exec path (real exit code via the sentinel) with
+        # the kubectl subprocess fallback.
+        if getattr(k8s, "_k8s", None) is not None:
+            try:
+                started = datetime.now()
+                output, sentinel_code, err = await asyncio.to_thread(
+                    k8s.exec_script, pod_name, script_lines, effective_timeout,
+                )
+                duration_ms = int((datetime.now() - started).total_seconds() * 1000)
+                exit_code = sentinel_code if sentinel_code is not None else -1
+                return {
+                    "output": output,
+                    "exit_code": exit_code,
+                    "error": err if exit_code != 0 else None,
+                    "sandbox_level": "k8s",
+                    "duration_ms": duration_ms,
+                }
+            except Exception as e:
+                return {"output": "", "exit_code": -1, "error": str(e), "sandbox_level": "k8s"}
 
-        if lang == "python":
-            script_lines += [
-                "python3 - <<'CDS_DECODE_EOF'",
-                "import base64, pathlib",
-                f"pathlib.Path('/workspace/tmp/cds-exec.py').write_bytes(base64.b64decode('{encoded_code}'))",
-                "CDS_DECODE_EOF",
-                "python3 /workspace/tmp/cds-exec.py",
-            ]
-        elif lang in {"bash", "shell", "sh"}:
-            script_lines += [
-                "python3 - <<'CDS_DECODE_EOF'",
-                "import base64, pathlib",
-                f"pathlib.Path('/workspace/tmp/cds-exec.sh').write_bytes(base64.b64decode('{encoded_code}'))",
-                "CDS_DECODE_EOF",
-                "sh /workspace/tmp/cds-exec.sh",
-            ]
-        else:
-            return {
-                "output": f"Unsupported language for K8s sandbox: {language}",
-                "exit_code": -1,
-                "duration_ms": 0,
-                "sandbox_level": "k8s",
-            }
-
-        # Execute code inside the pod via kubectl exec.
+        # kubectl fallback.
+        import subprocess
         try:
             result = k8s._kubectl(
                 "exec", "-i", pod_name, "-n", k8s.namespace, "--", "sh", "-s",
                 input="\n".join(script_lines) + "\n",
                 timeout=effective_timeout,
             )
+            output = result.stdout or ""
+            sentinel_code = self._extract_exit_code(output)
+            exit_code = sentinel_code if sentinel_code is not None else result.returncode
             return {
-                "output": result.stdout or "",
-                "exit_code": result.returncode,
-                "error": result.stderr if result.returncode != 0 else None,
+                "output": output,
+                "exit_code": exit_code,
+                "error": result.stderr if exit_code != 0 else None,
                 "sandbox_level": "k8s",
             }
         except subprocess.TimeoutExpired:
@@ -1636,6 +1680,121 @@ class K8sRuntimeAdapter(RuntimeAdapter):
         k8s = self._get_k8s()
         pod_name = self._pod_name_from_container_id(container_id)
         return k8s.terminate(pod_name)
+
+    async def execute_streaming(self, container_id: str, code: str, language: str = "bash",
+                                *, env_vars: dict[str, str] | None = None,
+                                timeout: int | None = None,
+                                extra_binds: list | None = None,
+                                on_line) -> dict:
+        """W10 streaming for K8s pods via the python-client exec WebSocket.
+
+        Every output line is pushed to ``on_line(stream_name, line)`` as it
+        arrives. A raise from the callback (e.g. OutputBlockedError) closes the
+        stream and propagates — fail-closed. Uses the python client only;
+        returns an honest unsupported marker when the client is unavailable.
+        """
+        import asyncio
+        import time as _time
+
+        k8s = self._get_k8s()
+        pod_name = self._pod_name_from_container_id(container_id)
+        if getattr(k8s, "_k8s", None) is None:
+            await on_line("stderr", "K8s streaming requires the python client (kubectl exec has no frame protocol)")
+            return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "k8s", "error": "python client unavailable"}
+
+        effective_timeout = timeout or 120
+        try:
+            script_lines = self._build_script(code, language, env_vars or {}, None)
+        except ValueError as e:
+            await on_line("stderr", str(e))
+            return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "k8s"}
+
+        try:
+            ws = k8s.open_exec_stream(pod_name)
+        except Exception as e:
+            await on_line("stderr", f"exec stream failed: {e}")
+            return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "k8s"}
+
+        queue: asyncio.Queue = asyncio.Queue()
+        started = datetime.now()
+        deadline = _time.monotonic() + effective_timeout
+
+        def _pump() -> None:
+            out_buf, err_buf = "", ""
+            try:
+                while _time.monotonic() < deadline and ws.is_open():
+                    ws.update(timeout=1)
+                    out = ws.read_stdout(timeout=0.2)
+                    if out:
+                        out_buf += out
+                        while "\n" in out_buf:
+                            line, out_buf = out_buf.split("\n", 1)
+                            queue.put_nowait(("stdout", line))
+                    err = ws.read_stderr(timeout=0.2)
+                    if err:
+                        err_buf += err
+                        while "\n" in err_buf:
+                            line, err_buf = err_buf.split("\n", 1)
+                            queue.put_nowait(("stderr", line))
+                if out_buf:
+                    queue.put_nowait(("stdout", out_buf))
+                if err_buf:
+                    queue.put_nowait(("stderr", err_buf))
+                queue.put_nowait(("__done__", None))
+            except Exception as e:
+                queue.put_nowait(("__error__", str(e)))
+
+        try:
+            ws.write_stdin("\n".join(script_lines) + "\n")
+        except Exception as e:
+            try:
+                ws.close()
+            except Exception:
+                pass
+            await on_line("stderr", f"exec stdin failed: {e}")
+            return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "k8s"}
+
+        pump_task = asyncio.create_task(asyncio.to_thread(_pump))
+        exit_code = -1
+        timed_out = False
+        try:
+            while True:
+                try:
+                    kind, payload = await asyncio.wait_for(queue.get(), timeout=effective_timeout)
+                except asyncio.TimeoutError:
+                    timed_out = True
+                    break
+                if kind == "__done__":
+                    break
+                if kind == "__error__":
+                    await on_line("stderr", f"exec stream error: {payload}")
+                    break
+                if payload.startswith("__CDS_EXIT__:"):
+                    try:
+                        exit_code = int(payload.split(":", 1)[1])
+                    except ValueError:
+                        pass
+                    continue
+                await on_line(kind, payload)
+        except Exception:
+            try:
+                ws.close()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+            if not pump_task.done():
+                pump_task.cancel()
+
+        duration_ms = int((datetime.now() - started).total_seconds() * 1000)
+        if timed_out:
+            await on_line("stderr", f"Execution timed out ({effective_timeout}s)")
+            return {"exit_code": -1, "duration_ms": duration_ms, "sandbox_level": "k8s"}
+        return {"exit_code": exit_code, "duration_ms": duration_ms, "sandbox_level": "k8s"}
 
     def get_status(self, container_id: str) -> str:
         k8s = self._get_k8s()
@@ -1697,8 +1856,14 @@ class SandboxRuntime:
         except Exception:
             return None
 
-    def provision(self, session_id: uuid.UUID, level: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
-        return self.get_adapter(level).provision(str(session_id), data_path, timeout, user_id=user_id)
+    def provision(self, session_id: uuid.UUID, level: str, data_path: str, timeout: int = 3600, user_id: str = "",
+                  volume_mounts: list[dict] | None = None) -> dict:
+        adapter = self.get_adapter(level)
+        if level == "k8s":
+            return adapter.provision(
+                str(session_id), data_path, timeout, user_id=user_id, volume_mounts=volume_mounts or [],
+            )
+        return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
 
     async def _execute_adapter(
         self,
@@ -1789,7 +1954,7 @@ class SandboxRuntime:
         extra_binds: list[tuple[Path, str, bool]] | None = None,
         on_line,
     ) -> dict:
-        """W10: facade dispatch for streaming execution (L0 only; other
+        """W10: facade dispatch for streaming execution (L0 + k8s; other
         adapters return an unsupported marker the caller reports honestly)."""
         if container_id.startswith("l0-"):
             adapter = self._adapters[SandboxLevel.L0.value]
@@ -1799,6 +1964,15 @@ class SandboxRuntime:
             return await streaming(
                 container_id, code, language, env_vars=env_vars, timeout=timeout,
                 extra_binds=extra_binds, on_line=on_line,
+            )
+        if container_id.startswith("k8s-"):
+            adapter = self._adapters["k8s"]
+            streaming = getattr(adapter, "execute_streaming", None)
+            if streaming is None:
+                return {"exit_code": -1, "duration_ms": 0, "blocked": False, "error": "adapter does not support streaming"}
+            return await streaming(
+                container_id, code, language, env_vars=env_vars, timeout=timeout,
+                on_line=on_line,
             )
         return {
             "exit_code": -1,

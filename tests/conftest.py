@@ -10,6 +10,9 @@ os.environ["TESTING"] = "1"
 # cached Settings object.
 os.environ.setdefault("CDS_KMS_REQUIRE_ATTESTATION", "false")
 os.environ.setdefault("CDS_DEV_SANDBOX_REQUIRE_CONTRACT", "false")
+# N7: test suite exercises the kubectl fallback path (no cluster in CI); the
+# python-client path is covered by dedicated mocked tests that flip it on.
+os.environ.setdefault("CDS_K8S_USE_PYTHON_CLIENT", "false")
 # Training runs in deterministic-proxy mode in the test environment (torch is
 # not installed); the fail-closed switch is covered by dedicated tests.
 os.environ.setdefault("CDS_TRAINING_REQUIRE_TORCH", "false")

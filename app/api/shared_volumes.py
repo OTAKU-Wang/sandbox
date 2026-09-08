@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.sandbox_session import SandboxSession
+from app.models.sandbox_session import SandboxSession, SessionStatus
 from app.models.shared_volume import SharedVolume, SharedVolumeAttachment
 from app.models.user import User
 from app.services import shared_volumes as volume_service
@@ -92,6 +92,15 @@ async def attach_volume(
         raise HTTPException(status_code=404, detail="Sandbox session not found")
     if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your session")
+    # N7: k8s pod volumes are fixed at provision time — attaching to a
+    # RUNNING k8s session would silently not take effect, so fail closed and
+    # tell the operator to (re)create the session after attaching.
+    if session.sandbox_level == "k8s" and session.status == SessionStatus.RUNNING.value:
+        raise HTTPException(
+            status_code=409,
+            detail="K8s pod volumes are fixed at provision time: attach the volume "
+                   "before session creation (or terminate and re-create the session).",
+        )
     attachment = await volume_service.attach(
         db, volume_id=volume_id, session_id=body.session_id,
         owner_id=current_user.id, read_only=body.read_only,

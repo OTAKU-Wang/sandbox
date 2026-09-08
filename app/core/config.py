@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     SANDBOX_K8S_POLL_INTERVAL_SECONDS: float = 1.0
     SANDBOX_K8S_KUBECONFIG: str = ""
     SANDBOX_K8S_FQDN_POLICY_PROVIDER: str = ""
+    # N7: use the official kubernetes python client instead of shelling out to
+    # kubectl. Falls back to kubectl when no cluster/kubeconfig is reachable.
+    K8S_USE_PYTHON_CLIENT: bool = True
+    # N7: storage class used for shared-volume PVCs (must support
+    # ReadWriteMany). Empty = cluster default class; honest error if none.
+    SANDBOX_K8S_STORAGE_CLASS: str = ""
 
     # Session lifecycle (gap A2/D1): background sweep interval for expired
     # sessions, dev sessions and contracts.

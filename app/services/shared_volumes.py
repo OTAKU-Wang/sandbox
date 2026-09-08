@@ -98,3 +98,25 @@ async def resolve_binds(db: AsyncSession, session_id: uuid.UUID) -> list[tuple[P
     for volume, attachment in result.all():
         binds.append((volume_dir(volume.id), f"/workspace/shared/{volume.name}", attachment.read_only))
     return binds
+
+
+async def resolve_mounts(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
+    """K8s PVC mount spec for a session's attached shared volumes.
+
+    Returns ``[{name: <pvc-claim>, mountPath, readOnly}, ...]`` where the PVC
+    claim name is ``cds-shared-<volume_id>`` (N7). The sandbox pod spec embeds
+    these as persistentVolumeClaim mounts.
+    """
+    result = await db.execute(
+        select(SharedVolume, SharedVolumeAttachment)
+        .join(SharedVolumeAttachment, SharedVolumeAttachment.volume_id == SharedVolume.id)
+        .where(SharedVolumeAttachment.session_id == session_id)
+    )
+    mounts: list[dict] = []
+    for volume, attachment in result.all():
+        mounts.append({
+            "name": f"cds-shared-{volume.id}",
+            "mountPath": f"/workspace/shared/{volume.name}",
+            "readOnly": attachment.read_only,
+        })
+    return mounts

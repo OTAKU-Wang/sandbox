@@ -158,7 +158,9 @@ async def exec_stream(ws: WebSocket, session_id: uuid.UUID):
             await ws.close(code=CLOSE_CONFLICT)
             return
 
-        if session.sandbox_level not in ("L0",):
+        # N7: streaming exec supported on L0 (bwrap) and k8s pods (python
+        # client exec WebSocket); L1/L2 remain STREAM_UNSUPPORTED.
+        if session.sandbox_level not in ("L0", "k8s"):
             await ws.send_json({"type": "error", "code": "STREAM_UNSUPPORTED",
                                 "message": f"streaming exec not supported on {session.sandbox_level}"})
             await ws.close(code=CLOSE_CONFLICT)
