@@ -18,7 +18,7 @@ from app.api import shared_volumes  # W15: shared volumes
 from app.api import network_policy as network_policy_api
 from app.api import admin
 from app.api import metrics
-from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert  # Ensure tables are created
+from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key  # Ensure tables are created
 from app.models import session_operation  # W11: async operation records
 from app.models import task_queue as task_queue_models  # W16: durable queue table
 from app.models import shared_volume  # W15: shared volume tables
@@ -121,6 +121,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"CDCAgent start failed: {e}")
 
+    # Startup: Merkle batch pipeline (experimental, opt-in — spec N2).
+    # Off by default; the audit path anchors via the synchronous
+    # merkle_service. Enable only for evaluation.
+    _merkle_pipeline_task = None
+    if settings.MERKLE_PIPELINE_ENABLED:
+        from app.services.merkle_pipeline import merkle_pipeline
+        await merkle_pipeline.start()
+        _merkle_pipeline_task = merkle_pipeline
+        logger.warning(
+            "[MAIN] Merkle batch pipeline ENABLED (experimental async mode); "
+            "audit anchoring now also flows through the Redis Stream worker"
+        )
+
     yield
     # Shutdown: session lifecycle cleanup
     if _session_cleanup_task is not None:
@@ -129,6 +142,12 @@ async def lifespan(app: FastAPI):
             await _session_cleanup_task
         except _asyncio.CancelledError:
             pass
+    # Shutdown: Merkle batch pipeline
+    if _merkle_pipeline_task is not None:
+        try:
+            await _merkle_pipeline_task.stop()
+        except Exception as e:
+            logger.error(f"[MAIN] Merkle pipeline stop failed: {e}")
     # Shutdown: KMS TTL cleanup
     _ttl_task.cancel()
     try:

@@ -114,6 +114,14 @@ class Settings(BaseSettings):
     RETENTION_JANITOR_DRY_RUN: bool = True
     RETENTION_JANITOR_BATCH: int = 1000
 
+    # Round 45+ (spec N2): Merkle batch pipeline (Redis Stream worker in
+    # app/services/merkle_pipeline.py) is an experimental async batch-anchoring
+    # mode, DISABLED by default — the audit path uses the synchronous
+    # merkle_service anchoring. Enable only for evaluation; when enabled the
+    # pipeline worker starts in the app lifespan and batches audit events into
+    # Merkle trees anchored via the blockchain adapter.
+    MERKLE_PIPELINE_ENABLED: bool = False
+
     # Session usability (Round 39): per-session file store and snapshot limits.
     # Uploaded files live inside the session workspace (sandbox-visible) and are
     # encrypted at rest with the session DEK; snapshots are tar archives of the
@@ -230,9 +238,13 @@ class Settings(BaseSettings):
     RAG_EMBEDDING_MODEL: str = "shibing624/text2vec-base-chinese"
     RAG_REQUIRE_ENCRYPTION: bool = True
 
-    # Streaming output proxy (mitmproxy addon)
-    STREAMING_PROXY_ENABLED: bool = False
-    STREAMING_PROXY_PORT: int = 8080
+    # Round 45+ (spec N2): Merkle batch pipeline (Redis Stream worker in
+    # app/services/merkle_pipeline.py) is an experimental async batch-anchoring
+    # mode, DISABLED by default — the audit path uses the synchronous
+    # merkle_service anchoring. Enable only for evaluation; when enabled the
+    # pipeline worker starts in the app lifespan and batches audit events into
+    # Merkle trees anchored via the blockchain adapter.
+    MERKLE_PIPELINE_ENABLED: bool = False
 
     model_config = {"env_prefix": "CDS_", "env_file": ".env"}
 

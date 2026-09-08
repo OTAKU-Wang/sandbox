@@ -1,4 +1,10 @@
-"""MPC Key Sharing API — Shamir's Secret Sharing for secure key distribution."""
+"""MPC Key Sharing API — Shamir's Secret Sharing for secure key distribution.
+
+Persistence: keys and shares are stored in the DB (spec N3) — split returns
+persisted shares, reconstruct/verify/rotate/destroy read from the DB. API
+behaviour is unchanged from the in-memory implementation; every write path
+reports ``persisted: true``.
+"""
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,6 +49,8 @@ class KeyResponse(BaseModel):
     threshold: int
     total_shares: int
     share_count: int
+    status: str
+    persisted: bool = True
 
 
 @router.post("/split", response_model=list[ShareResponse])
@@ -58,7 +66,8 @@ async def split_key(
         raise HTTPException(status_code=400, detail="Invalid hex string")
 
     try:
-        mpc_key = mpc_service.split_key(
+        mpc_key = await mpc_service.split_key(
+            db,
             secret=secret,
             threshold=body.threshold,
             total_shares=body.total_shares,
@@ -71,7 +80,7 @@ async def split_key(
     await audit_service.log(
         db, action="mpc.key.split", resource_type="mpc_key",
         user_id=current_user.id, resource_id=mpc_key.key_id,
-        detail={"threshold": body.threshold, "total_shares": body.total_shares},
+        detail={"threshold": body.threshold, "total_shares": body.total_shares, "persisted": True},
     )
 
     return [
@@ -96,7 +105,7 @@ async def reconstruct_key(
 ):
     """Reconstruct a secret from shares."""
     try:
-        secret = mpc_service.reconstruct_key(body.key_id, body.share_ids)
+        secret = await mpc_service.reconstruct_key(db, body.key_id, body.share_ids)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -115,10 +124,11 @@ async def reconstruct_key(
 
 @router.get("/keys")
 async def list_keys(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """List all managed MPC keys."""
-    keys = mpc_service.list_keys()
+    keys = await mpc_service.list_keys(db)
     return [
         KeyResponse(
             key_id=k.key_id,
@@ -126,6 +136,7 @@ async def list_keys(
             threshold=k.threshold,
             total_shares=k.total_shares,
             share_count=len(k.shares),
+            status=k.status,
         )
         for k in keys
     ]
@@ -134,10 +145,11 @@ async def list_keys(
 @router.get("/keys/{key_id}")
 async def get_key(
     key_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get key details (without shares)."""
-    mpc_key = mpc_service.get_key(key_id)
+    mpc_key = await mpc_service.get_key(db, key_id)
     if not mpc_key:
         raise HTTPException(status_code=404, detail="Key not found")
     return KeyResponse(
@@ -146,16 +158,18 @@ async def get_key(
         threshold=mpc_key.threshold,
         total_shares=mpc_key.total_shares,
         share_count=len(mpc_key.shares),
+        status=mpc_key.status,
     )
 
 
 @router.get("/keys/{key_id}/shares")
 async def list_shares(
     key_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """List shares for a key."""
-    shares = mpc_service.list_shares(key_id)
+    shares = await mpc_service.list_shares(db, key_id)
     if not shares:
         raise HTTPException(status_code=404, detail="Key not found or no shares")
     return [
@@ -175,29 +189,62 @@ async def list_shares(
 @router.post("/keys/{key_id}/rotate")
 async def rotate_key(
     key_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     """Rotate a key — generate new shares."""
-    old_key = mpc_service.get_key(key_id)
+    old_key = await mpc_service.get_key(db, key_id)
     if not old_key:
         raise HTTPException(status_code=404, detail="Key not found")
 
-    new_key = mpc_service.rotate_key(key_id)
+    try:
+        new_key = await mpc_service.rotate_key(db, key_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await audit_service.log(
+        db, action="mpc.key.rotate", resource_type="mpc_key",
+        user_id=current_user.id, resource_id=key_id,
+        detail={"new_key_id": new_key.key_id},
+    )
+
     return KeyResponse(
         key_id=new_key.key_id,
         algorithm=new_key.algorithm,
         threshold=new_key.threshold,
         total_shares=new_key.total_shares,
         share_count=len(new_key.shares),
+        status=new_key.status,
     )
+
+
+@router.post("/keys/{key_id}/destroy")
+async def destroy_key(
+    key_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Destroy a key — mark destroyed and crypto-erase all shares."""
+    destroyed = await mpc_service.destroy_key(db, key_id)
+    if not destroyed:
+        raise HTTPException(status_code=404, detail="Key not found")
+
+    await audit_service.log(
+        db, action="mpc.key.destroy", resource_type="mpc_key",
+        user_id=current_user.id, resource_id=key_id,
+        detail={"persisted": True},
+    )
+
+    return {"key_id": key_id, "destroyed": True, "persisted": True}
 
 
 @router.post("/verify")
 async def verify_shares(
     key_id: str,
     share_ids: list[str],
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Verify that shares are valid for a key."""
-    valid = mpc_service.verify_shares(key_id, share_ids)
+    valid = await mpc_service.verify_shares(db, key_id, share_ids)
     return {"key_id": key_id, "valid": valid, "shares_provided": len(share_ids)}

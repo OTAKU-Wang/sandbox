@@ -130,6 +130,8 @@ services:
       # W12 retention (dry-run default; flip after compliance review)
       CDS_RETENTION_JANITOR_ENABLED: "true"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"
+      # Round 45+ (spec N2): experimental Merkle batch pipeline, off by default
+      CDS_MERKLE_PIPELINE_ENABLED: "false"
       # W13 egress audit (dev: plaintext JSONL under ./logs)
       CDS_EGRESS_AUDIT_ENABLED: "true"
       # W14 node stale detection

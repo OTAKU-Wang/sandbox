@@ -49,6 +49,8 @@ api:
     CDS_ALERT_RETENTION_DAYS: "180"
     CDS_RETENTION_JANITOR_DRY_RUN: "true"
     CDS_RETENTION_JANITOR_BATCH: "1000"
+    # Round 45+ (spec N2): experimental Merkle batch pipeline, off by default
+    CDS_MERKLE_PIPELINE_ENABLED: "false"
     CDS_EGRESS_AUDIT_ENABLED: "true"
     CDS_NODE_STALE_SECONDS: "300"
     CDS_SHARED_VOLUME_ROOT: /data/shared-volumes
@@ -99,7 +101,12 @@ redis:
         cpu: 250m
         memory: 512Mi
 
-# ─── ClickHouse (audit) ───
+# ─── ClickHouse (audit) — EXTERNALLY MANAGED ───
+# This chart ships NO ClickHouse template. `enabled: true` here only marks that
+# the CDS audit path expects a ClickHouse; the actual service must be provided
+# out-of-band and referenced via `api.env.CDS_CLICKHOUSE_URL` (typically
+# injected through `secrets.existingSecret`). Flip to false when audit is not
+# deployed.
 clickhouse:
   enabled: true
   image:
@@ -112,7 +119,11 @@ clickhouse:
       cpu: 500m
       memory: 1Gi
 
-# ─── OPA (policy engine) ───
+# ─── OPA (policy engine) — EXTERNALLY MANAGED ───
+# This chart ships NO OPA Deployment (the historical `-opa` Service was removed
+# as a dangling selector — nothing in this chart matched it). Point the API at
+# an out-of-band OPA instance via `api.env.CDS_OPA_URL` (through
+# `secrets.existingSecret`); the compose/k8s-manifest paths still bundle OPA.
 opa:
   enabled: true
   image:
@@ -123,6 +134,16 @@ opa:
     requests:
       cpu: 100m
       memory: 128Mi
+
+# ─── External component whitelist ───
+# Components whose `enabled: true` does NOT map to an in-chart template or a
+# Chart.yaml dependency. They are provisioned externally and wired via
+# api.env / secrets.existingSecret. tests/test_helm_chart.py asserts every
+# `*.enabled=true` component is either templated, a declared dependency, or
+# listed here — add a new external component to this list, never silently.
+externalComponents:
+  - clickhouse
+  - opa
 
 # ─── Ingress ───
 ingress:

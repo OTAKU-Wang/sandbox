@@ -59,3 +59,45 @@ def test_template_conditionals_balanced():
         opens = text.count("{{- if") + text.count("{{- range") + text.count("{{- with")
         closes = text.count("{{- end")
         assert opens == closes, template.name
+
+
+# Components whose `enabled: true` is satisfied by a first-class chart
+# template (component name → template file). Anything else must be a declared
+# Chart.yaml dependency or appear in values.externalComponents.
+COMPONENT_TEMPLATES = {
+    "autoscaling": "hpa.yaml",
+    "ingress": "ingress.yaml",
+    "api": "deployment-api.yaml",
+    "frontend": "deployment-frontend.yaml",
+}
+
+
+def test_enabled_components_have_templates_or_whitelist():
+    """Every `*.enabled: true` component must be templated in-chart, a declared
+    Chart.yaml dependency, or listed in values.externalComponents — so a
+    dangling `enabled` flag (a component the chart claims but does not ship)
+    cannot silently reappear after the N4 topology alignment."""
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+    chart = yaml.safe_load((CHART / "Chart.yaml").read_text())
+
+    external = set(values.get("externalComponents", []))
+    dependencies = {d["name"] for d in chart.get("dependencies", [])}
+    existing_templates = {t.name for t in (CHART / "templates").glob("*.yaml")}
+
+    enabled_components = {
+        name for name, cfg in values.items()
+        if isinstance(cfg, dict) and cfg.get("enabled") is True
+    }
+    assert enabled_components, "no enabled components found — topology gate is vacuous"
+
+    for comp in sorted(enabled_components):
+        template = COMPONENT_TEMPLATES.get(comp)
+        satisfied = (
+            comp in external
+            or comp in dependencies
+            or (template is not None and template in existing_templates)
+        )
+        assert satisfied, (
+            f"component {comp!r} is enabled but has no in-chart template, no "
+            f"Chart.yaml dependency, and is not in values.externalComponents"
+        )

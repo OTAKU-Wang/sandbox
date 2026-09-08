@@ -111,7 +111,7 @@ services:
       # validate_security_config posture matrix (is_prod gate) and the JWT
       # secret requirement. Keep false unless actively debugging the stack.
       CDS_DEBUG: "false"
-  CDS_LOG_JSON: "true"
+      CDS_LOG_JSON: "true"
       CDS_DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@postgres:5432/cds
       CDS_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CDS_CLICKHOUSE_URL: http://clickhouse:8123/cds_audit
@@ -137,6 +137,8 @@ services:
       CDS_ALERT_RETENTION_DAYS: "180"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"
       CDS_RETENTION_JANITOR_BATCH: "1000"
+      # Round 45+ (spec N2): experimental Merkle batch pipeline, off by default
+      CDS_MERKLE_PIPELINE_ENABLED: "false"
       CDS_EGRESS_AUDIT_ENABLED: "true"
       CDS_NODE_STALE_SECONDS: "300"
       CDS_SHARED_VOLUME_ROOT: /data/shared-volumes

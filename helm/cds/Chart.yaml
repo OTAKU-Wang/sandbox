@@ -8,6 +8,11 @@ keywords:
   - data-sandbox
   - trusted-data-space
   - confidential-computing
+# Dependencies (postgresql/redis) are DECLARED but NOT vendored into
+# helm/cds/charts/. Before installing, run `helm dependency build ./helm/cds`
+# (requires network access to charts.bitnami.com). Without vendoring, `helm
+# template`/`helm install` will fail to find the subcharts even though
+# values.yaml declares them enabled. See specs/productization-deployment-runbook.md.
 dependencies:
   - name: postgresql
     version: "15.x.x"

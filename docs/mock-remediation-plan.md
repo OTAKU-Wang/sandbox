@@ -444,4 +444,10 @@
 
 ## 六、执行记录
 
-（待实施轮次逐轮追加：任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项）
+### Round 45（2026-09-08）—— 用户裁定本轮仅执行 round3-spec P0 批次（N1–N4）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| 与本轮 P0 重叠的处置 | ✅ 已实现 | **MR-A15（孤儿代码）部分完成**：`chain_attestation.py` + `scripts/chain-attestation-ddl.sql` 已随 round3 N2 移除（vision×2 / training_pipeline / k_anonymity / query_rewriter 处置未在本轮范围）；N2 移除 `STREAMING_PROXY_ENABLED` 死配置（与本文件 §5.2 诚实性纪律同向） | 见 round3-spec Round 45 执行记录 | 待全量回归确认 | MR-A1..A14、MR-B1、M-16..M-27 软件预备项全部未实施（用户裁定 P0 范围） |
+
+> 说明：MR-A1（SM4 真后端）、MR-A2（SFT 真实训练）、MR-A3（DP 接线）、MR-A4（MIA）、MR-A5/A6/A9/A12/A13/A14（诚实性速修）、MR-A7（链持久化）、MR-A8（mTLS）、MR-A10/A11、MR-B1（证明白名单）均属后续轮次；与 P1 任务（N5–N9）或环境验收轨道（FG-001/002/005/007/008/010/014）衔接时随计划执行。

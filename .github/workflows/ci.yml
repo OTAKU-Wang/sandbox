@@ -74,7 +74,8 @@ jobs:
             tests/test_rag_ingest.py \
             tests/test_rate_limit_distributed.py \
             tests/test_tenant_quota_persistence.py \
-            tests/test_migrations.py
+            tests/test_migrations.py \
+            tests/test_deploy_manifests.py
 
       - name: Full suite (informational)
         if: always()

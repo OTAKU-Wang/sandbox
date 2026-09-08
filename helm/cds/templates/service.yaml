@@ -29,20 +29,3 @@ spec:
       name: http
   selector:
     {{- include "cds.frontend.selectorLabels" . | nindent 4 }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "cds.fullname" . }}-opa
-  labels:
-    {{- include "cds.labels" . | nindent 4 }}
-spec:
-  type: ClusterIP
-  ports:
-    - port: {{ .Values.opa.port }}
-      targetPort: {{ .Values.opa.port }}
-      protocol: TCP
-      name: http
-  selector:
-    app.kubernetes.io/name: {{ include "cds.name" . }}-opa
-    app.kubernetes.io/instance: {{ .Release.Name }}

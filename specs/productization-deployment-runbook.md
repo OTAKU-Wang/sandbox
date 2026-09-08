@@ -173,6 +173,15 @@ helm history cds -n cds-system
 helm rollback cds <REVISION> -n cds-system
 ```
 
+### 5.1 K8s manifests 与 Helm chart 的密钥边界（spec N4）
+
+两套部署路径的密钥来源不同，切勿混用：
+
+- **`k8s/secrets.yaml`（manifests 路径，dev/243 专用）**：内含硬编码明文开发凭据，已提交到 git，**仅限 dev/243 环境**。文件顶部有 `DEV ONLY` 标注。任何真实环境都必须轮换其中的所有凭据，并使用外部密钥管理注入。
+- **Helm chart（生产路径）**：不内置任何明文密钥，一律经 `secrets.existingSecret`（默认 `cds-secrets`）以 `CDS_*` 前缀注入（见 §5 创建命令）。生产环境推荐将 `existingSecret` 指向由 Vault / External Secrets Operator / 云 KMS 托管的 Secret，而非 manifests 路径的静态文件。
+- **外部组件接线**：Helm 部署下 ClickHouse / OPA 不随 chart 渲染（见 `helm/cds/values.yaml` `externalComponents` 白名单），通过 `CDS_CLICKHOUSE_URL` / `CDS_OPA_URL` 指向外部实例；其连接凭据同样经 existingSecret 注入。
+- **流式输出代理**：`STREAMING_PROXY_ENABLED` 配置键已移除（spec N2）——流式输出代理是部署栈外部的 mitmproxy 组件，需独立部署并前置在会话出口；CDS 应用本身不再声明该能力。
+
 ---
 
 ## 6. 编译级验证

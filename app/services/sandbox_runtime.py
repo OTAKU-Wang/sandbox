@@ -1481,51 +1481,6 @@ class TEEAdapter(RuntimeAdapter):
         return "terminated"
 
 
-class DockerAdapter(RuntimeAdapter):
-    """L3: Docker container adapter (fallback)."""
-
-    def provision(self, session_id: str, data_path: str, timeout: int = 3600, user_id: str = "") -> dict:
-        container_name = f"cds-l3-{session_id}"
-        try:
-            cmd = ["docker", "run", "-d", "--name", container_name, "--network", "none", "--read-only", "--tmpfs", "/tmp:size=100m", "--memory", "512m", "--cpus", "1", "--pids-limit", "100", "python:3.11-slim", "sleep", str(timeout)]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
-                return {"container_id": None, "status": SessionStatus.FAILED.value, "error": result.stderr}
-            return {"container_id": container_name, "status": SessionStatus.RUNNING.value}
-        except Exception as e:
-            return {"container_id": None, "status": SessionStatus.FAILED.value, "error": str(e)}
-
-    async def execute(self, container_id: str, code: str, language: str = "python") -> dict:
-        try:
-            start = datetime.now()
-            cmd = ["docker", "exec", container_id, "python3", "-c", code] if language == "python" else ["docker", "exec", container_id, "bash", "-c", code]
-            result = await asyncio.wait_for(
-                asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True),
-                timeout=120,
-            )
-            duration = int((datetime.now() - start).total_seconds() * 1000)
-            return {"output": result.stdout + result.stderr, "exit_code": result.returncode, "duration_ms": duration}
-        except asyncio.TimeoutError:
-            return {"output": "Execution timed out (120s)", "exit_code": -1, "duration_ms": 120000}
-        except Exception as e:
-            return {"output": str(e), "exit_code": -1, "duration_ms": 0}
-
-    def terminate(self, container_id: str) -> bool:
-        try:
-            subprocess.run(["docker", "kill", container_id], capture_output=True, timeout=10)
-            subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, timeout=10)
-            return True
-        except Exception:
-            return False
-
-    def get_status(self, container_id: str) -> str:
-        try:
-            result = subprocess.run(["docker", "inspect", "--format", "{{.State.Status}}", container_id], capture_output=True, text=True, timeout=5)
-            return SessionStatus.RUNNING.value if result.stdout.strip() == "running" else result.stdout.strip()
-        except Exception:
-            return "unknown"
-
-
 class DestructionReport:
     """Report of secure sandbox destruction."""
     def __init__(self, session_id, container_destroyed=False, key_destroyed=False,

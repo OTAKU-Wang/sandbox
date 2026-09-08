@@ -354,4 +354,15 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 
 ## 九、执行记录
 
-（待 Round 45 起逐轮追加）
+### Round 45 执行记录（2026-09-08）—— M1：P0 四项（N1–N4）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N1 生产部署文件修复 + 语法门禁 | ✅ 已实现 | `docker-compose.prod.yml` 第 114 行 `CDS_LOG_JSON` 缩进归位（2→6 空格），`yaml.safe_load` 恢复可解析；新建 `tests/test_deploy_manifests.py`（22 用例：全部 compose/values/Chart/k8s 多文档 manifest 可解析、prod fail-closed 键在位、dev/prod service 拓扑一致、placeholder 声明核对）；`.github/workflows/ci.yml` backend gate 加入该文件 | tests/test_deploy_manifests.py 22 passed | — | 无 |
+| N2 遗留半接线/死代码处置 | ✅ 已实现 | ①移除 `app/services/chain_attestation.py` + `scripts/chain-attestation-ddl.sql`（无调用方、表不在 alembic），`test_p0_security_gaps.py` SM3 glob 断言同步；②`merkle_pipeline.py` 保留并显式接线：新增 `MERKLE_PIPELINE_ENABLED=False`（config + 四同步）+ `app/main.py` lifespan 按开关 start/stop（开启时 warning 标注实验性异步批量模式）；③移除死配置键 `STREAMING_PROXY_ENABLED`/`STREAMING_PROXY_PORT`（config.py，四文件均无引用），runbook §5.1 说明流式代理为外部 mitmproxy 组件；④移除 `DockerAdapter` 类（sandbox_runtime.py，无引用，L3 由 BwrapAdapter 承担）；⑤移除 `app/models/key_metadata.py`（无导入方，`kms.py:140` `KeyMetadata = DataEncryptionKey` 别名保留，`key_metadata` 表从未被 create_all/alembic 创建） | tests/test_p0_security_gaps.py + test_merkle_pipeline.py + test_audit_service.py + test_audit_api.py 59 passed；`from app.core.config import settings` 冒烟通过（无死键） | 待全量回归确认 | 无 |
+| N3 MPC 秘密分享持久化 | ✅ 已实现 | 新建 `app/models/mpc_key.py`（`mpc_keys` + `mpc_key_shares`，share_value 为 SM4-GCM 密文，KEK 复用 `AUDIT_ENCRYPTION_KEY or JWT_SECRET_KEY` → sha256 派生链，同 egress_audit）；Alembic `0008_mpc_persistence`（additive）；`mpc_service.py` 全量改造为 async + DB 落库（split/reconstruct/get/list/rotate/verify/destroy，destroy 标记 destroyed + crypto-erase share，rotate 标记 rotated + 旧 share 清除）；`mpc.py` API 全端点接 db + `status`/`persisted:true` 字段 + 新增 `POST /keys/{id}/destroy`；`app/main.py` 注册模型导入 | tests/test_mpc_service.py 重写（async）+ tests/test_mpc_persistence.py 新增，合计 21 passed（含"新服务实例重启重构一致/destroy 后重构失败/threshold 不足回归"）；`alembic upgrade head` + `verify_schema_parity.py` → SCHEMA PARITY OK 36 tables | 待全量回归确认 | 无 |
+| N4 Helm/K8s 拓扑对齐 | ✅ 已实现 | `helm/cds/values.yaml`：ClickHouse/OPA 标注 EXTERNALLY MANAGED + 新增 `externalComponents` 白名单（clickhouse/opa，注释契约）；`templates/service.yaml` 删除悬空 `-opa` Service（selector 无匹配 Deployment，改 `CDS_OPA_URL` 直连外部）；`Chart.yaml` 注明 `helm dependency build` 前置；`k8s/secrets.yaml` 顶部加 `DEV ONLY` 显著标注；`specs/productization-deployment-runbook.md` §5.1 新增"K8s manifests 与 Helm chart 的密钥边界"章节 | tests/test_helm_chart.py 扩展 `test_enabled_components_have_templates_or_whitelist`（enabled=true 组件必须有模板/依赖/白名单，防再漂移）；helm+deploy 合计 28 passed | 待全量回归确认 | helm 真渲染/lint 属环境验收（本机无 helm） |
+
+**配置四同步**：`MERKLE_PIPELINE_ENABLED=false` 已同步 .env.example / docker-compose.yml / docker-compose.prod.yml / helm/cds/values.yaml。
+**禁项自检**：无裸 `except: pass` 新增、未删既有测试、未放宽 W2/T5 门禁；N2/N3 移除均为无引用死代码（grep 三向验证）。
+**偏差说明**：N3 表主键按既有 API 契约用 String(64)/String(128)（服务生成的短 hex key_id/share_id 原样返回），未按 spec 字面用 UUID 列——API 行为不变优先。

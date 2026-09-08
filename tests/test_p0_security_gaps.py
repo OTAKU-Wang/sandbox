@@ -288,8 +288,7 @@ class TestSM3GlobalReplacement:
         import glob
 
         # These files should use SM3 for all primary crypto paths
-        security_files = glob.glob("app/services/chain_attestation.py") + \
-                        glob.glob("app/services/field_acl.py") + \
+        security_files = glob.glob("app/services/field_acl.py") + \
                         glob.glob("app/services/gateway_service.py") + \
                         glob.glob("app/services/merkle_service.py")
 
