@@ -20,6 +20,7 @@ from app.api import admin
 from app.api import metrics
 from app.api import inference  # N5: inference service sandbox
 from app.api import k8s_ops  # N8: K8s runtime operations (read-only)
+from app.api import agent  # N10: sandbox-internal agent execution
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model, rag_generative_model  # Ensure tables are created
 from app.models import session_operation  # W11: async operation records
 from app.models import task_queue as task_queue_models  # W16: durable queue table
@@ -250,6 +251,7 @@ app.include_router(network_policy_api.router, prefix="/api/v1/network-policies",
 app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
 app.include_router(inference.router, prefix="/api/v1/inference", tags=["inference"])
+app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"])
 app.include_router(k8s_ops.router, prefix="/api/v1/ops", tags=["ops"])
 
 # W10: WebSocket exec stream (mounted without prefix — paths are absolute)

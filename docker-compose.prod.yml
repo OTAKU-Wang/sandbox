@@ -129,6 +129,10 @@ services:
       # W3: stricter login throttle; per-scope limits sized for one replica.
       CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
       CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+      # N10 agent execution budgets
+      CDS_AGENT_STEP_BUDGET: "15"
+      CDS_AGENT_TOKEN_BUDGET: "20000"
+      CDS_AGENT_MAX_TOOLS: "4"
       # W12 retention: audit/merkle keep-forever; alerts 180d. dry-run stays
       # true until a compliance review flips it explicitly.
       CDS_RETENTION_JANITOR_ENABLED: "true"

@@ -127,6 +127,10 @@ services:
       # W3 rate limiting (dev: defaults are fine, keys shown for discoverability)
       CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
       CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+      # N10 agent execution budgets
+      CDS_AGENT_STEP_BUDGET: "15"
+      CDS_AGENT_TOKEN_BUDGET: "20000"
+      CDS_AGENT_MAX_TOOLS: "4"
       # W12 retention (dry-run default; flip after compliance review)
       CDS_RETENTION_JANITOR_ENABLED: "true"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"

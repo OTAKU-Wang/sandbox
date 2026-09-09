@@ -24,6 +24,9 @@ class TaskType(str, Enum):
     # N5: inference over a registered model (system-generated runner, model
     # artifact materialized into the workspace before execution).
     INFERENCE = "inference"
+    # N10: sandbox-internal agent execution (system-generated runner over
+    # platform-fixed tools, deterministic planner, step/token budgets).
+    AGENT = "agent"
 
 
 class TaskStatus(str, Enum):

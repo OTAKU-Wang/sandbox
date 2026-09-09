@@ -2,6 +2,10 @@
 
 Generates Debezium connector configurations and provides a Kafka producer
 for streaming database change events to downstream consumers.
+
+Naming note: "CDC Agent" here means a CHANGE DATA CAPTURE connector tool
+(Debezium→Kafka→ClickHouse), NOT an AI/LLM agent. The sandbox-internal agent
+execution framework (N10) is a separate concern — see app/services/agent_service.py.
 """
 import asyncio
 import json

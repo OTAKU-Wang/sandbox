@@ -42,6 +42,10 @@ api:
     # W3 rate limiting (Redis fixed window, fail-open on Redis outage)
     CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
     CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+    # N10 agent execution budgets
+    CDS_AGENT_STEP_BUDGET: "15"
+    CDS_AGENT_TOKEN_BUDGET: "20000"
+    CDS_AGENT_MAX_TOOLS: "4"
     # W12 retention janitor (see docs/retention.md)
     CDS_RETENTION_JANITOR_ENABLED: "true"
     CDS_AUDIT_LOG_RETENTION_DAYS: "0"

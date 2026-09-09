@@ -381,6 +381,40 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
             except Exception as e:
                 logger.warning("[Pipeline] Inference model materialization failed for task %s: %s", task_id, e)
 
+        # N10: agent tasks materialize dependencies selected by their tools
+        # (corpus for rag_retrieve, generative bundle for llm_reason, model
+        # for inference) — same prepare_* helpers the RAG/INFERENCE paths use.
+        agent_deps = None
+        if task.payload.get("agent"):
+            agent_deps = {}
+            tool_ids = set(task.payload.get("agent_tool_ids") or [])
+            workspace = runtime.get_workspace(container_id, session.sandbox_level)
+            if workspace:
+                if "rag_retrieve" in tool_ids:
+                    try:
+                        from app.services.rag_service import prepare_corpus_for_task
+                        agent_deps["corpus"] = await prepare_corpus_for_task(db, session, workspace)
+                    except Exception as e:
+                        logger.warning("[Pipeline] Agent corpus materialization failed: %s", e)
+                if "llm_reason" in tool_ids and task.payload.get("agent_generative_model_id"):
+                    try:
+                        from app.services.rag_generative_service import prepare_rag_generative_model
+                        agent_deps["generative"] = await prepare_rag_generative_model(
+                            db, session, workspace,
+                            uuid.UUID(str(task.payload["agent_generative_model_id"])),
+                        )
+                    except Exception as e:
+                        logger.warning("[Pipeline] Agent generative materialization failed: %s", e)
+                if "inference" in tool_ids and task.payload.get("agent_inference_model_id"):
+                    try:
+                        from app.services.inference_service import prepare_model_for_task
+                        agent_deps["inference"] = await prepare_model_for_task(
+                            db, session, workspace,
+                            uuid.UUID(str(task.payload["agent_inference_model_id"])), {},
+                        )
+                    except Exception as e:
+                        logger.warning("[Pipeline] Agent inference materialization failed: %s", e)
+
         try:
             from app.services.task_code_security import decrypt_task_code
             code_content = decrypt_task_code(orm_task.code_content)
@@ -474,6 +508,38 @@ async def _default_running_handler(task: PipelineTask) -> tuple[TaskStatus, dict
                         }
                 except Exception as e:
                     logger.warning("[Pipeline] RAG metering extract failed: %s", e)
+            # N10: agent metering — parse agent_trace, verify step budget was
+            # honored (fail-closed on mismatch), audit every step.
+            if task.payload.get("agent"):
+                try:
+                    from app.services.agent_service import extract_agent_metrics
+                    from app.core.config import get_settings as _get_agent_settings
+                    metrics = extract_agent_metrics(output)
+                    budget = int(_get_agent_settings().AGENT_STEP_BUDGET)
+                    if metrics.get("traces"):
+                        orm_task.resource_usage = {
+                            **(orm_task.resource_usage or {}),
+                            "agent_steps_used": metrics["steps_used"],
+                            "agent_tokens_used": metrics["tokens_used"],
+                            "agent_tools_used": metrics["tools_used"],
+                        }
+                        for trace in metrics["traces"]:
+                            await audit_service.log(
+                                db, action="agent.step", resource_type="sandbox_task",
+                                user_id=orm_task.user_id, session_id=orm_task.session_id,
+                                detail={"step": trace.get("step"), "tool": trace.get("tool"),
+                                        "args_hash": trace.get("args_hash"), "status": trace.get("status"),
+                                        "tokens": trace.get("tokens"), "ms": trace.get("ms")},
+                            )
+                        if metrics["steps_used"] > budget:
+                            orm_task.status = ORMTaskStatus.FAILED.value
+                            orm_task.error_message = (
+                                f"agent step budget exceeded (used {metrics['steps_used']} > {budget})"
+                            )
+                            await db.commit()
+                            return TaskStatus.FAILED, {"error": orm_task.error_message}
+                except Exception as e:
+                    logger.warning("[Pipeline] Agent metering extract failed: %s", e)
             await audit_service.log(
                 db, action="sandbox_task.execute", resource_type="sandbox_task",
                 user_id=orm_task.user_id, resource_id=task_id,
@@ -568,6 +634,33 @@ async def _code_scanning_handler(task: PipelineTask) -> tuple[TaskStatus, dict |
         except Exception as e:
             logger.warning("[Pipeline] Inference runner validation error: %s", e)
             return TaskStatus.FAILED, {"reason": f"Inference runner validation error: {e}"}
+
+    # N10: system-generated AGENT runners are validated byte-exactly against
+    # the trusted template (never the widened user-code whitelist).
+    if task.payload.get("agent"):
+        from app.services.agent_service import validate_agent_runner
+        try:
+            passed, reason = validate_agent_runner(code, task.payload.get("agent_tool_ids"))
+            try:
+                async with async_session() as db:
+                    await audit_service.log(
+                        db, action="sandbox_task.code_scanning", resource_type="sandbox_task",
+                        user_id=task.session_id, resource_id=task.task_id,
+                        detail={"agent_runner": True, "passed": passed, "reason": reason,
+                                "tool_ids": task.payload.get("agent_tool_ids")},
+                    )
+                    await db.commit()
+            except Exception as audit_err:
+                logger.warning("[Pipeline] Agent scan audit write failed: %s", audit_err)
+            if not passed:
+                return TaskStatus.REJECTED, {
+                    "reason": f"Agent runner validation failed: {reason}",
+                    "agent_runner": True,
+                }
+            return TaskStatus.CODE_SCANNING, {"scan": "agent_runner_verified", "reason": reason}
+        except Exception as e:
+            logger.warning("[Pipeline] Agent runner validation error: %s", e)
+            return TaskStatus.FAILED, {"reason": f"Agent runner validation error: {e}"}
 
     scanner = CodeScanner()
     try:

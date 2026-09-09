@@ -267,6 +267,27 @@ FG-005 真链 e2e、FG-007 生产 HSM/Vault、FG-008 联邦 e2e、FG-009 SIEM/�
 
 ---
 
+### N10 · 智能体执行框架（B3）—— 设计定稿（2026-09-09 确认）
+
+**定位与诚实边界**：受控工具编排框架，非通用 LLM agent 沙箱。用户在沙箱内运行"多步、平台注册工具、逐步审计、预算硬限"的编排任务：提供 `prompt + 工具选择 + 预算`；**工具实现由平台固化**（用户不可注入工具代码——那等于拓宽 code_scanner 白名单）。推理步默认**确定性规划器**（无模型可用），可选挂 N6 generative ONNX 钩子（供方模型）；无模型时诚实退化，不伪造"智能"。
+
+**复用机制（N5/N6 三段式）**：`build_agent_runner` 生成自包含沙箱 runner → `validate_agent_runner` 字节精确模板验证（白名单永不拓宽）→ pipeline 走 code-scanning + 物化 + 计量。逐步审计：每步 `agent_trace` JSONL → audit（`agent.step`）+ egress audit（http 工具）+ 输出 DLP 复用。
+
+**组件**：
+1. `app/services/agent_tools.py`：`ToolRegistry` + 内置工具目录（`compute` pandas/numpy 计算、`rag_retrieve` 复用 N6 沙箱内检索、`inference` 复用 N5 模型调用、`db_query` sqlalchemy 只读 SELECT、`http` allowlist-only（URL 必须命中会话网络策略 allowlist 域/IP + deny_all 兜底双闸）、`llm_reason` N6 generative ONNX 钩子/确定性规划器退化）。每个工具含 `params_schema` / `network_targets` / `budget_cost`。
+2. `app/services/agent_service.py`：`build_agent_runner(prompt, tool_ids, step_budget, token_budget, rag_corpus?, inference_model_id?, generative_model_id?)` —— 字面量 `_AGENT_PROMPT/_AGENT_TOOLS/_AGENT_STEP_BUDGET/_AGENT_TOKEN_BUDGET/_AGENT_MAX_TOOLS` + 运行中步数/令牌累计器，超限 fail-closed；每步 `agent_trace`；`validate_agent_runner(code, tool_ids)` 字节精确比对（AST 抽取字面量 → 重生成 → 全等）。
+3. **会话级预算**：`AGENT_STEP_BUDGET`（默认 15）/ `AGENT_TOKEN_BUDGET`（默认 20000）/ `AGENT_MAX_TOOLS`（默认 4）配置四同步；双层执行（runner 内硬限 + host 侧解析 agent_trace 复核步数 ≤ 预算，mismatch → FAILED + 告警）；`resource_usage` 记 `steps_used/token_used/tools_used`。
+4. **API/pipeline**：`TaskType.AGENT = "agent"`；`POST /api/v1/agent/tasks`（`{prompt, tool_ids, step_budget, token_budget}`，ADMIN/OPERATOR/DATA_PROVIDER）；pipeline code_scanning 走 `validate_agent_runner`；running 物化语料/模型/bundle；usage-on-completion 记 agent 计量 + `agent.step` 审计。
+5. `cdc_agent` 模块 docstring 澄清：CDC = **C**hange **D**ata **C**apture（Debezium→Kafka→ClickHouse 连接器生成器），**非 AI agent**。
+
+**显式不做（本轮边界）**：用户注入自定义工具；沙箱内任意 LLM 代码执行（推理步仅经 `llm_reason` 钩子或规划器）；多 agent/子 agent 编排；http 工具仅 allowlist 域（不放开任意外联）。
+
+**任务拆解（垂直切片）**：T1 ToolRegistry+内置工具 → T2 build_agent_runner（步骤循环+预算+agent_trace+确定性规划器）→ T3 validate_agent_runner（字节精确+tamper 拒绝）→ T4 TaskType.AGENT+pipeline 集成（code_scanning/running 物化/usage 计量/审计）→ T5 POST /api/v1/agent/tasks + AGENT_* 配置四同步 → T6 cdc_agent 澄清+全量回归+执行记录。
+
+---
+
+
+
 ## 六、环境验收轨道（硬件/外部系统门禁 · 持续跟踪不伪造）
 
 本轮软件任务与既有 FG 项的衔接关系（完整 FG 清单与验收标准见 `specs/SS-gap-analysis.md` FG 表，此处只列增量）：
@@ -413,3 +434,15 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 - 页面范围按用户指示改为 K8s 运行时 4 页（Deployments/NetworkPolicies/PVCs/Logs），与 spec C5 原列不同——已在记录首行注明。
 - 日志页对"无集群/非 k8s 会话"回退审计轨迹并诚实标注 `source:audit`（不伪装成实时日志）。
 - PVC/策略页把 DB 记录（权威意图）与集群实时状态（最佳努力）分开展示，集群不可用不阻断 DB 数据。
+
+### P2 N10 执行记录（2026-09-09）—— 智能体执行框架（受控工具编排）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N10 智能体执行框架 | ✅ 已实现（T1-T6） | **T1 ToolRegistry** `app/services/agent_tools.py`：6 内置平台固化工具（compute / rag_retrieve / inference / db_query / http / llm_reason），params_schema 轻量校验 + network_targets + budget_cost + roles；`validate_network_target`（域精确/`*.`通配 + IP CIDR，镜像网络策略匹配器）。**T2 runner 生成** `app/services/agent_service.py`：`build_agent_runner` 生成自包含沙箱 runner（字面量 `_AGENT_PROMPT/_AGENT_TOOLS/_AGENT_STEP_BUDGET/_AGENT_TOKEN_BUDGET/_AGENT_HTTP_ALLOW/_RAG_INDEX_FILE/_RAG_GENERATIVE_MODEL_ID/_INFERENCE_MODEL_ID`）；**确定性规划器**（rag_retrieve→compute→db_query→http→inference→llm_reason 状态机，同输入同输出）；步骤循环 + 步数/令牌硬限 fail-closed；每步 `agent_trace` JSONL；http 工具域校验双闸；compute 工具受限 AST 白名单 eval；llm_reason 无模型 → 确定性摘要退化（N6 generative ONNX 钩子可选）。**T3 validate_agent_runner**：AST 抽取 9 个 per-task 字面量 → 重生成 → 字节精确比对（白名单永不拓宽）。**T4 pipeline 集成**：`TaskType.AGENT`；code_scanning agent 分支（validate_agent_runner，审计失败不影响验证）；running 物化 agent 依赖（rag_retrieve→语料 / llm_reason+模型→generative bundle / inference→N5 model）；usage-on-completion agent 计量（agent_steps_used/agent_tokens_used/agent_tools_used）+ 每步 `agent.step` 审计 + **步数超预算 → 任务 FAILED（fail-closed）**。**T5 API**：`POST /api/v1/agent/tasks`（ADMIN/OPERATOR/DATA_PROVIDER/BUYER，工具角色门禁 + 会话归属 + 预算校验 + 依赖校验），pipeline submit 带 agent 载荷；`AGENT_STEP_BUDGET/AGENT_TOKEN_BUDGET/AGENT_MAX_TOOLS` 配置四同步。**T6**：`cdc_agent` docstring 澄清 CDC=Change Data Capture（非 AI agent），与 N10 划清。 | tests/test_agent_tools.py 7 passed（工具 schema/域/CIDR）+ test_agent_service.py 11 passed（多步 runner 子进程/预算硬限/超预算 fail-closed/rag 语料检索/http 门禁/trace 提取/模板验证/tamper/工具集不匹配/prompt 注入）+ test_agent_pipeline.py 4 passed（code_scanning 接受生成 runner/拒绝篡改/拒绝伪造工具/类型注册）+ test_agent_api.py 5 passed（创建/未知工具 422/inference 缺模型 422/工具角色门禁/会话归属 403）；受影响子集 122 passed | 待全量回归确认 | 真实 LLM 推理步需供方 N6 generative 模型（默认确定性规划器诚实退化）；通用 agent（多 agent/子 agent、用户自定义工具）显式不做；agent 前端页（可挂 N8 K8s 运营面或单列） |
+
+**偏差/边界（N10）**：
+- 推理步默认**确定性规划器**（状态机），无模型可用；`llm_reason` 在注册了 N6 generative 模型时挂 ONNX 钩子（供方模型），否则确定性摘要——诚实标注。
+- 工具实现全部平台固化在 runner 模板内，用户仅选工具 + 给 prompt + 预算；`compute` 表达式经受限 AST 白名单 + 无内建命名空间求值（bwrap/seccomp 为真实边界）。
+- http 工具仅会话网络策略 allowlist 域/IP（planner 只调度具体非通配目标，通配符 allowlist 不下发具体 URL——诚实，避免任意域名拉取）。
+- `inference` 工具按 N5 runner 契约（`inputs` 命名张量字典 + 物化 `input/model.onnx`）。

@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     # ReadWriteMany). Empty = cluster default class; honest error if none.
     SANDBOX_K8S_STORAGE_CLASS: str = ""
 
+    # N10: sandbox-internal agent execution framework — in-sandbox step/token
+    # budgets enforced by the generated runner + verified host-side.
+    AGENT_STEP_BUDGET: int = 15
+    AGENT_TOKEN_BUDGET: int = 20000
+    AGENT_MAX_TOOLS: int = 4
+
     # Session lifecycle (gap A2/D1): background sweep interval for expired
     # sessions, dev sessions and contracts.
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 300
