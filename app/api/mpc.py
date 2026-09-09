@@ -4,6 +4,10 @@ Persistence: keys and shares are stored in the DB (spec N3) — split returns
 persisted shares, reconstruct/verify/rotate/destroy read from the DB. API
 behaviour is unchanged from the in-memory implementation; every write path
 reports ``persisted: true``.
+
+Honest boundary (N11): this service is Shamir secret ESCROW, not multi-party
+computation. HE/MPC compute (SecretFlow HEU/SPU) is in evaluation — see the
+``/capabilities`` endpoint and spec N11 for the current (not-deployed) state.
 """
 import os
 
@@ -18,6 +22,36 @@ from app.services.mpc_service import mpc_service
 from app.services.audit_service import audit_service
 
 router = APIRouter()
+
+
+def _mpc_capabilities() -> dict:
+    """Honest HE/MPC state disclosure (N11 evaluation, not deployed).
+
+    Mirrors the audit._backend_disclosure pattern: reports exactly what this
+    service is (Shamir secret custody) and what it is NOT (no MPC compute),
+    plus the SecretFlow HEU evaluation status. Fail-closed — never implies
+    computation that is not running.
+    """
+    return {
+        "mode": "custody",
+        "label": "Shamir 秘密托管（非 MPC 计算协议）",
+        "compute": "evaluating",
+        "backend": None,
+        "backend_label": "SecretFlow HEU/SPU 评估中（N11）；当前运行时未部署",
+        "note": (
+            "评估结论：SecretFlow/SPU/HEU 均为 Apache-2.0；HEU 独立库（sf-heu）可作为 "
+            "mpc_service 的计算内核（PHE sum/mean/var）；当前运行时 Python 3.14 无 cp314 "
+            "wheel 且依赖未安装——计算能力保持 fail-closed（详见 spec N11 节）。"
+        ),
+    }
+
+
+@router.get("/capabilities")
+async def mpc_capabilities(
+    current_user: User = Depends(get_current_user),
+):
+    """Report the honest MPC capability state (custody vs compute)."""
+    return _mpc_capabilities()
 
 
 class SplitKeyRequest(BaseModel):
@@ -119,6 +153,7 @@ async def reconstruct_key(
         "key_id": body.key_id,
         "secret_hex": secret.hex(),
         "shares_used": len(body.share_ids),
+        "mpc_capabilities": _mpc_capabilities(),
     }
 
 
@@ -247,4 +282,9 @@ async def verify_shares(
 ):
     """Verify that shares are valid for a key."""
     valid = await mpc_service.verify_shares(db, key_id, share_ids)
-    return {"key_id": key_id, "valid": valid, "shares_provided": len(share_ids)}
+    return {
+        "key_id": key_id,
+        "valid": valid,
+        "shares_provided": len(share_ids),
+        "mpc_capabilities": _mpc_capabilities(),
+    }

@@ -29,6 +29,7 @@
 ## 降级语义（诚实声明）
 
 - **限流 fail-open**（W3）：Redis 不可用时回退进程内本地限流并输出 WARNING——限流组件故障不拒绝全量流量。这是显式决策，非静默降级。
+- **MPC 托管语义**（N3/N11）：`mpc_service` 为 **Shamir 秘密托管**（密钥份额拆分/重建/轮换/销毁，跨重启持久化），**非 MPC 计算协议**。HE/MPC 计算（SecretFlow HEU/SPU）处于评估阶段，未部署——`GET /api/v1/mpc/capabilities` 与监控 `/security-posture` 的 `mpc` 项如实披露 `compute=evaluating`。调用方不得假设任何跨方密文计算能力。
 - 410 语义为 CubeSandbox 对齐项（C2）：客户端 SDK（`cds_sdk.CDSApiError.code == "SESSION_TERMINATED"`）应据此停止重试。
 
 ## 既有端点语义对齐（以测试期望为准）

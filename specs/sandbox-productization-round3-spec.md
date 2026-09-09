@@ -446,3 +446,38 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 - 工具实现全部平台固化在 runner 模板内，用户仅选工具 + 给 prompt + 预算；`compute` 表达式经受限 AST 白名单 + 无内建命名空间求值（bwrap/seccomp 为真实边界）。
 - http 工具仅会话网络策略 allowlist 域/IP（planner 只调度具体非通配目标，通配符 allowlist 不下发具体 URL——诚实，避免任意域名拉取）。
 - `inference` 工具按 N5 runner 契约（`inputs` 命名张量字典 + 物化 `input/model.onnx`）。
+
+### N11 · HE/MPC 计算（B4）—— SecretFlow 评估结论（2026-09-09）
+
+**定位**：评估 → 集成路径。`mpc_service` **保留 Shamir 托管语义**（N3 已持久化）；本评估确定"真实密文计算"采用哪条路径、许可与部署约束。评估基于 SecretFlow/SPU/HEU main 分支源码 + 官方文档（引用见文末，SHA：secretflow `11425fa` / spu `02ac612` / heu `b982e7d`）。
+
+**1. 许可结论**：SecretFlow、SPU、HEU 均为 **Apache-2.0**（无 AGPL/BSD 复杂项；LEGAL.md 仅为"中文注释为准"声明）。三方加密后端（SEAL/HElib/Palisade/Concrete）为 Bazel 构建时自动下载的外部依赖（宽松许可），供应商时仍需对编译 wheel 做 SBOM 审计。⚠️ 对照项：`python-paillier`（phe）为 **GPLv3**——商用 CDS 的许可红线，HEU 无此问题。
+
+**2. 能力（HEU 统计 + SPU 两方）**：
+- **HEU 设备**（SecretFlow `device/heu.py` + `kernels/heu.py`）：`sum` / `select_sum` / `batch_select_sum` / `feature_wise_bucket_sum`（密文数组归约与分组/分桶求和）、`add`/`sub`（密⊕密）、`mul`/`matmul`（密⊗明，**仅明文标量/矩阵**）、`encrypt`/`decode`/`decrypt`（SK 持有方唯一解密）。**诚实边界**：无 one-call `mean/var`——需组合（`mean = sum(ct)×(1/n)`、`var = sum((x−mean)²)/n`，平方用密⊗明）；**count 在明文侧泄漏**；Paillier PHE 下**无比较/排序/分位数**。跨方"联合统计"走 `secretflow.stats.united_stats`（united_mean/var，每方本地均值 + SPU/HEU 安全聚合；united_var 会揭示均值）。
+- **HEU 独立库**（`sf-heu`，关键组件）：`heu.numpy` / `heu.phe` Python API（`hnp.setup(schema, 2048)` → encryptor/decryptor/evaluator + Integer/Float/Bigint/Batch 编码器）；支持 **Paillier（推荐）/ Okamoto–Uchiyama / EC ElGamal / Damgard–Jurik / DGK**；FHE（TFHE/Concrete）**开发中**，不可排期依赖。
+- **SPU 两方**（`spu.proto` ProtocolKind 权威枚举）：`CHEETAH` = **唯一的 2PC 协议（半诚实，快速）**；`ABY3`/`SECURENN` = 3PC 诚实多数半诚实；`SWIFT` = 恶意 3PC（实验）；`SEMI2K` = 多方半诚实但需可信第三方离线随机数（默认"可信第一方"= debug only）。**诚实缺口**：SPU 无恶意安全 2PC——若恶意 2PC 是硬需求，SecretFlow 非正确工具。
+
+**3. 部署**：全量 SecretFlow 重（Ray 分布式引擎 + `>=3.10,<3.12`（**无 3.12/3.13/3.14**）、jax/pandas 1.5.3/pyarrow/duckdb → 实际 1–2 GB/方、CPU only 无特殊硬件）；生产模式 = 每机构独立 Ray 集群 + SPU 自建 brpc mesh（独立端口）+ 编排（Kuscia/K3s 承载 TLS）；仿真模式单机不生产安全。wheel：`spu`≈72MB、`sf-heu`≈3.6–6.2MB、`secretflow` 纯 Python 0.7MB。
+
+**4. 替代方案（窄用例：两方共享列 HE 统计）**：**HEU 独立库（推荐）**（Apache-2.0，PHE add+标量乘恰好覆盖 sum/mean/var，numpy 式 API，无 Ray，tiny wheel）；`python-paillier`（GPLv3，技术合适但许可阻止）；PySyft（Apache-2.0，现代版是 PyTorch 数据科学框架，HE 多在 legacy，过重/不确定）；tf-encrypted（Apache-2.0，自我声明非生产、弃维护，❌）；tenSEAL（Apache-2.0，BFV/CKKS 密封 SIMD，值得并列基准）。
+
+**5. 集成路径（诚实）**：
+- **Option A 评估交付（推荐第一步）**：单机 `sf.init(parties=['alice','bob'], address='local')` 仿真跑 HEU `sum` + `united_mean/var`，产出 PoC 脚本 + 2048-bit Paillier 吞吐基准 + 评估结论。约束：需 Python 3.10/3.11（当前 CDS 运行时 3.14 无 cp314 wheel → 环境验收门禁，不伪造）。~0.5–1 人日。
+- **Option B 两方 HEU 最小集成（推荐生产路径）**：**不**上全量 SecretFlow 生产集群；`pip install sf-heu`（~6MB + numpy）入现有服务镜像；`mpc_service` 增 `he-stats` 计算内核——A=sk_keeper 生成密钥分发公钥，双方 `heu.numpy` 本地加密列，密文走**既有 mTLS/gRPC 传输与证书**（信任/网络面零新增），求值方 `sum(ct)×(1/n)`，A 解密。信任模型**非对称**（密钥方得明文结果，求值方永不见明文）——这正是选 HEU 而非 SPU 的原因（SPU 两方对称信任且仅半诚实/Cheetah）。无 Ray/Kuscia/新 PKI。
+- **全量 SecretFlow 仅当**后续需要 PSI/安全 LR/XGB/联邦训练时立项（预算：Ray-per-party 或 Kuscia/TLS + brpc 端口 + py3.10/3.11 + 1–2GB/方 + 2PC 仅 Cheetah 半诚实）。
+
+**6. 本轮代码交付**：`GET /api/v1/mpc/capabilities` + split/reconstruct/verify 响应增 `mpc_capabilities` disclosure（镜像 audit._backend_disclosure 诚实标注模式：mode=custody / compute=evaluating / backend=none）；监控 `/security-posture` 增 `mpc` 能力项；`docs/error-codes.md` 补 N3 遗留的 Shamir 托管诚实声明（spec N3 step-5 原未落盘）。**无任何伪造计算**——compute=evaluating 直到真实 HEU 部署。
+
+**引用**：[SecretFlow LICENSE](https://github.com/secretflow/secretflow/blob/11425fa5282cf0898393cf881df09d210ef384e2/LICENSE) · [SPU LICENSE](https://github.com/secretflow/spu/blob/02ac612de3084dc53eddab91b720c6b80bc48779/LICENSE) · [HEU LICENSE](https://github.com/secretflow/heu/blob/b982e7d9db8968f75e26cb28a30dea22742fd22e/LICENSE) · [SPU ProtocolKind](https://github.com/secretflow/spu/blob/02ac612de3084dc53eddab91b720c6b80bc48779/src/libspu/spu.proto#L103-L133) · [HEU device ops](https://github.com/secretflow/secretflow/blob/11425fa5282cf0898393cf881df09d210ef384e2/secretflow/device/device/heu.py#L70-L314) · [HEU kernels](https://github.com/secretflow/secretflow/blob/11425fa5282cf0898393cf881df09d210ef384e2/secretflow/device/kernels/heu.py#L172-L190) · [united_stats](https://github.com/secretflow/secretflow/blob/11425fa5282cf0898393cf881df09d210ef384e2/secretflow/stats/united_stats.py#L50-L90) · [HEU README](https://github.com/secretflow/heu/blob/b982e7d9db8968f75e26cb28a30dea22742fd22e/README.md) · [SecretFlow deployment](https://secretflow.readthedocs.io/en/stable/getting_started/deployment.html) · [PyPI: secretflow/spu/sf-heu/phe/syft](https://pypi.org/project/secretflow/)
+
+### Round 45 M6 执行记录（2026-09-09）—— N11 HE/MPC 评估 + 诚实披露
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N11 HE/MPC 评估（SecretFlow） | ✅ 已实现（评估交付） | **评估结论写入 spec N11 节**（许可/能力/部署/替代/集成路径，含引用与 SHA）；`GET /api/v1/mpc/capabilities` + split/reconstruct/verify 响应 `mpc_capabilities` disclosure（mode=custody/compute=evaluating/backend=none，镜像 audit._backend_disclosure）；监控 `/security-posture` 增 `mpc` 能力项（custody + 评估中）；`docs/error-codes.md` 补 N3 遗留的 Shamir 托管诚实声明（spec N3 step-5 原未落盘，已闭环） | tests/test_mpc_capabilities.py 新增（capabilities 端点披露 + reconstruct/verify disclosure 附着 + posture mpc 项）；既有 mpc 测试保持绿 | 待全量回归确认 | **真实 HEU 计算未部署**（Option B 需 Python 3.10/3.11 运行时 + sf-heu 集成，属环境门禁 FG——compute=evaluating fail-closed，不伪造）；Option A 仿真 PoC 留待 py3.10/3.11 环境执行 |
+
+**偏差/边界（N11）**：
+- 按 spec 语义"评估→集成"，本轮交付**评估结论 + 诚实披露扩展点**，未引入真实密文计算（SecretFlow 依赖需 py3.10/3.11，当前 3.14 无 wheel；HEU 集成路径 Option B 已明确）。
+- 推荐路径：**HEU 独立库（sf-heu）作 mpc_service 计算内核**（非全量 SecretFlow），原因：PHE add+标量乘恰好覆盖 sum/mean/var、Apache-2.0、tiny wheel、无 Ray；信任模型非对称（密钥方得明文）与"托管+受控计算"语义一致。
+- 诚实缺口明确记录：count 明文泄漏、无密文比较/排序/分位数、SPU 恶意安全仅 3PC 实验（SWIFT）、2PC 仅 Cheetah 半诚实。

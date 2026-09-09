@@ -183,6 +183,20 @@ def _security_posture_payload() -> dict:
             ["debug=true"],
         ))
 
+    # N11: MPC is Shamir secret custody today; HE/MPC compute is in
+    # evaluation (SecretFlow HEU) — honest capability entry, never implies
+    # computation that is not deployed.
+    capabilities.append(_capability(
+        "mpc",
+        "MPC / 安全计算",
+        "custody",
+        "ok",
+        "Shamir 秘密托管（跨重启持久化）；HE/MPC 计算处于评估阶段（N11，SecretFlow HEU/SPU 未部署）",
+        "pass",
+        "HE/MPC 计算启用前需通过 SecretFlow HEU 评估验收（见 spec N11 节）",
+        ["mode=custody", "compute=evaluating", "backend=none"],
+    ))
+
     gate_order = {"block": 3, "conditional": 2, "pass": 1}
     worst_gate = max(capabilities, key=lambda item: gate_order.get(item["release_gate"], 0))["release_gate"]
     recommendation = {
