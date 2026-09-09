@@ -48,4 +48,20 @@ describe('Sidebar', () => {
     renderWithProviders(<Sidebar />);
     expect(screen.getByText('审计中心')).toBeInTheDocument();
   });
+
+  it('shows K8s 运营 group for operator role', () => {
+    useAuthStore.setState({
+      user: { id: 'u1', username: 'op', email: 'op@test.com', role: 'operator', organization: null },
+    });
+    renderWithProviders(<Sidebar />);
+    expect(screen.getByText('K8s 运营')).toBeInTheDocument();
+  });
+
+  it('hides K8s 运营 group for buyer role', () => {
+    useAuthStore.setState({
+      user: { id: 'u1', username: 'buyer', email: 'b@test.com', role: 'buyer', organization: null },
+    });
+    renderWithProviders(<Sidebar />);
+    expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
+  });
 });

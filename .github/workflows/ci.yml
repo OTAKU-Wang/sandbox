@@ -76,6 +76,7 @@ jobs:
             tests/test_rag_transformers.py \
             tests/test_k8s_client.py \
             tests/test_k8s_n7.py \
+            tests/test_k8s_ops.py \
             tests/test_rate_limit_distributed.py \
             tests/test_tenant_quota_persistence.py \
             tests/test_migrations.py \

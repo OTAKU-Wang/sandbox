@@ -400,3 +400,16 @@ N7 (K8s client+流式+卷) ∥ N8 (前端 4 页) ∥ N9 (SDK 扩面)
 - 配置 `K8S_USE_PYTHON_CLIENT`/`SANDBOX_K8S_STORAGE_CLASS` 与既有 `SANDBOX_K8S_*` 一致仅同步 `.env.example`（docker-compose/helm 部署不运行 k8s 集群，四同步按"集群作用域配置"归类，非默认四文件枚举）。
 - 流式 exec 退出码经 `__CDS_EXIT__` 文本哨兵获取（kubernetes ws 协议不暴露 exec 退出码通道）；kubectl 回退路径解析哨兵，缺失时用 subprocess returncode 保持既有语义。
 - PVC RWX 能力无法从 StorageClass 元数据探知——使用配置类或集群 default 类，无类时诚实报错（不猜测）。
+
+### Round 45 M5 执行记录（2026-09-09）—— N8 K8s 运营面 4 页（框架 + 基础路由）
+
+> 范围调整：本轮按用户指示实现 **Deployments / NetworkPolicies / PVCs / Logs** 四个 **K8s 运行时运营页**（N7 的直接配套），非 spec C5 原列的 nodes/compliance/rag/volumes 页——那组留待后续评估。
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| N8 K8s 运营面 4 页（框架+基础路由） | ✅ 已实现 | **后端只读运营 API** `app/api/k8s_ops.py`（`/api/v1/ops/*`，ADMIN/OPERATOR）：`GET /ops/deployments`（K8sSandboxAdapter.list_sandboxes + get_status 实时 phase/ready/ip，集群不可用 → `cluster_available:false` + 空数组诚实降级）；`GET /ops/network-policies`（DB 会话策略权威数据 + live_pod 存活核实）；`GET /ops/pvcs`（共享卷定义 + attach 挂载配置权威 + 最佳努力实时 PVC Bound/Pending/容量/存储类）；`GET /ops/logs/{session_id}`（k8s 会话+集群 → 实时 Pod stdout/stderr `source:k8s`；否则 DB 审计轨迹回退 `source:audit`，诚实标注来源）。`KubernetesClient` 增 `list_pvcs()`。**前端** `cds-frontend`：`src/services/k8sOpsApi.ts`（类型 + 4 函数，走共享 axios 实例）；`ROLE_GROUPS.k8sOpsReaders`（OPERATOR/ADMIN）；`src/pages/K8sOps/{Deployments,NetworkPolicies,Pvcs,Logs}.tsx` 四页（antd Table/Card + @tanstack/react-query + QueryErrorAlert/tableEmpty + 集群不可用诚实 banner；Logs 页会话 ID 拉取 + 日志块 + source 徽标）；`App.tsx` 增 4 条 `/ops/*` 懒加载路由（RoleRoute 门禁）；`Sidebar.tsx` 增 "K8s 运营" 菜单组（ClusterOutlined）。 | 后端 `tests/test_k8s_ops.py` 6 passed（无集群诚实降级、角色门禁 403、策略/PVC 列表 DB 权威、日志审计回退、404）；前端 `src/services/__tests__/k8sOpsApi.test.ts` 4 passed + Sidebar 测试增 k8s 运营组显隐 2 例；`npm run build` 通过、`npm test` 18 passed；N8 新增文件 lint 干净（22 处 lint error 均为既有存量，非本次引入） | 待全量回归确认 | 页面详情/筛选增强（分页已就位）、真实集群渲染验收（FG-004）、nodes/compliance/rag/volumes 页（原 C5 名单，另行评估） |
+
+**偏差说明（N8）**：
+- 页面范围按用户指示改为 K8s 运行时 4 页（Deployments/NetworkPolicies/PVCs/Logs），与 spec C5 原列不同——已在记录首行注明。
+- 日志页对"无集群/非 k8s 会话"回退审计轨迹并诚实标注 `source:audit`（不伪装成实时日志）。
+- PVC/策略页把 DB 记录（权威意图）与集群实时状态（最佳努力）分开展示，集群不可用不阻断 DB 数据。

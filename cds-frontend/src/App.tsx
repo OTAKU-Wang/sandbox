@@ -31,6 +31,10 @@ const TrainingDashboard = lazy(() => import('./pages/Training/TrainingDashboard'
 const Connectors = lazy(() => import('./pages/Connectors'));
 const KeyManagement = lazy(() => import('./pages/Identity/KeyManagement'));
 const Certificates = lazy(() => import('./pages/Identity/Certificates'));
+const K8sDeployments = lazy(() => import('./pages/K8sOps/Deployments'));
+const K8sNetworkPolicies = lazy(() => import('./pages/K8sOps/NetworkPolicies'));
+const K8sPvcs = lazy(() => import('./pages/K8sOps/Pvcs'));
+const K8sLogs = lazy(() => import('./pages/K8sOps/Logs'));
 
 const PageSpinner = () => <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
 
@@ -75,6 +79,10 @@ export default function App() {
                 <Route path="connectors" element={<RoleRoute allowedRoles={ROLE_GROUPS.connectorManagers}><Connectors /></RoleRoute>} />
                 <Route path="identity/keys" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><KeyManagement /></RoleRoute>} />
                 <Route path="certificates" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><Certificates /></RoleRoute>} />
+                <Route path="ops/deployments" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sDeployments /></RoleRoute>} />
+                <Route path="ops/network-policies" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sNetworkPolicies /></RoleRoute>} />
+                <Route path="ops/pvcs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sPvcs /></RoleRoute>} />
+                <Route path="ops/logs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sLogs /></RoleRoute>} />
               </Route>
             </Routes>
           </Suspense>

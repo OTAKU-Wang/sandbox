@@ -14,6 +14,7 @@ import {
   ExperimentOutlined,
   ApiOutlined,
   KeyOutlined,
+  ClusterOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { MenuProps } from 'antd';
@@ -94,6 +95,20 @@ function getMenuItems(role?: RoleLike): MenuProps['items'] {
 
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.monitoringReaders)) {
     items.push({ key: '/monitoring', icon: <MonitorOutlined />, label: '监控中心' });
+  }
+
+  if (hasAnyRole(normalizedRole, ROLE_GROUPS.k8sOpsReaders)) {
+    items.push({
+      key: 'k8s-ops',
+      icon: <ClusterOutlined />,
+      label: 'K8s 运营',
+      children: [
+        { key: '/ops/deployments', label: '部署' },
+        { key: '/ops/network-policies', label: '网络策略' },
+        { key: '/ops/pvcs', label: '存储卷' },
+        { key: '/ops/logs', label: '日志' },
+      ],
+    });
   }
 
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.identityManagers)) {

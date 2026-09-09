@@ -77,6 +77,9 @@ class KubernetesClient:
     def list_pods(self, label_selector: str | None = None) -> list:
         return self._v1.list_namespaced_pod(self.namespace, label_selector=label_selector).items
 
+    def list_pvcs(self) -> list:
+        return self._v1.list_namespaced_persistent_volume_claim(self.namespace).items
+
     def pod_logs(self, name: str) -> str:
         return self._v1.read_namespaced_pod_log(name, self.namespace)
 
