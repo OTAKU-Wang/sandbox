@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { dataProductApi } from '../../services/dataProductApi';
 import { dataResourceApi } from '../../services/dataResourceApi';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title } = Typography;
 const { TextArea } = Input;
@@ -31,7 +32,7 @@ export default function ProductCreate() {
   const [current, setCurrent] = useState(0);
   const selectedResourceId = Form.useWatch('resource_id', form);
 
-  const { data: resources } = useQuery({
+  const { data: resources, isError: resourcesIsError, error: resourcesError, refetch: refetchResources } = useQuery({
     queryKey: ['data-resources-product-create'],
     queryFn: () => dataResourceApi.list({ page: 1, page_size: 100 }),
   });
@@ -50,6 +51,9 @@ export default function ProductCreate() {
   const steps = [
     { title: '基本信息', content: (
       <>
+        {resourcesIsError && (
+          <QueryErrorAlert error={resourcesError} message="数据资源列表加载失败" onRetry={() => { void refetchResources(); }} />
+        )}
         <Form.Item name="resource_id" label="绑定数据资源">
           <Select
             allowClear

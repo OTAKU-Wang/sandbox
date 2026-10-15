@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { dataResourceApi } from '../../services/dataResourceApi';
 import type { DataResource } from '../../services/dataResourceApi';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title } = Typography;
 
@@ -21,12 +22,12 @@ export default function ResourceList() {
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const [form] = Form.useForm();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['data-resources', page],
     queryFn: () => dataResourceApi.list({ page, page_size: 20 }),
   });
 
-  const { data: selectedResource } = useQuery({
+  const { data: selectedResource, isError: selectedIsError, error: selectedError, refetch: refetchSelected } = useQuery({
     queryKey: ['data-resource', selectedResourceId],
     queryFn: () => dataResourceApi.get(selectedResourceId!),
     enabled: !!selectedResourceId,
@@ -89,6 +90,7 @@ export default function ResourceList() {
         </Button>
       </div>
 
+      {isError && <QueryErrorAlert error={error} message="数据资源列表加载失败" onRetry={() => { void refetch(); }} />}
       <Table
         columns={columns}
         dataSource={data?.items ?? []}
@@ -136,6 +138,7 @@ export default function ResourceList() {
         onClose={() => setSelectedResourceId(null)}
         width={640}
       >
+        {selectedIsError && <QueryErrorAlert error={selectedError} message="资源详情加载失败" onRetry={() => { void refetchSelected(); }} />}
         {selectedResource && (
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
             <Descriptions bordered column={1} size="small">

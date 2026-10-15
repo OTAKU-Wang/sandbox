@@ -296,10 +296,59 @@ def test_retry_exhausted_raises():
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
-        return httpx.Response(410, json={"code": "GONE", "message": "stale"})
+        return httpx.Response(503, json={"code": "SERVICE_UNAVAILABLE", "message": "stale"})
 
     with _client(handler) as c:
         with pytest.raises(CDSError) as exc:
             c.get_session("s-1")
     assert calls["n"] == 4  # 1 initial + 3 retries
+    assert exc.value.status_code == 503
+
+
+def test_410_not_retried_session_terminated():
+    """PZ-11③: SESSION_TERMINATED (410) is terminal — exactly ONE request."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            410, json={"code": "SESSION_TERMINATED", "message": "session terminated"}
+        )
+
+    with _client(handler) as c:
+        with pytest.raises(CDSError) as exc:
+            c.get_session("s-1")
+    assert calls["n"] == 1
     assert exc.value.status_code == 410
+    assert exc.value.code == "SESSION_TERMINATED"
+
+
+def test_429_honors_retry_after_header(monkeypatch):
+    import cds_sdk.client as client_mod
+
+    sleeps = []
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, json={"code": "RATE_LIMITED"},
+                                  headers={"Retry-After": "2"})
+        return httpx.Response(200, json={"ok": True})
+
+    with _client(handler) as c:
+        c.get_session("s-1")
+    assert calls["n"] == 2
+    assert sleeps == [2.0]  # Retry-After respected
+
+
+def test_capability_matrix_path():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/meta/capability-matrix"
+        return httpx.Response(200, json={"matrix": {"L0": {"streaming": "real"}}})
+
+    with _client(handler) as c:
+        m = c.capability_matrix()
+    assert m["matrix"]["L0"]["streaming"] == "real"

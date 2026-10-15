@@ -4,6 +4,11 @@ Revision ID: 0003_idle_policy
 Revises: 0002_session_usability
 Create Date: 2026-09-07
 
+NOTE (SS-14 e2e D-e2e-08): auto_resume server_default text("0") → text("false") —
+PostgreSQL rejects an integer default on a boolean column, so on PG this
+migration could never have applied (no deployed PG schema carries the old
+literal); SQLite tolerated 0, which is why it survived. See 0005's note.
+
 Additive-only, safe against a create_all database:
 
 - sandbox_sessions.idle_policy   ("kill" | "pause", NULL = default policy)
@@ -24,7 +29,7 @@ def upgrade() -> None:
     op.add_column("sandbox_sessions", sa.Column("idle_policy", sa.String(length=16), nullable=True))
     op.add_column(
         "sandbox_sessions",
-        sa.Column("auto_resume", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("auto_resume", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
 
 

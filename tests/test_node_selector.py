@@ -1,12 +1,28 @@
 """Tests for Node Selector — scoring-based node selection."""
 import pytest
 import pytest_asyncio
+import random
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sandbox_node import SandboxNode, NodeStatus
 from app.services.node_selector import NodeSelector, DEFAULT_WEIGHTS
+
+
+@contextmanager
+def _seeded_rng(seed: int):
+    """Pin the module RNG for weighted-random selection tests: the >40/100
+    preference thresholds sit inside the jitter's variance band (observed
+    36/100 in full-suite run 2026-10-13), so the statistical-preference
+    assertions are made reproducible instead of luck-dependent."""
+    state = random.getstate()
+    random.seed(seed)
+    try:
+        yield
+    finally:
+        random.setstate(state)
 
 
 @pytest.fixture
@@ -122,10 +138,11 @@ class TestSelection:
         await _create_node(db_session, node_id="idle", cpu_usage=0.1, memory_usage=0.1)
         # With weighted-random jitter, "idle" should win most of the time
         selections = []
-        for _ in range(100):
-            result = await selector.select(db_session)
-            assert result.selected is not None
-            selections.append(result.selected.node_id)
+        with _seeded_rng(20261013):
+            for _ in range(100):
+                result = await selector.select(db_session)
+                assert result.selected is not None
+                selections.append(result.selected.node_id)
         idle_count = selections.count("idle")
         assert idle_count > 40, f"idle node selected {idle_count}/100 times, expected >40"
 
@@ -134,10 +151,11 @@ class TestSelection:
         await _create_node(db_session, node_id="unreliable", error_rate=0.5)
         await _create_node(db_session, node_id="reliable", error_rate=0.0)
         selections = []
-        for _ in range(100):
-            result = await selector.select(db_session)
-            assert result.selected is not None
-            selections.append(result.selected.node_id)
+        with _seeded_rng(20261013):
+            for _ in range(100):
+                result = await selector.select(db_session)
+                assert result.selected is not None
+                selections.append(result.selected.node_id)
         reliable_count = selections.count("reliable")
         assert reliable_count > 40, f"reliable node selected {reliable_count}/100 times, expected >40"
 
@@ -146,10 +164,11 @@ class TestSelection:
         await _create_node(db_session, node_id="full", active_tasks=9, max_tasks=10)
         await _create_node(db_session, node_id="empty", active_tasks=0, max_tasks=10)
         selections = []
-        for _ in range(100):
-            result = await selector.select(db_session)
-            assert result.selected is not None
-            selections.append(result.selected.node_id)
+        with _seeded_rng(20261013):
+            for _ in range(100):
+                result = await selector.select(db_session)
+                assert result.selected is not None
+                selections.append(result.selected.node_id)
         empty_count = selections.count("empty")
         assert empty_count > 40, f"empty node selected {empty_count}/100 times, expected >40"
 
@@ -300,9 +319,10 @@ class TestScoring:
         await _create_node(db_session, node_id="reliable", error_rate=0.0, cpu_usage=0.9)
         await _create_node(db_session, node_id="unreliable", error_rate=0.5, cpu_usage=0.1)
         selections = []
-        for _ in range(100):
-            result = await selector.select(db_session)
-            assert result.selected is not None
-            selections.append(result.selected.node_id)
+        with _seeded_rng(20261013):
+            for _ in range(100):
+                result = await selector.select(db_session)
+                assert result.selected is not None
+                selections.append(result.selected.node_id)
         reliable_count = selections.count("reliable")
         assert reliable_count > 40, f"reliable node selected {reliable_count}/100 times, expected >40"

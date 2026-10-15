@@ -96,7 +96,11 @@ class OutputGateway:
                 should_block,
             )
 
-            inspector_rows = data if rules.get("k_anonymity") or rules.get("enforce_k_anonymity") else None
+            # PZ-02: structured rows must reach the inspector whenever ANY
+            # row-level stage needs them — k-anonymity OR a DP epsilon budget
+            # (otherwise DP noise is computed on nothing and never released).
+            inspector_rows = data if (rules.get("k_anonymity") or rules.get("enforce_k_anonymity")
+                                      or policy.dp_epsilon_budget) else None
             inspection = inspect_text_output(
                 inspection_text,
                 user_id=user_id,
@@ -120,8 +124,15 @@ class OutputGateway:
                     signature=inspection.signature,
                     error="Output inspection blocked release",
                 )
+            # PZ-02: release the NOISED rows when DP actually ran — the
+            # inspection applied Laplace noise to the structured rows; the
+            # original `data` must not leak un-noised values. Redaction (if
+            # any) is applied on top of the noised rows.
             if findings:
                 data = redact_data(data)
+            noisy = getattr(inspection, "noisy_output_rows", None)
+            if noisy is not None:
+                data = redact_data(noisy) if findings else noisy
 
             # Gap A5/T7: apply field-level classification rules (mask /
             # deny-out) derived from the data product's field_classifications.

@@ -1,5 +1,10 @@
 """K8s Sandbox Adapter — manages sandbox sessions as Kubernetes pods.
 
+.. deprecated:: SS-10 CB-01
+    The k8s level is deprecated in favour of the L2' (Cube) node data plane
+    (``l2c``). Registered only when CDS_LEGACY_L2_ENABLED=true (default false);
+    retained for the transition.
+
 Implements task #131: K8s/K3s distributed scaling + tenant isolation.
 Each sandbox session = one K8s pod with:
 - Resource limits (CPU/memory/disk)

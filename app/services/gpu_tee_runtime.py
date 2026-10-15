@@ -70,6 +70,10 @@ class AttestationReport:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     valid: bool = True
     signature: str = ""
+    # PZ-04 (MR-A12): honest disclosure — stub/local-software reports must be
+    # distinguishable from real NVIDIA CC attestation by every consumer.
+    is_simulation: bool = False
+    tee_backend: str = ""
 
 
 @dataclass
@@ -292,6 +296,10 @@ class GPUTeeRuntimeStub(GPUTeeRuntime):
             measurement=measurement,
             valid=True,
             signature=signature,
+            # PZ-04 (MR-A12): this is the local software runtime — never let
+            # the report masquerade as real GPU-TEE (FG-002).
+            is_simulation=True,
+            tee_backend="local_software",
         )
 
     async def allocate_secure_memory(self, size_bytes: int, gpu_device: int = 0) -> SecureAllocation:

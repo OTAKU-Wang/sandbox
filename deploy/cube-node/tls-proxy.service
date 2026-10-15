@@ -1,0 +1,23 @@
+# cds-tls-proxy.service — CDS 组件②（SS-10 CB-02，§2.10）
+# TLS 前置代理：终结 CDS 控制面 → 节点的 mTLS（stunnel，verify=2 强制客户端证书），
+# 明文转发 127.0.0.1:<cubelet gRPC 端口>（stock cubelet gRPC 为 plaintext-only）。
+# 红线（铁律 6 纪律 + §2.10）：sidecar 不可达 = 节点 down，CDS 不做明文回退。
+# 独立 CDS 单元，不触碰任何 stock 单元（红线 1/2）。
+[Unit]
+Description=CDS Cube node TLS front-proxy (SS-10 CB-02, CDS component 2)
+Documentation=file:/opt/cds/cube-node/preflight.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# stunnel 二进制路径按发行版可能为 /usr/bin/stunnel 或 /usr/sbin/stunnel
+ExecStart=/usr/bin/stunnel /etc/cds/tls-proxy/stunnel.conf
+Restart=always
+RestartSec=2
+# 轻量资源上限（sidecar 不承载沙箱负载）
+CPUWeight=100
+# 证书轮换：替换 /etc/cds/tls-proxy/* 后 systemctl restart cds-tls-proxy
+
+[Install]
+WantedBy=multi-user.target

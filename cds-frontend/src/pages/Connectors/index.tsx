@@ -12,7 +12,6 @@ import {
   message,
   Descriptions,
   Drawer,
-  Spin,
   Tooltip,
 } from 'antd';
 import {
@@ -28,6 +27,7 @@ import { connectorApi } from '../../services/connectorApi';
 import type { Connector, HeartbeatResponse } from '../../services/connectorApi';
 import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
@@ -67,7 +67,7 @@ export default function Connectors() {
   const [form] = Form.useForm();
 
   // Fetch connectors
-  const { data: connectors, isLoading } = useQuery({
+  const { data: connectors, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['connectors'],
     queryFn: () => connectorApi.listConnectors(),
   });
@@ -272,6 +272,7 @@ export default function Connectors() {
           </Button>
         }
       >
+        {isError && <QueryErrorAlert error={error} message="连接器列表加载失败" onRetry={() => { void refetch(); }} />}
         <Table
           columns={columns}
           dataSource={connectors || []}

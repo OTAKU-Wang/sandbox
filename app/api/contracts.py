@@ -5,7 +5,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_business_user
 from app.models.user import User, UserRole
 from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.models.data_product import DataProduct
@@ -59,7 +59,7 @@ async def _validate_contract_create(
 async def create_contract(
     body: ContractCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     await _validate_contract_create(db, body, current_user)
 
@@ -106,7 +106,7 @@ async def list_contracts(
     cursor: str | None = Query(None),
     response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     filters = []
     if not _can_view_all_contracts(current_user):
@@ -147,7 +147,7 @@ async def list_contracts(
 async def get_contract(
     contract_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     contract = await contract_service.get_by_id(db, contract_id)
     if not contract:
@@ -162,7 +162,7 @@ async def sign_contract(
     contract_id: uuid.UUID,
     body: ContractSign,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     try:
         contract = await contract_service.sign(db, contract_id, current_user.id, body.signature, body.timestamp)
@@ -181,7 +181,7 @@ async def sign_contract(
 async def activate_contract(
     contract_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     contract = await contract_service.get_by_id(db, contract_id)
     if not contract:
@@ -231,7 +231,7 @@ async def terminate_contract(
     contract_id: uuid.UUID,
     body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     try:
         contract = await contract_service.terminate(db, contract_id, current_user.id)
@@ -257,7 +257,7 @@ async def terminate_contract(
 async def get_contract_policy(
     contract_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     contract = await contract_service.get_by_id(db, contract_id)
     if not contract:
@@ -271,7 +271,7 @@ async def get_contract_policy(
 async def get_dp_budget_status(
     contract_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Get DP budget status for a contract."""
     contract = await contract_service.get_by_id(db, contract_id)

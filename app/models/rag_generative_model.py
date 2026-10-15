@@ -9,7 +9,7 @@ vocab — honest conditional answer synthesis, fail-closed without the bundle.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,7 +20,7 @@ class RAGGenerativeModel(Base):
     __tablename__ = "rag_generative_models"
 
     model_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     artifact_ref: Mapped[str] = mapped_column(String(512), nullable=False)
     vocab_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

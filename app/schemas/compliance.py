@@ -58,3 +58,10 @@ class ComplianceReportResponse(BaseModel):
     compliance_status: dict[str, str]  # check_name -> pass/fail/warn
     recommendations: list[str]
     anchoring: AnchoringDisclosure | None = None
+    # PZ-06: live-state disclosure fields (additive; computed by compliance_report_service)
+    signing_backend: str | None = None
+    aead_algorithm: str | None = None
+    trust_root: str | None = None
+    chain_anchoring: str | None = None
+    # SS-13: session engine disclosure (additive, alongside the PZ-06 fields)
+    sandbox_engine: str | None = None

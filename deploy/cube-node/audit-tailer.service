@@ -1,0 +1,23 @@
+# cds-audit-tailer.service — CDS 组件③（SS-10 CB-06，单元与 env 由 CB-02 节点 bundle 交付）
+# tail egress 审计 JSONL（强制点，§2.7）→ HTTP push → CDS /internal/audit/egress（mTLS 服务证书）。
+# 红线 5（审计不可丢弃）：at-least-once；本地有界队列溢出 = critical 告警 + 停写保护，
+# 禁止"队满丢弃"语义。tailer 二进制本体由 CB-06 交付；二进制缺席时 install.sh 不 enable 本单元。
+[Unit]
+Description=CDS Cube node egress audit tailer (SS-10 CB-06, unit by CB-02)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/cds/audit-tailer.env
+# tailer 本体（CB-06 交付：deploy/cube-node/audit_tailer.py → 约定 bin 路径，python3 入口）
+ExecStart=/usr/bin/python3 __CDS_CUBE_AUDIT_TAILER_BIN__
+Restart=always
+# 崩溃重启 → offset 水位续读（无丢失；重读由 CDS 端幂等键吸收）
+RestartSec=2
+CPUWeight=10
+MemoryMax=256M
+# 审计链路失败不静默：单元 failed 状态由 CDS 节点健康探针（W14 链）拾取告警
+
+[Install]
+WantedBy=multi-user.target

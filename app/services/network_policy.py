@@ -53,6 +53,7 @@ class NetworkPolicyConfig:
     allowed_ips: list[str] = field(default_factory=list)
     allowed_domains: list[str] = field(default_factory=list)
     allowed_ports: list[int] = field(default_factory=lambda: [443, 80])
+    deny_out: list[str] = field(default_factory=list)  # SS-10 CB-04: explicit denies → CubeNetworkConfig.deny_out (l2c)
     dns_proxy_enabled: bool = True
     max_connections_per_second: int = 10
     max_bandwidth_bytes_per_second: int = 0
@@ -286,15 +287,100 @@ class NetworkPolicyEngine:
         self._dns_port_counter = 10053
         self._netns_counter = 0
 
-    async def create_policy(self, session_id: str, config: NetworkPolicyConfig) -> dict:
+    async def _session_is_l2c(self, session_id: str, db=None) -> bool:
+        """SS-10 CB-04: does this session run on the Cube L2' data plane?
+
+        The engine is host-level machinery; the level lives on the session
+        row (sandbox_level == "l2c"). The lookup runs on the CALLER's
+        session (``db``) — this method never opens its own session:
+        a second session on the shared in-memory test connection would
+        roll back (wipe) the caller's uncommitted rows on close, and on a
+        pooled production connection it would only see committed rows —
+        missing the in-flight session row created in the same request.
+
+        When ``db`` is None (no caller session available) the check is
+        skipped and False is returned — the host netns/iptables path is
+        the legacy default. A bad/unknown session id or a query failure is
+        likewise treated as "not l2c".
+        """
+        import uuid as _uuid
+
+        if db is None:
+            logger.debug(
+                "[net-policy] l2c check skipped for %s: no caller session "
+                "(host path default)", session_id,
+            )
+            return False
+
+        from sqlalchemy import select as _select
+
+        from app.models.sandbox_session import SandboxSession
+
+        try:
+            session_uuid = _uuid.UUID(str(session_id))
+            row = (await db.execute(
+                _select(SandboxSession).where(SandboxSession.id == session_uuid)
+            )).scalar_one_or_none()
+        except Exception as exc:
+            logger.warning(
+                "[net-policy] l2c check failed for %s: %s — host path default",
+                session_id, exc,
+            )
+            return False
+        return bool(row is not None and row.sandbox_level == "l2c")
+
+    async def create_policy(
+        self, session_id: str, config: NetworkPolicyConfig, db=None
+    ) -> dict:
         """Create and enforce a network policy for a session.
 
         For deny_all mode: bwrap --unshare-net handles isolation (no network).
         For allowlist mode: creates network namespace + veth + iptables + DNS proxy.
 
+        SS-10 CB-04: l2c sessions skip this host path entirely — their egress
+        is enforced by the node data plane (CubeVS/CubeEgress) via the
+        compiled full-state CubeNetworkConfig (see _session_is_l2c branch).
+        ``db`` is the caller's request session: the l2c check and the cube
+        hot-swap push run on it (never on a second session).
+
         Returns policy enforcement details.
         """
         self._policies[session_id] = config
+
+        # SS-10 CB-04 l2c branch (spec §3.5): early return — l2c never
+        # touches netns/iptables (host-side L0/L3 machinery). The
+        # Update(CubeNetworkConfig) push IS the hot-swap path (spec §2.8);
+        # its failure raises (fail-closed: the API surfaces the error
+        # instead of claiming enforcement updated).
+        if await self._session_is_l2c(session_id, db):
+            from app.services import cube_egress
+            from app.services.egress_audit import log_egress_event
+
+            log_egress_event(
+                session_id=session_id, event_type="access",
+                verdict="policy_applied", rule_id="level:l2c",
+                detail={
+                    "enforced_by": "cube_dataplane",
+                    "mode": config.mode,
+                    "note": "netns/iptables skipped for l2c (SS-10 CB-04)",
+                },
+            )
+            logger.info(f"[net-policy] {session_id}: l2c — netns/iptables skipped; "
+                        "pushing full-state CubeNetworkConfig (mode={config.mode})")
+            result = {
+                "session_id": session_id,
+                "mode": config.mode,
+                "netns_name": None,
+                "veth_host": None,
+                "veth_sandbox": None,
+                "iptables_chain": None,
+                "dns_proxy_port": None,
+                "enforced_by": "cube_dataplane",
+            }
+            result["cube_update"] = await cube_egress.apply_network_policy_to_cube(
+                session_id, config, db=db
+            )
+            return result
 
         # Initialize rate limiter for this session
         if config.max_connections_per_second > 0:
@@ -360,11 +446,48 @@ class NetworkPolicyEngine:
                      f"netns={netns_name}")
         return result
 
-    async def remove_policy(self, session_id: str) -> None:
-        """Remove all network policy enforcement for a session."""
+    async def remove_policy(self, session_id: str, db=None) -> None:
+        """Remove all network policy enforcement for a session.
+
+        ``db`` is the caller's request session (SS-10 CB-04): the l2c check
+        and the default-deny push run on it, never on a second session.
+        """
         config = self._policies.pop(session_id, None)
         self._rate_limiters.pop(session_id, None)
         if not config:
+            return
+
+        # SS-10 CB-04 l2c branch: no host artifacts to remove. Push the
+        # full-state default-deny config instead (zero-trust: policy removed
+        # ⇒ deny all). Best-effort so the terminate/cleanup chain is never
+        # blocked — a failed push is audited as security_event, not raised.
+        if await self._session_is_l2c(session_id, db):
+            from app.services import cube_egress
+            from app.services.egress_audit import log_egress_event
+
+            log_egress_event(
+                session_id=session_id, event_type="access",
+                verdict="policy_applied", rule_id="level:l2c",
+                detail={
+                    "enforced_by": "cube_dataplane",
+                    "note": "policy removed — pushing full-state default-deny "
+                            "CubeNetworkConfig (SS-10 CB-04)",
+                },
+            )
+            try:
+                await cube_egress.apply_network_policy_to_cube(
+                    session_id, NetworkPolicyConfig(mode="deny_all"),
+                    default_deny=True, db=db,
+                )
+            except Exception as exc:
+                logger.error(f"[net-policy] {session_id}: l2c default-deny push failed: {exc}")
+                log_egress_event(
+                    session_id=session_id, event_type="security_event",
+                    verdict="deny", rule_id="level:l2c",
+                    detail={"error": str(exc),
+                            "note": "default-deny push failed during policy removal"},
+                )
+            logger.info(f"[net-policy] {session_id}: l2c policy removed (cube default-deny)")
             return
 
         # Stop DNS proxy

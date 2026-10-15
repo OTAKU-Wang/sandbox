@@ -125,7 +125,15 @@ services:
       # P0 hardening switches �?production fail-closed posture.
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "true"
+      # CB-01: service token for the Go volume plugin's KMS volume-key endpoints
+      # (must match the plugin's CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN; required).
+      CDS_KMS_SERVICE_TOKEN: ${CDS_KMS_SERVICE_TOKEN}
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+      # PZ-10 (spec ss-11): MFA (TOTP) + SM2 cert login. Prod requires an
+      # explicit MFA encryption key (empty key refuses to boot).
+      CDS_AUTH_MFA_ENABLED: "true"
+      CDS_MFA_SECRET_ENCRYPTION_KEY: ${CDS_MFA_SECRET_ENCRYPTION_KEY}
+      CDS_AUTH_CERT_LOGIN: "true"
       # W3: stricter login throttle; per-scope limits sized for one replica.
       CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
       CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
@@ -145,6 +153,28 @@ services:
       CDS_MERKLE_PIPELINE_ENABLED: "false"
       CDS_EGRESS_AUDIT_ENABLED: "true"
       CDS_NODE_STALE_SECONDS: "300"
+      # SS-10 CB-01: Cube (L2') node data plane — off by default. Enabling in prod
+      # requires real node mTLS material (CDS_CUBE_NODE_TLS_CA) + CDS_CUBE_RESULTS_DIR.
+      CDS_CUBE_DATAPLANE_ENABLED: "false"
+      CDS_LEGACY_L2_ENABLED: "false"
+      CDS_CUBE_NODE_GRPC_TLS: "true"
+      CDS_CUBE_NODE_TLS_CA: ""
+      CDS_CUBE_NODE_TLS_CERT: ""
+      CDS_CUBE_NODE_TLS_KEY: ""
+      CDS_CUBE_NODE_TLS_PROXY_PORT: "9443"
+      CDS_CUBE_RESULTS_DIR: /var/lib/cds/sandbox-results
+      CDS_CUBE_SANDBOX_IMAGE: cds/cube-sandbox:latest
+      CDS_CUBE_DEK_LENGTH: "16"
+      # CB-04: CubeEgress root CA artifact (CDS-side copy of node bring-up output)
+      CDS_CUBE_EGRESS_CA: ""
+      # CB-06: cube egress audit ingestion token (POST /internal/audit/egress);
+      # empty = fail-closed (401). Must match the node tailer's credential.
+      CDS_CUBE_AUDIT_SERVICE_TOKEN: ${CDS_CUBE_AUDIT_SERVICE_TOKEN:-}
+      # CB-05: cube template artifact token signing (presigned URL TTL + HMAC token);
+      # required in production when the cube data plane is enabled (fail-closed boot).
+      CDS_CUBE_TEMPLATE_SIGNING_KEY: ${CDS_CUBE_TEMPLATE_SIGNING_KEY:-}
+      CDS_CUBE_TEMPLATE_URL_TTL_SECONDS: "3600"
+      CDS_CUBE_TEMPLATE_DIST_RETRY: "2"
       CDS_SHARED_VOLUME_ROOT: /data/shared-volumes
       CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED: "true"
       CDS_EGRESS_AUDIT_LOG_PATH: /data/egress-audit/access.jsonl
@@ -168,9 +198,22 @@ services:
       # hardware attestation is available and verified.
       CDS_ALLOW_SIMULATION: "true"
       CDS_TEE_ALLOW_SOFTWARE_FALLBACK: "true"
-      CDS_TEE_SIMULATION_MODE: "true"
       CDS_GPU_TEE_SIMULATION: "true"
       CDS_FEDERATION_JWT_KEY_REQUIRED: "true"
+      # PZ-04/PZ-05 (specs/ss-11-cds-productization.md §7.1) — prod fail-closed
+      # honesty gates: these RAISE at startup (validate_security_config) if left
+      # at their dev defaults, so they are pinned here.
+      CDS_MIA_SHADOW_MODEL: "false"
+      CDS_SM3_FALLBACK_ALLOWED: "false"
+      CDS_COLUMN_ENCRYPTION_KEY: ${CDS_COLUMN_ENCRYPTION_KEY}
+      CDS_ATTESTATION_ALLOWED_MEASUREMENTS: ${CDS_ATTESTATION_ALLOWED_MEASUREMENTS}
+      # PZ-05: federation is mTLS-terminated (FG-008). Until real cert/key/CA
+      # material is provisioned the channel stays off — prod would RAISE
+      # otherwise (fail-closed, not silent skip).
+      CDS_FEDERATION_ENABLED: "false"
+      CDS_FEDERATION_CA_BUNDLE: ""
+      CDS_FEDERATION_CERT: ""
+      CDS_FEDERATION_KEY: ""
     depends_on:
       postgres:
         condition: service_healthy

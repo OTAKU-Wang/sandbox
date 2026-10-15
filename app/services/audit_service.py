@@ -69,8 +69,23 @@ class AuditService:
         detail: dict | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
+        actor_type: str | None = None,
+        actor_id: str | None = None,
     ) -> AuditLog:
-        """Create an audit log entry in PostgreSQL."""
+        """Create an audit log entry in PostgreSQL.
+
+        SS-12 additive: optional `actor_type`/`actor_id` record the acting
+        machine identity (API key) inside `detail` without changing the SM2
+        signature event string; both default to None so existing call sites
+        and their stored detail payloads stay byte-identical.
+        """
+        if actor_type is not None or actor_id is not None:
+            if detail is None:
+                detail = {}
+            if actor_type is not None:
+                detail["actor_type"] = actor_type
+            if actor_id is not None:
+                detail["actor_id"] = actor_id
         # SM2 sign the audit event for non-repudiation (P0-2: HSM-first)
         signature = None
         try:

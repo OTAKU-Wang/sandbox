@@ -1,5 +1,7 @@
 # 密态沙箱系统（CDS）· 产品设计文档
 
+> ⚠️ **DEPRECATED（2026-10-12，SS-11 PZ-07 文档归一）**：本文件为并行历史副本，非权威版本。权威版本：`product-design.md`（同目录 root 版）。已知漂移：状态标记（设计完成 vs 初稿）、场景集（三场景 vs 六场景）、L3 同态加密表述、部署栈版本。仅作历史参考，不再修订。
+
 > 版本：v1.0
 > 状态：设计完成
 > 基于：product-spec v1.1 + detailed-tech-spec v2.0 + frontend-spec v1.0 + data-security-spec + distributed-sandbox-connector-spec + secure-output-lifecycle + advanced-scenarios-spec + frontend-roles-design

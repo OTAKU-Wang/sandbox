@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Table, Tag, Typography, Space, Select, Button, Drawer, Descriptions, message, Alert, Input } from 'antd';
+import { Table, Tag, Typography, Space, Select, Button, Drawer, Descriptions, message, Alert } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { auditApi, type AuditRecord } from '../../services/auditApi';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
@@ -22,7 +23,7 @@ export default function AuditLog() {
   const [verifyResult, setVerifyResult] = useState<{ verified: boolean; tx_hash: string | null } | null>(null);
   const [proofResult, setProofResult] = useState<{ record_hash: string; tx_hash: string } | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['audit-records', page, actionFilter],
     queryFn: () => auditApi.list({ page, page_size: 20, action: actionFilter }),
   });
@@ -104,6 +105,9 @@ export default function AuditLog() {
         />
       )}
 
+      {isError && (
+        <QueryErrorAlert error={error} message="审计日志加载失败" onRetry={() => { void refetch(); }} />
+      )}
       <Table
         columns={columns}
         dataSource={data?.items || []}

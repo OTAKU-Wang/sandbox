@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Form, Input, Button, Card, Typography, message, Space, Tag } from 'antd';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { authApi } from '../../services/authApi';
+import api from '../../services/api';
 
 const { Title, Text } = Typography;
 
@@ -11,6 +13,14 @@ export default function Login() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const [loading, setLoading] = useState(false);
+  // 登录前无 JWT：消费公开矩阵面（/health 能力区，SS-11 PZ-13）；/api/v1/meta 需认证。
+  const { data: health } = useQuery({
+    queryKey: ['health-capability'],
+    queryFn: async () =>
+      (await api.get('/health', { baseURL: '' })) as { capability?: { levels?: string[] } },
+    staleTime: 60 * 1000,
+  });
+  const capabilityLevels = health?.capability?.levels ?? [];
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
@@ -19,11 +29,15 @@ export default function Login() {
       login(resp.user, resp.access_token, resp.refresh_token);
       message.success('登录成功');
       navigate('/');
-    } catch (err: any) {
-      const detail = err?.detail;
+    } catch (err) {
+      const detail = (err as { detail?: unknown } | null)?.detail;
       const msg = Array.isArray(detail)
-        ? detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join('; ')
-        : detail || '登录失败';
+        ? detail.map((e) => {
+            if (e && typeof e === 'object' && 'msg' in e) return String((e as { msg: unknown }).msg);
+            if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
+            return JSON.stringify(e);
+          }).join('; ')
+        : typeof detail === 'string' ? detail : '登录失败';
       message.error(msg);
     } finally {
       setLoading(false);
@@ -46,7 +60,9 @@ export default function Login() {
         </Space>
         <div className="cds-auth-status">
           <span>安全域</span>
-          <strong>L1 / L2 / L3</strong>
+          {capabilityLevels.length > 0 && (
+            <strong>{capabilityLevels.map((level) => (level === 'l2c' ? "L2'" : level)).join(' / ')}</strong>
+          )}
         </div>
       </section>
 

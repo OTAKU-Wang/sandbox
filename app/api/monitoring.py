@@ -22,6 +22,7 @@ from app.models.audit_log import AuditLog
 from app.models.alert import AlertRecord
 from app.services.alert_center import alert_center
 from app.services.tee_capability import TEECapabilityDetector
+from app.services.compliance_report import disclosure_fields
 
 router = APIRouter()
 
@@ -209,6 +210,8 @@ def _security_posture_payload() -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "release_recommendation": recommendation,
         "capabilities": capabilities,
+        # PZ-06: disclosure fields (additive; computed from live state).
+        **disclosure_fields(),
     }
 
 

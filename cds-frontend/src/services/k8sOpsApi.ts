@@ -3,6 +3,10 @@ import api from './api';
 // N8: K8s runtime operations (read-only, ADMIN/OPERATOR).
 // The backend degrades honestly: without a reachable cluster, cluster_available
 // is false and items is empty — never fabricated live state.
+//
+// DEVIATION (accepted, PZ-09④): this module exports standalone functions instead
+// of a typed endpoint object, unlike the other service modules. It still rides
+// the shared `api` instance, so every call gets the auth/401-refresh interceptors.
 
 export interface OpsDeployment {
   pod_name: string;

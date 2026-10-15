@@ -40,6 +40,14 @@ KMS_DISTRIBUTIONS = Counter(
 RATE_LIMITED = Counter(
     "cds_rate_limited_total", "Requests rejected by rate limiting", ["scope"], registry=REGISTRY
 )
+CUBE_EGRESS_LINES = Counter(
+    "cds_cube_egress_lines_total", "Cube egress audit tailer lines received", ["result"], registry=REGISTRY
+)
+AUDIT_WRITE_FAILURES = Counter(
+    "cds_audit_write_failures_total",
+    "Audit log writes that could not be persisted (event lost, request continued)",
+    ["op"], registry=REGISTRY
+)
 
 
 def render_metrics() -> bytes:
@@ -66,3 +74,8 @@ def record_output_inspection(verdict: str) -> None:
 def record_kms_distribution(result: str) -> None:
     """Result is bounded: success | rejected | failed."""
     KMS_DISTRIBUTIONS.labels(result=result).inc()
+
+
+def record_cube_egress_lines(result: str) -> None:
+    """Result is bounded: stored | duplicate."""
+    CUBE_EGRESS_LINES.labels(result=result).inc()

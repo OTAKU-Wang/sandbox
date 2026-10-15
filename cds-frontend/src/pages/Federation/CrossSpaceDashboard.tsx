@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { federationApi } from '../../services/federationApi';
 import type { TrustRelationship, SyncStatus } from '../../services/federationApi';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
@@ -25,12 +26,12 @@ export default function CrossSpaceDashboard() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form] = Form.useForm();
 
-  const { data: trusts, isLoading: trustsLoading } = useQuery({
+  const { data: trusts, isLoading: trustsLoading, isError: trustsIsError, error: trustsError, refetch: refetchTrusts } = useQuery({
     queryKey: ['federation-trusts'],
     queryFn: () => federationApi.listTrusts(),
   });
 
-  const { data: syncStatus, isLoading: syncLoading } = useQuery({
+  const { data: syncStatus, isLoading: syncLoading, isError: syncIsError, error: syncError, refetch: refetchSync } = useQuery({
     queryKey: ['catalog-sync-status'],
     queryFn: () => federationApi.getSyncStatus(),
   });
@@ -137,11 +138,13 @@ export default function CrossSpaceDashboard() {
 
       {/* Trust Relationships */}
       <Card title="信任关系" style={{ marginBottom: 16 }} extra={<Button type="primary" onClick={() => setCreateOpen(true)}>建立信任</Button>}>
+        {trustsIsError && <QueryErrorAlert error={trustsError} message="信任关系加载失败" onRetry={() => { void refetchTrusts(); }} />}
         <Table columns={trustColumns} dataSource={trusts || []} rowKey="trust_id" loading={trustsLoading} pagination={false} />
       </Card>
 
       {/* Catalog Sync Status */}
       <Card title="目录同步状态">
+        {syncIsError && <QueryErrorAlert error={syncError} message="目录同步状态加载失败" onRetry={() => { void refetchSync(); }} />}
         <Table columns={syncColumns} dataSource={syncStatus || []} rowKey="space_id" loading={syncLoading} pagination={false} />
       </Card>
 

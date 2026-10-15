@@ -143,7 +143,7 @@ async def test_e2e_duckdb_buyer_read_only(client: AsyncClient, operator_headers:
     }, headers=operator_headers)
     assert resp.status_code == 200
 
-    # Another data_provider is not the owner — 403 (G-073)
+    # Another user is not the owner — 403 (G-073)
     other_h, _ = await _register_other_provider(client)
     resp = await client.post("/api/v1/sandbox-db/query", json={
         "session_id": session_id,
@@ -154,14 +154,17 @@ async def test_e2e_duckdb_buyer_read_only(client: AsyncClient, operator_headers:
 
 
 async def _register_other_provider(client: AsyncClient) -> tuple[dict, str]:
-    """Register a second data_provider and return (headers, user_id)."""
+    """Register a second user (non-owner) and return (headers, user_id).
+
+    PZ-10: role key dropped — self-registration no longer accepts
+    data_provider; ownership checks are role-independent.
+    """
     import uuid as _uuid
     unique = _uuid.uuid4().hex[:8]
     resp = await client.post("/api/v1/auth/register", json={
         "username": f"other_{unique}",
         "email": f"other_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     assert resp.status_code == 201
     data = resp.json()

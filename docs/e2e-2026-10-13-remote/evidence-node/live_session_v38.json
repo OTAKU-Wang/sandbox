@@ -1,0 +1,104 @@
+{
+  "finished": "2026-10-14T16:55:59+0800",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "evidence": [
+    {
+      "step": "admin.login",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:00+0800"
+    },
+    {
+      "step": "N1.node.schedulable",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "1 schedulable node(s)",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:00+0800"
+    },
+    {
+      "step": "setup.product_published",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "38b8f0aa-40ac-4717-a013-54aed5aaa291",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:00+0800"
+    },
+    {
+      "step": "N2.session.create",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "live l2c session 4e7b1fea-a92f-43cd-899b-63af8c6111cf running",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:00+0800"
+    },
+    {
+      "step": "N3.exec.basic",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "print(6*7) -> 42",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:16+0800"
+    },
+    {
+      "step": "N4.files.roundtrip",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "512B upload/download byte-identical",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:37+0800"
+    },
+    {
+      "step": "N5.egress.deny",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "outbound HTTP from sandbox refused",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:48+0800"
+    },
+    {
+      "step": "N6.isolation.file_escape",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "host-unique content not visible in sandbox",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:58+0800"
+    },
+    {
+      "step": "N7.isolation.cross_party",
+      "status": "PASS",
+      "status_code": null,
+      "note": "foreign session: files=403 exec=403",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:59+0800"
+    },
+    {
+      "step": "N8.proof_bundle",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "proof bundle with integrity, no raw keys",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:59+0800"
+    },
+    {
+      "step": "N9.audit.session_actions",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "3 audit actions incl exec",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:59+0800"
+    },
+    {
+      "step": "N10.session.terminate",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "session terminated",
+      "excerpt": "",
+      "ts": "2026-10-14T16:55:59+0800"
+    }
+  ]
+}

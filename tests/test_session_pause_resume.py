@@ -74,8 +74,11 @@ async def test_pause_from_ready_resumes_to_ready(client, db_session, owned_sessi
 async def test_resume_non_suspended_rejected(client, owned_session, owner_headers):
     resp = await client.post(f"/api/v1/sandbox-sessions/{owned_session.id}/resume",
                              headers=owner_headers)
-    assert resp.status_code == 400
-    assert "not suspended" in resp.json()["detail"].lower()
+    # W2 (PZ-15): state conflicts are 409 SESSION_STATE_CONFLICT with a W2 body
+    # (code + message), not a legacy 400 + detail.
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "SESSION_STATE_CONFLICT"
+    assert "not suspended" in resp.json()["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -83,7 +86,7 @@ async def test_pause_requires_ownership(client, owned_session):
     unique = uuid.uuid4().hex[:8]
     resp = await client.post("/api/v1/auth/register", json={
         "username": f"notown_{unique}", "email": f"notown_{unique}@example.com",
-        "password": "testpass123", "role": "buyer",
+        "password": "testpass123",
     })
     other = {"Authorization": f"Bearer {resp.json()['access_token']}"}
     resp = await client.post(f"/api/v1/sandbox-sessions/{owned_session.id}/pause", headers=other)
@@ -96,8 +99,11 @@ async def test_pause_terminal_session_rejected(client, db_session, owned_session
     await db_session.flush()
     resp = await client.post(f"/api/v1/sandbox-sessions/{owned_session.id}/pause",
                              headers=owner_headers)
-    assert resp.status_code == 400
-    assert "terminal" in resp.json()["detail"].lower()
+    # W2 (PZ-15): state conflicts are 409 SESSION_STATE_CONFLICT with a W2 body
+    # (code + message), not a legacy 400 + detail.
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "SESSION_STATE_CONFLICT"
+    assert "terminal" in resp.json()["message"].lower()
 
 
 @pytest.mark.asyncio

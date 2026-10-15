@@ -4,8 +4,58 @@ Production: Tongsuo SM4-GCM via system OpenSSL.
 """
 import os
 import hashlib
+import logging
 
 from Cryptodome.Cipher import AES
+
+logger = logging.getLogger(__name__)
+
+# PZ-04 (MR-A14): one process-lifetime warning when the SM3→SHA-256 fallback
+# actually runs — the API surface must be able to tell which hash produced a
+# digest.
+_sm3_fallback_warned = False
+
+
+def _sm3_fallback_allowed() -> bool:
+    """Whether the SHA-256 fallback for SM3 (gmssl missing) may be used.
+
+    Fail-closed when CDS_SM3_FALLBACK_ALLOWED=false: GM/T paths must run real
+    SM3 instead of silently hashing with SHA-256.
+    """
+    try:
+        from app.core.config import get_settings
+        return bool(get_settings().SM3_FALLBACK_ALLOWED)
+    except Exception:
+        # Settings unavailable (e.g. imported before config is loadable):
+        # keep the historical dev behavior of falling back.
+        return True
+
+
+def sm3_hash(data: bytes) -> str:
+    """SM3 hash (returns hex string). Uses gmssl SM3 when available.
+
+    Fallback (dev only): SHA-256 when gmssl is missing — gated by
+    CDS_SM3_FALLBACK_ALLOWED (PZ-04/MR-A14) and surfaced with one
+    process-lifetime warning.
+    """
+    global _sm3_fallback_warned
+    try:
+        from gmssl import sm3 as _sm3
+        return _sm3.sm3_hash(list(data))
+    except ImportError:
+        if not _sm3_fallback_allowed():
+            raise RuntimeError(
+                "gmssl is not installed and CDS_SM3_FALLBACK_ALLOWED=false: "
+                "SM3 cannot fall back to SHA-256. Install gmssl (or Tongsuo) "
+                "to run real SM3."
+            )
+        if not _sm3_fallback_warned:
+            logger.warning(
+                "gmssl not installed — SM3 requests fall back to SHA-256 "
+                "(CDS_SM3_FALLBACK_ALLOWED=true). Install gmssl for real SM3."
+            )
+            _sm3_fallback_warned = True
+        return hashlib.sha256(data).hexdigest()
 
 
 class SM4Cipher:
@@ -34,12 +84,3 @@ class SM4Cipher:
             return cipher.decrypt_and_verify(ciphertext, tag)
         except ValueError:
             raise ValueError("SM4-GCM authentication tag mismatch")
-
-
-def sm3_hash(data: bytes) -> str:
-    """SM3 hash (returns hex string). Uses gmssl SM3 when available; SHA-256 as dev fallback."""
-    try:
-        from gmssl import sm3 as _sm3
-        return _sm3.sm3_hash(list(data))
-    except ImportError:
-        return hashlib.sha256(data).hexdigest()

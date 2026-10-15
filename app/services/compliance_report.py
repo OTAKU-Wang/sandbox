@@ -1,4 +1,5 @@
 """Compliance report service — auto-fills audit data for TC609 reports."""
+import inspect
 import uuid
 from datetime import datetime
 
@@ -7,6 +8,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
 from app.models.user import User
+
+
+# PZ-06 (SS-11 §3.1): honest disclosure fields, computed from live system
+# state — never hardcoded. Shared by the compliance report, the monitoring
+# security posture and the session proof bundle (bundle_meta).
+def disclosure_fields() -> dict:
+    """Derive signing_backend / aead_algorithm / trust_root / chain_anchoring
+    / sandbox_engine.
+
+    signing_backend: "hsm" only while the audit SM2 key is a real HSM key
+        (AuditService falls back to the "__software__" in-memory keypair);
+    aead_algorithm:  the SM4-GCM label is actually AES-256-GCM until the
+        Tongsuo helper (SS-10 §2.9) swaps SM4Cipher.encrypt_gcm;
+    trust_root:      "local-simulated" while remote attestation signs against
+        the local static root (M-17), "external" only once an external root
+        is configured (attestation trust root — the PER-SESSION sandbox TEE
+        trust root is a different field, surfaced on the session detail);
+    chain_anchoring: PZ-03 state of the active backend;
+    sandbox_engine:  SS-13 — platform-level session engine disclosure: the
+        production session path is the Cube MicroVM level (l2c); platform
+        level there is no per-VM TEE until RT-06 lands (per-session value
+        comes from the session detail).
+    """
+    from app.services.audit_service import AuditService
+    from app.services.blockchain_adapter import chain_anchoring_state
+    from app.utils.crypto import SM4Cipher
+
+    key_id = getattr(AuditService, "_hsm_key_id", None)
+    signing_backend = "hsm" if key_id and key_id != "__software__" else "software"
+
+    try:
+        aead_source = inspect.getsource(SM4Cipher.encrypt_gcm)
+        aead_algorithm = "aes_fallback" if "AES.MODE_GCM" in aead_source else "tongsuo_sm4"
+    except (OSError, TypeError):
+        aead_algorithm = "aes_fallback"
+
+    import app.services.remote_attestation as remote_attestation
+    trust_root = "external" if getattr(remote_attestation, "EXTERNAL_ATTESTATION_ROOT", None) else "local-simulated"
+
+    return {
+        "signing_backend": signing_backend,
+        "aead_algorithm": aead_algorithm,
+        "trust_root": trust_root,
+        "chain_anchoring": chain_anchoring_state(),
+        "sandbox_engine": "cube_microvm",
+    }
 
 
 class ComplianceReportService:
@@ -41,6 +88,8 @@ class ComplianceReportService:
             "compliance_status": compliance_status,
             "recommendations": recommendations,
             "anchoring": self._build_anchoring_disclosure(),
+            # PZ-06: disclosure fields (additive; computed from live state).
+            **disclosure_fields(),
         }
 
     def _build_anchoring_disclosure(self) -> dict:

@@ -25,7 +25,6 @@ async def test_create_contract(client: AsyncClient, auth_headers: dict):
         "username": f"buyer_{uuid.uuid4().hex[:8]}",
         "email": f"buyer_{uuid.uuid4().hex[:8]}@example.com",
         "password": "buyerpass",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
 
@@ -62,7 +61,6 @@ async def test_regulator_can_read_all_contracts(client: AsyncClient, auth_header
         "username": f"reg_buyer_{uuid.uuid4().hex[:8]}",
         "email": f"reg_buyer_{uuid.uuid4().hex[:8]}@example.com",
         "password": "buyerpass",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
 
@@ -94,7 +92,6 @@ async def test_sign_contract(client: AsyncClient, auth_headers: dict):
         "username": f"signer_{uuid.uuid4().hex[:8]}",
         "email": f"signer_{uuid.uuid4().hex[:8]}@example.com",
         "password": "signerpass",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
 
@@ -125,7 +122,6 @@ async def test_get_contract_policy(client: AsyncClient, auth_headers: dict):
         "username": f"policy_{uuid.uuid4().hex[:8]}",
         "email": f"policy_{uuid.uuid4().hex[:8]}@example.com",
         "password": "policypass",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
 

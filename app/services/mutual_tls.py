@@ -298,5 +298,60 @@ class MTLSManager:
         return "\n".join(lines)
 
 
+# PZ-05 (MR-A8): real federation mTLS material, loaded from
+# CDS_FEDERATION_CA_BUNDLE / CDS_FEDERATION_CERT / CDS_FEDERATION_KEY (PEM file
+# paths). The MTLSManager identities above remain the SM2 bookkeeping layer;
+# this is the actual certificate material the HTTP channel terminates with.
+def load_federation_mtls_material() -> dict | None:
+    """Load and validate real federation mTLS material from settings.
+
+    Returns None when nothing is configured (dev: the channel keeps working
+    with plain verified TLS, and self-signed test certs can be pointed at via
+    the CDS_FEDERATION_* settings). When ALL of CA bundle, cert and key are
+    configured, validates that the files exist, are PEM, and the cert/key pair
+    loads — raises ValueError on invalid material (misconfiguration must fail
+    loudly, never degrade silently). The production fail-closed gate (missing
+    material while federation is enabled) lives in validate_security_config
+    and FederationConnector.
+    """
+    import ssl
+    from pathlib import Path
+
+    from app.core.config import get_settings
+
+    s = get_settings()
+    ca_bundle, cert, key = s.FEDERATION_CA_BUNDLE, s.FEDERATION_CERT, s.FEDERATION_KEY
+    if not (ca_bundle or cert or key):
+        return None
+    if not (ca_bundle and cert and key):
+        raise ValueError(
+            "Federation mTLS material is partially configured: "
+            "CDS_FEDERATION_CA_BUNDLE, CDS_FEDERATION_CERT and CDS_FEDERATION_KEY "
+            "must all be set together"
+        )
+
+    def _read_pem(path: str, label: str, must_contain: str) -> None:
+        p = Path(path)
+        if not p.is_file():
+            raise ValueError(f"Federation {label} not found: {path}")
+        text = p.read_text()
+        if must_contain not in text:
+            raise ValueError(f"Federation {label} is not valid PEM ({must_contain} missing): {path}")
+
+    _read_pem(ca_bundle, "CA bundle", "BEGIN CERTIFICATE")
+    _read_pem(cert, "client certificate", "BEGIN CERTIFICATE")
+    _read_pem(key, "client key", "PRIVATE KEY")
+
+    # The cert and key must form a loadable pair (ssl will reject mismatched
+    # or corrupt material).
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        ctx.load_cert_chain(certfile=cert, keyfile=key)
+    except ssl.SSLError as e:
+        raise ValueError(f"Federation mTLS cert/key pair is invalid: {e}")
+
+    return {"ca_bundle": ca_bundle, "cert": cert, "key": key}
+
+
 # Global singleton
 mtls_manager = MTLSManager()

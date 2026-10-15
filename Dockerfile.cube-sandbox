@@ -1,0 +1,48 @@
+# =============================================================================
+# CDS L2' 场景镜像（SS-10 CB-04 步骤 4 — CA bake）
+#
+# 沙箱信任 CubeEgress 根 CA（spec ss-10 §1.6 依赖 D / §4 CB-04）：L7 MITM
+# 的 TLS 校验链必须在该 CA 上终结，否则沙箱内所有 HTTPS egress 失败。
+#
+# CA 工件来源：CB-02 节点 bring-up 产出——节点上的
+#   /etc/cube/ca/cube-root-ca.crt   （上游 CubeEgress/nginx.conf ca_cert_path，
+#                                   2026-10-13 源码核实）
+# 由 CDS 运维拷贝到构建机后作为 build-arg 传入（见
+# scripts/build-cube-sandbox-image.sh）。
+#
+# 构建：
+#   scripts/build-cube-sandbox-image.sh <ca-artifact-path>
+#   # 或手工：
+#   docker build -f Dockerfile.cube-sandbox \
+#     --build-arg CUBE_EGRESS_CA=./cube-egress-ca.crt <context>
+#
+# probe 校验（CB-05 模板构建阶段调用，缺失 → 模板构建失败，诚实错误）：
+#   app.services.cube_egress.check_cube_egress_ca_baked(ca_path)
+# =============================================================================
+
+# build-arg：CA 工件在 build context 内的相对路径（默认 = 构建脚本拷贝的固定名）
+ARG CUBE_EGRESS_CA=./cube-egress-ca.crt
+
+FROM python:3.12-slim AS base
+
+ARG CUBE_EGRESS_CA
+
+# Bake the CubeEgress root CA into the system trust store (铁律：缺 CA 的
+# 场景镜像不得进入模板构建 —— 构建脚本 / CB-05 probe 先行校验，此处 COPY
+# 缺失会在 build 期直接失败，不做静默跳过)。
+COPY ${CUBE_EGRESS_CA} /usr/local/share/ca-certificates/cube-egress-ca.crt
+RUN set -eux; \
+    update-ca-certificates; \
+    test -s /etc/ssl/certs/ca-certificates.crt
+
+ENV PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /app
+
+# SS-14 RT-07: 沙箱 init 常驻进程（工作负载经 cubelet Exec 注入; 默认
+# python3 REPL 无 TTY 即退会收掉 containerd task → Exec 130497, 实测）。
+CMD ["sleep", "infinity"]

@@ -3,6 +3,11 @@
 Revision ID: 0007_shared_volumes
 Revises: 0006_task_queue
 Create Date: 2026-09-07
+
+NOTE (SS-14 e2e D-e2e-08): read_only server_default text("0")/text("1") →
+text("false")/text("true") — PostgreSQL rejects integer defaults on boolean
+columns, so on PG this migration could never have applied (no deployed PG
+schema carries the old literals); SQLite tolerated them. See 0005's note.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -21,7 +26,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=64), nullable=False),
         sa.Column("owner_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("size_limit_mb", sa.Integer(), nullable=False, server_default="1024"),
-        sa.Column("read_only", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("read_only", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.UniqueConstraint("owner_id", "name", name="uq_shared_volume_owner_name"),
     )
@@ -34,7 +39,7 @@ def upgrade() -> None:
         sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("volume_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("shared_volumes.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("read_only", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("read_only", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.UniqueConstraint("session_id", "volume_id", name="uq_volume_attachment"),
     )

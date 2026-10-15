@@ -1,9 +1,14 @@
 [project]
 name = "cds-sdk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python SDK for the CDS confidential data sandbox (sessions, files, snapshots, exec, logs)"
 requires-python = ">=3.10"
 dependencies = ["httpx>=0.27.0"]
+
+[project.optional-dependencies]
+# PZ-11②: WS streaming exec (ws-ticket flow). Optional — the core SDK works
+# without it and raises a clear CDSError when streaming is attempted.
+stream = ["websocket-client>=1.6"]
 readme = "README.md"
 
 [build-system]

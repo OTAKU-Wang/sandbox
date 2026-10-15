@@ -1,5 +1,7 @@
 """Training API — LLM SFT and vision model training in sandbox."""
+import io
 import json
+import logging
 import os
 import pickle
 import random
@@ -28,11 +30,14 @@ from app.services.llm_sft_runtime import (
     FinetuneMethod,
     LoRAConfig,
     SFTConfig,
+    SFTModelResolutionError,
     TrainingPhase,
     llm_sft_runtime,
 )
 from app.services.model_watermark import model_watermark_service
 from app.services.secure_checkpoint import secure_checkpoint_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -89,44 +94,87 @@ def _build_sft_config(body: Any) -> SFTConfig:
     )
 
 
-def _write_sft_checkpoint(job_id: str, result) -> str:
-    """Write a local checkpoint that downstream watermark APIs can load."""
+def _write_sft_checkpoint(job_id: str, result, config: SFTConfig) -> str:
+    """Write the training output (M-10 / MR-A10).
+
+    Real training -> the genuine ``state_dict`` (``torch.save`` ``.pt``)
+    plus an encrypted copy in the secure checkpoint store. Simulated
+    training -> an honest ``simulation_manifest`` (parameters + loss
+    formula, NO state_dict): simulated runs never produce weights, so
+    forging a ``state_dict`` was the M-10 defect.
+    """
     _TRAINING_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    path = _TRAINING_OUTPUT_ROOT / f"{job_id}.json"
-    final_loss = max(float(result.final_loss or 0.0), 0.001)
-    state_dict = {
-        "lora_adapter.weight": [
-            round((idx + 1) * 0.001 + final_loss * 0.0001, 6)
-            for idx in range(256)
-        ],
-        "lm_head.weight": [
-            round((idx + 1) * 0.0005 + final_loss * 0.00005, 6)
-            for idx in range(256)
-        ],
-    }
-    payload = {
-        "format": "cds-local-sft-checkpoint-v1",
-        "job_id": job_id,
-        "session_id": result.session_id,
-        "phase": result.phase.value,
-        "state_dict": state_dict,
-        "metrics": {
-            "total_epochs": result.total_epochs,
-            "final_loss": result.final_loss,
-            "memorization_score": result.memorization_score,
-            "watermark_injected": result.watermark_injected,
-            "duration_seconds": result.duration_seconds,
-        },
-    }
-    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+
+    if result.is_simulation:
+        manifest = {
+            "format": "cds-sft-simulation-manifest-v1",
+            "job_id": job_id,
+            "session_id": result.session_id,
+            "phase": result.phase.value,
+            "is_simulation": True,
+            "base_model": config.base_model,
+            "method": config.method.value,
+            "parameters": {
+                "epochs": config.num_epochs,
+                "batch_size": config.batch_size,
+                "learning_rate": config.learning_rate,
+                "lora_rank": config.lora_config.r,
+                "max_seq_len": config.max_seq_len,
+                "warmup_steps": config.warmup_steps,
+                "dp_enabled": config.dp_config.enabled,
+                "dp_epsilon": config.dp_config.epsilon if config.dp_config.enabled else None,
+            },
+            "loss_model": (
+                "deterministic proxy: base_loss * decay^epoch / "
+                "(size_factor * optimization_gain) — no real model was "
+                "trained and no weights exist"
+            ),
+            "metrics": {
+                "total_epochs": result.total_epochs,
+                "final_loss": result.final_loss,
+                "memorization_score": result.memorization_score,
+                "mia_status": result.mia_status,
+                "watermark_injected": result.watermark_injected,
+                "duration_seconds": result.duration_seconds,
+            },
+        }
+        path = _TRAINING_OUTPUT_ROOT / f"{job_id}.json"
+        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with tmp_path.open("w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        logger.info("Wrote simulation manifest checkpoint to %s", path)
+        return str(path)
+
+    # Real training: persist the genuine trained weights.
+    import torch
+
+    state_dict = result.model_state or {}
+    buffer = io.BytesIO()
+    torch.save(state_dict, buffer)
+    pt_path = _TRAINING_OUTPUT_ROOT / f"{job_id}.pt"
+    tmp_path = pt_path.with_name(f".{pt_path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with tmp_path.open("w", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
-        os.replace(tmp_path, path)
+        tmp_path.write_bytes(buffer.getvalue())
+        os.replace(tmp_path, pt_path)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
-    return str(path)
+
+    # Encrypted in-process copy (visible via /checkpoints).
+    try:
+        secure_checkpoint_store.encrypt_checkpoint(
+            job_id, config.num_epochs, 0, buffer.getvalue()
+        )
+    except Exception as exc:
+        logger.warning("Failed to register encrypted checkpoint for %s: %s", job_id, exc)
+
+    logger.info("Wrote real checkpoint to %s", pt_path)
+    return str(pt_path)
 
 
 def _sft_metrics_payload(result) -> dict:
@@ -137,6 +185,12 @@ def _sft_metrics_payload(result) -> dict:
         "memorization_score": result.memorization_score,
         "watermark_injected": result.watermark_injected,
         "duration_seconds": result.duration_seconds,
+        # PZ-01 / M-04: additive honesty fields — existing consumers keep
+        # working; new fields disclose simulation / MIA status.
+        "is_simulation": result.is_simulation,
+        "mia_status": result.mia_status,
+        "memorization_risk": result.memorization_risk,
+        "mia_probe": result.mia_probe,
         "epochs": [
             {
                 "epoch": metric.epoch,
@@ -209,17 +263,22 @@ async def start_sft_training(
     await db.flush()
 
     session_id = body.session_id or job_id
-    result = llm_sft_runtime.run_sft(
-        session_id=session_id,
-        config=sft_config,
-        data_product_ids=[body.dataset_path],
-    )
+    try:
+        result = llm_sft_runtime.run_sft(
+            session_id=session_id,
+            config=sft_config,
+            data_product_ids=[body.dataset_path],
+        )
+    except SFTModelResolutionError as exc:
+        # PZ-01 (a): unresolvable base model / missing torch -> fail closed
+        # with an actionable message; never fall back to silent simulation.
+        raise HTTPException(status_code=400, detail=str(exc))
     job.metrics = _sft_metrics_payload(result)
     job.completed_at = datetime.now(timezone.utc)
     if result.phase == TrainingPhase.COMPLETED:
         job.status = TrainingJobStatus.COMPLETED.value
         try:
-            job.output_path = _write_sft_checkpoint(job_id, result)
+            job.output_path = _write_sft_checkpoint(job_id, result, sft_config)
         except Exception as exc:
             job.status = TrainingJobStatus.FAILED.value
             job.error_message = f"Checkpoint write failed: {exc}"

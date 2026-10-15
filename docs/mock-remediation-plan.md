@@ -81,6 +81,7 @@
 
 ### M-01 · SM4-GCM AEAD 全线实为 AES-GCM
 
+> **SS-10 实施状态（2026-10-13）**：上方 MR-A1 步骤 2 的 `tongsuo enc -sm4-gcm` 子进程路径已作废——上游 `enc` 一律拒绝 AEAD 密码（源码核实，SS-10 §2.9）。Cube 数据面侧真实 SM4-GCM 后端已由 **CB-03 交付**：libtongsuo C helper（EVP API，OpenSSL 3.x 惯例 AAD 经 `EVP_CipherUpdate(ctx, NULL, …)` 喂入）+ Go 卷插件，禁 enc CLI；执行证据见 SS-10 §八。存量 `app/utils/crypto.py` 等路径（步骤 1/3-6 范围）仍归 MR-A1 原计划，未在本次 SS-10 范围改动。
 **现状**（`app/utils/crypto.py:2-3,13,17-36`）：`SM4Cipher` 构造固定 32 字节密钥（:17），`encrypt_gcm/decrypt_gcm` 走 `Cryptodome.Cipher.AES` AES-256-GCM（:19-36）。docstring 宣称"Production: Tongsuo SM4-GCM via system OpenSSL"（:2-3）与"production uses Tongsuo SM4-GCM"（:13）——**代码中无 Tongsuo/openssl 调用、无子进程、无 ctypes**。下游真实消费者：`egress_audit.py:45-61`（W19 审计日志静态加密，注释标 SM4-GCM 实为 AES-GCM）、`column_encryption.py`、`hsm_adapter.py:165-181`（软件 KEK wrap）。`secure_checkpoint.py:22-27,90-92,172-193` 直接承认"gmssl 不提供 SM4-GCM，统一用 AES-128-GCM"。`Tongsuo/` 为 vendor 源码，Dockerfile.api / docker-compose / scripts 均无构建接线（grep 实证）。
 
 **问题分析**：
@@ -451,3 +452,21 @@
 | 与本轮 P0 重叠的处置 | ✅ 已实现 | **MR-A15（孤儿代码）部分完成**：`chain_attestation.py` + `scripts/chain-attestation-ddl.sql` 已随 round3 N2 移除（vision×2 / training_pipeline / k_anonymity / query_rewriter 处置未在本轮范围）；N2 移除 `STREAMING_PROXY_ENABLED` 死配置（与本文件 §5.2 诚实性纪律同向） | 见 round3-spec Round 45 执行记录 | 待全量回归确认 | MR-A1..A14、MR-B1、M-16..M-27 软件预备项全部未实施（用户裁定 P0 范围） |
 
 > 说明：MR-A1（SM4 真后端）、MR-A2（SFT 真实训练）、MR-A3（DP 接线）、MR-A4（MIA）、MR-A5/A6/A9/A12/A13/A14（诚实性速修）、MR-A7（链持久化）、MR-A8（mTLS）、MR-A10/A11、MR-B1（证明白名单）均属后续轮次；与 P1 任务（N5–N9）或环境验收轨道（FG-001/002/005/007/008/010/014）衔接时随计划执行。
+
+### Round 46（2026-10-12）—— SS-11 P0 诚实可信批次（`specs/ss-11-cds-productization.md` PZ-01..08，分支 `feat/ss-11-productization`）
+
+| 任务 | 状态 | 关键产出 | 新增测试与结果 | 回归结论 | 未实施项 |
+|---|---|---|---|---|---|
+| MR-A5（M-05 联邦静态键门禁） | ✅ 已修 | `FEDERATION_JWT_KEY_REQUIRED=false` 生产改 RAISE（原仅 WARN） | tests/test_pz04_honesty_gates.py 等 45 项全绿（Track A 自报 + 父任务复核） | 待全量回归 | — |
+| MR-A6（M-06 死配置） | ✅ 已修 | `TEE_SIMULATION_MODE` 全链路移除（config + prod compose；核实无读取方） | 同上 | 待全量回归 | — |
+| MR-A7（M-07 链存证软件面） | ✅ 软件面已修 | `chain_anchoring_records` 表 + 迁移 0011 + FISCO/Ant/PG 锚定落库 + 重启后 verify 水合 + `chain_anchoring` 状态披露（pg-log/fisco-sim/ant-sim/not_configured） | tests/test_pz03_chain_persistence.py 12 项全绿 + parity 40 表 OK（Track C 自报 + 父任务复核） | 待全量回归 | 真链 e2e 归 FG-005 |
+| MR-A8（M-08 联邦 mTLS） | ✅ 软件面已修 | `CDS_FEDERATION_ENABLED` 主开关 + CA/cert/key 真 PEM 加载（无效即 ValueError）+ 生产缺材料拒通道 + httpx `verify=ca_bundle` + client cert；互信评分核实无硬编码（50 基准动态调） | tests/test_pz05_federation_attestation.py 11 项全绿 | 待全量回归 | 跨空间互操作归 FG-008 |
+| MR-A9（M-09 列 DEK） | ✅ 已修 | `CDS_COLUMN_ENCRYPTION_KEY`（16B hex/base64），生产空值 RAISE，dev 默认仅非生产 + warning | 含于 pz04 17 项 | 待全量回归 | — |
+| MR-A12（M-12 GPU stub） | ✅ 已修 | `AttestationReport.is_simulation=True` + `tee_backend="local_software"` | 含于 pz04 17 项 | 待全量回归 | 真 GPU-TEE 归 FG-002 |
+| MR-A13（M-13 seccomp） | ✅ 已修（S4 收口） | firecracker 双点（:660/:819）无 seccomp 重试接 `SECCOMP_FALLBACK_ALLOWED` 门禁；拒 → 诚实 SECURITY ERROR | 含于 pz04 17 项 | 待全量回归 | — |
+| MR-A14（M-14 sm3 回退） | ✅ 已修 | `CDS_SM3_FALLBACK_ALLOWED=false` 生产 RAISE；回退实际运行时每进程一次 warning；另修复 `crypto.py` 底部重复 `sm3_hash` 影子函数（潜在 bug） | 含于 pz04 17 项 | 待全量回归 | — |
+| MR-B1（M-17 证明白名单） | ✅ 软件面已修 | `CDS_ATTESTATION_ALLOWED_MEASUREMENTS` 生产必填（空且证明门禁开启 → RAISE）；`trust_root` 披露字段（local-simulated/external） | tests/test_pz05_federation_attestation.py | 待全量回归 | 厂商证书链归 FG-001 |
+| M-11 披露面（signing_backend） | ✅ 披露面已修 | `disclosure_fields()` 从活状态派生 `signing_backend`（HSM 激活即翻 hsm）/`aead_algorithm`/`trust_root`/`chain_anchoring`，接入证明包 `bundle_meta`（evidence_hash 输入集不变，测试锁定）/合规报告/安全态势；另补 `/api/v1/compliance/reports` HTTP body 四字段（父任务收口） | tests/test_pz06_disclosure.py 8 项全绿 | 待全量回归 | HSM 真钥归 FG-007；SM4 真后端归 SS-10 CB-03（MR-A1） |
+| MR-A2/A3/A4/A10（SFT 真实化 + DP 接线 + MIA + checkpoint） | ✅ 已修 | ① `resolve_sft_base_model`（`llm_sft_runtime.py:165`）fail-closed：torch 缺失/模型不可解析 → `SFTModelResolutionError` → API 400，永不再静默模拟；仿真仅 `CDS_TRAINING_ALLOW_SIMULATION`（dev/test conftest 钉 true，生产缺省 false=RAISE 路径）且标 `is_simulation=True`；② M-10：真实训练持久化真 `torch.save` `.pt` + 加密副本；仿真运行写 `cds-sft-simulation-manifest-v1`（无 state_dict，伪造 256 元数组已删）；③ M-04：`CDS_MIA_SHADOW_MODEL` 开 → 真影子模型探针 `mia_status=shadow_model`+`mia_probe`，关 → 诚实 `proxy_estimate`/`not_evaluable` + 超阈降级披露；④ M-03：DP 真 Laplace 加噪（`DifferentialPrivacyEngine`），`dp_applied` 真实，双预算统一（引擎 `_budgets` 已删，唯一源 `dp_budget_ledger`），预算耗尽 fail-closed 阻断；⑤ 父任务收口：`output_gateway` 将 `noisy_output_rows` 接入释放路径（修复前噪声不进 payload） | tests/test_pz01_sft_real.py 9 + test_pz02_dp.py 6 全绿；train/sft/dp/output 相关 205+125 项全绿（Track B 自报 + 父任务复核） | 待全量回归 | 分布式平台归 FG-011 |
+
+> 配置四处同步（.env.example / docker-compose.yml / docker-compose.prod.yml / helm/cds/values.yaml）已随 Track A 完成；runbook 配置矩阵已回写 7 新键（PZ-07⑥）。PZ-08 数据闭环 e2e（`tests/test_e2e_data_loop.py`，CI 门禁级）已入：上传→L0 执行→T5 头下载→审计/计量/证明包（含 bundle_meta）全链断言。

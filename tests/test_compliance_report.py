@@ -86,6 +86,9 @@ async def test_quick_compliance_report(client: AsyncClient, operator_headers: di
     data = resp.json()
     assert data["report_type"] == "tc609"
     assert len(data["recommendations"]) > 0
+    # PZ-06: live-state disclosure fields present in the HTTP body
+    for field in ("signing_backend", "aead_algorithm", "trust_root", "chain_anchoring"):
+        assert field in data and data[field], f"PZ-06 disclosure field {field} missing"
 
 
 @pytest.mark.asyncio

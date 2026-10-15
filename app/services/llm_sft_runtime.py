@@ -17,9 +17,11 @@ Supports base models: Qwen2.5, Llama-3.1, InternLM2.5, Baichuan2
 """
 from app.services.crypto_service import crypto_service
 import logging
+import os
 import re
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -111,6 +113,14 @@ class SFTResult:
     error: str | None = None
     duration_seconds: float = 0.0
     mia_status: str = "not_evaluable"  # shadow_model | proxy_estimate | not_evaluable (gap C2)
+    # PZ-01 / MR-A2 诚实性字段（PZ-01/MR-A2 honesty fields, additive）：
+    # is_simulation=True 当且仅当运行走了确定性模拟路径（CDS_TRAINING_ALLOW_SIMULATION
+    # 显式开启）；model_state 只在真实训练时携带训练后的 state_dict（模拟路径恒 None，
+    # 绝不伪造权重）。
+    is_simulation: bool = False
+    mia_probe: dict | None = None  # M-04: shadow-model probe detail (CDS_MIA_SHADOW_MODEL)
+    model_state: dict | None = None  # real trained state_dict (real runs only)
+    memorization_risk: str | None = None  # M-04 降级披露: "high" when score > threshold and gate off
 
 
 @dataclass
@@ -139,6 +149,121 @@ ALLOWED_BASE_MODELS = {
     "InternLM2.5-7B", "InternLM2.5-20B",
     "Baichuan2-7B", "Baichuan2-13B",
 }
+
+
+class SFTModelResolutionError(RuntimeError):
+    """Fail-closed: the SFT base model cannot be resolved (PZ-01 / MR-A2).
+
+    Raised when torch/transformers are missing or the requested base model
+    cannot be loaded from a local registry directory, a local path, or a
+    HuggingFace Hub id. The SFT runtime never simulates silently when this
+    happens (unless CDS_TRAINING_ALLOW_SIMULATION=true, which is a dev/test
+    escape hatch, default false).
+    """
+
+
+def resolve_sft_base_model(name: str):
+    """Load ``(model, tokenizer)`` for an SFT base model — fail-closed.
+
+    Model sources, checked in order:
+      1. ``$CDS_MODEL_REGISTRY_DIR/<name>`` — a local HuggingFace-format
+         directory (config.json + weights + tokenizer files) in the model
+         registry;
+      2. ``name`` itself, when it is an existing local directory (a direct
+         path);
+      3. ``name`` as a HuggingFace Hub id (``org/model``) — hub downloads
+         are only attempted for hub-style ids, so bare names such as
+         ``Qwen2.5-7B`` fail fast instead of hitting the network.
+
+    Raises:
+        SFTModelResolutionError: torch/transformers missing, or the model
+            cannot be loaded. Tests monkeypatch this module-level function
+            with a tiny randomly-initialized local model.
+    """
+    try:
+        import torch  # noqa: F401
+    except ImportError as exc:
+        raise SFTModelResolutionError(
+            "torch is required for real SFT training but is not installed "
+            "(pip install torch>=2.0.0)"
+        ) from exc
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as exc:
+        raise SFTModelResolutionError(
+            "transformers is required to load SFT base models but is not "
+            "installed (pip install transformers)"
+        ) from exc
+
+    candidates: list[Path] = []
+    registry_dir = os.environ.get("CDS_MODEL_REGISTRY_DIR", "").strip()
+    if registry_dir:
+        candidates.append(Path(registry_dir).expanduser() / name)
+    if name and os.path.isdir(name):
+        candidates.append(Path(name))
+    for path in candidates:
+        if not path.is_dir():
+            continue
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(str(path))
+            model = AutoModelForCausalLM.from_pretrained(str(path))
+        except Exception as exc:
+            raise SFTModelResolutionError(
+                f"failed to load local SFT base model directory {path}: {exc}"
+            ) from exc
+        logger.info("Loaded SFT base model %r from local directory %s", name, path)
+        return model, tokenizer
+
+    if "/" in name:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(name)
+            model = AutoModelForCausalLM.from_pretrained(name)
+        except Exception as exc:
+            raise SFTModelResolutionError(
+                f"failed to load SFT base model from hub id {name!r}: {exc}"
+            ) from exc
+        return model, tokenizer
+
+    raise SFTModelResolutionError(
+        f"SFT base model {name!r} is unresolvable: no local HuggingFace-format "
+        f"model directory found (set CDS_MODEL_REGISTRY_DIR to a directory "
+        f"containing {name!r}/, or pass a local path / 'org/model' hub id). "
+        f"Allowed base models: {sorted(ALLOWED_BASE_MODELS)}"
+    )
+
+
+def _training_allow_simulation() -> bool:
+    """CDS_TRAINING_ALLOW_SIMULATION — dev/test-only simulation escape hatch.
+
+    Fail-closed default (False): without this flag an unresolvable base
+    model raises instead of silently simulating. The settings attribute
+    wins once the parallel config track declares the key; until then the
+    CDS_-prefixed env var is honored so the dev/test matrix works.
+    Tests monkeypatch this module-level function.
+    """
+    from app.core.config import get_settings
+
+    value = getattr(get_settings(), "CDS_TRAINING_ALLOW_SIMULATION", None)
+    if value is None:
+        value = os.environ.get("CDS_TRAINING_ALLOW_SIMULATION", "").strip().lower()
+        return value in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _mia_shadow_model_enabled() -> bool:
+    """CDS_MIA_SHADOW_MODEL — opt-in real shadow-model MIA probe (M-04).
+
+    Fail-closed default (False): when off the SFT result stays honestly
+    labeled proxy_estimate/not_evaluable. Same settings-attr-over-env
+    resolution as _training_allow_simulation; tests monkeypatch this.
+    """
+    from app.core.config import get_settings
+
+    value = getattr(get_settings(), "CDS_MIA_SHADOW_MODEL", None)
+    if value is None:
+        value = os.environ.get("CDS_MIA_SHADOW_MODEL", "").strip().lower()
+        return value in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 class MemorizationRiskError(Exception):
@@ -390,6 +515,34 @@ class LLMSFTRuntime:
                 duration_seconds=time.monotonic() - start,
             )
 
+        # PZ-01 (MR-A2): real training requires a resolvable base model.
+        # Resolution is fail-closed: torch missing / model unresolvable ->
+        # SFTModelResolutionError. The deterministic simulation path is ONLY
+        # an explicit dev/test escape hatch (CDS_TRAINING_ALLOW_SIMULATION,
+        # default false; prod raises via validate_security_config).
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        allow_simulation = _training_allow_simulation()
+
+        model = None
+        tokenizer = None
+        try:
+            model, tokenizer = resolve_sft_base_model(config.base_model)
+        except SFTModelResolutionError as exc:
+            if not allow_simulation:
+                raise
+            if not cpu_trainer.available and settings.TRAINING_REQUIRE_TORCH:
+                raise SFTModelResolutionError(
+                    "torch is required for SFT training "
+                    "(CDS_TRAINING_REQUIRE_TORCH=true) but is not installed; "
+                    "the simulation path is not allowed under this gate"
+                ) from exc
+            logger.warning(
+                "SIMULATED SFT training (CDS_TRAINING_ALLOW_SIMULATION=true): %s", exc
+            )
+
+        is_simulation = model is None
         try:
             # Phase 1: Load model
             self._phase = TrainingPhase.LOADING_MODEL
@@ -404,11 +557,17 @@ class LLMSFTRuntime:
             )
             dataloader.load()
 
-            # Phase 3: Training -- use CPUTrainer if available
+            # Phase 3: Training
             self._phase = TrainingPhase.TRAINING
+            memorization_score = 0.0
+            mia_status = "not_evaluable"
+            mia_probe: dict | None = None
+            model_state: dict | None = None
 
-            if cpu_trainer.available:
-                cpu_result = self._run_cpu_training(config, dataloader)
+            if not is_simulation:
+                # Real CPU training: real forward/backward passes via
+                # CPUTrainer (which already supports model != None).
+                cpu_result = self._run_cpu_training(config, dataloader, model, tokenizer)
                 # Convert CPU training metrics to SFT metrics
                 for i, loss in enumerate(cpu_result.loss_history):
                     duration = cpu_result.duration_ms / 1000.0 / max(len(cpu_result.loss_history), 1)
@@ -420,53 +579,115 @@ class LLMSFTRuntime:
                         duration_seconds=duration,
                     )
                     self._metrics.append(metrics)
+                if cpu_result.error:
+                    # Fail-closed: a crashed real training run must never be
+                    # reported as a completed job.
+                    raise RuntimeError(f"Real CPU training failed: {cpu_result.error}")
                 memorization_score = cpu_result.memorization_score
                 mia_status = "proxy_estimate"
+
+                # MIA (M-04 / MR-A4): opt-in real shadow-model memorization
+                # probe. Disabled by default (CDS_MIA_SHADOW_MODEL=false);
+                # when off the status stays honestly "proxy_estimate".
+                if _mia_shadow_model_enabled():
+                    try:
+                        probe_score, mia_probe = self._run_shadow_model_probe(
+                            config, dataloader, config.max_memorization_score
+                        )
+                        memorization_score = probe_score
+                        mia_status = "shadow_model"
+                    except Exception as probe_exc:
+                        logger.warning("MIA shadow-model probe failed: %s", probe_exc)
+                        mia_probe = {"method": "shadow_model", "error": str(probe_exc)}
+
+                if hasattr(model, "state_dict"):
+                    model_state = dict(model.state_dict())
             else:
-                # Fallback: simulation-based training
-                batches = dataloader.get_batches()
-                for epoch in range(config.num_epochs):
-                    epoch_start = time.monotonic()
-                    epoch_loss = 0.0
-                    samples_this_epoch = 0
-
-                    for batch in batches:
-                        step_loss = self._simulate_training_step(epoch, config)
-                        epoch_loss += step_loss * len(batch)
-                        samples_this_epoch += len(batch)
-
-                    avg_loss = epoch_loss / max(samples_this_epoch, 1)
-                    duration = time.monotonic() - epoch_start
-
-                    metrics = TrainingMetrics(
-                        epoch=epoch,
-                        loss=avg_loss,
-                        learning_rate=config.learning_rate * (1 - epoch / config.num_epochs),
-                        samples_seen=samples_this_epoch,
-                        duration_seconds=duration,
+                # Simulation escape hatch (CDS_TRAINING_ALLOW_SIMULATION=true)
+                if cpu_trainer.available:
+                    train_cfg = TrainConfig(
+                        learning_rate=config.learning_rate,
+                        num_epochs=config.num_epochs,
+                        batch_size=config.batch_size,
+                        max_grad_norm=config.dp_config.max_grad_norm,
+                        warmup_steps=config.warmup_steps,
+                        dp_enabled=config.dp_config.enabled,
+                        dp_noise_multiplier=config.dp_config.noise_multiplier,
+                        dp_max_grad_norm=config.dp_config.max_grad_norm,
+                        memorization_threshold=config.max_memorization_score,
+                        use_lora=(config.method in (FinetuneMethod.LORA, FinetuneMethod.QLORA)),
+                        lora_r=config.lora_config.r,
+                        lora_alpha=config.lora_config.lora_alpha,
+                        lora_dropout=config.lora_config.lora_dropout,
+                        lora_target_modules=list(config.lora_config.target_modules),
                     )
-                    self._metrics.append(metrics)
-                    logger.info(f"Epoch {epoch}: loss={avg_loss:.4f}, samples={samples_this_epoch}")
+                    dataset = [
+                        {"text": sample}
+                        for batch in dataloader.get_batches()
+                        for sample in batch
+                    ]
+                    cpu_result = cpu_trainer._simulate_fallback(dataset, train_cfg)
+                    for i, loss in enumerate(cpu_result.loss_history):
+                        duration = cpu_result.duration_ms / 1000.0 / max(len(cpu_result.loss_history), 1)
+                        metrics = TrainingMetrics(
+                            epoch=i,
+                            loss=loss,
+                            learning_rate=config.learning_rate * (1 - i / config.num_epochs),
+                            samples_seen=dataloader.num_samples,
+                            duration_seconds=duration,
+                        )
+                        self._metrics.append(metrics)
+                    memorization_score = cpu_result.memorization_score
+                    mia_status = "proxy_estimate"
+                else:
+                    # Pure-python per-epoch simulation loop (torch unavailable)
+                    batches = dataloader.get_batches()
+                    for epoch in range(config.num_epochs):
+                        epoch_start = time.monotonic()
+                        epoch_loss = 0.0
+                        samples_this_epoch = 0
 
-                # Phase 4: MIA memorization probe (fallback mode)
-                probe = MIAProbe(
-                    member_samples=dataloader.get_sample(200),
-                    non_member_samples=dataloader.get_holdout(200),
-                )
-                mia_result = probe.detailed_result(config.max_memorization_score)
-                memorization_score = mia_result.advantage_score
-                mia_status = mia_result.mia_status
+                        for batch in batches:
+                            step_loss = self._simulate_training_step(epoch, config)
+                            epoch_loss += step_loss * len(batch)
+                            samples_this_epoch += len(batch)
+
+                        avg_loss = epoch_loss / max(samples_this_epoch, 1)
+                        duration = time.monotonic() - epoch_start
+
+                        metrics = TrainingMetrics(
+                            epoch=epoch,
+                            loss=avg_loss,
+                            learning_rate=config.learning_rate * (1 - epoch / config.num_epochs),
+                            samples_seen=samples_this_epoch,
+                            duration_seconds=duration,
+                        )
+                        self._metrics.append(metrics)
+                        logger.info(f"Epoch {epoch}: loss={avg_loss:.4f}, samples={samples_this_epoch}")
+
+                    # Phase 4: MIA memorization probe (fallback mode)
+                    probe = MIAProbe(
+                        member_samples=dataloader.get_sample(200),
+                        non_member_samples=dataloader.get_holdout(200),
+                    )
+                    mia_result = probe.detailed_result(config.max_memorization_score)
+                    memorization_score = mia_result.advantage_score
+                    mia_status = mia_result.mia_status
 
             # Check memorization threshold — Gap C2: only a REAL shadow-model
-            # evaluation may enforce the hard gate. Deterministic proxy
-            # estimates are advisory (labeled proxy_estimate); hard-gating on
-            # them would present a heuristic as real memorization evidence.
+            # evaluation may enforce the hard gate. (M-04: the shadow branch
+            # is now reachable when CDS_MIA_SHADOW_MODEL=true.)
             self._phase = TrainingPhase.PROBING
             if mia_status == "shadow_model" and memorization_score > config.max_memorization_score:
                 raise MemorizationRiskError(
                     f"Memorization score {memorization_score:.3f} exceeds "
                     f"threshold {config.max_memorization_score}"
                 )
+            # M-04 降级披露: when the hard gate is off, an over-threshold
+            # score is disclosed (memorization_risk), not silently passed.
+            memorization_risk = (
+                "high" if memorization_score > config.max_memorization_score else None
+            )
 
             # Phase 5: Watermark injection
             self._phase = TrainingPhase.WATERMARKING
@@ -487,6 +708,10 @@ class LLMSFTRuntime:
                 metrics=list(self._metrics),
                 duration_seconds=time.monotonic() - start,
                 mia_status=mia_status,
+                is_simulation=is_simulation,
+                mia_probe=mia_probe,
+                model_state=None if is_simulation else model_state,
+                memorization_risk=memorization_risk,
             )
 
         except MemorizationRiskError:
@@ -502,6 +727,7 @@ class LLMSFTRuntime:
                 metrics=list(self._metrics),
                 error="Memorization risk exceeded threshold",
                 duration_seconds=time.monotonic() - start,
+                is_simulation=is_simulation,
             )
 
         except Exception as e:
@@ -517,6 +743,7 @@ class LLMSFTRuntime:
                 metrics=list(self._metrics),
                 error=str(e),
                 duration_seconds=time.monotonic() - start,
+                is_simulation=is_simulation,
             )
 
     def _simulate_training_step(self, epoch: int, config: SFTConfig) -> float:
@@ -564,16 +791,24 @@ class LLMSFTRuntime:
         return max(0.1, (base_loss * decay / (1.0 + lr_factor * 0.05)) + jitter)
 
     def _run_cpu_training(
-        self, config: SFTConfig, dataloader: "SecureTextDataLoader"
+        self,
+        config: SFTConfig,
+        dataloader: "SecureTextDataLoader",
+        model: Any,
+        tokenizer: Any,
     ) -> CPUTrainingResult:
         """Delegate training to CPUTrainer with real forward/backward passes.
 
-        Builds a TrainConfig from SFTConfig, prepares the dataset from
-        the dataloader's samples, and runs the CPU training loop.
+        PZ-01 (MR-A2): the real model and tokenizer come from
+        ``resolve_sft_base_model`` — this path no longer passes None, so
+        ``CPUTrainer._can_run_real_training`` is true and the trainer runs
+        genuine forward/backward steps.
 
         Args:
             config: SFT training configuration.
             dataloader: The data loader with loaded samples.
+            model: Resolved base model (never None on this path).
+            tokenizer: Resolved tokenizer (never None on this path).
 
         Returns:
             CPUTrainingResult from CPUTrainer.train().
@@ -608,20 +843,76 @@ class LLMSFTRuntime:
             f"method={config.method.value}"
         )
 
-        # CPUTrainer expects a model and tokenizer; we pass None since
-        # the simulation fallback doesn't need them. For real training,
-        # the caller would provide actual model instances.
-        result = cpu_trainer.train(
-            model=None,
-            tokenizer=None,
+        return cpu_trainer.train(
+            model=model,
+            tokenizer=tokenizer,
             dataset=dataset,
             config=train_cfg,
         )
 
-        if result.error:
-            logger.warning(f"CPU training error: {result.error}")
+    def _run_shadow_model_probe(
+        self,
+        config: SFTConfig,
+        dataloader: "SecureTextDataLoader",
+        threshold: float,
+    ) -> tuple[float, dict]:
+        """Real shadow-model MIA probe (M-04 / MR-A4).
 
-        return result
+        A fresh shadow model (re-resolved from the same base source, so its
+        pre-training state matches the main model's) is trained on the PII-
+        masked corpus MINUS the held-out member probe samples; its real
+        forward-pass loss on member vs non-member samples is then compared
+        (``cpu_trainer.check_memorization`` runs real forward passes on the
+        shadow model). Only a probe that ran this way may set
+        ``mia_status="shadow_model"``.
+
+        Returns:
+            (advantage score in [0, 1], probe detail dict)
+        """
+        shadow_model, shadow_tokenizer = resolve_sft_base_model(config.base_model)
+        corpus = [sample for batch in dataloader.get_batches() for sample in batch]
+        member_samples = corpus[: min(20, len(corpus))]
+        train_texts = corpus[len(member_samples): len(member_samples) + 48]
+        non_member_samples = dataloader.get_holdout(min(20, max(len(corpus), 1)))
+        if not train_texts or not member_samples:
+            raise ValueError("corpus too small for a shadow-model MIA probe")
+
+        shadow_cfg = TrainConfig(
+            learning_rate=config.learning_rate,
+            num_epochs=1,
+            batch_size=config.batch_size,
+            max_grad_norm=config.dp_config.max_grad_norm,
+            warmup_steps=0,
+            memorization_threshold=threshold,
+            use_lora=False,
+        )
+        cpu_trainer.train(
+            shadow_model,
+            shadow_tokenizer,
+            [{"text": sample} for sample in train_texts],
+            shadow_cfg,
+        )
+        probe = cpu_trainer.check_memorization(
+            shadow_model,
+            shadow_tokenizer,
+            [{"text": sample} for sample in member_samples],
+            threshold,
+        )
+        score = max(0.0, min(1.0, float(probe.score)))
+        detail = {
+            "method": "shadow_model",
+            "score": score,
+            "member_loss": float(probe.member_loss),
+            "non_member_loss": float(probe.non_member_loss),
+            "num_member_samples": len(member_samples),
+            "num_non_member_samples": len(non_member_samples),
+            "num_shadow_train_samples": len(train_texts),
+            "threshold": threshold,
+            "passed": probe.passed,
+            "details": probe.details,
+        }
+        logger.info("Shadow-model MIA probe: score=%.4f (%s)", score, probe.details)
+        return score, detail
 
     def _inject_watermark(self, session_id: str) -> bool:
         """Inject invisible provenance watermark into model weights.

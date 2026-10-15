@@ -1,0 +1,73 @@
+// CDS volume plugin extension API (SS-10 CB-03, spec step 3).
+//
+// This is a CDS-owned extension, NOT part of the upstream CubeSandbox
+// volumeplugin protocol. The stock protocol (Attach/Detach/Create/Destroy)
+// carries no data path; CDS pushes data-directory snapshots to the node
+// plugin over this channel (mTLS in production; the control plane is the
+// only authorized caller).
+syntax = "proto3";
+
+package cdsvolume.v1;
+
+option go_package = "cds-volume-plugin/gen/cdsvolumev1;cdsvolumev1";
+
+service CDSVolumeExtension {
+  // PutVolumeData writes the (single, bounded) data blob of a volume.
+  // The volume must exist (Controller Create already ran) and must not
+  // hold data yet, unless the payload is byte-identical (idempotent retry).
+  // The plugin SM4-GCM encrypts the payload at rest (spec §2.9 helper path).
+  rpc PutVolumeData(PutVolumeDataRequest) returns (PutVolumeDataResponse);
+
+  // GetVolumeInfo reports volume metadata (layout, cipher, size, state).
+  rpc GetVolumeInfo(GetVolumeInfoRequest) returns (GetVolumeInfoResponse);
+
+  // ReadSandboxFile reads a file from a live sandbox's writable rootfs
+  // (SS-14 RT-07, 2026-10-14: upstream cold-start sandboxes do NOT wire
+  // declared host_dir/empty_dir/plugin volumes into the guest — /results,
+  // /scratch, /data are plain dirs on the writable-rootfs overlay, whose
+  // upper layer is a host XFS ext4 file (disk/<cubebox_id>/upper/). The
+  // plugin loop-mounts that file READ-ONLY, copies the file out, and
+  // unmounts. Reads are cache-safe while the guest holds the file live;
+  // the host NEVER writes into it (that would double-mount corrupt).
+  rpc ReadSandboxFile(ReadSandboxFileRequest) returns (ReadSandboxFileResponse);
+}
+
+message ReadSandboxFileRequest {
+  // cubebox id (== container id for the first container, 32 hex).
+  string cubebox_id = 1;
+  // session id (uuid string) — names the rootfs volume file.
+  string session_id = 2;
+  // Path inside the container root, e.g. ".cds-exec/out.code".
+  string vm_path = 3;
+}
+
+message ReadSandboxFileResponse {
+  bytes data = 1;
+  bool exists = 2;
+  uint64 size_bytes = 3;
+}
+
+message PutVolumeDataRequest {
+  string volume_id = 1;
+  // AAD bound into the GCM tag: defaults to the volume name/label.
+  string aad = 2;
+  bytes data = 3;
+}
+
+message PutVolumeDataResponse {
+  uint64 data_size_bytes = 1;
+  bool idempotent_retry = 2;
+}
+
+message GetVolumeInfoRequest {
+  string volume_id = 1;
+}
+
+message GetVolumeInfoResponse {
+  string volume_id = 1;
+  string name = 2;
+  string cipher = 3;
+  string dek_ref = 4;
+  uint64 data_size_bytes = 5;
+  bool has_data = 6;
+}

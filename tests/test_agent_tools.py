@@ -11,7 +11,7 @@ from app.services.agent_tools import (
 
 
 def test_registry_has_all_builtin_tools():
-    ids = {t.id for t in tool_registry.list()}
+    ids = {t.id for t in tool_registry.list_tools()}
     assert ids == {"compute", "rag_retrieve", "inference", "db_query", "http", "llm_reason"}
 
 

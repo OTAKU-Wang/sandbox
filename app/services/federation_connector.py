@@ -661,7 +661,32 @@ class FederationConnector:
 
         Builds the federation API URL from the remote space endpoint, forwards
         the operation and payload with federated auth headers.
+
+        PZ-05 (MR-A8): the channel is mTLS-terminated. Real cert/key/CA
+        material (CDS_FEDERATION_CA_BUNDLE / CERT / KEY) is enforced —
+        production with federation enabled refuses the channel without valid
+        material (fail-closed raise, never silent skip).
         """
+        from app.core.config import get_settings, is_production
+        from app.services.mutual_tls import load_federation_mtls_material
+
+        settings = get_settings()
+        if not settings.FEDERATION_ENABLED:
+            raise RuntimeError(
+                "Federation channel is disabled (CDS_FEDERATION_ENABLED=false) — "
+                "refusing remote request"
+            )
+
+        # Invalid material raises ValueError (operator misconfiguration, any env).
+        mtls = load_federation_mtls_material()
+        if is_production(settings) and mtls is None:
+            raise RuntimeError(
+                "Federation mTLS material is missing in production: set "
+                "CDS_FEDERATION_CA_BUNDLE, CDS_FEDERATION_CERT and "
+                "CDS_FEDERATION_KEY, or disable the channel with "
+                "CDS_FEDERATION_ENABLED=false"
+            )
+
         base_url = trust.remote_space.endpoint.rstrip("/")
         url = f"{base_url}/api/v1/federation/{request.operation}"
 
@@ -678,7 +703,11 @@ class FederationConnector:
         timeout = httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0)
 
         try:
-            with httpx.Client(timeout=timeout, verify=True) as client:
+            # mTLS: verify the remote against our CA bundle and present our
+            # client cert; dev without configured material keeps plain TLS.
+            client_verify = mtls["ca_bundle"] if mtls is not None else True
+            client_cert = (mtls["cert"], mtls["key"]) if mtls is not None else None
+            with httpx.Client(timeout=timeout, verify=client_verify, cert=client_cert) as client:
                 response = client.post(
                     url,
                     json=body,

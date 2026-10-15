@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles
+from app.core.deps import get_business_user, require_roles
 from app.models.user import User, UserRole
 from app.models.data_product import DataProduct
 from app.models.data_resource import DataResource, ResourceStatus, ResourceType, ResourceFormat
@@ -213,14 +213,16 @@ async def upload_data_resource(
         user_id=current_user.id, resource_id=str(resource.id),
         detail={"format": detected_format.value, "size": len(content), "rows": row_count},
     )
-
+    # SS-14 D-e2e-14 同族 (2026-10-14): 显式 commit 后再响应 —— upload 200 先于
+    # commit 可见时, 紧接的 create-product 按 resource_id 读不到行 (404)。
+    await db.commit()
     return DataResourceResponse.model_validate(resource)
 
 
 @router.get("/", response_model=list[DataResourceResponse])
 async def list_data_resources(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """List data resources owned by the current user."""
     result = await db.execute(
@@ -233,7 +235,7 @@ async def list_data_resources(
 async def get_data_resource(
     resource_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Get a data resource by ID."""
     result = await db.execute(select(DataResource).where(DataResource.id == resource_id))
@@ -249,7 +251,7 @@ async def get_data_resource(
 async def delete_data_resource(
     resource_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Delete a data resource."""
     result = await db.execute(select(DataResource).where(DataResource.id == resource_id))
@@ -298,7 +300,7 @@ async def sample_data_resource(
     sample_size: int = Query(100, ge=1, le=10000),
     method: str = Query("random", pattern="^(random|systematic|first_n)$"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Sample rows from a data resource for testing.
 
@@ -339,7 +341,7 @@ async def sample_data_resource(
 async def desensitize_data_resource(
     resource_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Apply PII masking to a data resource for safe testing.
 
@@ -390,7 +392,7 @@ def _generate_synthetic_data_from_schema(schema: list[dict], row_count: int, res
 async def generate_synthetic_data(
     schema: list[dict],
     row_count: int = Query(100, ge=1, le=10000),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Generate synthetic test data from a schema definition.
 
@@ -404,7 +406,7 @@ async def generate_synthetic_data(
 async def generate_mock_data(
     schema: list[dict],
     row_count: int = Query(100, ge=1, le=10000),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Deprecated compatibility alias for synthetic test data generation."""
     return _generate_synthetic_data_from_schema(schema, row_count, "mock")

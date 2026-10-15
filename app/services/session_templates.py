@@ -95,18 +95,28 @@ def _merged_registry() -> dict[str, dict]:
                             "description": str(tpl.get("description", "")),
                             "files": {str(k): str(v) for k, v in (tpl.get("files") or {}).items()},
                             "env": {str(k): str(v) for k, v in (tpl.get("env") or {}).items()},
+                            # SS-10 CB-05: optional reference to a CDS cube
+                            # template (id or name) this JSON template maps to.
+                            "cube_template_id": tpl.get("cube_template_id"),
                         }
         except (ValueError, TypeError) as e:
             logger.warning("[SessionTemplates] ignoring invalid CDS_SESSION_TEMPLATES_JSON: %s", e)
     return registry
 
 
-def register_template(name: str, description: str, files: dict[str, str], env: dict[str, str] | None = None) -> None:
+def register_template(
+    name: str,
+    description: str,
+    files: dict[str, str],
+    env: dict[str, str] | None = None,
+    cube_template_id: str | None = None,
+) -> None:
     """Programmatically register a template (merged over built-ins)."""
     BUILTIN_TEMPLATES[str(name)] = {
         "description": str(description),
         "files": {str(k): str(v) for k, v in (files or {}).items()},
         "env": {str(k): str(v) for k, v in (env or {}).items()},
+        "cube_template_id": cube_template_id,
     }
 
 

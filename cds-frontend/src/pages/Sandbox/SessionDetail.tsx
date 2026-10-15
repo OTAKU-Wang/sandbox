@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ExecStreamTerminal from '../../components/Sandbox/ExecStreamTerminal';
+import ErrorCard from '../../components/Feedback/ErrorCard';
+import ProofBundleDrawer from './ProofBundleDrawer';
+import SessionStatusStrip from './SessionStatusStrip';
 import {
   Alert,
   Button,
   Card,
   Col,
   Descriptions,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -15,25 +18,26 @@ import {
   List,
   Modal,
   Popconfirm,
+  Progress,
   Row,
   Select,
   Space,
-  Spin,
   Statistic,
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
   message,
-} from 'antd';
-import type { UploadProps } from 'antd';
+} from 'antd';import type { UploadProps } from 'antd';
 import {
   CodeOutlined,
   DeleteOutlined,
   DownloadOutlined,
   FileProtectOutlined,
   FileTextOutlined,
+  InfoCircleOutlined,
   LinkOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
@@ -43,19 +47,26 @@ import {
   StopOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
+import { ApiOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   sandboxApi,
+  isSessionOperation,
+  isTerminalOperation,
   type SessionExecuteResult,
   type ExecResult,
   type SessionLogEntry,
   type SessionFile,
   type SessionSnapshot,
+  type SessionOperation,
 } from '../../services/sandboxApi';
+import { metaApi } from '../../services/metaApi';
 import { useAuthStore } from '../../stores/authStore';
 import { UserRole } from '../../types/enums';
 import { hasAnyRole } from '../../utils/roles';
-import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage, CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import SimulationBadge, { simulationStateForValue, type SimulationBadgeState } from '../../components/Feedback/SimulationBadge';
+import { supportsWsStreaming, rowReviewStatus, parseW2Error } from './sessionWorkbench';
 
 const { Title, Paragraph, Text } = Typography;
 const { TextArea } = Input;
@@ -99,6 +110,13 @@ const statusLabels: Record<string, string> = {
   expired: '已过期',
 };
 
+// PZ-16 ①：T5 行级状态高亮（/logs 条目 detail 带 inspection 字段时）
+const rowReviewMeta: Record<string, { color: string; label: string; border: string; bg: string }> = {
+  passed: { color: 'green', label: 'passed', border: '#52c41a', bg: '#f6ffed' },
+  redacted: { color: 'orange', label: 'redacted', border: '#fa8c16', bg: '#fff7e6' },
+  blocked: { color: 'red', label: 'blocked', border: '#ff4d4f', bg: '#fff1f0' },
+};
+
 const modeLabels: Record<string, string> = {
   structured_query: '结构化查询',
   structured_modeling: '结构化建模',
@@ -106,6 +124,13 @@ const modeLabels: Record<string, string> = {
   llm_training: 'LLM 训练',
   product_dev: '产品开发',
   joint_federated: '联合计算',
+};
+
+// SS-13: trust_root 徽标（level Tag 同行）——真实 TEE 显示硬件名，none/缺失诚实披露为裸 MicroVM
+const trustRootLabels: Record<string, string> = {
+  tdx: 'TDX 机密计算',
+  sev_snp: 'SEV-SNP 机密计算',
+  none: '无 TEE 硬件（裸 MicroVM）',
 };
 
 const severityColors: Record<string, string> = {
@@ -121,11 +146,15 @@ const proofLevelLabels: Record<string, string> = {
   runtime_isolation: '运行时隔离',
 };
 
-const proofLevelColors: Record<string, string> = {
-  hardware_tee: 'green',
-  software_confidential: 'orange',
-  runtime_isolation: 'blue',
-};
+// PZ-14：后端披露字段（老响应可能缺失，防御式读取）
+interface SecurityReportDisclosure {
+  ner_engine?: string | null;
+  signature_algorithm?: string | null;
+}
+
+function disclosureString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
 
 function shortId(id?: string | null) {
   return id ? `${id.slice(0, 8)}...${id.slice(-6)}` : '-';
@@ -183,15 +212,45 @@ export default function SessionDetail() {
   // --- Files ---
   const [downloadRedactedFile, setDownloadRedactedFile] = useState<string | null>(null);
 
+  // PZ-16 ③：文件审查预告（X-CDS-Output-Review 头解析结果，按文件名缓存）
+  // 与 409 阻断发现摘要（不放开，仅展示 findings）
+  const [fileReviews, setFileReviews] = useState<Record<string, { status: 'passed' | 'redacted' | 'blocked'; findings: number }>>({});
+  const [blockedDownload, setBlockedDownload] = useState<{
+    filename: string;
+    findingsCount: number;
+    findings: { severity?: string; type?: string; message?: string }[];
+  } | null>(null);
+
   // --- Snapshots ---
   const [createSnapshotOpen, setCreateSnapshotOpen] = useState(false);
   const [snapshotDescription, setSnapshotDescription] = useState('');
 
-  const { data: session, isLoading } = useQuery({
+  // PZ-16 ④：202 异步快照操作（轮询 GET /operations/{op_id}）+ OPERATION_LOCKED 锁定指示
+  const [activeOp, setActiveOp] = useState<SessionOperation | null>(null);
+  const [opLocked, setOpLocked] = useState<{ retryAfter: number } | null>(null);
+  const { data: opData } = useQuery({
+    queryKey: ['sandbox-session-operation', activeOp?.operation_id],
+    queryFn: () => sandboxApi.getOperation(activeOp!.operation_id),
+    enabled: !!activeOp && !isTerminalOperation(activeOp),
+    refetchInterval: (q) => (isTerminalOperation(q.state.data) ? false : 2000),
+    staleTime: 0,
+  });
+
+  const { data: session, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['sandbox-session', id],
     queryFn: () => sandboxApi.get(id!),
     enabled: !!id,
   });
+
+  // PZ-16 ①：流式能力由 PZ-13 能力矩阵判定（stream_ws=real），不可用时回退 L0/k8s 白名单
+  const { data: capabilityMatrix } = useQuery({
+    queryKey: ['capability-matrix'],
+    queryFn: () => metaApi.getCapabilityMatrix(),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+  const streamingSupported = !!session && supportsWsStreaming(session.sandbox_level, capabilityMatrix);
+  const sessionIsActive = !!session && ['pending', 'provisioning', 'key_distributing', 'ready', 'running'].includes(session.status);
 
   const canOperate = !!session && (
     user?.id === session.user_id || hasAnyRole(user?.role, [UserRole.OPERATOR, UserRole.ADMIN])
@@ -206,7 +265,12 @@ export default function SessionDetail() {
   const canManageFiles = !!session && canOperate && ['ready', 'running', 'suspended'].includes(session.status);
   const canManageSnapshots = !!session && canOperate && ['ready', 'running', 'suspended'].includes(session.status);
 
-  const { data: networkPolicy } = useQuery({
+  const {
+    data: networkPolicy,
+    isError: networkIsError,
+    error: networkError,
+    refetch: refetchNetworkPolicy,
+  } = useQuery({
     queryKey: ['sandbox-session-network-policy', id],
     queryFn: () => sandboxApi.getNetworkPolicy(id!),
     enabled: !!id && !!session,
@@ -216,6 +280,8 @@ export default function SessionDetail() {
   const {
     data: usage,
     isFetching: usageFetching,
+    isError: usageIsError,
+    error: usageError,
     refetch: refetchUsage,
   } = useQuery({
     queryKey: ['sandbox-session-usage', id],
@@ -224,6 +290,7 @@ export default function SessionDetail() {
   });
 
   // --- Logs ---
+  // PZ-16 ①：非 WS 级别（L1/L2/L3/L2'）轮询 /logs 审计尾（3s），显式"非实时"；WS 级别保留手动刷新
   const {
     data: logsData,
     isFetching: logsFetching,
@@ -238,6 +305,7 @@ export default function SessionDetail() {
       action: logActionFilter || undefined,
     }),
     enabled: !!id && !!session,
+    refetchInterval: !streamingSupported && sessionIsActive ? 3000 : false,
   });
 
   // Accumulate logs for "load more" pagination
@@ -268,6 +336,8 @@ export default function SessionDetail() {
   const {
     data: filesData,
     isFetching: filesFetching,
+    isError: filesIsError,
+    error: filesError,
     refetch: refetchFiles,
   } = useQuery({
     queryKey: ['sandbox-session-files', id],
@@ -279,6 +349,8 @@ export default function SessionDetail() {
   const {
     data: snapshotsData,
     isFetching: snapshotsFetching,
+    isError: snapshotsIsError,
+    error: snapshotsError,
     refetch: refetchSnapshots,
   } = useQuery({
     queryKey: ['sandbox-session-snapshots', id],
@@ -286,17 +358,29 @@ export default function SessionDetail() {
     enabled: !!id && !!session,
   });
 
-  const {
-    data: proofBundle,
-    isFetching: proofFetching,
-    isError: proofIsError,
-    error: proofError,
-    refetch: refetchProofBundle,
-  } = useQuery({
-    queryKey: ['sandbox-session-proof-bundle', id],
-    queryFn: () => sandboxApi.getProofBundle(id!),
-    enabled: false,
-  });
+  // 异步操作到达终态：刷新快照/文件/用量并清除进度指示
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!activeOp || !opData || !isTerminalOperation(opData)) return;
+    if (opData.operation_id !== activeOp.operation_id) return;
+    if (opData.status === 'succeeded') {
+      message.success(opData.op_type === 'rollback' ? '快照回滚完成' : '快照创建完成');
+    } else {
+      message.error(`操作失败：${opData.error || '未知错误'}`);
+    }
+    void refetchSnapshots();
+    void refetchFiles();
+    void refetchUsage();
+    setActiveOp(null);
+  }, [opData, activeOp, refetchSnapshots, refetchFiles, refetchUsage]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // OPERATION_LOCKED：按 Retry-After 倒计时后自动解除锁定指示（503 无头时默认 5s）
+  useEffect(() => {
+    if (!opLocked) return;
+    const t = setTimeout(() => setOpLocked(null), Math.max(1, opLocked.retryAfter) * 1000);
+    return () => clearTimeout(t);
+  }, [opLocked]);
 
   useEffect(() => {
     if (!networkPolicy) return;
@@ -313,24 +397,6 @@ export default function SessionDetail() {
   }, [networkForm, networkPolicy]);
 
   const networkMode = Form.useWatch('mode', networkForm);
-
-  const openProofBundle = () => {
-    setProofOpen(true);
-    void refetchProofBundle();
-  };
-
-  const downloadProofBundle = () => {
-    if (!proofBundle) return;
-    const blob = new Blob([JSON.stringify(proofBundle, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `cds-session-proof-${session?.id || id}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
 
   const terminateMutation = useMutation({
     mutationFn: () => sandboxApi.terminate(id!),
@@ -442,7 +508,7 @@ export default function SessionDetail() {
   // --- File download ---
   const downloadFileMutation = useMutation({
     mutationFn: (filename: string) => sandboxApi.downloadFile(id!, filename),
-    onSuccess: ({ blob, redacted }, filename) => {
+    onSuccess: ({ blob, review }, filename) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -451,7 +517,12 @@ export default function SessionDetail() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      if (redacted) {
+      // PZ-16 ③：缓存 X-CDS-Output-Review 结果供文件表徽标展示（下载前预告）
+      setBlockedDownload(null);
+      if (review) {
+        setFileReviews((prev) => ({ ...prev, [filename]: { status: review.status, findings: review.findings } }));
+      }
+      if (review?.status === 'redacted') {
         setDownloadRedactedFile(filename);
         message.info('该文件已通过输出审查，内容已脱敏');
       } else {
@@ -460,10 +531,14 @@ export default function SessionDetail() {
       }
     },
     onError: (error: unknown, filename) => {
-      const err = error as { status?: number; detail?: { findings_count?: number; error?: string } };
+      const err = error as { status?: number; detail?: { findings_count?: number; error?: string; findings?: { severity?: string; type?: string; message?: string }[] } };
       if (err.status === 409) {
+        // 409 输出审查阻断：不放开，展示发现摘要 + 联系管理员（PZ-16 ③）
         const count = err.detail?.findings_count ?? 0;
-        message.error(`下载失败：输出审查阻断（发现 ${count} 项风险）`);
+        const findings = err.detail?.findings ?? [];
+        setFileReviews((prev) => ({ ...prev, [filename]: { status: 'blocked', findings: count } }));
+        setBlockedDownload({ filename, findingsCount: count, findings });
+        message.error(`下载失败：输出审查阻断（发现 ${count} 项风险，内容未释放）`);
       } else {
         message.error(getErrorMessage(error, `${filename} 下载失败`));
       }
@@ -481,28 +556,52 @@ export default function SessionDetail() {
     onError: (error: unknown) => message.error(getErrorMessage(error, '删除失败')),
   });
 
-  // --- Snapshot create ---
+  // PZ-16 ④：OPERATION_LOCKED（503）— 置锁定指示（busy，非 spinner），按 Retry-After 倒计时
+  const handleOperationLocked = (error: unknown): boolean => {
+    const w2 = parseW2Error(error);
+    if (w2.code === 'OPERATION_LOCKED' || w2.code === 'HTTP_503' || /OPERATION_LOCKED/i.test(w2.message)) {
+      setOpLocked({ retryAfter: 5 });
+      return true;
+    }
+    return false;
+  };
+
+  // --- Snapshot create（202 异步 + 轮询） ---
   const createSnapshotMutation = useMutation({
-    mutationFn: () => sandboxApi.createSnapshot(id!, { description: snapshotDescription || undefined }),
-    onSuccess: () => {
-      message.success('快照已创建');
+    mutationFn: () => sandboxApi.createSnapshot(id!, { description: snapshotDescription || undefined }, true),
+    onSuccess: (res) => {
       setCreateSnapshotOpen(false);
       setSnapshotDescription('');
-      void refetchSnapshots();
-      void refetchUsage();
+      if (isSessionOperation(res)) {
+        setActiveOp(res);
+        message.info('快照创建已提交（异步执行中）');
+      } else {
+        message.success('快照已创建');
+        void refetchSnapshots();
+        void refetchUsage();
+      }
     },
-    onError: (error: unknown) => message.error(getErrorMessage(error, '创建快照失败')),
+    onError: (error: unknown) => {
+      if (!handleOperationLocked(error)) message.error(getErrorMessage(error, '创建快照失败'));
+    },
   });
 
-  // --- Snapshot rollback ---
+  // --- Snapshot rollback（202 异步 + 轮询；并发回滚 → OPERATION_LOCKED） ---
   const rollbackSnapshotMutation = useMutation({
-    mutationFn: (snapshotId: string) => sandboxApi.rollbackSnapshot(id!, snapshotId),
-    onSuccess: () => {
-      message.success('已回滚到快照');
-      void refetchSnapshots();
-      void refetchFiles();
+    mutationFn: (snapshotId: string) => sandboxApi.rollbackSnapshot(id!, snapshotId, true),
+    onSuccess: (res) => {
+      if (isSessionOperation(res)) {
+        setActiveOp(res);
+        message.info('快照回滚已提交（异步执行中）');
+      } else {
+        message.success('已回滚到快照');
+        void refetchSnapshots();
+        void refetchFiles();
+      }
     },
-    onError: (error: unknown) => message.error(getErrorMessage(error, '回滚失败')),
+    onError: (error: unknown) => {
+      if (!handleOperationLocked(error)) message.error(getErrorMessage(error, '回滚失败'));
+    },
   });
 
   // --- Snapshot delete ---
@@ -516,10 +615,145 @@ export default function SessionDetail() {
     onError: (error: unknown) => message.error(getErrorMessage(error, '删除快照失败')),
   });
 
-  if (isLoading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
-  if (!session) return <Empty description="会话不存在或无权访问" />;
+  if (isError) {
+    // PZ-16 ⑥：主查询错误按 W2 码区分（404/403/410/500…），不再混同为"会话不存在或无权访问"；
+    // 404/未知态同时给空态引导（PZ-16 ⑦：无会话 → 创建表单，仅链接，表单在会话列表页）
+    const w2 = parseW2Error(error);
+    return (
+      <ErrorCard
+        code={w2.code}
+        message={w2.message}
+        request_id={w2.requestId}
+        status={w2.status}
+        retryAction={() => void refetch()}
+        actions={
+          <>
+            <Button onClick={() => navigate('/sandbox-sessions')}>返回列表</Button>
+            <Button type="primary" onClick={() => navigate('/sandbox-sessions')}>创建会话</Button>
+          </>
+        }
+      />
+    );
+  }
+  if (isLoading) return <CenteredLoading tip="加载会话" />;
+  if (!session) {
+    return (
+      <EmptyState
+        description="暂无会话"
+        action={<Button type="primary" onClick={() => navigate('/sandbox-sessions')}>前往创建会话</Button>}
+      />
+    );
+  }
 
   const report = executeResult?.security_report;
+
+  // PZ-14 诚实降级呈现：头部三元组（级别 / 运行时后端 / 证明级别）+ 执行结果区披露徽标。
+  // 字段可能缺失（老响应），仅在字段存在时渲染。
+  const sessionDisclosure = session as unknown as Record<string, unknown>;
+  const sessionIsSimulation = sessionDisclosure.is_simulation === true;
+  const sessionTeeMode = disclosureString(sessionDisclosure.tee_mode);
+  const sessionBackend = disclosureString(sessionDisclosure.backend);
+  const sessionProofLevel = disclosureString(sessionDisclosure.proof_level);
+  const isL1SoftwarePath = session.sandbox_level === 'L1';
+
+  const runtimeBackendBadge = (() => {
+    if (sessionIsSimulation) {
+      return (
+        <SimulationBadge
+          state="simulated"
+          label={`运行时后端: ${sessionTeeMode || sessionBackend || 'software_confidential'}（模拟，FG-001）`}
+          detail="当前运行时为软件模拟路径（诚实降级）：执行链路真实，隔离/证明硬件为模拟；FG-001 真实 TEE 硬件验收通过后转为真实。"
+        />
+      );
+    }
+    const backendValue = sessionTeeMode || sessionBackend;
+    if (backendValue) {
+      return (
+        <SimulationBadge
+          state={simulationStateForValue(backendValue) ?? 'real'}
+          label={`运行时后端: ${backendValue}`}
+          detail="会话运行时后端披露（tee_mode / backend 字段，PZ-14）。"
+        />
+      );
+    }
+    if (isL1SoftwarePath) {
+      return (
+        <SimulationBadge
+          state="simulated"
+          label="software_confidential（模拟，FG-001）"
+          detail="L1 软件路径（诚实降级）：真实 TEE 硬件验收（FG-001）通过后转为真实。"
+        />
+      );
+    }
+    return null;
+  })();
+
+  const proofLevelBadge = (() => {
+    if (sessionProofLevel) {
+      const state: SimulationBadgeState =
+        sessionProofLevel === 'hardware_tee' ? 'real'
+        : sessionProofLevel === 'software_confidential' ? 'simulated'
+        : (simulationStateForValue(sessionProofLevel) ?? 'real');
+      return (
+        <SimulationBadge
+          state={state}
+          label={`证明级别: ${proofLevelLabels[sessionProofLevel] || sessionProofLevel}`}
+          detail={state === 'simulated'
+            ? '软件密态证明（software_hash），非硬件 TEE 证明；FG-001 硬件验收通过后升级为硬件 TEE。'
+            : '会话证明级别披露（proof_level 字段，PZ-14）。'}
+        />
+      );
+    }
+    if (isL1SoftwarePath) {
+      return (
+        <SimulationBadge
+          state="simulated"
+          label="证明级别: software_confidential（模拟，FG-001）"
+          detail="L1 软件密态证明（software_hash）；FG-001 真实 TEE 硬件验收通过后升级为硬件 TEE。"
+        />
+      );
+    }
+    return null;
+  })();
+
+  const reportBadges: ReactNode[] = [];
+  if (report) {
+    if (report.dp_applied !== undefined) {
+      reportBadges.push(
+        report.dp_applied ? (
+          <SimulationBadge key="dp" state="real" label="DP 已施加" detail="差分隐私（Laplace 加噪）已真实施加到本次输出（PZ-02）。" />
+        ) : (
+          <SimulationBadge key="dp" state="unsupported" label="DP 未施加" detail="本次输出未施加差分隐私（ε=0 或未配置预算）；输出不含 DP 噪声保护。" />
+        ),
+      );
+    }
+    const nerEngine = (report as SecurityReportDisclosure).ner_engine;
+    const nerState = simulationStateForValue(nerEngine);
+    if (nerEngine && nerState) {
+      reportBadges.push(
+        <SimulationBadge
+          key="ner"
+          state={nerState}
+          label={`PII NER: ${nerEngine}`}
+          detail={nerEngine === 'lac' ? 'ML NER 模型（LAC）真实执行。'
+            : nerEngine === 'rule' ? 'ML 引擎不可用，由规则引擎执行 PII 识别（诚实披露，ner_engine=rule）。'
+            : 'PII NER 未启用（仅正则层）。'}
+        />,
+      );
+    }
+    if (report.signature) {
+      const sigAlgo = (report as SecurityReportDisclosure).signature_algorithm;
+      // SM2 签名为 r||s（128 hex）；SM3 摘要为 64 hex —— 短即降级
+      const downgraded = sigAlgo ? /sm3/i.test(sigAlgo) : /^[0-9a-f]{64}$/i.test(report.signature);
+      reportBadges.push(
+        downgraded ? (
+          <SimulationBadge key="sig" state="simulated" label="签名降级: SM2→SM3" detail="SM2 签名不可用，已降级为 SM3 摘要（无签名不可否认性保证）；HSM/国密签名路径（FG-007）接入后恢复 SM2。" />
+        ) : (
+          <SimulationBadge key="sig" state="real" label="SM2 签名" detail="输出经 SM2 数字签名（GM/T 0009）。" />
+        ),
+      );
+    }
+  }
 
   return (
     <div>
@@ -529,7 +763,12 @@ export default function SessionDetail() {
             <Title level={4} style={{ margin: 0 }}>沙箱会话</Title>
             <Tag color={statusColors[session.status] ?? 'default'}>{statusLabels[session.status] ?? session.status}</Tag>
             <Tag>{session.sandbox_level}</Tag>
+            <Tag color={session.trust_root && session.trust_root !== 'none' ? 'geekblue' : 'default'}>
+              {trustRootLabels[session.trust_root ?? 'none'] ?? '无 TEE 硬件（裸 MicroVM）'}
+            </Tag>
             <Tag>{modeLabels[session.sandbox_mode] || session.sandbox_mode}</Tag>
+            {runtimeBackendBadge}
+            {proofLevelBadge}
           </Space>
           <Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
             <Text code>{session.id}</Text>
@@ -544,7 +783,7 @@ export default function SessionDetail() {
               合约
             </Button>
           )}
-          <Button icon={<DownloadOutlined />} loading={proofFetching && proofOpen} onClick={openProofBundle}>
+          <Button icon={<DownloadOutlined />} onClick={() => setProofOpen(true)}>
             证明包
           </Button>
           {canPause && (
@@ -571,12 +810,16 @@ export default function SessionDetail() {
         </Space>
       </div>
 
+      {/* PZ-16 ②：状态机可视化（pending → key_distributing → ready → running → 终态 + 步骤耗时 + 失败态审计尾） */}
+      <SessionStatusStrip session={session} auditTail={allLogs} />
+
       {session.error_message && (
         <Alert type="error" showIcon message="会话异常" description={session.error_message} style={{ marginBottom: 16 }} />
       )}
 
       {/* Usage summary line */}
       <Card size="small" style={{ marginBottom: 16 }} bodyStyle={{ padding: '8px 16px' }}>
+        {usageIsError && <QueryErrorAlert error={usageError} message="用量加载失败" onRetry={() => { void refetchUsage(); }} />}
         <Row gutter={[16, 8]} align="middle">
           <Col xs={12} sm={8} md={5}>
             <Text type="secondary">工作区：</Text>
@@ -651,6 +894,7 @@ export default function SessionDetail() {
       </Row>
 
       <Card title="网络策略" style={{ marginTop: 16 }}>
+        {networkIsError && <QueryErrorAlert error={networkError} message="网络策略加载失败" onRetry={() => { void refetchNetworkPolicy(); }} />}
         <Form
           form={networkForm}
           layout="vertical"
@@ -781,6 +1025,11 @@ export default function SessionDetail() {
                     <Tag>发现 {report.findings_count ?? report.findings?.length ?? 0} 项</Tag>
                     {report.dp_applied && <Tag color="blue">DP</Tag>}
                   </Space>
+                  {reportBadges.length > 0 && (
+                    <Space wrap>
+                      {reportBadges}
+                    </Space>
+                  )}
                   {report.watermark && <Text code>watermark: {report.watermark}</Text>}
                   {report.signature && <Text code>signature: {report.signature.slice(0, 24)}...</Text>}
                   {(report.findings || []).map((finding, index) => (
@@ -801,12 +1050,38 @@ export default function SessionDetail() {
         </Row>
        )}
 
-      {/* --- W10: streaming exec terminal --- */}
-      <Card title="流式终端" style={{ marginTop: 16 }}>
-        {session && user?.id === session.user_id && session.status === 'running' ? (
-          <ExecStreamTerminal sessionId={session.id} />
+      {/* --- W10/PZ-16 ①: 执行观察 — L0/k8s（能力矩阵 stream_ws=real）WS 流式；其余级别轮询 /logs（非实时） --- */}
+      <Card
+        title="执行观察"
+        style={{ marginTop: 16 }}
+        extra={
+          streamingSupported
+            ? <Tag color="green" icon={<ApiOutlined />}>实时 · WS 流式</Tag>
+            : (
+              <Tooltip title="该级别不支持 WS 流式执行（STREAM_UNSUPPORTED，能力矩阵）；执行观察来自 /logs 审计尾轮询（3s），非实时输出。">
+                <Tag color="gold" icon={<InfoCircleOutlined />}>非实时 · 轮询</Tag>
+              </Tooltip>
+            )
+        }
+      >
+        {streamingSupported ? (
+          user?.id === session.user_id && session.status === 'running' ? (
+            <ExecStreamTerminal sessionId={session.id} />
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="会话所有者且状态为 running 时可用流式终端" />
+          )
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="会话所有者且状态为 running 时可用流式终端" />
+          <Alert
+            type="info"
+            showIcon
+            message="该级别不支持 WS 流式执行"
+            description={
+              <span>
+                {session.sandbox_level} 级别执行观察采用 <Text code>/logs</Text> 审计尾轮询（下方「审计日志」区，3s 刷新，显式"非实时"）；
+                同步命令输出请走下方「终端命令」或「会话执行」。
+              </span>
+            }
+          />
         )}
       </Card>
 
@@ -840,6 +1115,7 @@ export default function SessionDetail() {
           </Space>
         }
       >
+        {filesIsError && <QueryErrorAlert error={filesError} message="文件列表加载失败" onRetry={() => { void refetchFiles(); }} />}
         {downloadRedactedFile && (
           <Alert
             type="info"
@@ -849,6 +1125,36 @@ export default function SessionDetail() {
             closable
             onClose={() => setDownloadRedactedFile(null)}
             style={{ marginBottom: 12 }}
+          />
+        )}
+        {blockedDownload && (
+          // PZ-16 ③：409 输出审查阻断 — 发现摘要面板（不放开，联系管理员）
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={
+              <span>
+                输出审查阻断：文件 "{blockedDownload.filename}" 的下载被拒绝（发现 {blockedDownload.findingsCount} 项风险，原始内容未释放）
+              </span>
+            }
+            description={
+              <div>
+                {blockedDownload.findings.length > 0 && (
+                  <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>
+                    {blockedDownload.findings.map((f, i) => (
+                      <li key={`${f.type}-${i}`} style={{ fontSize: 12 }}>
+                        <Tag color={severityColors[f.severity ?? ''] ?? 'default'} style={{ fontSize: 11 }}>{f.severity || 'unknown'}</Tag>
+                        {f.type}: {f.message || '-'}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Text type="secondary">请勿尝试绕过输出审查（其他下载/导出通道同样受门禁）。如业务必须获取该内容，请联系管理员复核并走合规放行流程。</Text>
+              </div>
+            }
+            closable
+            onClose={() => setBlockedDownload(null)}
           />
         )}
         <Table
@@ -863,13 +1169,28 @@ export default function SessionDetail() {
               title: '文件名',
               dataIndex: 'name',
               key: 'name',
-              render: (name: string, record: SessionFile) => (
-                <Space>
-                  <FileTextOutlined />
-                  <Text code>{name}</Text>
-                  {record.encrypted && <Tag color="gold">已加密</Tag>}
-                </Space>
-              ),
+              render: (name: string, record: SessionFile) => {
+                // PZ-16 ③：下载前 T5 结果预告 — 优先 list 的 output_review 字段（若有），
+                // 其次消费上次下载的 X-CDS-Output-Review 头解析结果
+                const review = fileReviews[name]
+                  ?? (record.output_review?.status
+                    ? { status: record.output_review.status as 'passed' | 'redacted' | 'blocked', findings: record.output_review.findings_count ?? 0 }
+                    : undefined);
+                return (
+                  <Space>
+                    <FileTextOutlined />
+                    <Text code>{name}</Text>
+                    {record.encrypted && <Tag color="gold">已加密</Tag>}
+                    {review && (
+                      <Tooltip title="T5 输出审查结果预告（X-CDS-Output-Review 语义：passed/redacted; findings=N）">
+                        {review.status === 'passed' && <Tag color="green">审查通过</Tag>}
+                        {review.status === 'redacted' && <Tag color="orange">已脱敏 · 发现 {review.findings} 项</Tag>}
+                        {review.status === 'blocked' && <Tag color="red">已阻断 · 发现 {review.findings} 项</Tag>}
+                      </Tooltip>
+                    )}
+                  </Space>
+                );
+              },
             },
             {
               title: '大小',
@@ -918,7 +1239,7 @@ export default function SessionDetail() {
         />
       </Card>
 
-      {/* --- Snapshots Panel --- */}
+      {/* --- Snapshots Panel（PZ-16 ④：202 异步进度 + OPERATION_LOCKED 锁定态） --- */}
       <Card
         title="会话快照"
         style={{ marginTop: 16 }}
@@ -927,7 +1248,7 @@ export default function SessionDetail() {
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              disabled={!canManageSnapshots}
+              disabled={!canManageSnapshots || !!activeOp || !!opLocked}
               onClick={() => setCreateSnapshotOpen(true)}
             >
               创建快照
@@ -942,6 +1263,56 @@ export default function SessionDetail() {
           </Space>
         }
       >
+        {snapshotsIsError && <QueryErrorAlert error={snapshotsError} message="快照列表加载失败" onRetry={() => { void refetchSnapshots(); }} />}
+        {opLocked && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="操作锁定（OPERATION_LOCKED）：另一快照操作进行中"
+            description={`约 ${opLocked.retryAfter}s 后可重新发起；回滚为同会话互斥操作，重复触发会被 503 拒绝。`}
+          />
+        )}
+        {(activeOp || opData) && (() => {
+          const op = opData ?? activeOp!;
+          const percent = Math.min(100, Math.round((op.progress ?? 0) * 100));
+          const statusTag = {
+            pending: <Tag>待处理</Tag>,
+            running: <Tag color="processing" style={{ marginInlineEnd: 0 }}>进行中</Tag>,
+            succeeded: <Tag color="success" style={{ marginInlineEnd: 0 }}>已完成</Tag>,
+            failed: <Tag color="error" style={{ marginInlineEnd: 0 }}>失败</Tag>,
+          }[op.status] ?? <Tag>{op.status}</Tag>;
+          return (
+            <Alert
+              type={op.status === 'failed' ? 'error' : 'info'}
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={
+                <Space wrap>
+                  <span>{op.op_type === 'rollback' ? '快照回滚' : '快照创建'}操作（异步）</span>
+                  {statusTag}
+                  <Text type="secondary" style={{ fontSize: 12 }}>operation_id: {op.operation_id.slice(0, 8)}…</Text>
+                </Space>
+              }
+              description={
+                <div style={{ maxWidth: 560 }}>
+                  {/* 进度条（Progress）作为 busy 指示，不用 Spin 以免与列表 loading 混淆 */}
+                  <Progress
+                    percent={percent}
+                    size="small"
+                    status={op.status === 'failed' ? 'exception' : op.status === 'succeeded' ? 'success' : 'active'}
+                  />
+                  {op.status === 'failed' && op.error && (
+                    <Text type="danger" style={{ fontSize: 12 }}>{op.error}</Text>
+                  )}
+                  {op.status === 'running' && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>快照为 202 异步操作，完成后自动刷新列表。</Text>
+                  )}
+                </div>
+              }
+            />
+          );
+        })()}
         <Table
           rowKey="id"
           size="small"
@@ -999,7 +1370,7 @@ export default function SessionDetail() {
                       type="link"
                       size="small"
                       icon={<RollbackOutlined />}
-                      disabled={!canManageSnapshots}
+                      disabled={!canManageSnapshots || !!activeOp || !!opLocked}
                     >
                       回滚
                     </Button>
@@ -1126,12 +1497,17 @@ export default function SessionDetail() {
         )}
       </Card>
 
-      {/* --- Logs Viewer --- */}
+      {/* --- Logs Viewer（PZ-16 ①：非 WS 级别轮询 + "非实时" 徽标 + T5 行级状态高亮） --- */}
       <Card
         title="审计日志"
         style={{ marginTop: 16 }}
         extra={
           <Space>
+            {!streamingSupported && (
+              <Tooltip title="该级别不支持 WS 流式，日志来自 /logs 审计尾轮询（3s），非实时输出。">
+                <Tag color="gold" icon={<InfoCircleOutlined />}>非实时</Tag>
+              </Tooltip>
+            )}
             <Input
               placeholder="筛选动作"
               value={logActionFilter}
@@ -1159,6 +1535,7 @@ export default function SessionDetail() {
             showIcon
             message="日志加载失败"
             description={getErrorMessage(logsError)}
+            action={<Button size="small" onClick={() => void refetchLogs()}>重试</Button>}
             style={{ marginBottom: 12 }}
           />
         )}
@@ -1167,29 +1544,37 @@ export default function SessionDetail() {
           loading={logsFetching && allLogs.length === 0}
           dataSource={allLogs}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无日志" /> }}
-          renderItem={(item) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={<Tag>{item.action}</Tag>}
-                title={
-                  <Space>
-                    <Text strong>{item.action}</Text>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {formatTime(item.created_at)}
-                    </Text>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      用户: {shortId(item.user_id)}
-                    </Text>
-                  </Space>
-                }
-                description={
-                  item.detail && typeof item.detail === 'object' && Object.keys(item.detail as Record<string, unknown>).length > 0
-                    ? <pre style={{ margin: 0, fontSize: 12, maxHeight: 80, overflow: 'auto' }}>{JSON.stringify(item.detail, null, 2)}</pre>
-                    : <Text type="secondary">-</Text>
-                }
-              />
-            </List.Item>
-          )}
+          renderItem={(item) => {
+            // T5 行级状态：inspection 字段存在时高亮输出行（passed/redacted/blocked）
+            const rowStatus = rowReviewStatus(item.detail);
+            const rowMeta = rowStatus ? rowReviewMeta[rowStatus] : null;
+            return (
+              <List.Item
+                style={rowMeta ? { borderLeft: `3px solid ${rowMeta.border}`, paddingLeft: 12, background: rowMeta.bg } : undefined}
+              >
+                <List.Item.Meta
+                  avatar={<Tag>{item.action}</Tag>}
+                  title={
+                    <Space>
+                      <Text strong>{item.action}</Text>
+                      {rowMeta && <Tag color={rowMeta.color} style={{ marginInlineEnd: 0 }}>{rowMeta.label}</Tag>}
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {formatTime(item.created_at)}
+                      </Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        用户: {shortId(item.user_id)}
+                      </Text>
+                    </Space>
+                  }
+                  description={
+                    item.detail && typeof item.detail === 'object' && Object.keys(item.detail as Record<string, unknown>).length > 0
+                      ? <pre style={{ margin: 0, fontSize: 12, maxHeight: 80, overflow: 'auto' }}>{JSON.stringify(item.detail, null, 2)}</pre>
+                      : <Text type="secondary">-</Text>
+                  }
+                />
+              </List.Item>
+            );
+          }}
         />
         {logsData && logsData.logs.length > 0 && logsData.count > allLogs.length && (
           <div style={{ textAlign: 'center', marginTop: 12 }}>
@@ -1221,83 +1606,8 @@ export default function SessionDetail() {
         </Form>
       </Modal>
 
-      <Drawer
-        title="会话证明包"
-        open={proofOpen}
-        onClose={() => setProofOpen(false)}
-        width={760}
-        extra={
-          <Button icon={<DownloadOutlined />} disabled={!proofBundle} onClick={downloadProofBundle}>
-            下载 JSON
-          </Button>
-        }
-      >
-        {proofIsError && (
-          <Alert
-            type="error"
-            showIcon
-            message="证明包生成失败"
-            description={getErrorMessage(proofError, '未知错误')}
-            style={{ marginBottom: 16 }}
-          />
-        )}
-        {proofFetching && !proofBundle ? (
-          <Spin size="large" style={{ display: 'block', margin: '80px auto' }} />
-        ) : proofBundle ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions bordered column={1} size="small">
-              <Descriptions.Item label="证明级别">
-                <Tag color={proofLevelColors[proofBundle.runtime.proof_level] || 'default'}>
-                  {proofLevelLabels[proofBundle.runtime.proof_level] || proofBundle.runtime.proof_level}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="Bundle Hash">
-                <Text code copyable>{proofBundle.integrity.bundle_hash}</Text>
-              </Descriptions.Item>
-              {proofBundle.integrity.evidence_hash && (
-                <Descriptions.Item label="Evidence Hash">
-                  <Text code copyable>{proofBundle.integrity.evidence_hash}</Text>
-                </Descriptions.Item>
-              )}
-              <Descriptions.Item label="策略 Hash">
-                <Text code copyable>{proofBundle.policy.combined_policy_hash || '-'}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Attestation">
-                <Space direction="vertical" size={2}>
-                  <Text>类型：{String(proofBundle.runtime.attestation.type || '-')}</Text>
-                  <Text code copyable={!!proofBundle.runtime.attestation.quote_hash}>
-                    quote_hash: {proofBundle.runtime.attestation.quote_hash || '-'}
-                  </Text>
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="输出审查">
-                {proofBundle.output_security.available ? (
-                  <Space direction="vertical" size={2}>
-                    <Space wrap>
-                      <Tag color={proofBundle.output_security.blocked ? 'red' : 'green'}>
-                        {proofBundle.output_security.blocked ? '已阻断' : '已放行'}
-                      </Tag>
-                      <Tag>发现 {proofBundle.output_security.findings_count ?? 0} 项</Tag>
-                    </Space>
-                    {proofBundle.output_security.signature && (
-                      <Text code copyable>{proofBundle.output_security.signature}</Text>
-                    )}
-                    {proofBundle.output_security.report_hash && (
-                      <Text code copyable>report_hash: {proofBundle.output_security.report_hash}</Text>
-                    )}
-                  </Space>
-                ) : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="审计事件">{proofBundle.audit.event_count ?? 0}</Descriptions.Item>
-            </Descriptions>
-            <Card title="JSON">
-              <pre className="cds-json-block">{JSON.stringify(proofBundle, null, 2)}</pre>
-            </Card>
-          </Space>
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无证明包" />
-        )}
-      </Drawer>
+      {/* PZ-16 ⑤：证明包 — 一键生成/下载 + 披露分组（bundle_meta vs evidence，PZ-14 口径） */}
+      <ProofBundleDrawer sessionId={session.id} open={proofOpen} onClose={() => setProofOpen(false)} />
     </div>
   );
 }

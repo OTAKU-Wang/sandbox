@@ -11,7 +11,6 @@ async def provider_headers(client: AsyncClient) -> dict:
         "username": f"provider_{unique}",
         "email": f"prov_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     assert resp.status_code == 201
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
@@ -24,7 +23,6 @@ async def buyer_headers(client: AsyncClient) -> dict:
         "username": f"buyer_{unique}",
         "email": f"buyer_{unique}@example.com",
         "password": "testpass123",
-        "role": "buyer",
     })
     assert resp.status_code == 201
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}

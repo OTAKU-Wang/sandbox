@@ -7,6 +7,7 @@ Provides column-level encryption for sensitive database fields with two modes:
 Both use SM4 per GM/T 0002 national standard with 128-bit keys.
 """
 import hashlib
+import base64
 import logging
 import os
 import struct
@@ -315,6 +316,57 @@ class ColumnEncryption:
         return hashlib.sha256(data).digest()[:16]
 
 
-# Singleton (initialized with a default DEK for development)
+# Singleton (PZ-04/MR-A9): DEK comes from CDS_COLUMN_ENCRYPTION_KEY when set;
+# the built-in development default is used only in non-production, and the
+# production posture is enforced by validate_security_config (fail-closed).
 _default_dek = hashlib.sha256(b"cds-column-encryption-default-key").digest()[:16]
-column_encryption = ColumnEncryption(dek=_default_dek, key_id="cds-default")
+_dek_source_warned = False
+_HEX_DIGITS = set("0123456789abcdefABCDEF")
+
+
+def build_column_encryption() -> ColumnEncryption:
+    """Build the default column-encryption engine from settings.
+
+    CDS_COLUMN_ENCRYPTION_KEY holds the 16-byte DEK as hex (32 chars) or
+    base64. When empty, the built-in development default DEK is used — in
+    non-production only (production must configure a real key;
+    validate_security_config raises at startup, and this function raises as
+    the import-time backstop).
+    """
+    global _dek_source_warned
+    from app.core.config import get_settings, is_production
+
+    s = get_settings()
+    raw = s.COLUMN_ENCRYPTION_KEY.strip()
+    if raw:
+        if len(raw) == 32 and all(c in _HEX_DIGITS for c in raw):
+            dek = bytes.fromhex(raw)
+        else:
+            try:
+                dek = base64.b64decode(raw, validate=True)
+            except ValueError:
+                raise ValueError(
+                    "CDS_COLUMN_ENCRYPTION_KEY must be a 16-byte DEK encoded "
+                    "as hex (32 chars) or base64"
+                )
+        if len(dek) != 16:
+            raise ValueError(
+                "CDS_COLUMN_ENCRYPTION_KEY must decode to exactly 16 bytes "
+                f"(got {len(dek)})"
+            )
+        return ColumnEncryption(dek=dek, key_id="cds-configured")
+    if is_production(s):
+        raise ValueError(
+            "CDS_COLUMN_ENCRYPTION_KEY is required in production: the built-in "
+            "default column DEK must never encrypt production data."
+        )
+    if not _dek_source_warned:
+        logger.warning(
+            "CDS_COLUMN_ENCRYPTION_KEY not set — column encryption uses the "
+            "built-in development default DEK (non-production only)"
+        )
+        _dek_source_warned = True
+    return ColumnEncryption(dek=_default_dek, key_id="cds-default")
+
+
+column_encryption = build_column_encryption()

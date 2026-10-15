@@ -101,7 +101,7 @@ async def create_network_policy(
         max_connections_per_second=policy.max_connections_per_second,
         max_bandwidth_bytes_per_second=policy.max_bandwidth_bytes_per_second,
     )
-    await network_policy_engine.create_policy(body.session_id, config)
+    await network_policy_engine.create_policy(body.session_id, config, db=db)
 
     await audit_service.log(
         db,
@@ -208,7 +208,7 @@ async def update_network_policy(
     await db.refresh(policy)
 
     # Hot-reload: remove old policy, create new one
-    await network_policy_engine.remove_policy(policy.session_id)
+    await network_policy_engine.remove_policy(policy.session_id, db=db)
     if policy.active:
         from app.services.network_policy import NetworkPolicyConfig
         config = NetworkPolicyConfig(
@@ -220,7 +220,7 @@ async def update_network_policy(
             max_connections_per_second=policy.max_connections_per_second,
             max_bandwidth_bytes_per_second=policy.max_bandwidth_bytes_per_second,
         )
-        await network_policy_engine.create_policy(policy.session_id, config)
+        await network_policy_engine.create_policy(policy.session_id, config, db=db)
 
     return NetworkPolicyResponse.model_validate(policy)
 
@@ -240,7 +240,7 @@ async def delete_network_policy(
         raise HTTPException(status_code=403, detail="Not your policy")
 
     # Remove enforcement
-    await network_policy_engine.remove_policy(policy.session_id)
+    await network_policy_engine.remove_policy(policy.session_id, db=db)
 
     await db.delete(policy)
     await audit_service.log(

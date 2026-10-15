@@ -7,6 +7,7 @@ import ProtectedRoute from './components/Auth/ProtectedRoute';
 import RoleRoute from './components/Auth/RoleRoute';
 import MainLayout from './components/Layout/MainLayout';
 import { ROLE_GROUPS } from './utils/roles';
+import { UserRole } from './types/enums';
 
 // Route-level lazy loading — each page becomes a separate chunk
 const Login = lazy(() => import('./pages/Auth/Login'));
@@ -35,6 +36,13 @@ const K8sDeployments = lazy(() => import('./pages/K8sOps/Deployments'));
 const K8sNetworkPolicies = lazy(() => import('./pages/K8sOps/NetworkPolicies'));
 const K8sPvcs = lazy(() => import('./pages/K8sOps/Pvcs'));
 const K8sLogs = lazy(() => import('./pages/K8sOps/Logs'));
+const CapabilityMatrix = lazy(() => import('./pages/CapabilityMatrix'));
+const ComplianceDisclosure = lazy(() => import('./pages/ComplianceDisclosure'));
+const MpcPage = lazy(() => import('./pages/MPC'));
+const DataPipeline = lazy(() => import('./pages/DataPipeline'));
+const SystemStatus = lazy(() => import('./pages/SystemStatus'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
+const ApiKeys = lazy(() => import('./pages/ApiKeys'));
 
 const PageSpinner = () => <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
 
@@ -83,6 +91,13 @@ export default function App() {
                 <Route path="ops/network-policies" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sNetworkPolicies /></RoleRoute>} />
                 <Route path="ops/pvcs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sPvcs /></RoleRoute>} />
                 <Route path="ops/logs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sLogs /></RoleRoute>} />
+                <Route path="capability-matrix" element={<CapabilityMatrix />} />
+                <Route path="data-pipeline" element={<DataPipeline />} />
+                <Route path="compliance-disclosure" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><ComplianceDisclosure /></RoleRoute>} />
+                <Route path="mpc" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><MpcPage /></RoleRoute>} />
+                <Route path="system-status" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><SystemStatus /></RoleRoute>} />
+                <Route path="users" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><UserManagement /></RoleRoute>} />
+                <Route path="api-keys" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><ApiKeys /></RoleRoute>} />
               </Route>
             </Routes>
           </Suspense>

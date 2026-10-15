@@ -24,6 +24,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
 import { UserRole } from '../../types/enums';
 import { EmptyState, QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import SimulationBadge, { simulationStateForValue } from '../../components/Feedback/SimulationBadge';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -70,6 +71,57 @@ const RELEASE_RECOMMENDATION: Record<string, { label: string; color: string }> =
   conditional_go: { label: 'Conditional Go', color: 'orange' },
   no_go: { label: 'No-Go', color: 'red' },
 };
+
+// PZ-14：安全态势卡披露字段（PZ-06 顶层字段，老响应可能缺失）
+const POSTURE_DISCLOSURE_LABELS: Record<string, string> = {
+  aead_algorithm: 'AEAD 算法',
+  chain_anchoring: '链锚定',
+  signing_backend: '签名后端',
+  trust_root: '证明信任根',
+  data_volume_at_rest: '静态数据加密',
+};
+
+const POSTURE_DISCLOSURE_DETAILS: Record<string, Record<string, string>> = {
+  aead_algorithm: {
+    aes_fallback: 'SM4-GCM 现为 AES-256-GCM 回退（Tongsuo 未接线，M-01 / SS-10 CB-03）；接入 Tongsuo SM4-GCM 后为真实。',
+    tongsuo_sm4: 'Tongsuo 国密 SM4-GCM 真实生效。',
+  },
+  chain_anchoring: {
+    'pg-log': 'PG append-only 哈希链锚定（真实持久化，非区块链）；真实联盟链（FISCO/AntChain）归 FG-005。',
+    'fisco-sim': 'FISCO 链模拟器（软件模拟路径）；生产真链归 FG-005。',
+    'ant-sim': 'AntChain 链模拟器（软件模拟路径）；生产真链归 FG-005。',
+    not_configured: '未配置链锚定后端；审计哈希链仅本地持久化。',
+  },
+  signing_backend: {
+    software: 'SM2 签名使用内存软件密钥（HSM 不可用，M-11）；HSM 接入（FG-007）后为真实。',
+    hsm: 'HSM 硬件签名密钥。',
+  },
+  trust_root: {
+    'local-simulated': '远程证明信任本地静态根（M-17）；配置外部证明根后为真实。',
+    external: '外部证明根。',
+  },
+};
+
+function PostureDisclosureBadges({ posture }: { posture: Record<string, unknown> }) {
+  const entries = Object.entries(POSTURE_DISCLOSURE_LABELS)
+    .map(([key, label]) => ({ key, label, value: typeof posture[key] === 'string' ? (posture[key] as string) : undefined }))
+    .filter((item): item is { key: string; label: string; value: string } => Boolean(item.value));
+  if (entries.length === 0) return null;
+  return (
+    <div style={{ marginTop: 12, paddingTop: 8, borderTop: '1px dashed #f0f0f0' }}>
+      <Space wrap size={[8, 8]}>
+        {entries.map(({ key, label, value }) => (
+          <SimulationBadge
+            key={key}
+            state={simulationStateForValue(value) ?? 'unsupported'}
+            label={`${label}: ${value}`}
+            detail={POSTURE_DISCLOSURE_DETAILS[key]?.[value] ?? '安全态势披露字段（PZ-06，实时状态派生）。'}
+          />
+        ))}
+      </Space>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -234,26 +286,29 @@ export default function Dashboard() {
           {securityPostureIsError ? (
             <QueryErrorAlert error={securityPostureError} message="安全态势加载失败" onRetry={() => { void refetchSecurityPosture(); }} />
           ) : securityPosture ? (
-            <Space wrap size={[8, 8]}>
-              {securityPosture.capabilities.map((item) => (
-                <AntTooltip
-                  key={item.id}
-                  title={
-                    <div>
-                      <div>{item.summary}</div>
-                      <div style={{ marginTop: 4 }}>{item.action}</div>
-                      {item.evidence?.length > 0 && (
-                        <div style={{ marginTop: 4 }}>证据: {item.evidence.join(' / ')}</div>
-                      )}
-                    </div>
-                  }
-                >
-                  <Tag color={POSTURE_STATUS_COLORS[item.status] || 'default'} style={{ padding: '4px 8px', lineHeight: '22px' }}>
-                    {item.name}: {POSTURE_STATUS_LABELS[item.status] || item.status}
-                  </Tag>
-                </AntTooltip>
-              ))}
-            </Space>
+            <>
+              <Space wrap size={[8, 8]}>
+                {securityPosture.capabilities.map((item) => (
+                  <AntTooltip
+                    key={item.id}
+                    title={
+                      <div>
+                        <div>{item.summary}</div>
+                        <div style={{ marginTop: 4 }}>{item.action}</div>
+                        {item.evidence?.length > 0 && (
+                          <div style={{ marginTop: 4 }}>证据: {item.evidence.join(' / ')}</div>
+                        )}
+                      </div>
+                    }
+                  >
+                    <Tag color={POSTURE_STATUS_COLORS[item.status] || 'default'} style={{ padding: '4px 8px', lineHeight: '22px' }}>
+                      {item.name}: {POSTURE_STATUS_LABELS[item.status] || item.status}
+                    </Tag>
+                  </AntTooltip>
+                ))}
+              </Space>
+              <PostureDisclosureBadges posture={securityPosture as unknown as Record<string, unknown>} />
+            </>
           ) : (
             <Alert type="info" showIcon message="安全态势加载中" />
           )}

@@ -4,11 +4,13 @@ CubeSandbox C7 alignment (isolate ≈ cordon). Health detection is honest and
 read-only: stale heartbeats mark nodes and raise alerts, but no automatic
 recovery is attempted (W18 differentiator stays out of scope here).
 """
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 
 from app.core.database import get_db
@@ -17,11 +19,24 @@ from app.core.config import get_settings
 from app.models.sandbox_node import SandboxNode, NodeStatus
 from app.models.user import User
 from app.services.audit_service import audit_service
+from app.services.cube_node_client import node_cubelet_endpoint
+from app.services.node_selector import node_selector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class RegisterNodeRequest(BaseModel):
+    node_id: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    hostname: str = Field(min_length=1, max_length=128)
+    ip_address: str = Field(min_length=1, max_length=64)
+    capabilities: dict = Field(default_factory=dict)
+    region: str = "default"
+    cpu_cores: int = 0
+    memory_mb: int = 0
+    max_tasks: int = 10
 
 
 def _require_admin(user: User) -> None:
@@ -44,6 +59,11 @@ def _node_payload(node: SandboxNode, running_sessions: int) -> dict:
         "max_tasks": node.max_tasks,
         "running_sessions": running_sessions,
         "scheduling_disabled": node.scheduling_disabled,
+        "schedulable": (
+            node.status == NodeStatus.ONLINE.value
+            and not node.scheduling_disabled
+            and bool(node_cubelet_endpoint(node))
+        ),
         "health_state": node.health_state,
         "last_heartbeat": node.last_heartbeat.isoformat() if node.last_heartbeat else None,
         "error_rate": node.error_rate,
@@ -63,6 +83,63 @@ async def list_nodes(
         "nodes": [_node_payload(n, n.active_tasks or 0) for n in nodes],
         "total": len(nodes),
     }
+
+
+@router.post("", status_code=201)
+async def register_node_endpoint(
+    body: RegisterNodeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin registration of a Cube node into the scheduling registry.
+
+    D-e2e-14: the registry had no runtime population path (NodeSelector.
+    register_node was test-only), so no node could ever enter scheduling.
+    Registration does NOT fake health: the row starts OFFLINE until the
+    built-in gRPC probe (List + GetStorageMetrics) confirms the dataplane;
+    the response echoes the immediate probe result as an honest disclosure.
+    """
+    _require_admin(current_user)
+    if not body.capabilities.get("cubelet_endpoint"):
+        raise HTTPException(
+            status_code=422,
+            detail="capabilities.cubelet_endpoint required (dial target, host:port or host)",
+        )
+    selector = node_selector
+    node = await selector.register_node(
+        db, node_id=body.node_id, hostname=body.hostname,
+        ip_address=body.ip_address, capabilities=body.capabilities,
+        region=body.region, cpu_cores=body.cpu_cores, memory_mb=body.memory_mb,
+        max_tasks=body.max_tasks,
+    )
+    node.status = NodeStatus.OFFLINE.value
+    node.health_state = "unknown"
+    await audit_service.log(
+        db, action="node.register", resource_type="sandbox_node",
+        user_id=current_user.id, resource_id=str(node.id),
+        detail={"node_id": node.node_id, "ip": body.ip_address,
+                "capabilities": body.capabilities},
+    )
+    probe_ok = False
+    try:
+        from app._stubs.cube.cubebox.v1 import cubebox_pb2
+        from app.services.cube_node_client import get_cube_node_client
+        client = get_cube_node_client(node, get_settings())
+        await asyncio.to_thread(client.list, cubebox_pb2.ListCubeSandboxRequest())
+        await asyncio.to_thread(
+            client.get_storage_metrics, cubebox_pb2.GetStorageMetricsRequest()
+        )
+        probe_ok = True
+    except Exception as e:
+        logger.warning("[NodeOps] initial probe for %s failed: %s", node.node_id, e)
+    await db.flush()
+    if probe_ok and node.health_state == "unknown":
+        node.health_state = "healthy"
+        node.status = NodeStatus.ONLINE.value
+    # Commit before responding: the 201 must not race the row's visibility
+    # (get_db commits in teardown, AFTER the response is generated).
+    await db.commit()
+    return _node_payload(node, 0) | {"probe_ok": probe_ok}
 
 
 async def _load_node(db: AsyncSession, node_id: str) -> SandboxNode:

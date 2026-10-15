@@ -49,6 +49,12 @@ python scripts/verify_schema_parity.py    # Alembic 链 vs create_all 结构比�
 | `CDS_TEE_ALLOW_SOFTWARE_FALLBACK` | 是 | 普通密态沙箱允许 `true`；要求真实 TEE 保证时必须置为 `false`。 |
 | `CDS_ALERT_WEBHOOK_URLS` | 可选 | 配置真实 Webhook/SIEM 后，告警中心会记录投递状态。 |
 | `CDS_CDC_KAFKA_BROKERS` / `CDS_CDC_KAFKA_CONNECT_URL` | 可选 | 配置真实 Kafka Connect 后启用 CDC 控制面。 |
+| `CDS_COLUMN_ENCRYPTION_KEY` | 生产必填 | 16 字节列加密 DEK（hex/base64）；生产空值/默认值启动即拒（SS-11 PZ-04）。 |
+| `CDS_SM3_FALLBACK_ALLOWED` | 生产必须 `false` | `gmssl` 缺失时 SHA-256 回退开关；生产 `true` 启动即拒（SS-11 PZ-04）。 |
+| `CDS_ATTESTATION_ALLOWED_MEASUREMENTS` | 生产必填（TEE 证明门禁开启时） | measurement 白名单（csv）；生产空值启动即拒，本地静态信任根披露 `trust_root=local-simulated`（SS-11 PZ-05/MR-B1）。 |
+| `CDS_FEDERATION_ENABLED` / `CDS_FEDERATION_CA_BUNDLE` / `CDS_FEDERATION_CERT` / `CDS_FEDERATION_KEY` | 联邦启用时必填 | 生产启用联邦且缺 mTLS 材料 → 拒绝联邦通道（fail-closed）；跨空间互操作归 FG-008（SS-11 PZ-05）。 |
+| `CDS_SECCOMP_FALLBACK_ALLOWED` | 建议生产 `false` | seccomp 不兼容时无 seccomp 重试开关（firecracker + sandbox_runtime 双点门禁，SS-11 PZ-04/MR-A13 收口 S4）。 |
+| `CDS_MIA_SHADOW_MODEL` | 可选 | 影子模型 MIA 评估开关（默认关；开启后响应携 `mia_status=shadow_model`）。 |
 
 安全默认值：
 
@@ -254,3 +260,66 @@ cd cds-frontend && npm test
 - `specs/product-security-release-review.md`
 - `specs/release-gate-checklist.md`
 - `specs/productization-gap-analysis.md`
+
+---
+
+## 9. Cube 节点部署与升级（SS-10 CB-02）
+
+> 适用范围：CubeSandbox 计算节点（裸金属/VM，`DEPLOY_ROLE=compute`，**不在** CDS k3s 内，§5.1 红线 2）。上游版本钉住见 `scripts/cube-bundle-manifest.json`（§5.2：钉住单位 = 上游 git sha）。真实节点 bring-up + 全链路 e2e 为环境验收项 **FG-017**。
+
+### 9.0 组件所有权边界（谁交付什么，升级谁负责）
+
+| 组件 | 形态 | 交付任务 | 升级责任方 | 备注 |
+|---|---|---|---|---|
+| cubelet / shim / cube-runtime / CubeCoW / CubeVS / CubeEgress / guest 资产 / containerd | stock 单元（`cube-sandbox-compute.target`） | 上游 install-compute.sh | **上游**（零 diff 红线 1：CDS 不 patch、不自补安全补丁，铁律 6） | 升级=换钉住 bundle 重跑官方安装器 |
+| ① cds-volume-plugin | 独立进程 + socket `/run/cds-volume-plugin/cds.sock` | CB-03 | CDS（插件镜像） | stock 配置仅增量注册（diff 留档 `stock-config-diff.log`） |
+| ② TLS 前置代理 | `cds-tls-proxy.service`（stunnel mTLS） | CB-02 | CDS（单元+证书独立升级，不碰 stock） | sidecar 不可达 = 节点 down，无明文回退（§2.10） |
+| ③ 审计 tailer | `cds-audit-tailer.service` | 单元 CB-02 / 二进制 CB-06 | CDS | 红线 5：审计不可丢弃 |
+
+### 9.1 首次 bring-up
+
+```bash
+# 节点前置：/dev/kvm 可读写、XFS(reflink) 数据盘挂 /data/cubelet、eBPF 内核支持（§2.1）
+sudo bash deploy/cube-node/preflight.sh     # 硬门禁：逐项 PASS/FAIL，任一 FAIL → exit 1
+sudo CDS_CUBE_TLS_CERT=<cert_service 签发的 crt> \
+     CDS_CUBE_TLS_KEY=<key> \
+     CDS_CUBE_TLS_CA=<ca> \
+     bash deploy/cube-node/install.sh       # preflight → 官方 install-compute.sh → 三 CDS 组件 → 状态落盘
+bash deploy/cube-node/verify.sh --json      # 机读验收：cubelet gRPC / sidecar 证书 / 卷 socket / tailer
+```
+
+安装状态：`/var/lib/cds/cube-node/INSTALL_STATE.json`；stock 配置增量 diff 归档：同目录 `stock-config-diff.log`（红线 1 留档）。bring-up 后由 CB-01 客户端把 `runtime_version`（如 `v0.7.3-rc2+9b75d33907ed`）写入 `sandbox_nodes`；CDS 拒绝调度到版本不匹配节点（§5.2）。
+
+### 9.2 preflight 失败分诊
+
+| FAIL 行 | 含义 | 处置 |
+|---|---|---|
+| `FAIL: kvm` | `/dev/kvm` 缺失或权限不足 | 宿主机启用 KVM（虚拟化 BIOS 开关）；权限：`usermod -aG kvm <user>` 或 root 运行（本工具链不代跑 sudo） |
+| `FAIL: data_fs` | 数据盘非 XFS / 无 reflink / FICLONE 实测失败 | 专用 XFS 分区挂 `/data/cubelet`（`mkfs.xfs` + `mount`）；确认 `xfs_info` 输出 `reflink=1`；上游同类问题：CubeSandbox#311 |
+| `FAIL: ebpf` | bpftool 缺失 / bpf syscall 被拒 / bpffs 未挂载 | 安装 bpf 工具集；检查 seccomp/AppArmor；`mount -t bpf bpf /sys/fs/bpf`（上游 troubleshooting: bpffs-is-not-mounted） |
+| `FAIL: cubelet_bin` | 二进制版本与钉住 sha 不符 | 重跑 install.sh（bundle 换版）或恢复旧 bundle（§9.4 回滚）；**禁止手工替换二进制**（零 diff） |
+| `FAIL: volume_sock` | CB-03 插件 socket 不在 | 部署/启动 cds-volume-plugin；未上 CB-03 前该节点不可承接加密卷会话（如实，不降级） |
+| `FAIL: tls_sidecar` | 9443 不可达 | `systemctl status cds-tls-proxy`；证书缺失时 install.sh 会硬失败——向 certificate_service 重新签发后重跑（无明文回退路径） |
+| `FAIL: containerd` / `FAIL: resources` | 依赖缺失 / 内存<8GB 或盘余量<10% | 安装 containerd；扩容（内存阈值与上游一致，可调 `CDS_CUBE_MIN_MEM_KB`，不得低于默认） |
+
+### 9.3 滚动升级 SOP（版本钉住 + 冒烟 + 滚动，批次=1 起步）
+
+1. **isolate**：CDS 侧 W14 节点运维 isolate 目标节点（node_selector 不再选它）
+2. **排空**：存量会话 terminate 或 pause——CB-07（跨节点 resume）就绪前排空=**终止**（诚实：无迁移能力时不做假迁移）
+3. **换 bundle**：更新钉住 sha（`scripts/cube-bundle-manifest.json` + `app/_stubs/cube/_VERSION.json` 经 CB-00 跟进流）→ 节点重跑 `install.sh`（`--mode` 走配置保留升级）
+4. **verify**：`verify.sh --json` 全绿（cubelet gRPC 应答 + sidecar 证书 + 卷 socket + tailer）
+5. **unisolate**：写新 `runtime_version` → W14 unisolate 恢复调度
+
+**安全补丁强制流**：上游 SECURITY release → **48h 内**完成滚动，豁免 isolate 等待窗口（§5.3 豁免等待；M1 收口前演练一次）。
+
+### 9.4 回滚
+
+- 回滚 = **旧 bundle 重钉**：恢复旧钉住 sha 的 manifest → 重跑 `install.sh`（上游安装器幂等）→ `verify.sh` → 恢复 `runtime_version` → unisolate
+- stock 配置增量（volume_plugins 段）由 `install.sh` 幂等重放恢复（§5.4）；回滚不产生手工痕迹
+- 最坏情况 = 钉版本等待（运维债，非代码债；§6.6 风险表）
+
+### 9.5 验收与 CI
+
+- 工具链冒烟：`.github/workflows/cube-node-smoke.yml`（`workflow_dispatch` 手动，self-hosted `kvm` 标签 runner；普通 CI 不运行）
+- 单元级：`pytest tests/test_cube_node_tooling.py`（mock fixture，PASS/FAIL 矩阵）
+- 真实节点全链路：FG-017（环境验收，不伪造完成）

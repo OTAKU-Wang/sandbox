@@ -5,6 +5,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { contractApi } from '../../services/contractApi';
 import { dataProductApi } from '../../services/dataProductApi';
 import { usersApi } from '../../services/usersApi';
+import { levelSelectOptions, metaApi } from '../../services/metaApi';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title } = Typography;
 const { TextArea } = Input;
@@ -39,6 +41,12 @@ export default function ContractCreate() {
   const { data: buyers, isLoading: buyersLoading } = useQuery({
     queryKey: ['buyer-options'],
     queryFn: () => usersApi.options({ role: 'buyer', limit: 100 }),
+  });
+
+  const { data: capabilityMatrix, isLoading: matrixLoading, isError: matrixIsError, error: matrixError, refetch: refetchMatrix } = useQuery({
+    queryKey: ['capability-matrix'],
+    queryFn: () => metaApi.getCapabilityMatrix(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const mutation = useMutation({
@@ -106,7 +114,7 @@ export default function ContractCreate() {
           onFinish={onFinish}
           initialValues={{
             contract_type: 'data_query',
-            allowed_sandbox_levels: ['L3'],
+            allowed_sandbox_levels: ['l2c'],
             allowed_sandbox_modes: ['query'],
             allowed_operations: ['read', 'analyze'],
             max_duration_hours: 24,
@@ -114,6 +122,9 @@ export default function ContractCreate() {
             allowed_output_formats: ['csv', 'json'],
           }}
         >
+          {matrixIsError && (
+            <QueryErrorAlert error={matrixError} message="沙箱级别加载失败" onRetry={() => { void refetchMatrix(); }} />
+          )}
           <Form.Item name="title" label="合约标题" rules={[{ required: true, max: 200, message: '请输入标题' }]}>
             <Input placeholder="合约标题" />
           </Form.Item>
@@ -152,13 +163,29 @@ export default function ContractCreate() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="allowed_sandbox_levels" label="允许沙箱级别">
-            <Select mode="multiple" allowClear options={[
-              { label: 'L1 - TEE', value: 'L1' },
-              { label: 'L2 - 轻量级虚拟化', value: 'L2' },
-              { label: 'L3 - 进程隔离', value: 'L3' },
-              { label: 'K8s - 分布式 Pod', value: 'k8s' },
-            ]} />
+          <Form.Item name="allowed_sandbox_levels" label="允许沙箱级别"
+            tooltip="级别能力以能力矩阵为权威源（SS-11 PZ-13）；L0 不可写入合约；弃用级别灰显">
+            <Select
+              mode="multiple"
+              allowClear
+              loading={matrixLoading}
+              notFoundContent={matrixLoading ? '加载中' : '能力矩阵加载失败'}
+              options={[
+                // SS-13：l2c 为 MicroVM 单一路径的生产默认；后端能力矩阵仍标记全 planned
+                // （矩阵转 real/simulated 后 matrix 条目自动覆盖此回退项，PZ-13 单一来源不变）。
+                { value: 'l2c', label: "L2' MicroVM (Cube)" },
+                ...levelSelectOptions(capabilityMatrix, { contract: true })
+                  .filter((opt) => opt.value !== 'l2c')
+                  .map((opt) => ({
+                    value: opt.value,
+                    label: (
+                      <span style={opt.deprecated ? { color: 'rgba(0, 0, 0, 0.45)' } : undefined}>
+                        {opt.label}
+                      </span>
+                    ),
+                  })),
+              ]}
+            />
           </Form.Item>
           <Form.Item name="allowed_sandbox_modes" label="允许沙箱模式">
             <Select mode="multiple" allowClear options={[

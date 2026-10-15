@@ -5,7 +5,7 @@ from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_business_user
 from app.models.user import User, UserRole
 from app.models.data_product import DataProduct, DataProductStatus
 from app.models.data_resource import DataResource, ResourceStatus
@@ -89,7 +89,7 @@ async def _active_session_count(db: AsyncSession, product_id: uuid.UUID) -> int:
 async def create_data_product(
     body: DataProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     # Validate resource if provided
     resource = None
@@ -147,7 +147,7 @@ async def list_data_products(
     cursor: str | None = Query(None),
     response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     filters = []
     visibility_filter = _visible_product_filter(current_user)
@@ -196,7 +196,7 @@ async def list_data_products(
 async def get_data_product(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
     product = result.scalar_one_or_none()
@@ -213,7 +213,7 @@ async def update_data_product(
     product_id: uuid.UUID,
     body: DataProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
     product = result.scalar_one_or_none()
@@ -235,7 +235,7 @@ async def update_data_product_put(
     product_id: uuid.UUID,
     body: DataProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
     product = result.scalar_one_or_none()
@@ -256,7 +256,7 @@ async def update_data_product_put(
 async def delete_data_product(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
     product = result.scalar_one_or_none()
@@ -280,7 +280,7 @@ async def delete_data_product(
 async def submit_for_review(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Submit a draft product for review."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
@@ -299,6 +299,9 @@ async def submit_for_review(
         user_id=current_user.id, resource_id=str(product.id),
         detail={"from": "draft", "to": "reviewing"},
     )
+    # SS-14 D-e2e-14 同族 (2026-10-14): 显式 commit 后再响应 —— 否则 200 先于
+    # commit 可见, 紧接的 approve 读到旧 draft 状态 (get_db teardown 才提交)。
+    await db.commit()
     return DataProductResponse.model_validate(product)
 
 
@@ -306,7 +309,7 @@ async def submit_for_review(
 async def approve_product(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Approve a reviewing product (admin only)."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
@@ -325,6 +328,8 @@ async def approve_product(
         user_id=current_user.id, resource_id=str(product.id),
         detail={"approved_by": str(current_user.id)},
     )
+    # SS-14 D-e2e-14 同族 (2026-10-14): 显式 commit 后再响应（见 submit 处注释）。
+    await db.commit()
     return DataProductResponse.model_validate(product)
 
 
@@ -332,7 +337,7 @@ async def approve_product(
 async def publish_product(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Publish an approved product."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
@@ -353,6 +358,8 @@ async def publish_product(
         user_id=current_user.id, resource_id=str(product.id),
         detail={"product_type": product.product_type, "resource_id": str(product.resource_id)},
     )
+    # SS-14 D-e2e-14 同族 (2026-10-14): 显式 commit 后再响应（见 submit 处注释）。
+    await db.commit()
     return DataProductResponse.model_validate(product)
 
 
@@ -360,7 +367,7 @@ async def publish_product(
 async def reject_product(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Reject a reviewing product back to draft (admin only)."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
@@ -386,7 +393,7 @@ async def reject_product(
 async def archive_product(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Archive a non-draft product after active usage has stopped."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
@@ -467,7 +474,7 @@ async def generate_synthetic_test_data(
     product_id: uuid.UUID,
     row_count: int = Query(100, ge=1, le=10000),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Generate synthetic test data from the product's schema definition.
 
@@ -482,7 +489,7 @@ async def generate_mock_test_data(
     product_id: uuid.UUID,
     row_count: int = Query(100, ge=1, le=10000),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Deprecated compatibility alias for synthetic test data generation."""
     return await _generate_synthetic_test_data_for_product(product_id, row_count, db, current_user, "mock")
@@ -494,7 +501,7 @@ async def sample_real_test_data(
     sample_size: int = Query(100, ge=1, le=10000),
     method: str = Query("random", pattern="^(random|systematic|first_n)$"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Sample real data from the linked resource for testing.
 
@@ -545,7 +552,7 @@ async def desensitize_real_test_data(
     product_id: uuid.UUID,
     sample_size: int = Query(100, ge=1, le=10000),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Generate desensitized test data from the linked resource.
 
@@ -599,7 +606,7 @@ async def create_new_version(
     product_id: uuid.UUID,
     change_summary: str = "",
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Create a new version of a data product. Copies metadata and increments version."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
@@ -657,7 +664,7 @@ async def create_new_version(
 async def list_versions(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """List all versions of a data product."""
     result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))

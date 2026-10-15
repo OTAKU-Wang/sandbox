@@ -169,6 +169,69 @@ class DPBudgetLedger:
         """Return True for unittest.mock sessions used by legacy tests."""
         return db.__class__.__module__.startswith("unittest.mock")
 
+    # ── Synchronous cache-level fast path (PZ-02 / MR-A3) ─────────────────
+    # The output-inspection pipeline runs in synchronous contexts (no DB
+    # session). PZ-02 made THIS ledger the single source of truth for DP
+    # budgets: DifferentialPrivacyEngine no longer keeps its own ``_budgets``
+    # dict and reads/writes through these methods instead. The write-through
+    # cache is the in-process authority; the DB rows remain the persistent
+    # source of truth and are only touched via the async allocate()/consume()
+    # above. Synchronous allocations/consumptions are therefore process-local
+    # (they survive the request, not a restart) — the contract-level async
+    # path is used where a DB session exists.
+
+    def has_budget_sync(self, budget_id: str) -> bool:
+        """True when a budget entry for ``budget_id`` exists in the in-process
+        ledger cache (allocated via allocate_sync or loaded from the DB)."""
+        return budget_id in self._loaded or budget_id in self._cache
+
+    def get_remaining_sync(self, budget_id: str) -> float:
+        """Synchronous cache-only remaining budget (0.0 if untracked)."""
+        return self._cache.get(budget_id, 0.0)
+
+    def allocate_sync(self, budget_id: str, total_epsilon: float) -> float:
+        """Allocate a budget in the in-process cache without a DB session.
+
+        Applies the same guardrails as the async ``allocate`` (gap E3 cap).
+        Process-local: no DB row is written; see the section comment above.
+        """
+        from app.core.config import get_settings
+
+        total = float(total_epsilon)
+        if total < 0:
+            raise ValueError("epsilon budget must be non-negative")
+        max_alloc = get_settings().DP_MAX_EPSILON_ALLOCATION
+        if max_alloc is not None and total > float(max_alloc):
+            raise ValueError(
+                f"epsilon allocation {total} exceeds DP_MAX_EPSILON_ALLOCATION={max_alloc}"
+            )
+        self._cache[budget_id] = max(total, 0.0)
+        self._loaded.add(budget_id)
+        return self._cache[budget_id]
+
+    def consume_sync(self, budget_id: str, epsilon: float) -> bool:
+        """Consume epsilon from the in-process cache (no DB entry written).
+
+        Mirrors the async ``consume`` guardrails: epsilon=0 / below
+        ``DP_MIN_EPSILON_CONSUMPTION`` is not a meaningful consumption
+        ("DP not applied") and is rejected, as is a single consumption above
+        ``DP_MAX_EPSILON_PER_CONSUMPTION``.
+        """
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        if epsilon <= settings.DP_MIN_EPSILON_CONSUMPTION:
+            return False
+        max_per = settings.DP_MAX_EPSILON_PER_CONSUMPTION
+        if max_per is not None and epsilon > float(max_per):
+            return False
+        remaining = self._cache.get(budget_id, 0.0)
+        if remaining < epsilon:
+            return False
+        self._cache[budget_id] = remaining - epsilon
+        self._loaded.add(budget_id)
+        return True
+
     async def get_ledger(self, db: AsyncSession, contract_id: str) -> list[BudgetEntry]:
         result = await db.execute(
             select(DPBudgetEntry)

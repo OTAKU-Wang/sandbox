@@ -1,6 +1,7 @@
 """Output Inspection Gateway — 6-stage review pipeline.
 Stages: Format Validation → DLP Scan → Differential Privacy → Watermark → Signature → Final Approval.
 """
+import logging
 import re
 import math
 import hashlib
@@ -8,6 +9,7 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 
+from app.services.dp_budget import dp_budget_ledger
 from app.utils.watermark import (
     generate_watermark,
     embed_text_watermark,
@@ -17,6 +19,8 @@ from app.utils.watermark import (
     extract_image_watermark,
     verify_image_watermark,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SandboxMode(str, Enum):
@@ -57,6 +61,13 @@ class InspectionResult:
     redacted_output: str | None = None
     watermark: str | None = None
     dp_applied: bool = False
+    # PZ-02 (MR-A3): DP budget honesty fields.
+    # dp_budget_remaining: remaining budget after this call's consumption;
+    #   None = no budget tracked for the session (or DP not applied).
+    # noisy_output_rows: the structured rows AFTER noise was applied
+    #   (None when no structured rows were provided).
+    dp_budget_remaining: float | None = None
+    noisy_output_rows: list[dict] | None = None
     signature: str | None = None  # SM2 digital signature (hex r||s)
 
 
@@ -185,12 +196,60 @@ class OutputInspector:
         elif InspectionStage.K_ANONYMITY.value in active_stages:
             stage_results[InspectionStage.K_ANONYMITY.value] = True
 
-        # Stage 4: Differential Privacy (if epsilon provided)
+        # Stage 4: Differential Privacy — REAL noise application (PZ-02 / MR-A3)
+        #
+        # dp_applied must reflect what actually happened:
+        #   - epsilon is None or <= 0 -> DP NOT applied (epsilon=0 means
+        #     "DP not applied", not an infinite budget);
+        #   - epsilon > 0            -> Laplace noise is applied to the
+        #     numeric fields of the structured output rows and the session's
+        #     DP budget is consumed once. The budget lives in the persistent
+        #     dp_budget_ledger (single source of truth — M-03 双预算 unification);
+        #     the engine's own _budgets dict is gone.
+        # If a budget is tracked for this session but exhausted, the output
+        # is blocked (fail-closed: release without the promised DP
+        # protection is not allowed).
+        dp_applied = False
+        dp_budget_remaining: float | None = None
+        noisy_rows: list[dict] | None = None
         if InspectionStage.DP.value in active_stages:
-            if dp_epsilon is not None:
-                stage_results[InspectionStage.DP.value] = True
-            else:
-                stage_results[InspectionStage.DP.value] = True
+            stage_results[InspectionStage.DP.value] = True
+            if dp_epsilon is not None and dp_epsilon > 0:
+                if dp_budget_ledger.has_budget_sync(session_id):
+                    if not dp_engine.consume(session_id, dp_epsilon):
+                        # Budget tracked but exhausted -> fail closed.
+                        stage_results[InspectionStage.DP.value] = False
+                        dp_budget_remaining = dp_engine.get_remaining(session_id)
+                        findings.append(InspectionFinding(
+                            InspectionStage.DP.value, "high", "dp_budget_exhausted",
+                            f"DP epsilon budget exhausted (remaining="
+                            f"{dp_budget_remaining:.4f}, requested={dp_epsilon:.4f})",
+                        ))
+                    else:
+                        noisy_rows, _noised = self._apply_dp_noise(output_rows, dp_epsilon)
+                        if output_rows is not None:
+                            output_rows = noisy_rows
+                        dp_applied = True
+                        dp_budget_remaining = dp_engine.get_remaining(session_id)
+                        logger.info(
+                            "DP applied: session=%s epsilon=%.4f remaining=%.4f",
+                            session_id, dp_epsilon, dp_budget_remaining,
+                        )
+                else:
+                    # No budget allocated for this session: the noise is
+                    # still real, but nothing is consumed (no budget exists
+                    # to consume). Session budgets are allocated via
+                    # /output-control/dp/budget/init or the contract ledger.
+                    noisy_rows, _noised = self._apply_dp_noise(output_rows, dp_epsilon)
+                    if output_rows is not None:
+                        output_rows = noisy_rows
+                    dp_applied = True
+                    dp_budget_remaining = None
+                    logger.info(
+                        "DP applied ad-hoc (no budget tracked for session %s); "
+                        "epsilon=%.4f not consumed", session_id, dp_epsilon,
+                    )
+            # else: epsilon is None or <= 0 -> DP not applied (honest no-op)
 
         # Stage 4b: Model Safety / MIA probe (training mode)
         if InspectionStage.MIA.value in active_stages:
@@ -248,12 +307,45 @@ class OutputInspector:
             findings=findings,
             redacted_output=redacted,
             watermark=watermark,
-            dp_applied=dp_epsilon is not None,
+            dp_applied=dp_applied,
+            dp_budget_remaining=dp_budget_remaining,
+            noisy_output_rows=noisy_rows,
             signature=sig,
         )
 
     def _generate_watermark(self, user_id: str, session_id: str) -> str:
         return generate_watermark(user_id, session_id)
+
+    def _apply_dp_noise(
+        self, output_rows: list[dict] | None, epsilon: float
+    ) -> tuple[list[dict] | None, int]:
+        """Add Laplace noise to the numeric fields of structured output rows.
+
+        PZ-02 (MR-A3): the DP stage used to be a no-op; this is the real
+        mechanism. Sensitivity 1.0 (unit L1 sensitivity of count/aggregate
+        query answers — the standard Laplace mechanism setting).
+
+        Returns ``(noisy_rows, num_noisy_cells)``. Free-text outputs have no
+        reliable numeric fields, so nothing is perturbed there.
+        """
+        if not output_rows:
+            return None, 0
+        noisy = []
+        count = 0
+        for row in output_rows:
+            new_row = {}
+            for key, value in row.items():
+                if isinstance(value, bool):
+                    new_row[key] = value
+                elif isinstance(value, (int, float)):
+                    new_row[key] = dp_engine.add_laplace_noise(
+                        float(value), sensitivity=1.0, epsilon=epsilon
+                    )
+                    count += 1
+                else:
+                    new_row[key] = value
+            noisy.append(new_row)
+        return noisy, count
 
     def check_data_reconstruction(
         self,
@@ -424,24 +516,28 @@ class OutputInspector:
 
 
 class DifferentialPrivacyEngine:
-    """Differential privacy budget management and noise injection."""
+    """Differential privacy noise + budget facade (PZ-02 / MR-A3).
 
-    def __init__(self):
-        self._budgets: dict[str, float] = {}  # session_id → remaining epsilon
+    Budget unification (M-03 双预算): the per-session ``_budgets`` dict that
+    used to live here is deleted — the persistent ``dp_budget_ledger`` is
+    the single source of truth, and every budget read/write in this class
+    delegates to it (its in-process write-through cache is the synchronous
+    fast path used from sync contexts; the ledger's DB rows remain the
+    persistent authority). epsilon=0 means "DP not applied" and is never
+    consumed.
+    """
 
-    def init_budget(self, session_id: str, epsilon: float):
-        self._budgets[session_id] = epsilon
+    def init_budget(self, session_id: str, epsilon: float) -> float:
+        return dp_budget_ledger.allocate_sync(session_id, epsilon)
 
     def get_remaining(self, session_id: str) -> float:
-        return self._budgets.get(session_id, 0.0)
+        return dp_budget_ledger.get_remaining_sync(session_id)
 
     def consume(self, session_id: str, epsilon: float) -> bool:
-        """Consume epsilon budget. Returns False if insufficient."""
-        remaining = self.get_remaining(session_id)
-        if remaining < epsilon:
-            return False
-        self._budgets[session_id] = remaining - epsilon
-        return True
+        """Consume epsilon budget via the ledger. Returns False when the
+        budget is insufficient or epsilon is not a meaningful consumption
+        (epsilon=0 -> "DP not applied")."""
+        return dp_budget_ledger.consume_sync(session_id, epsilon)
 
     def add_laplace_noise(self, value: float, sensitivity: float, epsilon: float) -> float:
         """Add Laplace noise for differential privacy."""

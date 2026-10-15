@@ -10,7 +10,6 @@ async def _setup_contract(client: AsyncClient, auth_headers: dict, **overrides):
         "username": f"buyer_{uuid.uuid4().hex[:8]}",
         "email": f"b_{uuid.uuid4().hex[:8]}@example.com",
         "password": "testpass123",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
 
@@ -122,7 +121,6 @@ async def test_contract_list_empty(client: AsyncClient, auth_headers: dict):
         "username": f"empty_{unique}",
         "email": f"empty_{unique}@example.com",
         "password": "testpass123",
-        "role": "buyer",
     })
     headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
     resp = await client.get("/api/v1/contracts", headers=headers)
@@ -169,7 +167,6 @@ async def test_contract_invalid_output_format(client: AsyncClient, auth_headers:
         "username": f"badfmt_{uuid.uuid4().hex[:8]}",
         "email": f"bad_{uuid.uuid4().hex[:8]}@example.com",
         "password": "testpass123",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
     prod_resp = await client.post("/api/v1/data-products", json={"name": "FmtTest"}, headers=auth_headers)
@@ -191,7 +188,6 @@ async def test_contract_max_output_rows_boundary(client: AsyncClient, auth_heade
         "username": f"rows_{uuid.uuid4().hex[:8]}",
         "email": f"rows_{uuid.uuid4().hex[:8]}@example.com",
         "password": "testpass123",
-        "role": "buyer",
     })
     buyer_id = buyer_resp.json()["user"]["id"]
     prod_resp = await client.post("/api/v1/data-products", json={"name": "RowsTest"}, headers=auth_headers)

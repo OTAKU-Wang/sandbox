@@ -136,7 +136,7 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
     # Remove network policy enforcement and mark policy inactive
     try:
         from app.services.network_policy import network_policy_engine
-        await network_policy_engine.remove_policy(str(session.id))
+        await network_policy_engine.remove_policy(str(session.id), db=db)
     except Exception as e:
         logger.warning("[SessionLifecycle] Network policy removal failed for %s: %s", session.id, e)
     net_result = await db.execute(
