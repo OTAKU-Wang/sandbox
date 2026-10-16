@@ -1,6 +1,8 @@
 # cds-volume-plugin image (SS-10 CB-03 spec step 6).
 #
-# Build from the CDS repo root (context must include the vendored Tongsuo):
+# Build from the CDS repo root (context must include the vendored Tongsuo;
+# run `scripts/prepare_tongsuo.sh` first — Tongsuo is a sha-pinned gitlink, the
+# 406MB source is not in this repo):
 #   docker build -f cds-volume-plugin/Dockerfile -t cds-volume-plugin:<ver> .
 #
 # Stages: Tongsuo (vendored source → libtongsuo) → static sm4_gcm helper
