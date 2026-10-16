@@ -38,6 +38,8 @@ sandbox/
 | Frontend API boundary | cds-frontend/src/services/ | shared axios, single-flight 401 refresh |
 | Frontend complexity concentration | cds-frontend/src/pages/SessionDetail.tsx | 1304 LOC, 26 lazy pages |
 | API error contract | docs/error-codes.md | {code,message,detail,request_id}, 12 named codes |
+| Agent handoff (env/lanes/pitfalls) | docs/agent-handoff-2026-10-16.md | read first on a new machine; open work = specs/ss-18-prototype-alignment.md §8 |
+| Remote verification lanes | scripts/remote-harness/{sync_tree,source_lane,fe_lane}.sh | tests run on the remote harness (user rule); needs CDS_LANE_DB_URL; never drop the venv PATH export |
 | Mock/simulation registry | docs/mock-remediation-plan.md | MR-A1..A15, honest-degradation rules |
 | Deploy | root compose (4 variants), k8s/, helm/cds | five parallel config copies — see NOTES |
 | CI gates | .github/workflows/ci.yml | gate list must be green; full suite informational |
@@ -100,6 +102,7 @@ helm dependency build ./helm/cds    # required before helm install
 ## NOTES
 - Crypto honesty: SM2/SM3/SM4 (GM/T) is the design, but Tongsuo/ is vendored and NOT wired — backend SM4-GCM is actually AES-256-GCM and sm3() silently falls back to SHA-256 without gmssl. Frontend does SM2/SM3 client-side via sm-crypto.
 - Prod compose knowingly ships software-simulation switches TRUE until real-hardware acceptance (FG-001/FG-002); the mock/simulation registry is docs/mock-remediation-plan.md (MR-A1..A15).
+- Sandbox guest path contract has ONE source of truth: `GUEST_DATA_DIR=/sandbox/data` (readonly declaration), `GUEST_OUTPUT_DIR=/sandbox/output` (the only harvested dir), `GUEST_WORK_DIR=/scratch` (compat-harvested), `GUEST_EXEC_DIR=/results/.cds-exec` (never harvested) in `app/services/cube_runtime_adapter.py`. Declared volumes do not reach the guest on cold start (data is injected over the exec channel), so "readonly" means declaration + harvest exclusion, NOT hypervisor enforcement — never claim stronger. Changing a path must also re-pin the literal mount assertions in `tests/test_cube_runtime_adapter.py`.
 - Known infra drift: postgres user `cds` vs `cds_admin`; `CDS_LOG_JSON` true (prod compose) vs "false" (helm); 8-col vs 40-col audit_events init SQL.
 - Known defect S4: firecracker seccomp retry is not gated by `SECCOMP_FALLBACK_ALLOWED` (sandbox_runtime is) — inconsistent isolation posture.
 - Committed dev artifacts: k8s/secrets.yaml (DEV-ONLY credentials — rotate in any real environment) and logs/cds-egress/access.jsonl (30 real session records).
