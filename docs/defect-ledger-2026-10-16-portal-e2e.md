@@ -418,6 +418,25 @@ antd Form 内部 store 仍为空 ⇒ 点“登录”既不发请求也不报字�
 
 ## 验证记录
 
+### V-16 推送前门（远程源码直跑 gate 车道 + FE 车道）
+
+环境前提：本轮首次跑的 gate 车道 **5 步全红**，根因是车道脚本（当时只在本机 `/tmp`）丢了
+`export PATH="…/venv/bin:…"` 一行⇒ 退化成 `/usr/bin/python`（3.11）：`alembic`/`pytest` 找不到模块，
+并把 `app/services/agent_service.py:386` 的合法 PEP 701 f-string **误报成 SyntaxError**。
+修车道后重跑，**未改任何产品代码**。车道脚本已入仓 `scripts/remote-harness/`。
+
+远程 `source_lane.sh fast`（Python 3.12.15，树 `STEP_OK tree_sync`）：
+`compileall` / `import_smoke` / `alembic_upgrade` / `alembic_check` / `schema_parity` / **`gate`（GATE_FILES=36）**
+均 `STEP_OK`；`ss15` 子集结果落地后回填。
+
+远程 FE 车道（node:20，补跑一轮以覆盖 IDE 目录提示行）：`TSC_RC=0 VITEST_RC=0 BUILD_RC=0 FE_LANE_EXIT=0`，
+`Test Files 12 passed (12) / Tests 141 passed (141)`。
+
+推送：`56ad292..b8fc5c1` → `origin/feat/ss-11-productization`（6 个提交：车道入仓 / SS-18 文档与台账 /
+前序后端轮次 / SS-18 目录契约 / 前端门户对齐 / 原型截图入仓）。
+**未跑 full 全量回归**（~28 分钟）：本轮只改过目录常量与两个 API 的文件路径解析，gate 子集 +
+定向 67 passed 已覆盖，全量数字待补到下一行，不得拿 22/33 基线当作本轮已验。
+
 ### V-15 SS-18 目录契约落地的远程权威复验
 
 载体：`/root/cds-test/src`（`TREE_MD5_MATCH a51f01fd…`，与本地逐文件同内容），

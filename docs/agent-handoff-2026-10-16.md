@@ -7,7 +7,7 @@
 
 ## 0. 现在的状态（一句话）
 
-分支 `feat/ss-11-productization`；后端业务闭环已在**真 CubeSandbox MicroVM** 上跑通并留证（台账 V-14/V-15），
+分支 `feat/ss-11-productization`，已推 `56ad292..b8fc5c1`（2026-10-16）——**接手第一步 `git pull`**；后端业务闭环已在**真 CubeSandbox MicroVM** 上跑通并留证（台账 V-14/V-15），
 本轮把**沙箱目录契约**与**开发者工作台信息架构**收敛到原型口径（SS-18 §2 与 M1 已落地），
 剩下的集中在 `specs/ss-18-prototype-alignment.md` §8 的 M2–M5 与后端 P0 三项。
 
