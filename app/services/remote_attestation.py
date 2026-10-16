@@ -111,6 +111,11 @@ class AttestationResult:
     tcb_status: str = ""
     policy_checks: dict[str, bool] = field(default_factory=dict)
     error_message: str | None = None
+    # PZ-05 (MR-B1): which trust root signed this quote. "external" = hardware
+    # / external CA chain (default for custom providers); "local-simulated" =
+    # the built-in local static root (_LOCAL_ATTESTATION_ROOT), i.e. software
+    # attestation that can be reproduced without TEE hardware.
+    trust_root: str = "external"
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: int = 0
 
@@ -495,11 +500,34 @@ class AttestationService:
     """
 
     def __init__(self, policy: AttestationPolicy | None = None):
-        self._policy = policy or AttestationPolicy()
+        if policy is None:
+            policy = AttestationPolicy()
+            # PZ-05 (MR-B1): the measurement whitelist is operator-managed via
+            # CDS_ATTESTATION_ALLOWED_MEASUREMENTS (csv); empty = allow all
+            # (dev default — production requires it non-empty, enforced by
+            # validate_security_config).
+            measurements: list[str] = []
+            try:
+                from app.core.config import get_settings
+                measurements = [
+                    m.strip()
+                    for m in get_settings().ATTESTATION_ALLOWED_MEASUREMENTS.split(",")
+                    if m.strip()
+                ]
+            except Exception as e:
+                logger.warning("Could not load ATTESTATION_ALLOWED_MEASUREMENTS from settings: %s", e)
+            policy.allowed_measurements = set(measurements)
+        self._policy = policy
         self._providers: dict[TEEType, AttestationProvider] = {
             TEEType.SGX: SGXProvider(),
             TEEType.SEV_SNP: SEVProvider(),
             TEEType.FIRECRACKER: FirecrackerProvider(),
+        }
+        # Built-in providers verify against the local static root
+        # (_LOCAL_ATTESTATION_ROOT) — their results carry trust_root=
+        # "local-simulated" so consumers can tell (PZ-05/MR-B1).
+        self._local_root_types: set[TEEType] = {
+            TEEType.SGX, TEEType.SEV_SNP, TEEType.FIRECRACKER,
         }
         self._verification_log: list[AttestationResult] = []
 
@@ -598,6 +626,11 @@ class AttestationService:
             return result
 
         result = provider.verify_quote(quote)
+
+        # PZ-05 (MR-B1): built-in providers verify against the local static
+        # root — label the trust root explicitly (additive field).
+        if quote.tee_type in self._local_root_types:
+            result.trust_root = "local-simulated"
 
         # Enrich with policy check results
         result.policy_checks["tee_type_allowed"] = True

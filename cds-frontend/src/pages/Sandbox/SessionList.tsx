@@ -10,6 +10,7 @@ import type { SandboxSession } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
 import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { levelSelectOptions, metaApi } from '../../services/metaApi';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title } = Typography;
@@ -89,6 +90,18 @@ export default function SessionList() {
     queryKey: ['sandbox-session-templates'],
     queryFn: () => sandboxApi.getSessionTemplates(),
     enabled: canCreateSession,
+  });
+
+  const {
+    data: capabilityMatrix,
+    isLoading: matrixLoading,
+    isError: matrixIsError,
+    error: matrixError,
+    refetch: refetchMatrix,
+  } = useQuery({
+    queryKey: ['capability-matrix'],
+    queryFn: () => metaApi.getCapabilityMatrix(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const terminateMutation = useMutation({
@@ -211,6 +224,9 @@ export default function SessionList() {
           {contractsIsError && (
             <QueryErrorAlert error={contractsError} message="可用合约加载失败" onRetry={() => { void refetchContracts(); }} />
           )}
+          {matrixIsError && (
+            <QueryErrorAlert error={matrixError} message="沙箱级别加载失败" onRetry={() => { void refetchMatrix(); }} />
+          )}
           <Form.Item name="data_product_id" label="数据产品" rules={[{ required: true, message: '请选择数据产品' }]}>
             <Select
               showSearch
@@ -238,13 +254,20 @@ export default function SessionList() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="sandbox_level" label="沙箱级别" rules={[{ required: true, message: '请选择沙箱级别' }]}>
-            <Select options={[
-              { label: 'L1 - TEE', value: 'L1' },
-              { label: 'L2 - 软件增强', value: 'L2' },
-              { label: 'L3 - 最小隔离', value: 'L3' },
-              { label: 'K8s - 分布式 Pod', value: 'k8s' },
-            ]} />
+          <Form.Item name="sandbox_level" label="沙箱级别" rules={[{ required: true, message: '请选择沙箱级别' }]}
+            tooltip="级别能力以能力矩阵为权威源（SS-11 PZ-13）；弃用级别灰显">
+            <Select
+              loading={matrixLoading}
+              notFoundContent={matrixLoading ? '加载中' : '能力矩阵加载失败'}
+              options={levelSelectOptions(capabilityMatrix).map((opt) => ({
+                value: opt.value,
+                label: (
+                  <span style={opt.deprecated ? { color: 'rgba(0, 0, 0, 0.45)' } : undefined}>
+                    {opt.label}
+                  </span>
+                ),
+              }))}
+            />
           </Form.Item>
           <Form.Item name="timeout_seconds" label="超时时间（秒）">
             <InputNumber min={60} max={86400} style={{ width: '100%' }} />

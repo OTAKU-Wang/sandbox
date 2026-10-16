@@ -1,0 +1,24 @@
+# SS-10 CB-00 · CubeSandbox upstream contract watch list (spec §5.3, versioned config — changes need review)
+# Consumed by scripts/cube-upstream-check.sh. One pathspec per line; a path matches
+# when a changed file equals it or lives under it (git pathspec prefix semantics).
+# Lines starting with '#' and blank lines are ignored.
+#
+# Sources (spec §5.3 契约 diff 路径集, cross-checked against §2 契约基线):
+#   pkgs/proto/services/{cubebox,volumeplugin,images,errorcode}  — gRPC 契约面（§2.2/§2.4/§2.5）
+#   pkgs/proto/types/**                                          — 共享消息类型
+#   CubeMaster/pkg/base/constants.go                             — 注解集合（pause / appsnapshot / artifact，§2.5/§2.6）
+#   Cubelet/storage/pluginvolume.go                              — plugin-volume-sources 注解契约（v1.1 增列，§2.4）
+#   CubeEgress/lua/audit.lua                                     — 审计 schema / 默认路径（§2.7）
+#   deploy/one-click/{install*.sh,systemd/}                      — 节点形态（compute role，§2.1）
+pkgs/proto/services/cubebox
+pkgs/proto/services/volumeplugin
+pkgs/proto/services/images
+pkgs/proto/services/errorcode
+pkgs/proto/services/snapshot
+pkgs/proto/types
+CubeMaster/pkg/base/constants.go
+Cubelet/storage/pluginvolume.go
+CubeEgress/lua/audit.lua
+deploy/one-click/install.sh
+deploy/one-click/install-compute.sh
+deploy/one-click/systemd

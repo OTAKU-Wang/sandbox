@@ -1,11 +1,14 @@
+import json
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
+from app.core.scopes import key_unmapped_deny, require_group, require_human
 
 logger = logging.getLogger(__name__)
 from app.core.database import engine, Base
@@ -20,11 +23,19 @@ from app.api import admin
 from app.api import metrics
 from app.api import inference  # N5: inference service sandbox
 from app.api import k8s_ops  # N8: K8s runtime operations (read-only)
+from app.api import meta  # PZ-13: capability matrix authority source
+from app.api import cube_templates  # SS-10 CB-05: template pipeline (image → artifact → distribution)
 from app.api import agent  # N10: sandbox-internal agent execution
+from app.api import cube_egress  # CB-06: node egress audit ingestion (/internal/audit)
+from app.api import api_keys  # SS-12: platform API key lifecycle (human-only)
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model, rag_generative_model  # Ensure tables are created
+from app.models import api_key as api_key_models  # SS-12: api_keys table
 from app.models import session_operation  # W11: async operation records
 from app.models import task_queue as task_queue_models  # W16: durable queue table
 from app.models import shared_volume  # W15: shared volume tables
+from app.models import volume_key  # CB-01: volume DEK lifecycle tables
+from app.models import cube_egress_dedup  # CB-06: egress audit idempotency keys
+from app.models import cube_template  # CB-05: cube template registry + node distribution
 
 
 @asynccontextmanager
@@ -188,11 +199,56 @@ async def lifespan(app: FastAPI):
 
 settings = get_settings()
 
+class Ss12KeyDefaultDenyMiddleware:
+    """SS-12 rule 1: API key subjects hitting a path no functional group
+    covers are rejected before routing — fail-closed default-deny.
+
+    Raw ASGI (not a dependency): the previous app-level
+    ``dependencies=[Depends(default_deny_unmapped)]`` carried an
+    HTTPBearer/Request dependency that crashes WebSocket handshakes
+    (``HTTPBearer.__call__() missing 'request'``), breaking every WS route.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        auth = ""
+        for k, v in scope.get("headers") or []:
+            if k == b"authorization":
+                auth = v.decode("latin-1")
+        if not key_unmapped_deny(path, auth):
+            await self.app(scope, receive, send)
+            return
+        request_id = (scope.get("state") or {}).get("request_id") or uuid.uuid4().hex[:16]
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        body = json.dumps({
+            "code": "API_KEY_SCOPE_DENIED",
+            "message": f"No functional group covers path {path} for API key subjects",
+            "detail": {"reason": "unmapped_prefix", "path": path},
+            "request_id": request_id,
+        }).encode()
+        await send({
+            "type": "http.response.start",
+            "status": 403,
+            "headers": [(b"content-type", b"application/json"),
+                        (b"x-request-id", request_id.encode())],
+        })
+        await send({"type": "http.response.body", "body": body})
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
+app.add_middleware(Ss12KeyDefaultDenyMiddleware)
 
 # W1: telemetry middlewares. Starlette makes the LAST added middleware the
 # OUTERMOST, so add Metrics first and RequestID second. Metrics is disabled
@@ -223,48 +279,79 @@ register_exception_handlers(app)
 
 
 # Register routers
-app.include_router(health.router, tags=["health"])
-app.include_router(metrics.router, tags=["metrics"])
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-app.include_router(data_products.router, prefix="/api/v1/data-products", tags=["data-products"])
-app.include_router(data_resources.router, prefix="/api/v1/data-resources", tags=["data-resources"])
-app.include_router(sandbox_sessions.router, prefix="/api/v1/sandbox-sessions", tags=["sandbox-sessions"])
-app.include_router(contracts.router, prefix="/api/v1/contracts", tags=["contracts"])
-app.include_router(dev_sandbox.router, prefix="/api/v1/dev-sandbox", tags=["dev-sandbox"])
-app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
-app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
-app.include_router(output_control.router, prefix="/api/v1/output-control", tags=["output-control"])
-app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"])
-app.include_router(compliance.router, prefix="/api/v1/compliance", tags=["compliance"])
-app.include_router(data_pipeline.router, prefix="/api/v1/data-pipeline", tags=["data-pipeline"])
-app.include_router(certificates.router, prefix="/api/v1/certificates", tags=["certificates"])
-app.include_router(mpc.router, prefix="/api/v1/mpc", tags=["mpc"])
-app.include_router(sandbox_db.router, prefix="/api/v1/sandbox-db", tags=["sandbox-db"])
-app.include_router(kms.router, prefix="/api/v1/kms", tags=["kms"])
-app.include_router(sandbox_tasks.router, prefix="/api/v1/sandbox-tasks", tags=["sandbox-tasks"])
-app.include_router(training.router, prefix="/api/v1/training", tags=["training"])
-app.include_router(federation.router, prefix="/api/v1/federation", tags=["federation"])
-app.include_router(field_exposure.router, prefix="/api/v1/field-exposure", tags=["field-exposure"])
-app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["connectors"])
-app.include_router(network_policy_api.router, prefix="/api/v1/network-policies", tags=["network-policies"])
-app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"])
-app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"])
-app.include_router(inference.router, prefix="/api/v1/inference", tags=["inference"])
-app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"])
-app.include_router(k8s_ops.router, prefix="/api/v1/ops", tags=["ops"])
+# SS-12: every router group carries its functional scope gate (require_group)
+# or the human-only gate (require_human) — user subjects are untouched, API
+# key subjects are scope-checked per specs/ss-12-agent-api-keys.md §4.2.
+app.include_router(health.router, tags=["health"], dependencies=[Depends(require_group("audit"))])
+app.include_router(metrics.router, tags=["metrics"], dependencies=[Depends(require_group("audit"))])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"], dependencies=[Depends(require_human)])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"], dependencies=[Depends(require_human)])
+app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"], dependencies=[Depends(require_human)])
+app.include_router(data_products.router, prefix="/api/v1/data-products", tags=["data-products"], dependencies=[Depends(require_group("data"))])
+app.include_router(data_resources.router, prefix="/api/v1/data-resources", tags=["data-resources"], dependencies=[Depends(require_group("data"))])
+app.include_router(sandbox_sessions.router, prefix="/api/v1/sandbox-sessions", tags=["sandbox-sessions"], dependencies=[Depends(require_group("sessions"))])
+app.include_router(contracts.router, prefix="/api/v1/contracts", tags=["contracts"], dependencies=[Depends(require_group("contracts"))])
+app.include_router(dev_sandbox.router, prefix="/api/v1/dev-sandbox", tags=["dev-sandbox"], dependencies=[Depends(require_group("sessions"))])
+app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"], dependencies=[Depends(require_group("audit"))])
+app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"], dependencies=[Depends(require_group("audit"))])
+app.include_router(output_control.router, prefix="/api/v1/output-control", tags=["output-control"], dependencies=[Depends(require_group("output"))])
+app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"], dependencies=[Depends(require_group("data"))])
+app.include_router(compliance.router, prefix="/api/v1/compliance", tags=["compliance"], dependencies=[Depends(require_group("audit"))])
+app.include_router(data_pipeline.router, prefix="/api/v1/data-pipeline", tags=["data-pipeline"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(certificates.router, prefix="/api/v1/certificates", tags=["certificates"], dependencies=[Depends(require_group("certs"))])
+app.include_router(mpc.router, prefix="/api/v1/mpc", tags=["mpc"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(sandbox_db.router, prefix="/api/v1/sandbox-db", tags=["sandbox-db"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(kms.router, prefix="/api/v1/kms", tags=["kms"], dependencies=[Depends(require_group("infra"))])
+app.include_router(sandbox_tasks.router, prefix="/api/v1/sandbox-tasks", tags=["sandbox-tasks"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(training.router, prefix="/api/v1/training", tags=["training"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(federation.router, prefix="/api/v1/federation", tags=["federation"], dependencies=[Depends(require_group("federation"))])
+app.include_router(field_exposure.router, prefix="/api/v1/field-exposure", tags=["field-exposure"], dependencies=[Depends(require_group("output"))])
+app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["connectors"], dependencies=[Depends(require_group("infra"))])
+app.include_router(network_policy_api.router, prefix="/api/v1/network-policies", tags=["network-policies"], dependencies=[Depends(require_group("output"))])
+app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"], dependencies=[Depends(require_group("gateway"))])
+app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(inference.router, prefix="/api/v1/inference", tags=["inference"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"], dependencies=[Depends(require_group("agent"))])
+app.include_router(k8s_ops.router, prefix="/api/v1/ops", tags=["ops"], dependencies=[Depends(require_group("infra"))])
+app.include_router(meta.router, prefix="/api/v1/meta", tags=["meta"], dependencies=[Depends(require_group("meta"))])  # PZ-13
 
-# W10: WebSocket exec stream (mounted without prefix — paths are absolute)
+# W10: WebSocket exec stream (mounted without prefix — paths are absolute;
+# SS-12: machine subjects authenticate via the WS ticket, not Bearer keys, so
+# no scope gate is attached here)
 app.include_router(session_stream.router)
-app.include_router(sandbox_nodes.router, prefix="/api/v1/sandbox-nodes", tags=["sandbox-nodes"])
-app.include_router(shared_volumes.router, prefix="/api/v1/shared-volumes", tags=["shared-volumes"])
+app.include_router(sandbox_nodes.router, prefix="/api/v1/sandbox-nodes", tags=["sandbox-nodes"], dependencies=[Depends(require_group("infra"))])
+app.include_router(shared_volumes.router, prefix="/api/v1/shared-volumes", tags=["shared-volumes"], dependencies=[Depends(require_group("infra"))])
+# CB-06: node audit tailer ingestion — service token + mTLS, NOT under /api/v1;
+# SS-12: human-only surface, API key subjects are rejected
+app.include_router(cube_egress.router, prefix="/internal/audit", tags=["cube-egress-audit"], dependencies=[Depends(require_human)])
+app.include_router(cube_templates.router, prefix="/api/v1/cube-templates", tags=["cube-templates"], dependencies=[Depends(require_group("infra"))])
 
 # Frontend admin UI (FE-1~FE-5)
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path as _Path
 _static_dir = _Path(__file__).parent / "static"
 if _static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    class _KeyBlockedStatic:
+        """SS-12: /static is a human-only surface — machine (API key) Bearer
+        requests get a W2 403 API_KEY_SCOPE_DENIED instead of the files."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http":
+                for k, v in scope.get("headers", []):
+                    if k == b"authorization" and v.startswith(b"Bearer cds_ak_"):
+                        body = ('{"code": "API_KEY_SCOPE_DENIED", '
+                                '"message": "API key subjects cannot access human-only endpoints", '
+                                '"detail": {"reason": "human_only"}, "request_id": ""}')
+                        await send({"type": "http.response.start", "status": 403,
+                                    "headers": [(b"content-type", b"application/json")]})
+                        await send({"type": "http.response.body", "body": body.encode()})
+                        return
+            await self._inner(scope, receive, send)
+
+    app.mount("/static", _KeyBlockedStatic(StaticFiles(directory=str(_static_dir))), name="static")
 # W4: legacy Jinja admin pages carry no authentication — off by default, and
 # validate_security_config() rejects enabling them in production. Factored
 # into a function so tests can exercise the gate on a fresh app instance.

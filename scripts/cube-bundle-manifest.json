@@ -1,0 +1,71 @@
+{
+  "bundle_version": "cb02-2026.10.13-1",
+  "spec": "specs/ss-10-cube-dataplane-connector.md (SS-10, CB-02)",
+  "pinned_at": "2026-10-13",
+  "cubesandbox": {
+    "version": "go-sdk-v0.7.3",
+    "git_sha": "9b75d33907ed7336b1eef73a935ae2d1990d9b35",
+    "tags_at_pin": ["go-sdk-v0.7.3", "python-sdk-v0.7.3", "sdk/go/v0.7.3"],
+    "install_role": "compute",
+    "installer": "deploy/one-click/install-compute.sh",
+    "zero_diff": true
+  },
+  "cds_components": {
+    "cds-volume-plugin": {
+      "task": "CB-03",
+      "version": "0.1.0-pending",
+      "binary": "/usr/local/bin/cds-volume-plugin",
+      "socket": "/run/cds-volume-plugin/cds.sock",
+      "note": "二进制由 CB-03 构建交付；本 bundle 只引用 socket 路径与注册约定（status: pending）"
+    },
+    "tls-proxy": {
+      "task": "CB-02",
+      "version": "1.0.0",
+      "implementation": "stunnel 5.x (mTLS, verify=2)",
+      "unit": "cds-tls-proxy.service",
+      "port": 9443
+    },
+    "audit-tailer": {
+      "task": "CB-06",
+      "version": "0.1.0-pending",
+      "binary": "/usr/local/bin/cds-audit-tailer",
+      "unit": "cds-audit-tailer.service",
+      "note": "单元与 env 模板由 CB-02 交付；tailer 二进制本体由 CB-06 交付（status: pending）"
+    }
+  },
+  "asset_digests": {
+    "_note": "to-be-filled at bundle build —— bundle 构建时（build-release 流程）实测写入；禁止占位猜测（诚实性纪律）",
+    "guest_image_ext4": {
+      "sha256": null,
+      "size_bytes": null,
+      "status": "to-be-filled at bundle build"
+    },
+    "guest_kernel_vmlinux": {
+      "sha256": null,
+      "size_bytes": null,
+      "status": "to-be-filled at bundle build"
+    },
+    "cube_agent_ext4": {
+      "sha256": null,
+      "size_bytes": null,
+      "status": "to-be-filled at bundle build"
+    },
+    "cds_volume_plugin_binary": {
+      "sha256": null,
+      "size_bytes": null,
+      "status": "to-be-filled at bundle build (CB-03)"
+    },
+    "audit_tailer_binary": {
+      "sha256": null,
+      "size_bytes": null,
+      "status": "to-be-filled at bundle build (CB-06)"
+    }
+  },
+  "ports": {
+    "tls_proxy": 9443,
+    "cubelet_grpc_tcp": 9999,
+    "cubelet_http": 9998
+  },
+  "node_state_file": "/var/lib/cds/cube-node/INSTALL_STATE.json",
+  "runtime_version_format": "<version>+<sha12> (例: v0.7.3-rc2+9b75d33907ed)，写入 sandbox_nodes.runtime_version（§5.2）"
+}

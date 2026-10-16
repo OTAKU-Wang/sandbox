@@ -20,7 +20,9 @@ async def _mk_node(db_session, *, node_id: str, online=True, heartbeat_age_s=10,
         hostname=f"host-{node_id}",
         ip_address="10.0.0.1",
         status=NodeStatus.ONLINE.value if online else NodeStatus.OFFLINE.value,
-        capabilities=["cpu"],
+        # RT-07 契约: capabilities 是 JSON dict（cubelet_endpoint/runtime_version/tee）,
+        # 旧 list 形态已被 node_cubelet_endpoint 的 dict 读取取代。
+        capabilities={"runtime_version": "v1"},
         scheduling_disabled=scheduling_disabled,
         last_heartbeat=datetime.now(timezone.utc) - timedelta(seconds=heartbeat_age_s),
     )

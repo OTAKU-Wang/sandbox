@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { trainingApi } from '../../services/trainingApi';
 import type { TrainingJob, ValidationResult, TrainingConfig } from '../../services/trainingApi';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
@@ -22,12 +23,12 @@ export default function TrainingDashboard() {
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [form] = Form.useForm();
 
-  const { data: jobs, isLoading } = useQuery({
+  const { data: jobs, isLoading, isError: jobsIsError, error: jobsError, refetch: refetchJobs } = useQuery({
     queryKey: ['training-jobs'],
     queryFn: () => trainingApi.listJobs(),
   });
 
-  const { data: selectedJobDetail, isLoading: detailLoading } = useQuery({
+  const { data: selectedJobDetail, isLoading: detailLoading, isError: detailIsError, error: detailError, refetch: refetchDetail } = useQuery({
     queryKey: ['training-job', detailDrawer.job?.job_id],
     queryFn: () => trainingApi.getJob(detailDrawer.job!.job_id),
     enabled: detailDrawer.open && !!detailDrawer.job?.job_id,
@@ -110,6 +111,7 @@ export default function TrainingDashboard() {
 
       {/* Job List */}
       <Card title="训练任务" style={{ marginBottom: 16 }} extra={<Button type="primary" onClick={() => { setValidateOpen(true); setValidationResult(null); form.resetFields(); }}>配置校验</Button>}>
+        {jobsIsError && <QueryErrorAlert error={jobsError} message="训练任务加载失败" onRetry={() => { void refetchJobs(); }} />}
         <Table columns={jobColumns} dataSource={jobs || []} rowKey="job_id" loading={isLoading} pagination={{ pageSize: 10 }} />
       </Card>
 
@@ -171,6 +173,7 @@ export default function TrainingDashboard() {
         onClose={() => setDetailDrawer({ open: false, job: null })}
         width={760}
       >
+        {detailIsError && <QueryErrorAlert error={detailError} message="任务详情加载失败" onRetry={() => { void refetchDetail(); }} />}
         {detailJob ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={1}>

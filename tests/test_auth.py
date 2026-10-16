@@ -10,7 +10,6 @@ async def test_register(client: AsyncClient):
         "username": f"user_{unique}",
         "email": f"user_{unique}@example.com",
         "password": "securepass123",
-        "role": "buyer",
     })
     assert resp.status_code == 201
     data = resp.json()

@@ -1807,15 +1807,31 @@ class SandboxRuntime:
     """Sandbox lifecycle manager with adapter selection and secure destruction."""
 
     def __init__(self):
-        self._adapters: dict[str, RuntimeAdapter] = {
-            SandboxLevel.L0.value: ProcessAdapter(),
-            SandboxLevel.L1.value: TEEAdapter(),
-            SandboxLevel.L2.value: FirecrackerAdapter(),
-            SandboxLevel.L3.value: BwrapAdapter(),
-        }
+        from app.core.config import get_settings
+
+        _settings = get_settings()
+        # SS-13 single-path cutover: legacy sandbox levels (L0/L1/L2/L3/k8s)
+        # are registered only behind the legacy gate — off by default; l2c
+        # (Cube MicroVM) is the production path. get_adapter for an absent
+        # level raises (existing 400 path).
+        self._adapters: dict[str, RuntimeAdapter] = {}
+        if _settings.SANDBOX_LEGACY_ENABLED or _settings.LEGACY_L2_ENABLED:
+            self._adapters[SandboxLevel.L0.value] = ProcessAdapter()
+            self._adapters[SandboxLevel.L1.value] = TEEAdapter()
+            self._adapters[SandboxLevel.L3.value] = BwrapAdapter()
+            # Legacy L2 (Firecracker) + k8s adapters — deprecated in the
+            # SS-10 transition (replaced by the L2' cube data plane).
+            self._adapters[SandboxLevel.L2.value] = FirecrackerAdapter()
+            self._adapters["k8s"] = K8sRuntimeAdapter()
         # K8s adapter available for distributed deployment (lazy init)
         self._k8s_adapter: K8sRuntimeAdapter | None = None
-        self._adapters["k8s"] = K8sRuntimeAdapter()
+        # L2' (Cube) data-plane adapter — registered only behind the gate
+        # (SS-10 CB-01). When CDS_CUBE_DATAPLANE_ENABLED=false the "l2c" key is
+        # absent and get_adapter("l2c") raises a clean 400 RUNTIME_UNAVAILABLE.
+        if _settings.CUBE_DATAPLANE_ENABLED:
+            from app.services.cube_runtime_adapter import CubeRuntimeAdapter
+
+            self._adapters[SandboxLevel.L2C.value] = CubeRuntimeAdapter()
 
     def register_adapter(self, name: str, adapter: RuntimeAdapter) -> None:
         """Register a custom runtime adapter."""
@@ -1831,6 +1847,15 @@ class SandboxRuntime:
     def get_adapter(self, level: str) -> RuntimeAdapter:
         adapter = self._adapters.get(level)
         if not adapter:
+            if level == SandboxLevel.L2C.value:
+                from app.core.errors import CDSError
+
+                raise CDSError(
+                    "L2' (cube) data plane is not enabled",
+                    code="RUNTIME_UNAVAILABLE",
+                    http_status=400,
+                    detail={"level": level, "reason": "dataplane_disabled"},
+                )
             raise ValueError(f"Unsupported sandbox level: {level}")
         return adapter
 
@@ -1857,11 +1882,17 @@ class SandboxRuntime:
             return None
 
     def provision(self, session_id: uuid.UUID, level: str, data_path: str, timeout: int = 3600, user_id: str = "",
-                  volume_mounts: list[dict] | None = None) -> dict:
+                  volume_mounts: list[dict] | None = None, cube_node: dict | None = None,
+                  volume_dek_ref: str | None = None) -> dict:
         adapter = self.get_adapter(level)
         if level == "k8s":
             return adapter.provision(
                 str(session_id), data_path, timeout, user_id=user_id, volume_mounts=volume_mounts or [],
+            )
+        if level == SandboxLevel.L2C.value:
+            return adapter.provision(
+                str(session_id), data_path, timeout, user_id=user_id, cube_node=cube_node,
+                volume_dek_ref=volume_dek_ref,
             )
         return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
 
@@ -1936,6 +1967,15 @@ class SandboxRuntime:
                 self._adapters["k8s"], container_id, code, language,
                 session_key=session_key, env_vars=env_vars, timeout=timeout,
             )
+        if container_id.startswith("l2c-"):
+            adapter = self._adapters.get(SandboxLevel.L2C.value)
+            if adapter is None:
+                return {"output": "L2' data plane not enabled", "exit_code": -1, "duration_ms": 0,
+                        "sandbox_level": "l2c", "error": "dataplane_disabled"}
+            return await self._execute_adapter(
+                adapter, container_id, code, language,
+                session_key=session_key, env_vars=env_vars, timeout=timeout,
+            )
         return {
             "output": f"SECURITY ERROR: unsupported sandbox container prefix for {container_id}",
             "exit_code": -1,
@@ -1974,6 +2014,15 @@ class SandboxRuntime:
                 container_id, code, language, env_vars=env_vars, timeout=timeout,
                 on_line=on_line,
             )
+        if container_id.startswith("l2c-"):
+            adapter = self._adapters.get(SandboxLevel.L2C.value)
+            streaming = getattr(adapter, "execute_streaming", None) if adapter else None
+            if streaming is None:
+                return {"exit_code": -1, "duration_ms": 0, "blocked": False, "error": "l2c streaming unavailable"}
+            return await streaming(
+                container_id, code, language, env_vars=env_vars, timeout=timeout,
+                on_line=on_line,
+            )
         return {
             "exit_code": -1,
             "duration_ms": 0,
@@ -1992,6 +2041,12 @@ class SandboxRuntime:
             return self._adapters[SandboxLevel.L3.value].terminate(container_id)
         if container_id.startswith("k8s-"):
             return self._adapters["k8s"].terminate(container_id)
+        if container_id.startswith("l2c-"):
+            adapter = self._adapters.get(SandboxLevel.L2C.value)
+            if adapter is None:
+                logger.warning("[SandboxRuntime] l2c terminate but data plane not enabled: %s", container_id)
+                return False
+            return adapter.terminate(container_id)
         logger.warning("[SandboxRuntime] Refusing to terminate unsupported container id: %s", container_id)
         return False
 
@@ -2006,6 +2061,11 @@ class SandboxRuntime:
             return self._adapters[SandboxLevel.L3.value].get_status(container_id)
         if container_id.startswith("k8s-"):
             return self._adapters["k8s"].get_status(container_id)
+        if container_id.startswith("l2c-"):
+            adapter = self._adapters.get(SandboxLevel.L2C.value)
+            if adapter is None:
+                return "unknown"
+            return adapter.get_status(container_id)
         logger.warning("[SandboxRuntime] Refusing to inspect unsupported container id: %s", container_id)
         return "unknown"
 

@@ -220,7 +220,7 @@ async def test_upload_requires_ownership(session_client, fake_session_id):
     unique = uuid.uuid4().hex[:8]
     resp = await session_client.post("/api/v1/auth/register", json={
         "username": f"other_{unique}", "email": f"other_{unique}@example.com",
-        "password": "testpass123", "role": "buyer",
+        "password": "testpass123",
     })
     other = {"Authorization": f"Bearer {resp.json()['access_token']}"}
     resp = await session_client.post(

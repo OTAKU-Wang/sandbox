@@ -12,6 +12,11 @@ class DummySandboxRuntime:
     def __init__(self, output: str = ""):
         self.output = output
 
+    def get_adapter(self, level: str):
+        # RT-07: 路由对 l2c 会话调 runtime.get_adapter 判适配器类型;
+        # dummy 返回自身（非 CubeRuntimeAdapter）→ 跳过卷预建/会话数据分支。
+        return self
+
     def provision(self, **kwargs):
         return {"container_id": "dummy-container", "status": "running"}
 
@@ -458,11 +463,11 @@ async def test_session_network_policy_can_be_viewed_and_updated_with_json_body(c
 
     engine_calls: list[tuple[str, str]] = []
 
-    async def fake_create_policy(session_id: str, config):
+    async def fake_create_policy(session_id: str, config, db=None):
         engine_calls.append(("create", config.mode))
         return {"session_id": session_id, "mode": config.mode}
 
-    async def fake_remove_policy(session_id: str):
+    async def fake_remove_policy(session_id: str, db=None):
         engine_calls.append(("remove", session_id))
 
     monkeypatch.setattr(sandbox_sessions_api.network_policy_engine, "create_policy", fake_create_policy)
@@ -535,11 +540,11 @@ async def test_cleanup_expired_sessions_removes_network_policy_enforcement(
     async def fake_get_sandbox_manager():
         return runtime
 
-    async def fake_create_policy(session_id: str, config):
+    async def fake_create_policy(session_id: str, config, db=None):
         engine_calls.append(("create", session_id))
         return {"session_id": session_id}
 
-    async def fake_remove_policy(session_id: str):
+    async def fake_remove_policy(session_id: str, db=None):
         engine_calls.append(("remove", session_id))
 
     monkeypatch.setattr(sandbox_sessions_api, "get_sandbox_manager", fake_get_sandbox_manager)

@@ -10,7 +10,12 @@ The adapter is selected via configuration; the rest of the system is backend-agn
 """
 from app.services.crypto_service import crypto_service
 import logging
+import os
 import uuid
+
+# Imported at module level so the model is registered on Base.metadata
+# (create_all / parity) as soon as any API imports this adapter.
+from app.models.chain_anchoring import ChainAnchoringRecord  # noqa: F401
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -47,7 +52,143 @@ class AnchorResult:
 
 
 class BlockchainAdapter(ABC):
-    """Abstract interface for blockchain backends."""
+    """Abstract interface for blockchain backends.
+
+    PZ-03: every backend persists successful anchors to the
+    chain_anchoring_records table (via set_db_session_factory) and can
+    re-hydrate its in-memory anchor cache after a restart via
+    hydrate_from_db, so verify() survives process restarts.
+    """
+
+    def set_db_session_factory(self, factory):
+        """Set the async session factory for DB persistence."""
+        self._db_session_factory = factory
+        self._hydrated = False
+
+    def _chain_record_rows(self, record: AnchorRecord) -> list[dict]:
+        """Build chain_anchoring_records row values for an anchor.
+
+        One row per anchored audit record (metadata['record_ids']); anchors
+        without explicit record ids write a single row keyed by the anchor
+        id. The full AnchorRecord payload travels in `receipt` so a fresh
+        instance can re-hydrate and verify without the legacy table.
+        """
+        receipt = {
+            "anchor_id": record.anchor_id,
+            "data_hash": record.data_hash,
+            "metadata": record.metadata,
+            "timestamp": record.timestamp.isoformat(),
+        }
+        audit_ids = []
+        for rid in record.metadata.get("record_ids") or []:
+            try:
+                audit_ids.append(uuid.UUID(str(rid)))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        if not audit_ids:
+            audit_ids = [uuid.UUID(record.anchor_id)]
+        return [
+            {
+                "id": uuid.uuid4(),
+                "audit_record_id": aid,
+                "backend": record.backend.value,
+                "tx_hash": record.tx_hash,
+                "block_height": record.block_number,
+                "confirmed": record.confirmed,
+                "receipt": receipt,
+            }
+            for aid in audit_ids
+        ]
+
+    async def _persist_chain_record(self, record: AnchorRecord) -> None:
+        """Persist an anchor to chain_anchoring_records (PZ-03). Never raises."""
+        factory = getattr(self, "_db_session_factory", None)
+        if not factory:
+            return
+        try:
+            from sqlalchemy import insert
+            from app.models.chain_anchoring import ChainAnchoringRecord
+            async with factory() as session:
+                for values in self._chain_record_rows(record):
+                    await session.execute(insert(ChainAnchoringRecord).values(**values))
+                await session.commit()
+        except Exception as e:
+            logger.error(f"[Blockchain] Failed to persist chain record {record.anchor_id}: {e}")
+
+    async def _load_chain_records(self) -> list[AnchorRecord]:
+        """Load this backend's anchor records from chain_anchoring_records."""
+        factory = getattr(self, "_db_session_factory", None)
+        if not factory:
+            return []
+        try:
+            from sqlalchemy import select
+            from app.models.chain_anchoring import ChainAnchoringRecord
+            async with factory() as session:
+                result = await session.execute(
+                    select(ChainAnchoringRecord)
+                    .where(ChainAnchoringRecord.backend == self.get_backend_type().value)
+                    .order_by(ChainAnchoringRecord.created_at, ChainAnchoringRecord.id)
+                )
+                rows = list(result.scalars().all())
+        except Exception as e:
+            logger.warning(f"[Blockchain] Failed to load chain records from DB: {e}")
+            return []
+        records: list[AnchorRecord] = []
+        seen: set[str] = set()
+        for row in rows:
+            receipt = row.receipt
+            if not receipt or not receipt.get("anchor_id"):
+                continue
+            anchor_id = receipt["anchor_id"]
+            if anchor_id in seen:
+                continue
+            seen.add(anchor_id)
+            try:
+                timestamp = datetime.fromisoformat(receipt["timestamp"])
+            except (KeyError, TypeError, ValueError):
+                timestamp = row.created_at or datetime.now(timezone.utc)
+            records.append(AnchorRecord(
+                anchor_id=anchor_id,
+                data_hash=receipt.get("data_hash", ""),
+                metadata=receipt.get("metadata") or {},
+                backend=ChainBackend(self.get_backend_type().value),
+                tx_hash=row.tx_hash,
+                block_number=row.block_height,
+                confirmed=row.confirmed,
+                timestamp=timestamp,
+            ))
+        records.sort(key=lambda r: r.timestamp)
+        return records
+
+    async def hydrate_from_db(self) -> int:
+        """Re-hydrate the in-memory anchor cache from the DB (idempotent).
+
+        Called lazily on anchor/verify/get_anchor and explicitly by the audit
+        API, so verify() succeeds on a fresh instance (simulated restart).
+        """
+        factory = getattr(self, "_db_session_factory", None)
+        if getattr(self, "_hydrated", False) or not factory:
+            return len(getattr(self, "_anchors", {}) or {})
+        self._hydrated = True
+        loaded = await self._load_chain_records()
+        anchors = getattr(self, "_anchors", None)
+        if anchors is not None:
+            for record in loaded:
+                anchors.setdefault(record.anchor_id, record)
+        if loaded:
+            self._after_hydrate(loaded)
+        return len(loaded)
+
+    def _after_hydrate(self, loaded: list[AnchorRecord]) -> None:
+        """Restore hash-chain bookkeeping (order + continuation hash) from the loaded records."""
+        existing = set(getattr(self, "_chain", []))
+        if hasattr(self, "_chain"):
+            self._chain = list(self._chain) + [r.anchor_id for r in loaded if r.anchor_id not in existing]
+        if not existing:
+            last = loaded[-1]
+            chain_hash = (last.metadata or {}).get("chain_hash") or last.tx_hash
+            if chain_hash:
+                self._last_hash = chain_hash
 
     @abstractmethod
     async def anchor(self, data: bytes, metadata: dict | None = None) -> AnchorResult:
@@ -100,8 +241,11 @@ class FISCOBCOSAdapter(BlockchainAdapter):
         self._anchors: dict[str, AnchorRecord] = {}
         self._chain: list[str] = []
         self._last_hash = "fisco-genesis"
+        self._db_session_factory = None
+        self._hydrated = False
 
     async def anchor(self, data: bytes, metadata: dict | None = None) -> AnchorResult:
+        await self.hydrate_from_db()
         data_hash = crypto_service.sm3_hash(data)
         anchor_id = str(uuid.uuid4())
 
@@ -124,22 +268,32 @@ class FISCOBCOSAdapter(BlockchainAdapter):
         self._chain.append(anchor_id)
         self._last_hash = chain_hash
 
+        await self._persist_chain_record(record)
+
         logger.info(f"FISCO BCOS local anchor: {anchor_id} tx={tx_hash}")
         return AnchorResult(success=True, anchor=record)
 
     async def verify(self, anchor_id: str, data: bytes) -> bool:
         record = self._anchors.get(anchor_id)
         if not record:
+            await self.hydrate_from_db()
+            record = self._anchors.get(anchor_id)
+        if not record:
             return False
         return crypto_service.sm3_hash(data) == record.data_hash
 
     async def get_anchor(self, anchor_id: str) -> AnchorRecord | None:
-        return self._anchors.get(anchor_id)
+        record = self._anchors.get(anchor_id)
+        if not record:
+            await self.hydrate_from_db()
+            record = self._anchors.get(anchor_id)
+        return record
 
     def get_backend_type(self) -> ChainBackend:
         return ChainBackend.FISCO_BCOS
 
     async def verify_chain_integrity(self) -> bool:
+        await self.hydrate_from_db()
         prev_hash = "fisco-genesis"
         for anchor_id in self._chain:
             record = self._anchors.get(anchor_id)
@@ -167,8 +321,11 @@ class AntChainAdapter(BlockchainAdapter):
         self._anchors: dict[str, AnchorRecord] = {}
         self._chain: list[str] = []
         self._last_hash = "antchain-genesis"
+        self._db_session_factory = None
+        self._hydrated = False
 
     async def anchor(self, data: bytes, metadata: dict | None = None) -> AnchorResult:
+        await self.hydrate_from_db()
         data_hash = crypto_service.sm3_hash(data)
         anchor_id = str(uuid.uuid4())
 
@@ -191,22 +348,32 @@ class AntChainAdapter(BlockchainAdapter):
         self._chain.append(anchor_id)
         self._last_hash = chain_hash
 
+        await self._persist_chain_record(record)
+
         logger.info(f"AntChain local anchor: {anchor_id} tx={tx_hash}")
         return AnchorResult(success=True, anchor=record)
 
     async def verify(self, anchor_id: str, data: bytes) -> bool:
         record = self._anchors.get(anchor_id)
         if not record:
+            await self.hydrate_from_db()
+            record = self._anchors.get(anchor_id)
+        if not record:
             return False
         return crypto_service.sm3_hash(data) == record.data_hash
 
     async def get_anchor(self, anchor_id: str) -> AnchorRecord | None:
-        return self._anchors.get(anchor_id)
+        record = self._anchors.get(anchor_id)
+        if not record:
+            await self.hydrate_from_db()
+            record = self._anchors.get(anchor_id)
+        return record
 
     def get_backend_type(self) -> ChainBackend:
         return ChainBackend.ANT_CHAIN
 
     async def verify_chain_integrity(self) -> bool:
+        await self.hydrate_from_db()
         prev_hash = "antchain-genesis"
         for anchor_id in self._chain:
             record = self._anchors.get(anchor_id)
@@ -238,10 +405,7 @@ class PGAppendOnlyAdapter(BlockchainAdapter):
         self._chain: list[str] = []  # Ordered list of anchor_ids for hash chaining
         self._last_hash: str = "genesis"
         self._db_session_factory = None
-
-    def set_db_session_factory(self, factory):
-        """Set the async session factory for DB persistence."""
-        self._db_session_factory = factory
+        self._hydrated = False
 
     async def _get_last_hash_from_db(self) -> str:
         """Load the last chain hash from DB on startup."""
@@ -265,12 +429,15 @@ class PGAppendOnlyAdapter(BlockchainAdapter):
         return self._last_hash
 
     async def _persist_anchor(self, record: AnchorRecord) -> None:
-        """Persist an anchor record to the database."""
+        """Persist an anchor to the legacy blockchain_anchors table and the
+        PZ-03 chain_anchoring_records table in a single commit."""
         if not self._db_session_factory:
             return
         try:
             import json
+            from sqlalchemy import insert
             from app.models.blockchain_anchor import BlockchainAnchor
+            from app.models.chain_anchoring import ChainAnchoringRecord
             async with self._db_session_factory() as session:
                 anchor_row = BlockchainAnchor(
                     id=uuid.UUID(record.anchor_id),
@@ -282,6 +449,8 @@ class PGAppendOnlyAdapter(BlockchainAdapter):
                     metadata_json=json.dumps(record.metadata),
                 )
                 session.add(anchor_row)
+                for values in self._chain_record_rows(record):
+                    await session.execute(insert(ChainAnchoringRecord).values(**values))
                 await session.commit()
         except Exception as e:
             logger.error(f"[Blockchain] Failed to persist anchor {record.anchor_id}: {e}")
@@ -441,3 +610,49 @@ try:
 except Exception:
     pass  # DB not configured yet (e.g. during testing)
 blockchain_adapter: BlockchainAdapter = _pg_adapter
+
+
+# PZ-03 honest chain-anchoring state (SS-11 §3.1) — values disclosed in
+# audit anchor/verify, compliance report, security posture and proof bundle.
+_CHAIN_ENV_ALIASES = {
+    "pg_append_only": "pg_append_only",
+    "local_hash_chain": "pg_append_only",
+    "fisco_bcos": "fisco_bcos",
+    "fisco": "fisco_bcos",
+    "fisco-bcos": "fisco_bcos",
+    "ant_chain": "ant_chain",
+    "antchain": "ant_chain",
+    "ant-chain": "ant_chain",
+}
+_CHAIN_STATE = {
+    ChainBackend.PG_APPEND_ONLY: "pg-log",
+    ChainBackend.FISCO_BCOS: "fisco-sim",
+    ChainBackend.ANT_CHAIN: "ant-sim",
+}
+
+
+def chain_anchoring_state(
+    backend: ChainBackend | None = None,
+    adapter: BlockchainAdapter | None = None,
+) -> str:
+    """Derive the honest chain-anchoring state from the active backend.
+
+    pg-log          — real PG append-only tamper-evident log (not a chain)
+    fisco-sim       — FISCO BCOS adapter, in-process simulation (disclosed)
+    ant-sim         — AntChain adapter, in-process simulation (disclosed)
+    not_configured  — a chain backend was requested via CDS_BLOCKCHAIN_BACKEND
+                      but the active adapter is not that backend (or the value
+                      is unknown), so no real/wired chain anchoring exists.
+
+    `backend` is the backend an anchor actually used (preferred when known);
+    `adapter` / the module singleton are the fallback sources.
+    """
+    if backend is None:
+        adapter = adapter or blockchain_adapter
+        backend = adapter.get_backend_type()
+    requested = (os.environ.get("CDS_BLOCKCHAIN_BACKEND") or "").strip().lower()
+    if requested:
+        mapped = _CHAIN_ENV_ALIASES.get(requested)
+        if mapped is None or mapped != backend.value:
+            return "not_configured"
+    return _CHAIN_STATE.get(backend, "not_configured")

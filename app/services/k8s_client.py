@@ -1,5 +1,9 @@
 """N7: official kubernetes python client backend for the sandbox adapter.
 
+.. deprecated:: SS-10 CB-01
+    Backend for the deprecated k8s level (see k8s_sandbox.py). Gated behind
+    CDS_LEGACY_L2_ENABLED (default false); retained for the transition.
+
 Replaces shelling out to ``kubectl`` with the typed client (CoreV1Api for
 pods/PVCs, dynamic client for NetworkPolicy / ResourceQuota / CRDs such as
 CiliumNetworkPolicy). Loads kubeconfig (or in-cluster config); raises

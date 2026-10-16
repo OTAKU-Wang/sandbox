@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 from pydantic import BaseModel
 
 from app.core.database import get_db
@@ -16,7 +16,7 @@ from app.core.deps import require_roles
 from app.models.user import User, UserRole
 from app.models.audit_log import AuditLog
 from app.services.audit_service import audit_service
-from app.services.blockchain_adapter import blockchain_adapter, ChainBackend
+from app.services.blockchain_adapter import blockchain_adapter, ChainBackend, chain_anchoring_state
 from app.services.merkle_service import merkle_service
 
 router = APIRouter()
@@ -40,6 +40,10 @@ def _backend_disclosure(backend: ChainBackend) -> dict:
         "backend": value,
         "backend_label": _BACKEND_LABELS.get(value, value),
         "is_consortium_chain": value in _CONSORTIUM_CHAIN_BACKENDS,
+        # PZ-03: derived chain-anchoring state (pg-log / fisco-sim / ant-sim /
+        # not_configured) so callers can distinguish a real chain anchor from
+        # the local log or an in-process simulation.
+        "chain_anchoring": chain_anchoring_state(backend),
     }
 
 
@@ -53,6 +57,12 @@ async def list_audit_records(
     limit: int = Query(20, ge=1, le=100),
     action: str | None = Query(None),
     resource_type: str | None = Query(None),
+    source: str | None = Query(
+        None,
+        description="Audit source filter (SS-10 CB-06). E.g. 'cube_egress' matches "
+        "actions 'cube_egress' and 'cube_egress.*' (network-layer forced-point audit; "
+        "W13 app-layer audit rows carry no source prefix).",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)),
 ):
@@ -66,6 +76,13 @@ async def list_audit_records(
     if resource_type:
         query = query.where(AuditLog.resource_type == resource_type)
         count_query = count_query.where(AuditLog.resource_type == resource_type)
+    if source:
+        source_cond = or_(
+            AuditLog.action == source,
+            AuditLog.action.like(source + ".%"),
+        )
+        query = query.where(source_cond)
+        count_query = count_query.where(source_cond)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -212,9 +229,12 @@ async def verify_audit_record(
         record_hashes.append(crypto_service.sm3_hash(data.encode()))
     merkle_root = merkle_service.get_root(record_hashes)
 
-    # Verify via blockchain adapter (find anchor by tx_hash)
+    # Verify via blockchain adapter (find anchor by tx_hash).
+    # PZ-03: re-hydrate the in-memory anchor cache from the DB first so
+    # verification survives process restarts.
     verified = False
     anchor_backend = None
+    await blockchain_adapter.hydrate_from_db()
     for aid, record in blockchain_adapter._anchors.items():
         if record.tx_hash == log.blockchain_tx_hash:
             verified = await blockchain_adapter.verify(aid, merkle_root.encode())

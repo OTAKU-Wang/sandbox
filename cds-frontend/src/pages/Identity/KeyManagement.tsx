@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { kmsApi, type KmsKey, type KeyAuditEntry } from '../../services/identityApi';
 import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
@@ -41,12 +42,12 @@ export default function KeyManagement() {
   const [auditKeyId, setAuditKeyId] = useState<string | null>(null);
   const [form] = Form.useForm();
 
-  const { data: keys, isLoading } = useQuery({
+  const { data: keys, isLoading, isError: keysIsError, error: keysError, refetch: refetchKeys } = useQuery({
     queryKey: ['kms-keys'],
     queryFn: () => kmsApi.listKeys(),
   });
 
-  const { data: auditLog, isLoading: auditLoading } = useQuery({
+  const { data: auditLog, isLoading: auditLoading, isError: auditIsError, error: auditError, refetch: refetchAudit } = useQuery({
     queryKey: ['kms-key-audit', auditKeyId],
     queryFn: () => kmsApi.getKeyAudit(auditKeyId!),
     enabled: !!auditKeyId,
@@ -175,6 +176,7 @@ export default function KeyManagement() {
           </Button>
         }
       >
+        {keysIsError && <QueryErrorAlert error={keysError} message="密钥列表加载失败" onRetry={() => { void refetchKeys(); }} />}
         <Table
           columns={columns}
           dataSource={keys || []}
@@ -215,6 +217,7 @@ export default function KeyManagement() {
         }}
         width={480}
       >
+        {auditIsError && <QueryErrorAlert error={auditError} message="密钥审计加载失败" onRetry={() => { void refetchAudit(); }} />}
         {auditLoading ? (
           <Spin style={{ display: 'block', margin: '40px auto' }} />
         ) : auditLog && auditLog.length > 0 ? (

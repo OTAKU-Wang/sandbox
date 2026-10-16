@@ -190,6 +190,7 @@ Round 5 从安全密态沙箱产品闭环重新复核后，任务输出、开发
 | FG-014 | 前端产品化 QA、可访问性和多角色工作流 e2e 未完成 | P2 | 主要页面、角色菜单和构建已修复 | 产品演示或试点验收前 | 五类角色端到端流程可用；空状态/错误态/加载态齐全；移动端/窄屏无错位；关键表单可恢复；基础 a11y 和中文文案统一 | `cds-frontend/src/`, `specs/frontend-spec.md`, `specs/frontend-implementation-guide.md` |
 | FG-015 | 安全认证、渗透测试和供应链合规未完成 | P0 | 代码级安全闭环和单测已覆盖主要逻辑 | 上线前安全评审 | 威胁模型复核；SAST/依赖漏洞/SBOM/镜像扫描；K8s/CIS baseline；渗透测试和沙箱逃逸测试；修复项回归通过 | `app/services/sandbox_security.py`, `Dockerfile.api`, `requirements.txt`, `cds-frontend/package-lock.json`, `specs/data-security-spec.md` |
 | FG-016 | 全量 e2e/CI 回归矩阵未固定 | P1 | 非 e2e 和聚焦测试通过；e2e 按当前任务暂未跑 | 进入持续交付阶段 | 243 或 CI 环境自动跑完整生命周期、K3s、联邦、链存证、训练、输出审查 e2e；失败自动生成 active gap；测试数据和依赖初始化脚本稳定 | `tests/test_e2e_full_lifecycle.py`, `tests/test_e2e_minimal_loop.py`, `tests/test_e2e_flows.py`, `.github/` 或后续 CI 配置 |
+| FG-017 | Cube 节点数据面 bring-up + 全链路 e2e 未完成（SS-10 新增，2026-10-12 登记） | P0 | 软件侧未开工：SS-10 CB-00..06 已定稿（v1.1）未实施；CB-02 交付 preflight 硬门禁（KVM/XFS/eBPF/cubelet/插件 socket 路径）与滚动升级 SOP | 有 KVM/XFS 节点的裸机/虚机 + CubeSandbox v0.7.3-rc2 节点 BOM（`DEPLOY_ROLE=compute`） | `pytest tests/test_cube_node_*.py -v` 全绿；真实节点 preflight+install+verify 通过；L2'（level `l2c`）创建/执行/销毁/暂停恢复全链路 e2e 通过；流式 spike 结论回写 SS-10；审计尾随（`source=cube_egress`）入 ClickHouse + Merkle 验证通过 | `specs/ss-10-cube-dataplane-connector.md`（§2.1 BOM、§6.3 测试协议、:363/:618）, `specs/ss-11-cds-productization.md`（§六 FG-017 行、PZ-12 产品面） |
 
 ---
 

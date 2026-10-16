@@ -1,0 +1,5 @@
+bin/
+tongsuo-build/
+sm4gcm/sm4_gcm
+sm4gcm/sm4_gcm-static
+*.tmp

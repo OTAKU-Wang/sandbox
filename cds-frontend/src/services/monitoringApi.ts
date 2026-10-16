@@ -86,6 +86,11 @@ export interface SecurityPosture {
   generated_at: string;
   release_recommendation: ReleaseRecommendation | string;
   capabilities: SecurityCapability[];
+  // PZ-06: 实时状态披露字段（后端 validate_security_config 同源）
+  signing_backend?: string;
+  aead_algorithm?: string;
+  trust_root?: string;
+  chain_anchoring?: string;
 }
 
 export interface AlertListParams {

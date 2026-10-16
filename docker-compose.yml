@@ -119,18 +119,55 @@ services:
       CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cds_minio_admin}
       CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-cds_dev_minio_password}
       CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY:-dev_jwt_secret_change_in_prod_32bytes}
+      # PZ-04/PZ-05 (specs/ss-11-cds-productization.md §7.1) — honesty & federation
+      # gates, dev values (relaxed); prod template sets the fail-closed posture.
+      CDS_MIA_SHADOW_MODEL: "false"
+      CDS_COLUMN_ENCRYPTION_KEY: ""
+      CDS_SM3_FALLBACK_ALLOWED: "true"
+      CDS_FEDERATION_ENABLED: "true"
+      CDS_FEDERATION_CA_BUNDLE: ""
+      CDS_FEDERATION_CERT: ""
+      CDS_FEDERATION_KEY: ""
+      CDS_ATTESTATION_ALLOWED_MEASUREMENTS: ""
       # P0 hardening switches — dev values (relaxed); production template sets
       # the fail-closed posture. See .env.example for semantics.
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "false"
+      # CB-01: service token for the Go volume plugin's KMS volume-key endpoints.
+      # Must match the plugin's CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN. Empty =
+      # volume-key endpoints fail-closed (401).
+      CDS_KMS_SERVICE_TOKEN: ${CDS_KMS_SERVICE_TOKEN:-}
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "false"
       # W3 rate limiting (dev: defaults are fine, keys shown for discoverability)
       CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
       CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
+      # PZ-10 (spec ss-11): MFA (TOTP) + SM2 cert login (dev: on, encryption
+      # key empty = dev fallback; prod template requires an explicit key)
+      CDS_AUTH_MFA_ENABLED: "true"
+      CDS_MFA_SECRET_ENCRYPTION_KEY: ""
+      CDS_AUTH_CERT_LOGIN: "true"
       # N10 agent execution budgets
       CDS_AGENT_STEP_BUDGET: "15"
       CDS_AGENT_TOKEN_BUDGET: "20000"
       CDS_AGENT_MAX_TOOLS: "4"
+      # SS-10 CB-01: Cube (L2') node data plane — off by default (honest 400 while off).
+      # dev allows plaintext node gRPC (grpc.dev); prod must use the TLS sidecar.
+      CDS_CUBE_DATAPLANE_ENABLED: "false"
+      CDS_LEGACY_L2_ENABLED: "false"
+      CDS_CUBE_NODE_GRPC_TLS: "false"
+      CDS_CUBE_NODE_TLS_PROXY_PORT: "9443"
+      CDS_CUBE_RESULTS_DIR: /var/lib/cds/sandbox-results
+      CDS_CUBE_SANDBOX_IMAGE: cds/cube-sandbox:latest
+      CDS_CUBE_DEK_LENGTH: "16"
+      # CB-04: CubeEgress root CA artifact (CDS-side copy of node bring-up output)
+      CDS_CUBE_EGRESS_CA: ""
+      # CB-06: cube egress audit ingestion token (POST /internal/audit/egress).
+      # Empty = fail-closed (401) — the tailer must not be able to push without it.
+      CDS_CUBE_AUDIT_SERVICE_TOKEN: ${CDS_CUBE_AUDIT_SERVICE_TOKEN:-}
+      # CB-05: cube template artifact token signing (presigned URL TTL + HMAC token).
+      CDS_CUBE_TEMPLATE_SIGNING_KEY: ${CDS_CUBE_TEMPLATE_SIGNING_KEY:-}
+      CDS_CUBE_TEMPLATE_URL_TTL_SECONDS: "3600"
+      CDS_CUBE_TEMPLATE_DIST_RETRY: "2"
       # W12 retention (dry-run default; flip after compliance review)
       CDS_RETENTION_JANITOR_ENABLED: "true"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"

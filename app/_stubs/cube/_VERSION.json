@@ -1,0 +1,15 @@
+{
+  "commit": "9b75d33907ed7336b1eef73a935ae2d1990d9b35",
+  "tag": "go-sdk-v0.7.3",
+  "generated_at": "2026-10-13T02:57:33Z",
+  "generator": "gen-cube-stubs.sh",
+  "git_sha": "9b75d33907ed7336b1eef73a935ae2d1990d9b35",
+  "cube_version": "go-sdk-v0.7.3",
+  "tags_at_pin": [
+    "go-sdk-v0.7.3",
+    "python-sdk-v0.7.3",
+    "sdk/go/v0.7.3"
+  ],
+  "proto_hash": "sha256:b9a34b622f9cce82c6567ac5b103f632b9f7ae96196ecc625002f1db9944ad4c",
+  "stub_hash": "sha256:7c6831a339108d3a278002d395a86eb2b56f5410b1fb1e00f62994695e9fbd91"
+}

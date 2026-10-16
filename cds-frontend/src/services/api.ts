@@ -35,6 +35,20 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     const status = error.response?.status;
 
+    // PZ-15: 408 REQUEST_TIMEOUT — 按 Retry-After 头做单次自动重试。
+    // 只对幂等请求（GET/HEAD/OPTIONS）自动重发：408 语义是"同步等待超时、
+    // 操作可能仍在沙箱内完成"，非幂等 POST 自动重发会导致执行两次。
+    if (status === 408 && originalRequest && !originalRequest._timeoutRetried) {
+      const method = String(originalRequest.method ?? 'get').toLowerCase();
+      if (['get', 'head', 'options'].includes(method)) {
+        const ra = Number(error.response?.headers?.['retry-after']);
+        const delayMs = Math.min(Math.max(Number.isFinite(ra) ? ra * 1000 : 2000, 500), 10000);
+        originalRequest._timeoutRetried = true;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return api(originalRequest);
+      }
+    }
+
     if (status === 401 && !originalRequest._retry) {
       const refreshToken = useAuthStore.getState().refreshToken;
 

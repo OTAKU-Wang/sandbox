@@ -162,8 +162,11 @@ async def test_exec_requires_running_session(session_client, owner_headers, fake
         json={"command": "ls"},
         headers=owner_headers,
     )
-    assert resp.status_code == 400
-    assert "not running" in resp.json()["detail"]
+    # W2 (PZ-15): a non-running session is a 409 SESSION_STATE_CONFLICT with a
+    # W2 body (code + message), not a legacy 400 + detail.
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "SESSION_STATE_CONFLICT"
+    assert "not running" in resp.json()["message"]
 
 
 @pytest.mark.asyncio
@@ -271,7 +274,7 @@ async def test_session_templates_route_not_shadowed_by_uuid(client):
     unique = uuid.uuid4().hex[:8]
     resp = await client.post("/api/v1/auth/register", json={
         "username": f"tpl_{unique}", "email": f"tpl_{unique}@example.com",
-        "password": "testpass123", "role": "buyer",
+        "password": "testpass123",
     })
     assert resp.status_code in (200, 201), resp.text
     headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}

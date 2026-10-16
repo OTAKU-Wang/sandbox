@@ -21,9 +21,18 @@ from app.models.sandbox_node import SandboxNode  # noqa: F401
 
 async def _register(client: AsyncClient, role: str = "data_provider", prefix: str = "e2e", make_user=None) -> tuple[dict, str]:
     """Register a user and return (headers, user_id).
-    For privileged roles (operator/admin/regulator), uses make_user fixture to create directly in DB.
+
+    PZ-10: role self-selection is limited to `admin` (or omitted → buyer).
+    - buyer: registered by omitting the role field (default).
+    - every other role: created via the make_user fixture (create_user_with_role,
+      DB-direct) — the same pattern as the pre-PZ-10 privileged branch.
     """
-    if role in ("operator", "admin", "regulator") and make_user is not None:
+    if role != "buyer":
+        if make_user is None:
+            raise RuntimeError(
+                f"_register(role={role!r}) requires the make_user fixture "
+                "(PZ-10 register whitelist: only admin/self-omitted are self-selectable)"
+            )
         return await make_user(role, prefix)
     unique = uuid.uuid4().hex[:8]
     username = f"{prefix}_{unique}".replace("-", "_")
@@ -31,7 +40,6 @@ async def _register(client: AsyncClient, role: str = "data_provider", prefix: st
         "username": username,
         "email": f"{username}@example.com",
         "password": "testpass123",
-        "role": role,
     })
     assert resp.status_code == 201, f"Register failed: {resp.text}"
     data = resp.json()
@@ -144,10 +152,10 @@ async def _create_contract(client: AsyncClient, headers: dict, buyer_id: str, pr
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_full_happy_path(client: AsyncClient, admin_headers: dict):
+async def test_e2e_full_happy_path(client: AsyncClient, admin_headers: dict, make_user):
     """Full lifecycle: provider registers → product → publish → contract → sign → sandbox → terminate."""
     # 1. Register provider and buyer
-    provider_headers, provider_id = await _register(client, "data_provider", "provider")
+    provider_headers, provider_id = await _register(client, "data_provider", "provider", make_user=make_user)
     buyer_headers, buyer_id = await _register(client, "buyer", "buyer")
 
     # 2. Provider creates and publishes a data product
@@ -224,9 +232,9 @@ async def test_e2e_full_happy_path(client: AsyncClient, admin_headers: dict):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_contract_policy_enforcement(client: AsyncClient, admin_headers: dict):
+async def test_e2e_contract_policy_enforcement(client: AsyncClient, admin_headers: dict, make_user):
     """Contract policy reflects terms and is queryable at each stage."""
-    provider_h, _ = await _register(client, "data_provider", "pol-provider")
+    provider_h, _ = await _register(client, "data_provider", "pol-provider", make_user=make_user)
     buyer_h, buyer_id = await _register(client, "buyer", "pol-buyer")
 
     product = await _create_product(client, provider_h, "Policy Product")
@@ -255,9 +263,9 @@ async def test_e2e_contract_policy_enforcement(client: AsyncClient, admin_header
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_cannot_sign_twice_same_party(client: AsyncClient, admin_headers: dict):
+async def test_e2e_contract_cannot_sign_twice_same_party(client: AsyncClient, admin_headers: dict, make_user):
     """Same party cannot sign twice."""
-    provider_h, _ = await _register(client, "data_provider", "dup-provider")
+    provider_h, _ = await _register(client, "data_provider", "dup-provider", make_user=make_user)
     buyer_h, buyer_id = await _register(client, "buyer", "dup-buyer")
 
     product = await _create_product(client, provider_h, "Dup Sign Product")
@@ -343,9 +351,9 @@ async def test_e2e_unauthenticated_access_rejected(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_cross_user_data_isolation(client: AsyncClient, admin_headers: dict):
+async def test_e2e_cross_user_data_isolation(client: AsyncClient, admin_headers: dict, make_user):
     """User A cannot access User B's sandbox sessions."""
-    headers_a, _ = await _register(client, "data_provider", "iso-a")
+    headers_a, _ = await _register(client, "data_provider", "iso-a", make_user=make_user)
     headers_b, _ = await _register(client, "buyer", "iso-b")
 
     # A creates a product and publishes it
@@ -368,9 +376,9 @@ async def test_e2e_cross_user_data_isolation(client: AsyncClient, admin_headers:
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_access_control(client: AsyncClient, admin_headers: dict):
+async def test_e2e_contract_access_control(client: AsyncClient, admin_headers: dict, make_user):
     """User not party to contract cannot view it."""
-    provider_h, _ = await _register(client, "data_provider", "acl-provider")
+    provider_h, _ = await _register(client, "data_provider", "acl-provider", make_user=make_user)
     buyer_h, buyer_id = await _register(client, "buyer", "acl-buyer")
     outsider_h, _ = await _register(client, "buyer", "acl-outsider")
 
@@ -386,9 +394,9 @@ async def test_e2e_contract_access_control(client: AsyncClient, admin_headers: d
 
 
 @pytest.mark.asyncio
-async def test_e2e_sandbox_requires_published_product(client: AsyncClient):
+async def test_e2e_sandbox_requires_published_product(client: AsyncClient, make_user):
     """Cannot create sandbox session for draft product."""
-    headers, _ = await _register(client, "data_provider", "draft")
+    headers, _ = await _register(client, "data_provider", "draft", make_user=make_user)
     product = await _create_product(client, headers, "Draft Product")
     # Don't publish — status is "draft"
 
@@ -400,10 +408,10 @@ async def test_e2e_sandbox_requires_published_product(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_product_owner_only_can_delete(client: AsyncClient):
+async def test_e2e_product_owner_only_can_delete(client: AsyncClient, make_user):
     """Only the product owner can delete."""
-    owner_h, _ = await _register(client, "data_provider", "del-owner")
-    other_h, _ = await _register(client, "data_provider", "del-other")
+    owner_h, _ = await _register(client, "data_provider", "del-owner", make_user=make_user)
+    other_h, _ = await _register(client, "data_provider", "del-other", make_user=make_user)
 
     product = await _create_product(client, owner_h, "Delete Test")
 
@@ -421,14 +429,14 @@ async def test_e2e_product_owner_only_can_delete(client: AsyncClient):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_data_product_lifecycle(client: AsyncClient, admin_headers: dict):
+async def test_e2e_data_product_lifecycle(client: AsyncClient, admin_headers: dict, make_user):
     """Create → Update → Publish → Use in sandbox session → deletion policy.
 
     Deletion follows the designed lifecycle policy (Round 13 hardening):
     only DRAFT products can be deleted — a published product returns 409,
     and a draft product deletes cleanly (204 → 404).
     """
-    headers, _ = await _register(client, "data_provider", "lifecycle")
+    headers, _ = await _register(client, "data_provider", "lifecycle", make_user=make_user)
 
     # Create
     product = await _create_product(client, headers, "Lifecycle Product")
@@ -466,9 +474,9 @@ async def test_e2e_data_product_lifecycle(client: AsyncClient, admin_headers: di
 
 
 @pytest.mark.asyncio
-async def test_e2e_multiple_contracts_same_product(client: AsyncClient, admin_headers: dict):
+async def test_e2e_multiple_contracts_same_product(client: AsyncClient, admin_headers: dict, make_user):
     """Multiple contracts can reference the same data product."""
-    provider_h, _ = await _register(client, "data_provider", "multi")
+    provider_h, _ = await _register(client, "data_provider", "multi", make_user=make_user)
     buyer1_h, buyer1_id = await _register(client, "buyer", "multi-b1")
     buyer2_h, buyer2_id = await _register(client, "buyer", "multi-b2")
 
@@ -487,9 +495,9 @@ async def test_e2e_multiple_contracts_same_product(client: AsyncClient, admin_he
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_output_inspection_api(client: AsyncClient):
+async def test_e2e_output_inspection_api(client: AsyncClient, make_user):
     """DLP inspection via API returns structured result."""
-    headers, _ = await _register(client, "data_provider", "oc-inspect")
+    headers, _ = await _register(client, "data_provider", "oc-inspect", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/inspect", json={
         "output": "分析结果：平均值42.5，样本数1000",
@@ -504,9 +512,9 @@ async def test_e2e_output_inspection_api(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_output_inspection_catches_pii(client: AsyncClient):
+async def test_e2e_output_inspection_catches_pii(client: AsyncClient, make_user):
     """DLP inspection catches PII in output."""
-    headers, _ = await _register(client, "data_provider", "oc-pii")
+    headers, _ = await _register(client, "data_provider", "oc-pii", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/inspect", json={
         "output": "用户身份证号110101199001011234",
@@ -521,9 +529,9 @@ async def test_e2e_output_inspection_catches_pii(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_dp_noise_laplace(client: AsyncClient):
+async def test_e2e_dp_noise_laplace(client: AsyncClient, make_user):
     """DP Laplace noise endpoint returns valid result."""
-    headers, _ = await _register(client, "data_provider", "oc-lap")
+    headers, _ = await _register(client, "data_provider", "oc-lap", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/dp/noise", json={
         "value": 100.0,
@@ -540,9 +548,9 @@ async def test_e2e_dp_noise_laplace(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_dp_noise_gaussian(client: AsyncClient):
+async def test_e2e_dp_noise_gaussian(client: AsyncClient, make_user):
     """DP Gaussian noise endpoint returns valid result."""
-    headers, _ = await _register(client, "data_provider", "oc-gauss")
+    headers, _ = await _register(client, "data_provider", "oc-gauss", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/dp/noise", json={
         "value": 50.0,
@@ -558,9 +566,9 @@ async def test_e2e_dp_noise_gaussian(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_dp_budget_lifecycle(client: AsyncClient):
+async def test_e2e_dp_budget_lifecycle(client: AsyncClient, make_user):
     """DP budget init → query lifecycle."""
-    headers, _ = await _register(client, "data_provider", "oc-budget")
+    headers, _ = await _register(client, "data_provider", "oc-budget", make_user=make_user)
     session_id = f"dp-session-{uuid.uuid4().hex[:8]}"
 
     # Init budget
@@ -575,9 +583,9 @@ async def test_e2e_dp_budget_lifecycle(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_dp_noise_invalid_mechanism(client: AsyncClient):
+async def test_e2e_dp_noise_invalid_mechanism(client: AsyncClient, make_user):
     """Invalid DP mechanism returns 400."""
-    headers, _ = await _register(client, "data_provider", "oc-invalid")
+    headers, _ = await _register(client, "data_provider", "oc-invalid", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/dp/noise", json={
         "value": 100.0,
@@ -608,7 +616,7 @@ async def test_e2e_audit_records_api(client: AsyncClient, make_user):
 @pytest.mark.asyncio
 async def test_e2e_monitoring_stats_api(client: AsyncClient, make_user):
     """Monitoring stats endpoint returns expected fields."""
-    headers, _ = await _register(client, "data_provider", "mon-stats")
+    headers, _ = await _register(client, "data_provider", "mon-stats", make_user=make_user)
 
     resp = await client.get("/api/v1/monitoring/stats", headers=headers)
     assert resp.status_code == 200
@@ -632,14 +640,14 @@ async def test_e2e_monitoring_alerts_api(client: AsyncClient, make_user):
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_activate_endpoint(client: AsyncClient, admin_headers: dict):
+async def test_e2e_contract_activate_endpoint(client: AsyncClient, admin_headers: dict, make_user):
     """Contract activate endpoint works for signed contracts.
 
     Note: After both parties sign, the contract auto-transitions to 'active'.
     The activate endpoint is only needed when contract is in 'signed' state
     (e.g., single-party sign flow). After two-party sign, it's already active.
     """
-    provider_h, _ = await _register(client, "data_provider", "act-provider")
+    provider_h, _ = await _register(client, "data_provider", "act-provider", make_user=make_user)
     buyer_h, buyer_id = await _register(client, "buyer", "act-buyer")
 
     product = await _create_product(client, provider_h, "Activate Product")
@@ -668,9 +676,9 @@ async def test_e2e_contract_activate_endpoint(client: AsyncClient, admin_headers
 
 
 @pytest.mark.asyncio
-async def test_e2e_contract_activate_requires_signed(client: AsyncClient, admin_headers: dict):
+async def test_e2e_contract_activate_requires_signed(client: AsyncClient, admin_headers: dict, make_user):
     """Cannot activate a draft contract."""
-    provider_h, _ = await _register(client, "data_provider", "act-draft-provider")
+    provider_h, _ = await _register(client, "data_provider", "act-draft-provider", make_user=make_user)
     buyer_h, buyer_id = await _register(client, "buyer", "act-draft-buyer")
 
     product = await _create_product(client, provider_h, "Draft Activate Product")
@@ -717,7 +725,7 @@ async def test_e2e_audit_anchor_and_verify(client: AsyncClient, make_user):
 async def test_e2e_audit_rbac_enforcement(client: AsyncClient, make_user):
     """Only operator/regulator can access audit records."""
     operator_h, _ = await _register(client, "operator", "rbac-op", make_user=make_user)
-    provider_h, _ = await _register(client, "data_provider", "rbac-provider")
+    provider_h, _ = await _register(client, "data_provider", "rbac-provider", make_user=make_user)
 
     # Operator can access
     resp = await client.get("/api/v1/audit/records", headers=operator_h)
@@ -733,9 +741,9 @@ async def test_e2e_audit_rbac_enforcement(client: AsyncClient, make_user):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_reconstruction_check_blocks_leak(client: AsyncClient):
+async def test_e2e_reconstruction_check_blocks_leak(client: AsyncClient, make_user):
     """Row-level reconstruction check blocks SELECT * style output."""
-    headers, _ = await _register(client, "data_provider", "recon-row")
+    headers, _ = await _register(client, "data_provider", "recon-row", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/reconstruction-check", json={
         "output_rows": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}],
@@ -748,9 +756,9 @@ async def test_e2e_reconstruction_check_blocks_leak(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_reconstruction_check_passes_aggregation(client: AsyncClient):
+async def test_e2e_reconstruction_check_passes_aggregation(client: AsyncClient, make_user):
     """Aggregated output passes reconstruction check."""
-    headers, _ = await _register(client, "data_provider", "recon-agg")
+    headers, _ = await _register(client, "data_provider", "recon-agg", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/reconstruction-check", json={
         "output_rows": [{"count": 100, "avg_age": 35}],
@@ -763,9 +771,9 @@ async def test_e2e_reconstruction_check_passes_aggregation(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_e2e_field_reconstruction_detects_distinct(client: AsyncClient):
+async def test_e2e_field_reconstruction_detects_distinct(client: AsyncClient, make_user):
     """Field-level reconstruction detects SELECT DISTINCT attack."""
-    headers, _ = await _register(client, "data_provider", "recon-field")
+    headers, _ = await _register(client, "data_provider", "recon-field", make_user=make_user)
 
     resp = await client.post("/api/v1/output-control/field-reconstruction-check", json={
         "output_values": [f"user{i}@example.com" for i in range(10)],
@@ -782,9 +790,9 @@ async def test_e2e_field_reconstruction_detects_distinct(client: AsyncClient):
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_contract_extended_fields(client: AsyncClient, admin_headers: dict):
+async def test_e2e_contract_extended_fields(client: AsyncClient, admin_headers: dict, make_user):
     """Contract with max_output_rows, allowed_output_formats, inspection_rule_set."""
-    provider_h, _ = await _register(client, "data_provider", "ext-provider")
+    provider_h, _ = await _register(client, "data_provider", "ext-provider", make_user=make_user)
     buyer_h, buyer_id = await _register(client, "buyer", "ext-buyer")
 
     product = await _create_product(client, provider_h, "Extended Product")
@@ -809,9 +817,9 @@ async def test_e2e_contract_extended_fields(client: AsyncClient, admin_headers: 
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_catalog_search(client: AsyncClient, admin_headers: dict):
+async def test_e2e_catalog_search(client: AsyncClient, admin_headers: dict, make_user):
     """Catalog search returns published products."""
-    provider_h, _ = await _register(client, "data_provider", "catalog")
+    provider_h, _ = await _register(client, "data_provider", "catalog", make_user=make_user)
 
     product = await _create_product(client, provider_h, "Catalog Search Product")
     await _publish_product(client, provider_h, admin_headers, product["id"])
@@ -1037,14 +1045,14 @@ async def test_e2e_blockchain_adapter_pg_append_only():
 # ──────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_e2e_minimal_sandbox_execution(client: AsyncClient):
+async def test_e2e_minimal_sandbox_execution(client: AsyncClient, make_user):
     """Minimal closed-loop: register → dev sandbox → execute code → verify output → terminate.
 
     This test verifies the event loop fix: sandbox code execution should complete
     successfully without crashing the conversation/session.
     """
     # 1. Register a user
-    headers, user_id = await _register(client, "data_provider", "sandbox-e2e")
+    headers, user_id = await _register(client, "data_provider", "sandbox-e2e", make_user=make_user)
 
     # 2. Create a dev sandbox session
     session_resp = await client.post("/api/v1/dev-sandbox/sessions", json={

@@ -5,9 +5,13 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_register_allowed_roles(client: AsyncClient):
-    """Self-registration allows buyer and data_provider roles."""
-    for role in ["data_provider", "buyer"]:
+async def test_register_rejects_non_admin_roles(client: AsyncClient):
+    """PZ-10: self-registration no longer accepts non-admin roles.
+
+    Role self-selection is tightened to admin (bootstrap) or omitted; every
+    other role is assigned by an admin via PATCH /auth/users/{id}/role.
+    """
+    for role in ["buyer", "data_provider", "operator", "regulator"]:
         unique = uuid.uuid4().hex[:8]
         resp = await client.post("/api/v1/auth/register", json={
             "username": f"{role}_{unique}",
@@ -15,14 +19,45 @@ async def test_register_allowed_roles(client: AsyncClient):
             "password": "testpass123",
             "role": role,
         })
-        assert resp.status_code == 201, f"Role {role} failed: {resp.text}"
-        assert resp.json()["user"]["role"] == role
+        assert resp.status_code == 422, f"Role {role} should be rejected: {resp.text}"
+
+
+@pytest.mark.asyncio
+async def test_register_admin_or_no_role(client: AsyncClient):
+    """PZ-10: admin stays self-selectable; omitting role defaults to buyer.
+
+    The suite pins CDS_ALLOW_ADMIN_SELF_REGISTER=true (conftest) because
+    fixture helpers create admins after other users exist; the enforcement
+    (flag off -> first-account rule) is covered by the D-e2e-01 tests below.
+    """
+    unique = uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/auth/register", json={
+        "username": f"adminsel_{unique}",
+        "email": f"adminsel_{unique}@example.com",
+        "password": "testpass123",
+        "role": "admin",
+    })
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["user"]["role"] == "admin"
+
+    unique2 = uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/auth/register", json={
+        "username": f"norole_{unique2}",
+        "email": f"norole_{unique2}@example.com",
+        "password": "testpass123",
+    })
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["user"]["role"] == "buyer"
 
 
 @pytest.mark.asyncio
 async def test_register_rejects_privileged_roles(client: AsyncClient):
-    """Self-registration rejects privileged roles (operator, admin, regulator)."""
-    for role in ["operator", "admin", "regulator"]:
+    """Self-registration rejects non-whitelisted privileged roles.
+
+    PZ-10: admin moved INTO the whitelist (bootstrap account); the
+    remaining privileged roles stay rejected.
+    """
+    for role in ["operator", "regulator"]:
         unique = uuid.uuid4().hex[:8]
         resp = await client.post("/api/v1/auth/register", json={
             "username": f"{role}_{unique}",
@@ -55,6 +90,56 @@ async def test_register_invalid_email(client: AsyncClient):
         "password": "testpass123",
     })
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_admin_first_account_bootstrap(client: AsyncClient, monkeypatch):
+    """D-e2e-01: on an empty deployment the first account may claim admin,
+    even with the escape hatch off."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ALLOW_ADMIN_SELF_REGISTER", False)
+    unique = uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/auth/register", json={
+        "username": f"boot_{unique}",
+        "email": f"boot_{unique}@example.com",
+        "password": "testpass123",
+        "role": "admin",
+    })
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["user"]["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_register_admin_rejected_after_bootstrap(client: AsyncClient, make_user, monkeypatch):
+    """D-e2e-01: once any account exists, admin self-registration is 403
+    (escape hatch off) — the privilege-escalation hole is closed."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ALLOW_ADMIN_SELF_REGISTER", False)
+    await make_user()
+    unique = uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/auth/register", json={
+        "username": f"lateadmin_{unique}",
+        "email": f"lateadmin_{unique}@example.com",
+        "password": "testpass123",
+        "role": "admin",
+    })
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_register_non_admin_roles_unaffected_by_flag(client: AsyncClient, monkeypatch):
+    """D-e2e-01: the flag only gates the admin claim; non-admin role
+    self-selection stays 422 (PZ-10 schema gate)."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ALLOW_ADMIN_SELF_REGISTER", False)
+    unique = uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/auth/register", json={
+        "username": f"prov_{unique}",
+        "email": f"prov_{unique}@example.com",
+        "password": "testpass123",
+        "role": "data_provider",
+    })
+    assert resp.status_code == 422, resp.text
 
 
 @pytest.mark.asyncio
@@ -98,7 +183,6 @@ async def test_register_with_organization(client: AsyncClient):
         "username": f"org_{unique}",
         "email": f"org_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
         "organization": "Test Corp",
     })
     assert resp.status_code == 201
@@ -111,7 +195,6 @@ async def test_user_options_lists_minimal_buyer_fields(client: AsyncClient, auth
         "username": f"option_buyer_{unique}",
         "email": f"option_buyer_{unique}@example.com",
         "password": "testpass123",
-        "role": "buyer",
         "organization": "Buyer Org",
     })
     assert buyer_resp.status_code == 201

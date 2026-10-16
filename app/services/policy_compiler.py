@@ -7,9 +7,14 @@ Supports 4 scenario-specific Rego templates (P1-1):
 - structured_app: API rate limits, response streaming controls
 """
 import json
+import logging
 from dataclasses import dataclass, field
 
+from app.core.errors import CDSError
 from app.utils.crypto import SM4Cipher, sm3_hash
+from app._stubs.cube.cubebox.v1 import cubebox_pb2  # SS-10 CB-04: cube_network target
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -96,6 +101,217 @@ class PolicyCompiler:
             sm3_hash=sm3_hash(rego.encode()),
             metadata={"version": "1.2", "compiler": "cds-policy-compiler", "mode": mode},
         )
+
+    # ------------------------------------------------------------------
+    # SS-10 CB-04 — cube_network target: policy package → CubeNetworkConfig
+    # ------------------------------------------------------------------
+    #
+    # Spec: specs/ss-10-cube-dataplane-connector.md §1.4 铁律, §2.8, §4 CB-04.
+    # Field names/types below were introspected from the CB-00 stubs
+    # (app/_stubs/cube/cubebox/v1/cubebox_pb2, upstream 9b75d33) on 2026-10-13;
+    # full mapping table: docs/cube-egress-mapping.md.
+
+    # EgressRuleInject.format semantics — VERIFIED against the pinned upstream
+    # (CubeEgress/lua/access_phase.lua:173 render_inject): `format` is a plain
+    # string template and the literal placeholder is `${SECRET}`, replaced with
+    # the raw secret at the node egress; a format WITHOUT `${SECRET}` is sent
+    # verbatim (upstream logs a WARN). The spec sample `Bearer {{secret}}`
+    # does NOT match the upstream placeholder syntax — this compiler emits
+    # `Bearer ${SECRET}` instead (spec CB-04 步骤 2: "实施时核实 format 字段
+    # 语义" — 核实结果见 docs/cube-egress-mapping.md).
+    CUBE_INJECT_DEFAULT_HEADER = "Authorization"
+    CUBE_INJECT_DEFAULT_FORMAT = "Bearer ${SECRET}"
+
+    # Full-state invariant (spec §2.8: Create/Update 传全量；omitted field =
+    # cleared upstream). Every compile_cube_network output MUST set all four
+    # CubeNetworkConfig fields — there is no incremental output path.
+    CUBE_NETWORK_FULL_STATE_FIELDS = ("allow_internet_access", "allow_out", "deny_out", "rules")
+
+    def compile_cube_network(
+        self,
+        policy_package: dict,
+        *,
+        credentials: list[dict] | None = None,
+    ) -> "cubebox_pb2.CubeNetworkConfig":
+        """SS-10 CB-04: compile an SS-02 policy package into a FULL-STATE
+        CubeNetworkConfig (the exact proto message the CB-01 adapter consumes
+        at build_run_request / Update).
+
+        Iron-rule compliance (spec §1.4 / §2.8):
+        - ``allow_internet_access`` is ALWAYS False — a hardcoded default-deny
+          baseline, never read from input (input trying to enable it is
+          rejected; fail-closed).
+        - Full-state: the output always carries CUBE_NETWORK_FULL_STATE_FIELDS
+          (see _check_cube_network_full_state) — a compile after a rule REMOVAL
+          simply no longer contains the rule (no incremental semantics).
+        - ``rules[]`` preserves the policy package rule order — first-match-wins
+          priority at the node is list order (stable, compile-time preserved).
+
+        policy_package fields (field names follow the CDS network custody
+        model — app/models/network_policy.py):
+          ``allowed_ips``     list[str] — ip/cidr passthrough entries → allow_out
+          ``allowed_domains`` list[str] — dns passthrough entries → allow_out
+                                (CubeVS DNS A-record learning, spec §2.8)
+          ``deny_out``        list[str] — explicit denies → deny_out
+          ``rules``           list[dict] — contract-level L7 rules in priority
+                                order: {name?, host|domain, path?,
+                                method?|methods?, allow?=true, audit?}
+                                Match fields AND-combine (upstream
+                                rule_matches); first match wins.
+          ``credentials``     list[dict] — same shape as the ``credentials``
+                                kwarg (kwarg wins when both are given)
+
+        credentials entries (app-layer custody → action.inject, spec §2.8
+        凭据注入下沉): {credential_id: str, domain: str, secret: str,
+        header: str = CUBE_INJECT_DEFAULT_HEADER,
+        format: str = CUBE_INJECT_DEFAULT_FORMAT}. A credential attaches to
+        the FIRST compiled rule whose match host equals its domain; if no such
+        rule exists a synthetic allow rule ``inject-<credential_id>`` is
+        appended AFTER the contract rules.
+
+        Raises CDSError (fail-closed) on: input trying to enable internet
+        access, a rule with no match constraint, or malformed credentials.
+        """
+        package = dict(policy_package or {})
+
+        # 铁律: allow_internet_access = ALWAYS False. Input may never widen
+        # the default-deny baseline.
+        if package.get("allow_internet_access"):
+            raise CDSError(
+                "policy package must not set allow_internet_access=true — "
+                "the L2' baseline is default-deny (allow_internet_access is "
+                "hardcoded False by the compiler)",
+                code="POLICY_COMPILE_ERROR",
+                http_status=400,
+                detail={"field": "allow_internet_access"},
+            )
+
+        allow_out = [str(e) for e in (package.get("allowed_ips") or [])]
+        allow_out += [str(d) for d in (package.get("allowed_domains") or [])]
+        deny_out = [str(e) for e in (package.get("deny_out") or [])]
+
+        # rules[] — AND matching per rule, first-match-wins, order preserved
+        # (stable: list append in package order; no re-sorting).
+        rules: list[cubebox_pb2.EgressRule] = []
+        for idx, raw in enumerate(package.get("rules") or []):
+            host = raw.get("host") or raw.get("domain")
+            path = raw.get("path")
+            methods = raw.get("methods")
+            if methods is None:
+                methods = raw.get("method")
+            if isinstance(methods, str):
+                methods = [methods]
+            if not (host or path or (methods or [])):
+                raise CDSError(
+                    f"egress rule #{idx + 1} has no match constraint (host/domain, "
+                    "path, or methods) — an empty match would allow everything; "
+                    "refusing to compile (fail-closed)",
+                    code="POLICY_COMPILE_ERROR",
+                    http_status=400,
+                    detail={"rule_index": idx},
+                )
+            match = cubebox_pb2.EgressRuleMatch()
+            if host:
+                match.host = str(host)
+            if path:
+                match.path = str(path)
+            for m in (methods or []):
+                match.method.append(str(m))
+            action = cubebox_pb2.EgressRuleAction(allow=bool(raw.get("allow", True)))
+            if raw.get("audit"):
+                action.audit = str(raw["audit"])
+            rules.append(cubebox_pb2.EgressRule(
+                name=str(raw.get("name") or f"rule-{idx + 1}"),
+                match=match,
+                action=action,
+            ))
+
+        # Credential injection (app_credentials custody → action.inject).
+        creds = credentials if credentials is not None else (package.get("credentials") or [])
+        skipped: list[str] = []
+        for cred in creds or []:
+            credential_id = str(cred.get("credential_id") or "").strip()
+            domain = str(cred.get("domain") or "").strip()
+            secret = cred.get("secret")
+            if not credential_id or not domain or not secret:
+                # Never emit an empty-secret inject entry; never fabricate a
+                # value the custody layer cannot resolve (honest degradation —
+                # the skip is disclosed, not silent).
+                skipped.append(credential_id or "<unidentified>")
+                logger.warning(
+                    "cube_network compile: credential %r incomplete "
+                    "(needs credential_id + domain + non-empty secret) — "
+                    "inject entry skipped", credential_id or "<unidentified>",
+                )
+                continue
+            inject = cubebox_pb2.EgressRuleInject(
+                header=str(cred.get("header") or self.CUBE_INJECT_DEFAULT_HEADER),
+                secret=str(secret),
+                format=str(cred.get("format") or self.CUBE_INJECT_DEFAULT_FORMAT),
+            )
+            target = next(
+                (r for r in rules if r.HasField("match") and r.match.host == domain),
+                None,
+            )
+            if target is None:
+                target = cubebox_pb2.EgressRule(
+                    name=f"inject-{credential_id}",
+                    match=cubebox_pb2.EgressRuleMatch(host=domain),
+                    action=cubebox_pb2.EgressRuleAction(allow=True),
+                )
+                rules.append(target)  # synthetic rules come AFTER contract rules
+            target.action.inject.append(inject)
+
+        config = cubebox_pb2.CubeNetworkConfig(
+            allow_internet_access=False,  # 铁律: hardcoded default-deny
+            allow_out=allow_out,
+            deny_out=deny_out,
+            rules=rules,
+        )
+        # Full-state self-check (spec §2.8: omitted field = cleared upstream).
+        self._check_cube_network_full_state(config)
+        if skipped:
+            logger.warning(
+                "cube_network compile: %d credential inject entries skipped "
+                "(unresolvable): %s", len(skipped), skipped,
+            )
+        return config
+
+    def _check_cube_network_full_state(self, config: "cubebox_pb2.CubeNetworkConfig") -> None:
+        """Full-state invariant self-check (spec §2.8, CB-04 步骤 2).
+
+        The compiler's output must ALWAYS contain the complete
+        CubeNetworkConfig field set — Create/Update are full-state
+        replacements, so an omitted field is a silent clear upstream.
+        Raises CDSError on proto drift or a missing mandatory presence.
+        """
+        desc_names = {f.name for f in cubebox_pb2.CubeNetworkConfig.DESCRIPTOR.fields}
+        missing = [n for n in self.CUBE_NETWORK_FULL_STATE_FIELDS if n not in desc_names]
+        if missing:
+            raise CDSError(
+                f"CubeNetworkConfig stub drift: fields {missing} no longer exist "
+                "— the full-state field set (CUBE_NETWORK_FULL_STATE_FIELDS) "
+                "must be re-derived from the pinned proto (CB-00)",
+                code="INTERNAL_ERROR",
+                http_status=500,
+                detail={"missing_fields": missing},
+            )
+        # allow_internet_access is a presence field (proto3 oneof): it must be
+        # EXPLICITLY set, and to the default-deny value.
+        if not config.HasField("allow_internet_access"):
+            raise CDSError(
+                "full-state violation: allow_internet_access must be explicitly "
+                "set on every compiled CubeNetworkConfig",
+                code="INTERNAL_ERROR",
+                http_status=500,
+            )
+        if config.allow_internet_access is not False:
+            raise CDSError(
+                "full-state violation: allow_internet_access must be False "
+                "(default-deny baseline is never widened)",
+                code="INTERNAL_ERROR",
+                http_status=500,
+            )
 
     def _generate_rego(self, contract_id: str, levels: list, operations: list, max_duration: int, dp_epsilon: float | None) -> str:
         """Generate generic OPA Rego source with AND-combined conditions."""
@@ -278,3 +494,20 @@ class PolicyEvaluator:
 
 policy_compiler = PolicyCompiler()
 policy_evaluator = PolicyEvaluator()
+
+
+def compile_cube_network(
+    policy_package: dict,
+    *,
+    credentials: list[dict] | None = None,
+) -> "cubebox_pb2.CubeNetworkConfig":
+    """Module-level entry (SS-10 CB-04): policy package → full-state
+    CubeNetworkConfig. See PolicyCompiler.compile_cube_network."""
+    return policy_compiler.compile_cube_network(policy_package, credentials=credentials)
+
+
+def verify_cube_network_full_state(config: "cubebox_pb2.CubeNetworkConfig") -> None:
+    """Public full-state self-check (SS-10 CB-04, spec §2.8). Raises CDSError
+    unless `config` carries the complete CubeNetworkConfig field set with
+    allow_internet_access explicitly False."""
+    policy_compiler._check_cube_network_full_state(config)

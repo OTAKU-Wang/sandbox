@@ -64,4 +64,21 @@ describe('Sidebar', () => {
     renderWithProviders(<Sidebar />);
     expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
   });
+
+  it('shows API 密钥 menu for admin role', () => {
+    useAuthStore.setState({
+      user: { id: 'u1', username: 'admin', email: 'a@test.com', role: 'admin', organization: null },
+    });
+    renderWithProviders(<Sidebar />);
+    expect(screen.getByText('用户管理')).toBeInTheDocument();
+    expect(screen.getByText('API 密钥')).toBeInTheDocument();
+  });
+
+  it('hides API 密钥 menu for non-admin roles', () => {
+    useAuthStore.setState({
+      user: { id: 'u1', username: 'op', email: 'op@test.com', role: 'operator', organization: null },
+    });
+    renderWithProviders(<Sidebar />);
+    expect(screen.queryByText('API 密钥')).not.toBeInTheDocument();
+  });
 });

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Typography, Card, Row, Col, Select, Button, Input, Tag, Table, Space, message, Modal, Statistic, Divider, Alert, Descriptions } from 'antd';
-import { PlayCircleOutlined, PlusOutlined, StopOutlined, CodeOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PlusOutlined, CodeOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Editor from '@monaco-editor/react';
 import { sandboxApi, type DevExecuteResult, type DevSession } from '../../services/sandboxApi';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 import type { SecurityFinding } from '../../types/security';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -64,7 +65,7 @@ export default function DataProductDev() {
   const [language, setLanguage] = useState('python');
   const [execResult, setExecResult] = useState<DevExecuteResult | null>(null);
 
-  const { data: sessions, isLoading } = useQuery({
+  const { data: sessions, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['dev-sessions'],
     queryFn: () => sandboxApi.devList(),
   });
@@ -168,6 +169,7 @@ export default function DataProductDev() {
         {/* Session list */}
         <Col span={selectedSession ? 8 : 24}>
           <Card size="small">
+            {isError && <QueryErrorAlert error={error} message="开发会话加载失败" onRetry={() => { void refetch(); }} />}
             <Table
               columns={columns}
               dataSource={sessions || []}

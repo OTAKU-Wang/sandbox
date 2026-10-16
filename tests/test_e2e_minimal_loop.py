@@ -19,7 +19,6 @@ async def test_minimal_loop_auth_to_execution(client: AsyncClient):
         "username": f"loop_{unique}",
         "email": f"loop_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     assert resp.status_code == 201
     token = resp.json()["access_token"]
@@ -76,7 +75,6 @@ async def test_minimal_loop_bash_execution(client: AsyncClient):
         "username": f"bash_{unique}",
         "email": f"bash_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     assert resp.status_code == 201
     headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
@@ -109,7 +107,6 @@ async def test_minimal_loop_error_handling(client: AsyncClient):
         "username": f"err_{unique}",
         "email": f"err_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     assert resp.status_code == 201
     headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
@@ -163,7 +160,6 @@ async def test_minimal_loop_full_lifecycle_with_data(client: AsyncClient):
         "username": f"full_{unique}",
         "email": f"full_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     assert resp.status_code == 201
     headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}

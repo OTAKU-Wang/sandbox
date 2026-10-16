@@ -52,6 +52,17 @@ def test_validate_security_config_rejects_admin_pages_in_production(monkeypatch)
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", secrets.token_urlsafe(48))
     monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", False)
     monkeypatch.setattr(settings, "HSM_SOFTWARE_FALLBACK_ALLOWED", False)
+    # PZ-04/PZ-05 (SS-11 Round 46): the newer prod gates must be satisfied
+    # too, so the only raised ValueError is ADMIN_PAGES_ENABLED (the target).
+    monkeypatch.setattr(settings, "SM3_FALLBACK_ALLOWED", False)
+    monkeypatch.setattr(settings, "COLUMN_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
+    # PZ-10: MFA key gate satisfied too, so the only raised ValueError is
+    # ADMIN_PAGES_ENABLED (the target of this test).
+    monkeypatch.setattr(settings, "MFA_SECRET_ENCRYPTION_KEY", "mfa-test-master-secret")
+    # D-e2e-01: the admin self-register escape hatch (suite env pins it true)
+    # is refused in production — satisfy it here to keep the single-raise contract.
+    monkeypatch.setattr(settings, "ALLOW_ADMIN_SELF_REGISTER", False)
+    monkeypatch.setattr(settings, "FEDERATION_ENABLED", False)
     monkeypatch.setattr(settings, "ADMIN_PAGES_ENABLED", True)
 
     # validate_security_config treats "not TESTING and not PYTEST_CURRENT_TEST"

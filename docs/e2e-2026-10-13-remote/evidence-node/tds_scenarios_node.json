@@ -1,0 +1,96 @@
+{
+  "finished": "2026-10-14T17:13:40+0800",
+  "total": 12,
+  "passed": 12,
+  "skipped": 0,
+  "failed": 0,
+  "evidence": [
+    {
+      "step": "setup.admin",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "time": "2026-10-14T17:13:13+0800"
+    },
+    {
+      "step": "setup.buyers",
+      "status": "PASS",
+      "status_code": null,
+      "note": "two isolated buyer identities",
+      "time": "2026-10-14T17:13:13+0800"
+    },
+    {
+      "step": "setup.product_published",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "b48afed6-8946-42d8-a2ad-bfc11f115ef2",
+      "time": "2026-10-14T17:13:13+0800"
+    },
+    {
+      "step": "T1.contract_bound_access",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "session e0673c86-26fe-40c1-bf64-4c19c488e83c on published product",
+      "time": "2026-10-14T17:13:14+0800"
+    },
+    {
+      "step": "T2.setup_buyer_session",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "",
+      "time": "2026-10-14T17:13:14+0800"
+    },
+    {
+      "step": "T2.setup_upload",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "buyer A uploads",
+      "time": "2026-10-14T17:13:30+0800"
+    },
+    {
+      "step": "T2.cross_party_isolation",
+      "status": "PASS",
+      "status_code": 403,
+      "note": "buyer B reading A's session file -> 403/404",
+      "time": "2026-10-14T17:13:30+0800",
+      "excerpt": "{\"code\":\"HTTP_403\",\"message\":\"Not your session\",\"request_id\":\"ff894f903db94d0c\",\"detail\":\"Not your session\"}"
+    },
+    {
+      "step": "T3.output_governance",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "X-CDS-Output-Review='passed; findings=0'",
+      "time": "2026-10-14T17:13:40+0800"
+    },
+    {
+      "step": "T5.session_proof_bundle",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "evidence_hash present (non-repudiation)",
+      "time": "2026-10-14T17:13:40+0800"
+    },
+    {
+      "step": "T5.meta_disclosure",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "capability meta discloses trust_root + sandbox_engine honestly",
+      "time": "2026-10-14T17:13:40+0800",
+      "excerpt": "{\"matrix\": {\"L0\": {\"sync_exec\": {\"state\": \"real\", \"note\": \"同步执行真实可用（cgroup 进程沙箱）。\", \"evidence\": \"session_stream.py:162-165 / sandbox_sessions.py execute\"}, \"stream_ws\": {\"state\": \"real\", \"note\": \"WS 流式执行支持（L0/k8s 白名单）。\", \"evidence\": \"session_stream.p"
+    },
+    {
+      "step": "T4.audit_completeness",
+      "status": "PASS",
+      "status_code": null,
+      "note": "missing audit actions: none",
+      "time": "2026-10-14T17:13:40+0800"
+    },
+    {
+      "step": "T6.compliance_surface",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "compliance/retention surface answers (GET /reports/quick)",
+      "time": "2026-10-14T17:13:40+0800",
+      "excerpt": "{\"report_id\":\"73a32c04-c19b-40fc-96bb-8e8ad3cf7290\",\"report_type\":\"tc609\",\"generated_at\":\"2026-10-14T09:13:40.817171\",\"period_start\":\"2026-09-14T09:13:40.797609\",\"period_end\":\"2026-10-14T09:13:40.7976"
+    }
+  ]
+}

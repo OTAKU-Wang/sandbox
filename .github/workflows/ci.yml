@@ -81,7 +81,10 @@ jobs:
             tests/test_rate_limit_distributed.py \
             tests/test_tenant_quota_persistence.py \
             tests/test_migrations.py \
-            tests/test_deploy_manifests.py
+            tests/test_deploy_manifests.py \
+            tests/test_pz10_mfa.py \
+            tests/test_capability_matrix_consistency.py \
+            tests/test_e2e_data_loop.py
 
       - name: Full suite (informational)
         if: always()

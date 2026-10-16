@@ -107,7 +107,7 @@ class ToolRegistry:
     def get(self, tool_id: str) -> AgentTool | None:
         return self._tools.get(tool_id)
 
-    def list(self) -> list[AgentTool]:
+    def list_tools(self) -> list[AgentTool]:
         return sorted(self._tools.values(), key=lambda t: t.id)
 
     def validate_run(self, tool_ids: list[str]) -> str | None:

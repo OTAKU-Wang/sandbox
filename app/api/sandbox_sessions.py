@@ -13,12 +13,12 @@ from fastapi.responses import JSONResponse
 
 import asyncio
 
-from app.core.errors import OperationLocked
+from app.core.errors import CDSError, OperationLocked, QuotaExceeded, RateLimited, RequestTimeout, SessionNotFound, SessionStateConflict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles
+from app.core.deps import get_business_user, require_roles
 from app.models.user import User, UserRole
 from app.models.data_product import DataProduct
 from app.models.contract import Contract, ContractStatus
@@ -27,6 +27,7 @@ from app.models.audit_log import AuditLog
 from app.schemas.sandbox_session import SandboxExecRequest, SandboxExecuteRequest, SandboxSessionCreate, SandboxSessionResponse
 from app.services.audit_service import audit_service
 from app.services.kms_service import kms_service
+from app.services.compliance_report import disclosure_fields
 from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits, attestation_required_for_level as _attestation_required_for_level, attestation_from_provision as _attestation_from_provision, attestation_from_session as _attestation_from_session
 from app.services.session_state_machine import session_state_machine
 from app.models.kms import KeyDistribution, KeyMetadata, KeyType, KeyStatus
@@ -282,7 +283,7 @@ async def _validate_session_contract(
 async def create_sandbox_session(
     body: SandboxSessionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     # Verify data product exists
     result = await db.execute(select(DataProduct).where(DataProduct.id == body.data_product_id))
@@ -294,12 +295,33 @@ async def create_sandbox_session(
 
     contract = await _validate_session_contract(db, body, current_user)
 
+    # SS-13 single-path cutover: legacy sandbox levels (L0/L1/L2/L3/k8s) are
+    # retired when the legacy gate is off — honest 400 (W2), never a silent
+    # fallback to another level.
+    if body.sandbox_level != "l2c":
+        from app.core.config import get_settings
+        from app.core.errors import CDSError
+
+        _legacy_settings = get_settings()
+        if not (_legacy_settings.SANDBOX_LEGACY_ENABLED or _legacy_settings.LEGACY_L2_ENABLED):
+            raise CDSError(
+                f"sandbox level {body.sandbox_level} is retired (SS-13 single-path: l2c only)",
+                code="LEGACY_LEVEL_RETIRED",
+                http_status=400,
+                detail={"reason": "legacy_level_retired", "requested_level": body.sandbox_level},
+            )
+
     # Round 40 usability: validate the template name before anything is
     # provisioned so an unknown name cannot leave an orphaned container.
+    # SS-10 CB-05: the field also accepts a CDS cube template id/name
+    # (Round 40 JSON templates may declare ``cube_template_id``).
     if body.template:
         from app.services import session_templates as st
+        from app.services.cube_template_service import cube_template_service
 
-        if st.get_template(body.template) is None:
+        if st.get_template(body.template) is None and (
+            await cube_template_service.resolve_cube_template(db, body.template) is None
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown session template: {body.template!r} (see GET /sandbox-sessions/session-templates)",
@@ -319,9 +341,8 @@ async def create_sandbox_session(
     )
     active_count = active_count_result.scalar() or 0
     if active_count >= MAX_ACTIVE_SESSIONS:
-        raise HTTPException(
-            status_code=429,
-            detail=f"并发会话数已达上限 ({MAX_ACTIVE_SESSIONS})，请先终止已有会话",
+        raise RateLimited(
+            f"并发会话数已达上限 ({MAX_ACTIVE_SESSIONS})，请先终止已有会话",
         )
 
     # Validate and enforce resource limits
@@ -340,6 +361,8 @@ async def create_sandbox_session(
         resource_limits=effective_limits,
         idle_policy=body.idle_policy,
         auto_resume=body.auto_resume,
+        tee_policy=body.tee_policy,
+        trust_root="none",  # SS-13: overwritten below once the cube node is selected
         status=SessionStatus.PROVISIONING.value,
     )
     db.add(session)
@@ -367,7 +390,51 @@ async def create_sandbox_session(
         disk_mb=limits["disk_mb"],
     )
     if not allowed:
-        raise HTTPException(status_code=429, detail=f"资源配额不足: {reason}")
+        raise QuotaExceeded(f"资源配额不足: {reason}")
+
+    # L2' (Cube) data-plane gate (SS-10 CB-01): honest rejection when the
+    # dataplane is off or no eligible node exists → 400 RUNTIME_UNAVAILABLE.
+    cube_node = None
+    if body.sandbox_level == "l2c":
+        from app.core.config import get_settings
+        from app.core.errors import CDSError
+        from app.services.cube_runtime_adapter import select_cube_node, pinned_cube_version
+
+        if not get_settings().CUBE_DATAPLANE_ENABLED:
+            raise CDSError(
+                "L2' (cube) data plane is not enabled",
+                code="RUNTIME_UNAVAILABLE",
+                http_status=400,
+                detail={"reason": "dataplane_disabled"},
+            )
+        # SS-13: tee_policy=tee_required narrows selection to TEE-capable
+        # nodes (capabilities.tee in {tdx, sev_snp}); no such node → honest
+        # 400 TEE_NODE_UNAVAILABLE.
+        require_tee = body.tee_policy == "tee_required"
+        cube_node = await select_cube_node(
+            db, runtime_version=pinned_cube_version(), template_id=body.template,
+            require_tee=require_tee,
+        )
+        if cube_node is None:
+            if require_tee:
+                raise CDSError(
+                    "no TEE-capable cube node is available (tee_policy=tee_required)",
+                    code="TEE_NODE_UNAVAILABLE",
+                    http_status=400,
+                    detail={"reason": "no_tee_node", "tee_policy": body.tee_policy},
+                )
+            raise CDSError(
+                "no eligible cube node (no online node with a matching runtime_version + cubelet endpoint)",
+                code="RUNTIME_UNAVAILABLE",
+                http_status=400,
+                detail={"reason": "no_eligible_node"},
+            )
+        # SS-13: persist the per-session trust root from the selected node's
+        # TEE capability — honest: missing/malformed capability means "none"
+        # (no per-VM TEE), never an upgraded claim.
+        _caps = cube_node.get("capabilities") or {}
+        _tee = _caps.get("tee", "none") if isinstance(_caps, dict) else "none"
+        session.trust_root = _tee if isinstance(_tee, str) else "none"
 
     # Provision sandbox container
     runtime = await get_sandbox_manager()
@@ -381,13 +448,68 @@ async def create_sandbox_session(
         except Exception as e:
             logger.warning("[Session] shared volume mount resolution failed: %s", e)
             volume_mounts = []
-    provision_result = runtime.provision(
+    volume_dek_ref = None
+    # SS-14 RT-07: 会话数据（l2c 产品数据注入源）。无条件初始化 —— 注入块在
+    # l2c 分支之外引用它（见下方 inject_session_data 处），非 Cube 适配器
+    # （测试 dummy/未来运行时）不能让它未绑定（UnboundLocalError 实测）。
+    session_data: bytes | None = None
+    if body.sandbox_level == "l2c":
+        from app.models.data_resource import DataResource
+        from app.services.cube_runtime_adapter import CubeRuntimeAdapter
+        from app.services.storage_service import storage_service
+
+        adapter = runtime.get_adapter(body.sandbox_level)
+        if isinstance(adapter, CubeRuntimeAdapter):
+            if product.resource_id is not None:
+                res_row = await db.execute(
+                    select(DataResource).where(DataResource.id == product.resource_id)
+                )
+                res = res_row.scalar_one_or_none()
+                if res is not None and res.storage_path:
+                    # 同步 MinIO 下载 + KMS 解密走 to_thread, 不占事件循环。
+                    session_data = await asyncio.to_thread(
+                        storage_service.download, res.storage_path
+                    )
+            if session_data is None:
+                session.status = SessionStatus.FAILED.value
+                session.error_message = ("l2c session requires a published product "
+                                         "with an uploaded data resource (fail-closed)")
+                db.add(session)
+                await db.commit()
+                raise CDSError(
+                    "l2c session requires a published product with an uploaded "
+                    "data resource (fail-closed)",
+                    code="INTERNAL_ERROR",
+                    http_status=500,
+                )
+            # SS-14 RT-07 (2026-10-14): 卷预建 + DEK ref 异步准备（卷面 httpx 走
+            # 线程、DEK 回查走主循环, 见 CubeRuntimeAdapter.prepare_session_volume）。
+            try:
+                volume_dek_ref = await adapter.prepare_session_volume(
+                    str(session.id), session_data
+                )
+            except CDSError as exc:
+                session.status = SessionStatus.FAILED.value
+                session.error_message = str(exc)
+                db.add(session)
+                await db.commit()
+                raise
+
+    # SS-14 RT-07 (2026-10-14): 同步 provision（内含 gRPC create）必须离事件循环 ——
+    # cubelet 建沙箱时插件 Attach 会回调本 API 的 KMS /distribute（解 DEK）;
+    # 若 gRPC 阻塞事件循环则循环依赖死锁（插件 20s 超时 → Attach 拒绝）。
+    # DB 访问已全部走 SyncDbBridge（独立 loop+引擎）, 跨线程 native 段错误源
+    # （_run_sync 新 loop 复用共享 asyncpg 引擎）已消除。
+    provision_result = await asyncio.to_thread(
+        runtime.provision,
         session_id=session.id,
         level=body.sandbox_level,
         data_path="",
         timeout=body.timeout_seconds,
         user_id=str(current_user.id),
         volume_mounts=volume_mounts,
+        cube_node=cube_node,
+        volume_dek_ref=volume_dek_ref,
     )
     session.container_id = provision_result.get("container_id")
     session.status = provision_result.get("status", SessionStatus.RUNNING.value)
@@ -491,6 +613,42 @@ async def create_sandbox_session(
 
     session.session_key_id = session_key_result["key_id"]
 
+    # SS-14 RT-07 (2026-10-14): 产品数据注入 VM。上游冷启动沙箱不把声明卷
+    # 挂进 guest（2026-10-14 实证: /data 仅为可写 rootfs 里的普通目录）, 会话
+    # 数据卷是节点侧 SM4 加密副本, VM 内可用副本经 exec 通道注入
+    # /data/session-data。有界重试; 失败 = fail-closed 终止会话（l2c 会话
+    # 的数据面是会话契约的一部分, 不静默降级）。
+    if body.sandbox_level == "l2c" and session_data is not None:
+        try:
+            await adapter.inject_session_data(session.container_id, session_data)
+        except Exception as e:
+            inject_error = e
+        else:
+            inject_error = None
+        if inject_error is not None:
+            kms_service.destroy_key(session_key_result["key_id"])
+            try:
+                runtime.terminate(session.container_id)
+            except Exception as e:
+                logger.warning("[sandbox] Container rollback after data injection failure failed: %s", e)
+            release_tenant_usage(
+                str(current_user.id),
+                cpu_cores=limits["cpu_cores"],
+                memory_mb=limits["memory_mb"],
+                disk_mb=limits["disk_mb"],
+            )
+            session.container_id = None
+            session.status = SessionStatus.FAILED.value
+            session.error_message = f"Session data injection into sandbox failed: {inject_error}"
+            await db.flush()
+            await db.refresh(session)
+            await audit_service.log(
+                db, action="sandbox.data_injection_failed", resource_type="sandbox_session",
+                user_id=current_user.id, session_id=session.id,
+                detail={"sandbox_level": body.sandbox_level, "error": str(inject_error)},
+            )
+            return SandboxSessionResponse.model_validate(session)
+
     # Record key metadata (gap B3: persist the KEK-wrapped blob so the key
     # survives restarts; nulled on destroy by the lifecycle terminator)
     key_meta = KeyMetadata(
@@ -518,7 +676,7 @@ async def create_sandbox_session(
 
     # Enforce network policy via engine
     policy_config = NetworkPolicyConfig(mode="deny_all")
-    await network_policy_engine.create_policy(str(session.id), policy_config)
+    await network_policy_engine.create_policy(str(session.id), policy_config, db=db)
 
     # Round 40 usability: seed the workspace with the requested template.
     # Convenience feature — seeding failures are audited, not fatal, so the
@@ -571,7 +729,7 @@ async def list_sandbox_sessions(
     cursor: str | None = Query(None),
     response: Response = None,  # noqa: B008 — FastAPI header-injection parameter
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     base = select(SandboxSession)
     count_base = select(func.count()).select_from(SandboxSession)
@@ -611,7 +769,7 @@ async def list_sandbox_sessions(
 
 @router.get("/session-templates")
 async def list_session_templates(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """List available workspace templates for session creation (Round 40).
 
@@ -628,12 +786,12 @@ async def list_session_templates(
 async def get_sandbox_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if session.user_id != current_user.id and not _can_view_all_sessions(current_user):
         raise HTTPException(status_code=403, detail="Not your session")
     return SandboxSessionResponse.model_validate(session)
@@ -643,7 +801,7 @@ async def get_sandbox_session(
 async def get_sandbox_session_proof_bundle(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Return a release/regulatory proof bundle for a sandbox session.
 
@@ -807,6 +965,14 @@ async def get_sandbox_session_proof_bundle(
         key: value for key, value in payload.items()
         if key not in {"generated_at", "integrity"}
     })
+    # PZ-06 (SS-11 §3.1): disclosure metadata as a sibling of evidence.
+    # Added AFTER evidence_hash so the evidence input set (and therefore the
+    # evidence_hash) stays unchanged; bundle_hash covers the full payload.
+    payload["bundle_meta"] = {
+        **disclosure_fields(),
+        "dp_applied": output_detail.get("dp_applied"),
+        "is_simulation": getattr(session, "is_simulation", None),
+    }
     payload["integrity"]["bundle_hash"] = _hash_json(payload)
 
     await audit_service.log(
@@ -830,12 +996,12 @@ async def get_sandbox_session_proof_bundle(
 async def terminate_sandbox_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if session.user_id != current_user.id and not _can_operate_sessions(current_user):
         raise HTTPException(status_code=403, detail="Not your session")
 
@@ -843,7 +1009,7 @@ async def terminate_sandbox_session(
     current = SessionStatus(session.status)
     result = session_state_machine.validate_transition(current, SessionStatus.TERMINATED)
     if not result.success:
-        raise HTTPException(status_code=400, detail=result.error)
+        raise SessionStateConflict(result.error)
 
     previous_status = session.status
     session.status = SessionStatus.TERMINATED.value
@@ -859,13 +1025,14 @@ async def terminate_sandbox_session(
     except Exception as e:
         logger.warning(f"[sandbox-audit] Collection on terminate failed: {e}")
 
-    # Destroy sandbox container
+    # Destroy sandbox container — SS-14 RT-07 (2026-10-14): to_thread, 销毁时插件
+    # Detach/Destroy 会回调本 API KMS（DEK revoke）, 占事件循环 = 循环依赖死锁。
     if session.container_id:
         runtime = await get_sandbox_manager()
-        runtime.terminate(session.container_id)
+        await asyncio.to_thread(runtime.terminate, session.container_id)
 
     # Clean up network policy enforcement
-    await network_policy_engine.remove_policy(str(session.id))
+    await network_policy_engine.remove_policy(str(session.id), db=db)
     net_result = await db.execute(
         select(NetworkPolicy).where(NetworkPolicy.session_id == str(session.id))
     )
@@ -908,7 +1075,7 @@ async def update_network_policy(
     session_id: uuid.UUID,
     body: NetworkPolicyUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Update the network policy for a sandbox session.
 
@@ -919,11 +1086,11 @@ async def update_network_policy(
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if session.user_id != current_user.id and not _can_operate_sessions(current_user):
         raise HTTPException(status_code=403, detail="Not your session")
     if session.status not in [SessionStatus.RUNNING.value, SessionStatus.READY.value]:
-        raise HTTPException(status_code=400, detail=f"Session not running (status: {session.status})")
+        raise SessionStateConflict(f"Session not running (status: {session.status})")
 
     # Update DB model
     net_result = await db.execute(
@@ -952,7 +1119,7 @@ async def update_network_policy(
         net_policy.active = True
 
     # Update engine enforcement
-    await network_policy_engine.remove_policy(str(session.id))
+    await network_policy_engine.remove_policy(str(session.id), db=db)
     config = NetworkPolicyConfig(
         mode=net_policy.mode,
         allowed_ips=net_policy.allowed_ips or [],
@@ -964,7 +1131,7 @@ async def update_network_policy(
     )
     policy_result = None
     if net_policy.active:
-        policy_result = await network_policy_engine.create_policy(str(session.id), config)
+        policy_result = await network_policy_engine.create_policy(str(session.id), config, db=db)
 
     await db.flush()
     await db.refresh(net_policy)
@@ -987,13 +1154,13 @@ async def update_network_policy(
 async def get_session_network_policy(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Get or initialize the zero-trust network policy for a sandbox session."""
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if session.user_id != current_user.id and not _can_view_all_sessions(current_user):
         raise HTTPException(status_code=403, detail="Not your session")
 
@@ -1011,7 +1178,7 @@ async def get_session_network_policy(
         db.add(net_policy)
         await db.flush()
         await db.refresh(net_policy)
-        await network_policy_engine.create_policy(str(session.id), NetworkPolicyConfig(mode="deny_all"))
+        await network_policy_engine.create_policy(str(session.id), NetworkPolicyConfig(mode="deny_all"), db=db)
 
     return NetworkPolicyResponse.model_validate(net_policy)
 
@@ -1023,7 +1190,7 @@ async def execute_in_sandbox(
     code: str | None = Query(None),
     language: str = Query("python"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Execute code in a sandbox session with session key injection."""
     exec_code = body.code if body else code
@@ -1035,16 +1202,16 @@ async def execute_in_sandbox(
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your session")
     await _maybe_auto_resume(session, db)
     # State machine validation: only RUNNING sessions can execute
     current = SessionStatus(session.status)
     if not session_state_machine.is_active(current):
-        raise HTTPException(status_code=400, detail=f"Session in terminal state (status: {session.status})")
+        raise SessionStateConflict(f"Session in terminal state (status: {session.status})")
     if session.status != SessionStatus.RUNNING.value:
-        raise HTTPException(status_code=400, detail=f"Session not running (status: {session.status})")
+        raise SessionStateConflict(f"Session not running (status: {session.status})")
     if not session.container_id:
         raise HTTPException(status_code=400, detail="Session has no container")
 
@@ -1134,10 +1301,46 @@ async def execute_in_sandbox(
     exec_result = await scene_runtime.post_execute(exec_result, scene_context)
 
     # Update session status if execution failed
-    if exec_result.get("exit_code", 0) != 0 and "timed out" in exec_result.get("output", "").lower():
+    exec_timed_out = (
+        exec_result.get("exit_code", 0) != 0
+        and "timed out" in (exec_result.get("output") or "").lower()
+    )
+    if exec_timed_out:
         session.status = SessionStatus.FAILED.value
         session.error_message = "Execution timed out"
         await db.flush()
+
+    # SS-14 RT-07 (2026-10-14): l2c 无 in-VM 审计 helper（bwrap 专属），
+    # 控制面在每次执行后写 application/code_execution 活动事件到同一
+    # tmpfs jsonl（/audit fallback 读此文件；ClickHouse 在场时由
+    # collector 统一 flush）。
+    if (session.sandbox_level or "") == "l2c":
+        try:
+            import tempfile as _tf
+
+            from app.services.sandbox_audit import ActivityCategory, SandboxActivityEvent
+
+            _al_path = Path(_tf.gettempdir()) / "cds-sandbox-audit" / f"{session_id}.jsonl"
+            _al_path.parent.mkdir(parents=True, exist_ok=True)
+            _ev = SandboxActivityEvent(
+                session_id=str(session_id),
+                user_id=str(current_user.id),
+                sandbox_level="l2c",
+                category=ActivityCategory.APPLICATION.value,
+                event_type="code_execution",
+                detail={
+                    "language": exec_language,
+                    "exit_code": exec_result.get("exit_code"),
+                    "output_size": len(exec_result.get("output") or ""),
+                    "runtime": "cubesandbox",
+                },
+                duration_ms=exec_result.get("duration_ms") or 0,
+            )
+            with open(_al_path, "a", encoding="utf-8") as _fh:
+                _fh.write(_ev.to_json() + "\n")
+            logger.info(f"[sandbox-audit] l2c activity event written: {_al_path.name}")
+        except Exception as e:
+            logger.warning(f"[sandbox-audit] l2c activity event failed: {e}")
 
     # Collect sandbox activity audit logs from tmpfs
     try:
@@ -1228,6 +1431,14 @@ async def execute_in_sandbox(
     except Exception as e:
         logger.warning("[sandbox] Failed to audit output inspection summary: %s", e)
 
+    # W2 (PZ-15): a timed-out synchronous wait is a 408 REQUEST_TIMEOUT — the
+    # operation may still have finished in the sandbox; query before retrying.
+    if exec_timed_out:
+        raise RequestTimeout(
+            "Execution timed out",
+            detail={"timed_out_after_seconds": session.timeout_seconds},
+        )
+
     return exec_result
 
 
@@ -1237,7 +1448,7 @@ async def get_sandbox_audit_logs(
     category: str | None = None,
     limit: int = Query(200, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Get sandbox activity audit logs for a session.
 
@@ -1247,7 +1458,7 @@ async def get_sandbox_audit_logs(
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if session.user_id != current_user.id and not _can_view_all_sessions(current_user):
         raise HTTPException(status_code=403, detail="Not your session")
 
@@ -1377,7 +1588,7 @@ async def _load_operable_session(
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=404, detail="Sandbox session not found")
+        raise SessionNotFound("Sandbox session not found")
     if not _can_operate_session(current_user, session):
         raise HTTPException(status_code=403, detail="Not your session")
     await _maybe_auto_resume(session, db)
@@ -1396,6 +1607,60 @@ def _session_workspace_or_400(session: SandboxSession) -> Path:
     return workspace
 
 
+# SS-14 RT-07 (2026-10-14): l2c 会话文件面 —— cube MicroVM 无宿主 workspace,
+# 会话文件落在 VM 内 /scratch（empty_dir 会话工作区）, 经 exec 通道读写
+# （exec 输出经结果卷文件中转, 见 CubeRuntimeAdapter.execute）。
+async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", data: bytes | None = None) -> dict:
+    from app.services import session_files as sf
+    from app.services.cube_runtime_adapter import CubeRuntimeAdapter
+    from app.services.sandbox_manager import get_sandbox_manager
+
+    name = sf.validate_filename(filename) if filename else ""
+    runtime = await get_sandbox_manager()
+    adapter = runtime.get_adapter("l2c")
+    if not isinstance(adapter, CubeRuntimeAdapter):
+        raise HTTPException(status_code=400, detail="l2c data plane not enabled")
+    if op == "upload":
+        import base64
+
+        b64 = base64.b64encode(data or b"").decode("ascii")
+        # 256KB 上限: 经 exec 参数面传输, 超出应走数据卷（数据产品面）。
+        if len(b64) > 256 * 1024:
+            raise HTTPException(status_code=400, detail="file too large for the exec channel (>256KB); use data products for large files")
+        code = ("import base64,os;os.makedirs('/scratch',exist_ok=True);"
+                f"open('/scratch/{name}','wb').write(base64.b64decode('{b64}'))")
+        result = await adapter.execute(session.container_id, code, "python", timeout=120)
+    elif op == "download":
+        code = ("import base64,os;"
+                f"print(base64.b64encode(open('/scratch/{name}','rb').read()).decode()) "
+                f"if os.path.exists('/scratch/{name}') else print('CDS404')")
+        result = await adapter.execute(session.container_id, code, "python", timeout=120)
+        if result.get("exit_code") != 0 or "error" in result:
+            raise HTTPException(status_code=502, detail=f"l2c file download failed: {result.get('error') or result.get('output', '')[:200]}")
+        out = (result.get("output") or "").strip()
+        if out.startswith("CDS404"):
+            raise HTTPException(status_code=404, detail="file not found")
+        import base64 as _b64
+
+        return {"data": _b64.b64decode(out.splitlines()[-1])}
+    elif op == "list":
+        code = ("import os;print(os.linesep.join(" "sorted(os.listdir('/scratch')))) "
+                "if os.path.isdir('/scratch') else print()")
+        result = await adapter.execute(session.container_id, code, "python", timeout=60)
+        out = (result.get("output") or "").strip()
+        return {"files": [f for f in out.splitlines() if f.strip()]}
+    elif op == "delete":
+        code = ("import os;"
+                f"os.remove('/scratch/{name}') if os.path.exists('/scratch/{name}') "
+                "else __import__('sys').exit(3)")
+        result = await adapter.execute(session.container_id, code, "python", timeout=60)
+        if result.get("exit_code") == 3:
+            raise HTTPException(status_code=404, detail="file not found")
+        return {"deleted": name}
+    else:  # pragma: no cover
+        raise HTTPException(status_code=400, detail="unknown op")
+
+
 async def _session_dek(session: SandboxSession) -> bytes | None:
     """Resolve the session workspace DEK (same chain as RAG corpora)."""
     from app.services.rag_service import _session_workspace_dek
@@ -1407,8 +1672,8 @@ async def _session_dek(session: SandboxSession) -> bytes | None:
 def _active_or_suspended(session: SandboxSession) -> None:
     current = SessionStatus(session.status)
     if not session_state_machine.is_active(current):
-        raise HTTPException(
-            status_code=400, detail=f"Session in terminal state (status: {session.status})"
+        raise SessionStateConflict(
+            f"Session in terminal state (status: {session.status})"
         )
 
 
@@ -1501,7 +1766,7 @@ def _session_template_env(session: SandboxSession) -> dict[str, str]:
 async def list_session_files(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """List files uploaded into the session workspace (sandbox-visible)."""
     session = await _load_operable_session(db, session_id, current_user)
@@ -1516,7 +1781,7 @@ async def upload_session_file(
     session_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Upload a file into the session workspace (DEK-encrypted at rest).
 
@@ -1526,6 +1791,17 @@ async def upload_session_file(
     """
     session = await _load_operable_session(db, session_id, current_user)
     _active_or_suspended(session)
+    if session.sandbox_level == "l2c":
+        data = await file.read()
+        result = await _l2c_file_op(session, "upload", file.filename or "", data)
+        await audit_service.log(
+            db, action="sandbox.file_upload", resource_type="sandbox_session",
+            user_id=current_user.id, session_id=session.id,
+            detail={"filename": file.filename or "", "size": len(data), "encrypted": False,
+                    "note": "l2c: file lands in the VM /scratch via exec channel (at-rest inside the sandbox)"},
+        )
+        await db.flush()
+        return {"session_id": str(session_id), "filename": file.filename or "", "size": len(data)}
     workspace = _session_workspace_or_400(session)
     dek = await _session_dek(session)
 
@@ -1551,7 +1827,7 @@ async def download_session_file(
     session_id: uuid.UUID,
     filename: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Download a workspace file — content passes the T5 output review first.
 
@@ -1561,6 +1837,76 @@ async def download_session_file(
     from fastapi import Response
 
     session = await _load_operable_session(db, session_id, current_user)
+    if session.sandbox_level == "l2c":
+        result = await _l2c_file_op(session, "download", filename)
+        content = result["data"]
+        # SS-14 RT-07: l2c 下载与 L3 同契约 —— 内容先过 T5 输出审查,
+        # 响应携带 X-CDS-Output-Review（critical 发现 409 不放出）。
+        from fastapi import Response as _Resp
+
+        from app.services.output_inspection import output_inspector
+
+        text = content.decode("utf-8", errors="replace")
+        _review = output_inspector.inspect(
+            text,
+            user_id=str(current_user.id),
+            session_id=str(session.id),
+            sandbox_mode=getattr(session, "sandbox_mode", None) or "structured_query",
+        )
+        _findings = list(getattr(_review, "findings", []) or [])
+
+        def _sev(f) -> str:
+            s = getattr(f, "severity", "")
+            return getattr(s, "value", None) or str(s)
+
+        _blocked = any(_sev(f).lower() == "critical" for f in _findings)
+        from app.core.metrics import record_output_inspection
+
+        if _blocked:
+            record_output_inspection("blocked")
+            await audit_service.log(
+                db, action="sandbox.file_download_blocked", resource_type="sandbox_session",
+                user_id=current_user.id, session_id=session.id,
+                detail={"filename": filename, "findings": len(_findings)},
+            )
+            await db.flush()
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "Output review blocked the file download",
+                    "filename": filename,
+                    "findings_count": len(_findings),
+                },
+            )
+        _header = f"passed; findings={len(_findings)}"
+        if _findings:
+            _redacted = getattr(_review, "redacted_output", None)
+            try:
+                content.decode("utf-8")
+                _is_text = True
+            except UnicodeDecodeError:
+                _is_text = False
+            if _is_text and _redacted is not None:
+                content = _redacted.encode("utf-8")
+                _header = f"redacted; findings={len(_findings)}"
+                record_output_inspection("redacted")
+            else:
+                record_output_inspection("passed")
+        else:
+            record_output_inspection("passed")
+        await audit_service.log(
+            db, action="sandbox.file_download", resource_type="sandbox_session",
+            user_id=current_user.id, session_id=session.id,
+            detail={"filename": filename, "size": len(content), "findings": len(_findings)},
+        )
+        await db.flush()
+        return _Resp(
+            content=content, media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-CDS-Output-Review": _header,
+            },
+        )
     workspace = _session_workspace_or_400(session)
     dek = await _session_dek(session)
 
@@ -1659,9 +2005,18 @@ async def delete_session_file(
     session_id: uuid.UUID,
     filename: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     session = await _load_operable_session(db, session_id, current_user)
+    if session.sandbox_level == "l2c":
+        result = await _l2c_file_op(session, "delete", filename)
+        await audit_service.log(
+            db, action="sandbox.file_delete", resource_type="sandbox_session",
+            user_id=current_user.id, session_id=session.id,
+            detail={"filename": filename},
+        )
+        await db.flush()
+        return {"session_id": str(session_id), "deleted": result["deleted"]}
     workspace = _session_workspace_or_400(session)
     from app.services import session_files as sf
 
@@ -1681,7 +2036,7 @@ async def delete_session_file(
 async def list_session_snapshots(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     session = await _load_operable_session(db, session_id, current_user)
     workspace = _session_workspace_or_400(session)
@@ -1695,7 +2050,7 @@ async def create_session_snapshot(
     session_id: uuid.UUID,
     async_mode: bool = Query(False, alias="async"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Snapshot the session workspace (content is DEK-encrypted at rest).
 
@@ -1740,7 +2095,7 @@ async def create_session_snapshot(
 async def get_session_operation(
     op_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Poll a session operation (W11 async model)."""
     from app.services import session_operations as ops
@@ -1761,7 +2116,7 @@ async def rollback_session_snapshot(
     snapshot_id: str,
     async_mode: bool = Query(False, alias="async"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Restore the workspace from a snapshot (current workspace content is
     discarded — the archive checksum is verified before any deletion).
@@ -1813,7 +2168,7 @@ async def delete_session_snapshot(
     session_id: uuid.UUID,
     snapshot_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     session = await _load_operable_session(db, session_id, current_user)
     workspace = _session_workspace_or_400(session)
@@ -1835,17 +2190,17 @@ async def delete_session_snapshot(
 async def pause_sandbox_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Pause a session (READY/RUNNING → SUSPENDED): execution is gated while
     workspace, files, snapshots and keys are all preserved."""
     session = await _load_operable_session(db, session_id, current_user)
     current = SessionStatus(session.status)
     if not session_state_machine.is_active(current):
-        raise HTTPException(status_code=400, detail=f"Session in terminal state (status: {session.status})")
+        raise SessionStateConflict(f"Session in terminal state (status: {session.status})")
     result = session_state_machine.validate_transition(current, SessionStatus.SUSPENDED)
     if not result.success:
-        raise HTTPException(status_code=400, detail=result.error)
+        raise SessionStateConflict(result.error)
 
     session.pre_pause_status = session.status
     session.status = SessionStatus.SUSPENDED.value
@@ -1866,13 +2221,13 @@ async def pause_sandbox_session(
 async def resume_sandbox_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Resume a paused session → restore the pre-pause status (fallback READY)."""
     session = await _load_operable_session(db, session_id, current_user)
     current = SessionStatus(session.status)
     if current != SessionStatus.SUSPENDED:
-        raise HTTPException(status_code=400, detail=f"Session not suspended (status: {session.status})")
+        raise SessionStateConflict(f"Session not suspended (status: {session.status})")
 
     target_raw = session.pre_pause_status or SessionStatus.READY.value
     try:
@@ -1883,7 +2238,7 @@ async def resume_sandbox_session(
         target = SessionStatus.READY
     result = session_state_machine.validate_transition(current, target)
     if not result.success:
-        raise HTTPException(status_code=400, detail=result.error)
+        raise SessionStateConflict(result.error)
 
     session.status = target.value
     session.pre_pause_status = None
@@ -1905,7 +2260,7 @@ async def refresh_sandbox_session(
     session_id: uuid.UUID,
     extend_seconds: int | None = Body(None, embed=True),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Extend the session expiry (default: one more timeout_seconds window).
 
@@ -1950,7 +2305,7 @@ async def exec_in_sandbox(
     session_id: uuid.UUID,
     body: SandboxExecRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Run a shell command inside the live sandbox workspace (Round 40).
 
@@ -1966,9 +2321,9 @@ async def exec_in_sandbox(
     session = await _load_operable_session(db, session_id, current_user)
     current = SessionStatus(session.status)
     if not session_state_machine.is_active(current):
-        raise HTTPException(status_code=400, detail=f"Session in terminal state (status: {session.status})")
+        raise SessionStateConflict(f"Session in terminal state (status: {session.status})")
     if session.status != SessionStatus.RUNNING.value:
-        raise HTTPException(status_code=400, detail=f"Session not running (status: {session.status})")
+        raise SessionStateConflict(f"Session not running (status: {session.status})")
     if not session.container_id:
         raise HTTPException(status_code=400, detail="Session has no container")
 
@@ -1997,6 +2352,35 @@ async def exec_in_sandbox(
         db=db,
     )
     duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+
+    # SS-14 RT-07 (2026-10-14): l2c 无 in-VM 审计 helper（与 /execute 同因）:
+    # 控制面写 application/shell_exec 活动事件到 tmpfs jsonl（/audit 读此文件）。
+    if (session.sandbox_level or "") == "l2c":
+        try:
+            import tempfile as _tf
+
+            from app.services.sandbox_audit import ActivityCategory, SandboxActivityEvent
+
+            _al_path = Path(_tf.gettempdir()) / "cds-sandbox-audit" / f"{session_id}.jsonl"
+            _al_path.parent.mkdir(parents=True, exist_ok=True)
+            _ev = SandboxActivityEvent(
+                session_id=str(session_id),
+                user_id=str(current_user.id),
+                sandbox_level="l2c",
+                category=ActivityCategory.APPLICATION.value,
+                event_type="shell_exec",
+                detail={
+                    "command_sha256": hashlib.sha256(body.command.encode("utf-8")).hexdigest(),
+                    "exit_code": exec_result.get("exit_code"),
+                    "runtime": "cubesandbox",
+                },
+                duration_ms=duration_ms,
+            )
+            with open(_al_path, "a", encoding="utf-8") as _fh:
+                _fh.write(_ev.to_json() + "\n")
+            logger.info(f"[sandbox-audit] l2c shell activity event written: {_al_path.name}")
+        except Exception as e:
+            logger.warning(f"[sandbox-audit] l2c shell activity event failed: {e}")
 
     output = exec_result.get("output") or ""
     if not isinstance(output, str):
@@ -2075,7 +2459,7 @@ async def get_session_logs(
     since: str | None = Query(None, max_length=64),
     action: str | None = Query(None, max_length=128),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Tail the session's audit trail (Round 40 log-polling stream).
 
@@ -2119,10 +2503,65 @@ async def get_session_logs(
 async def get_session_usage(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_business_user),
 ):
     """Workspace / files / snapshots usage snapshot for one session (Round 40)."""
     session = await _load_operable_session(db, session_id, current_user)
+    if session.sandbox_level == "l2c":
+        # SS-14 RT-07: l2c 无宿主 workspace（文件在 VM 内 /data /results /scratch）。
+        # 诚实口径: 数据卷大小（节点侧 SM4 at-rest 副本）+ VM 侧目录统计
+        # （exec 通道 du, best-effort）。
+        from app.services import cube_node_client
+        from app.services.cube_runtime_adapter import CubeRuntimeAdapter
+        from app._stubs.cube.cubebox.v1 import cubebox_pb2
+
+        data_bytes = 0
+        vm_dirs: dict = {"data": 0, "results": 0, "scratch": 0}
+        try:
+            from app.services.sandbox_runtime import get_sandbox_manager
+
+            _mgr = await get_sandbox_manager()
+            _cra = _mgr.get_adapter("l2c")
+            _node_id, _cubebox = CubeRuntimeAdapter._parse_container_id(session.container_id)
+            _node = await _cra._resolve_node(_node_id)
+            _client = _cra._client_for(_node)
+            _vol = await asyncio.to_thread(
+                _client.inspect_storage_volumes,
+                cubebox_pb2.InspectStorageVolumesRequest(cubebox_id=_cubebox),
+            )
+            for v in getattr(_vol, "volumes", None) or []:
+                if str(getattr(v, "name", "")).startswith("cds-data-"):
+                    data_bytes = int(getattr(v, "size", 0) or 0)
+        except Exception:
+            pass
+        try:
+            _du = await asyncio.to_thread(
+                _cra.execute_sync_for_usage,
+                session.container_id, "du -sk /data /results /scratch 2>/dev/null",
+            )
+            for line in str(_du.get("output") or "").splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].rstrip("/") in ("data", "results", "scratch"):
+                    vm_dirs[parts[1].rstrip("/")] = int(parts[0]) * 1024
+        except Exception:
+            pass
+        return {
+            "session_id": str(session_id),
+            "status": session.status,
+            "runtime": "cubesandbox",
+            "workspace": {
+                "files": None,  # VM 内, 宿主侧不可枚举（诚实: 不伪造）
+                "bytes": data_bytes + sum(vm_dirs.values()),
+                "data_volume_bytes": data_bytes,
+                "vm_directories": vm_dirs,
+            },
+            "uploaded_files": {"count": None, "bytes": None},
+            "snapshots": {"count": 0, "bytes": 0},
+            "timeout": {
+                "timeout_seconds": session.timeout_seconds,
+                "extended_seconds": int(getattr(session, "extended_seconds", 0) or 0),
+            },
+        }
     workspace = _session_workspace_or_400(session)
 
     from app.services import session_files as sf

@@ -1,0 +1,26 @@
+[
+  {
+    "step": "P1.host_procs_invisible",
+    "status": "PASS",
+    "status_code": 200,
+    "excerpt": "P1_HOST_PROCS NONE\nP1_PID_COUNT 3\n⁠​​​​​‌​​​﻿‌​​﻿‌​‌‍​‍​﻿​​​﻿​﻿​﻿​﻿​﻿‍​‌‍​﻿‌‍‌​​﻿‌﻿​﻿‍​​﻿‍‌‌‍‌​‌‍​‍​﻿​﻿​﻿​‍"
+  },
+  {
+    "step": "P2.privilege",
+    "status": "FAIL",
+    "status_code": 200,
+    "excerpt": "P2_UID 0\nP2_SETGID_ROOT OK-BAD\nP2_MOUNT DENIED\n⁠​​​​​‌​​​﻿‌​​﻿‌​‌‍​‍​﻿​​​﻿​﻿​﻿​﻿​﻿‍​‌‍​﻿‌‍‌​​﻿‌﻿​﻿‍​​﻿‍‌‌‍‌​‌‍​‍​﻿​﻿​﻿​‍"
+  },
+  {
+    "step": "P3.host_mounts",
+    "status": "PASS",
+    "status_code": 200,
+    "excerpt": "P3_home_kratos ABSENT\nP3_data_cubelet ABSENT\nP3_root PRESENT\n⁠​​​​​‌​​​﻿‌​​﻿‌​‌‍​‍​﻿​​​﻿​﻿​﻿​﻿​﻿‍​‌‍​﻿‌‍‌​​﻿‌﻿​﻿‍​​﻿‍‌‌‍‌​‌‍​‍​﻿​﻿​﻿​‍"
+  },
+  {
+    "step": "P5.devices",
+    "status": "FAIL",
+    "status_code": 200,
+    "excerpt": "P5_dev_mem READABLE-BAD\nP5_dev_kmem BLOCKED\nP5_dev_port READABLE-BAD\n⁠​​​​​‌​​​﻿‌​​﻿‌​‌‍​‍​﻿​​​﻿​﻿​﻿​﻿​﻿‍​‌‍​﻿‌‍‌​​﻿‌﻿​﻿‍​​﻿‍‌‌‍‌​‌‍​‍​﻿​﻿​﻿​‍"
+  }
+]

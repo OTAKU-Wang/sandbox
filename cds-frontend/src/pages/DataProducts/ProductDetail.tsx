@@ -5,7 +5,6 @@ import {
   Tag,
   Button,
   Typography,
-  Spin,
   Space,
   Card,
   Row,
@@ -32,6 +31,7 @@ import { fieldExposureApi, type ExposureRequest, type FieldRule, type FieldSensi
 import { ProductStatus, UserRole } from '../../types/enums';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole } from '../../utils/roles';
+import { CenteredLoading, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -146,7 +146,7 @@ export default function ProductDetail() {
   const [fieldRules, setFieldRules] = useState<Record<string, FieldRule>>({});
   const [defaultSensitivity, setDefaultSensitivity] = useState<FieldSensitivity>('internal');
 
-  const { data: product, isLoading } = useQuery({
+  const { data: product, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['data-product', id],
     queryFn: () => dataProductApi.get(id!),
     enabled: !!id,
@@ -261,7 +261,8 @@ export default function ProductDetail() {
     });
   }, [product?.data_schema]);
 
-  if (isLoading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
+  if (isError) return <QueryErrorAlert error={error} message="产品详情加载失败" onRetry={() => { void refetch(); }} />;
+  if (isLoading) return <CenteredLoading tip="加载产品详情" />;
   if (!product) return <Empty description="产品不存在或无权访问" />;
 
   const outputConstraints = product.output_constraints ?? {};

@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
-VALID_SANDBOX_LEVELS = ("L0", "L1", "L2", "L3", "k8s")
+VALID_SANDBOX_LEVELS = ("L0", "L1", "L2", "l2c", "L3", "k8s")
 VALID_SANDBOX_MODES = (
     "structured_query",
     "structured_modeling",
@@ -15,9 +15,17 @@ VALID_SANDBOX_MODES = (
 )
 
 
+VALID_TEE_POLICIES = ("tee_if_available", "tee_required", "none")
+
+
 class SandboxSessionCreate(BaseModel):
     data_product_id: uuid.UUID
-    sandbox_level: str = "L3"
+    # SS-13 single-path cutover: default is the Cube MicroVM level (l2c);
+    # legacy levels (L0/L1/L2/L3/k8s) require SANDBOX_LEGACY_ENABLED.
+    sandbox_level: str = "l2c"
+    # SS-13: TEE selection policy for the l2c data plane. tee_required fails
+    # closed (400 TEE_NODE_UNAVAILABLE) when no TEE-capable node exists.
+    tee_policy: str = "tee_if_available"
     sandbox_mode: str = "structured_query"
     contract_id: str | None = None
     timeout_seconds: int = 3600
@@ -41,6 +49,13 @@ class SandboxSessionCreate(BaseModel):
     def valid_sandbox_level(cls, v: str) -> str:
         if v not in VALID_SANDBOX_LEVELS:
             raise ValueError(f"Invalid sandbox_level: {v}. Must be one of {VALID_SANDBOX_LEVELS}")
+        return v
+
+    @field_validator("tee_policy")
+    @classmethod
+    def valid_tee_policy(cls, v: str) -> str:
+        if v not in VALID_TEE_POLICIES:
+            raise ValueError(f"Invalid tee_policy: {v}. Must be one of {VALID_TEE_POLICIES}")
         return v
 
     @field_validator("sandbox_mode")
@@ -72,6 +87,12 @@ class SandboxSessionResponse(BaseModel):
     extended_seconds: int = 0
     pre_pause_status: str | None = None
     resource_limits: dict | None
+    # SS-13: TEE selection policy + per-session trust root (the selected cube
+    # node's capabilities.tee; "none" = no per-VM TEE — honest default).
+    tee_policy: str = "tee_if_available"
+    trust_root: str = "none"
+    # SS-13 disclosure: the session engine (derived — see _derive_sandbox_engine).
+    sandbox_engine: str | None = None
     error_message: str | None
     started_at: datetime | None
     ended_at: datetime | None
@@ -79,6 +100,13 @@ class SandboxSessionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _derive_sandbox_engine(self):
+        # SS-13: only l2c sessions run on the Cube MicroVM data plane; legacy
+        # levels must not claim the cube engine (honest degradation).
+        self.sandbox_engine = "cube_microvm" if self.sandbox_level == "l2c" else None
+        return self
 
 
 class SandboxExecuteRequest(BaseModel):

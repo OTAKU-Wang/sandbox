@@ -1,0 +1,72 @@
+# W/CB-02: Cube 计算节点部署工具链冒烟（SS-10 CB-02 步骤 1 验收，spec §6.3 测试协议）
+#
+# 运行环境要求（重要——标签说明）：
+#   本 job 需要 KVM 能力的裸金属/自托管 runner + 可挂载 XFS loop 设备。
+#   GitHub 托管 runner（ubuntu-latest）无 /dev/kvm 且无法挂 XFS，因此 job 用
+#   `if:` 门控到 self-hosted `kvm` 标签 runner 组，**普通 CI（push/PR）不运行本 job**，
+#   不会阻塞主流水线。真实节点 bring-up + 全链路 e2e 仍归环境验收项 FG-017。
+#
+# 触发与门控（为什么普通 CI 不会跑/不会被本 job 阻塞）：
+#   GitHub 托管 runner 无 /dev/kvm 且无法挂 XFS；self-hosted 标签队列若无人在线
+#   会让 PR 状态 check 挂起直至超时。因此本 job 仅由 workflow_dispatch 手动触发，
+#   定向 self-hosted `kvm` 标签 runner——普通 push/PR 完全不受影响。
+#   真实节点 bring-up + 全链路 e2e 仍归环境验收项 FG-017。
+name: cube-node-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_ip:
+        description: "冒烟目标节点（仅记录；runner 本机冒烟留空）"
+        required: false
+        default: ""
+
+jobs:
+  node-smoke:
+    # KVM 标签 runner（self-hosted 组）。托管 runner 无 kvm 标签 → 本 job 在托管
+    # 池上直接 skip，不破坏普通 CI。
+    runs-on: [self-hosted, linux, kvm]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 语法门禁（所有 runner 通用）
+        run: |
+          bash -n deploy/cube-node/preflight.sh deploy/cube-node/install.sh deploy/cube-node/verify.sh
+          python3 -m json.tool scripts/cube-bundle-manifest.json > /dev/null
+
+      - name: 准备 XFS loop 设备（数据盘前置，spec §2.1）
+        run: |
+          set -euo pipefail
+          LOOP_FILE=/var/tmp/cds-cube-smoke-xfs.img
+          mkdir -p /data/cubelet
+          if ! mountpoint -q /data/cubelet; then
+            truncate -s 8G "${LOOP_FILE}"
+            losetup -fP --show "${LOOP_FILE}" > /var/tmp/cds-cube-smoke-loop
+            LOOP_DEV=$(cat /var/tmp/cds-cube-smoke-loop)
+            mkfs.xfs -f "${LOOP_DEV}"
+            mount "${LOOP_DEV}" /data/cubelet
+          fi
+
+      - name: preflight（硬门禁）
+        run: bash deploy/cube-node/preflight.sh
+
+      - name: install（compute role + CDS 组件）
+        run: |
+          set -euo pipefail
+          # 冒烟 runner 使用本地测试证书（生产必为 certificate_service 签发）
+          mkdir -p /tmp/cds-smoke-tls && cd /tmp/cds-smoke-tls
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+            -keyout tls.key -out tls.crt -days 2 -nodes \
+            -subj "/CN=cds-cube-node-smoke" -addext "subjectAltName=IP:127.0.0.1"
+          cp tls.crt ca.crt
+          bash deploy/cube-node/install.sh
+
+      - name: verify（机读验收）
+        run: |
+          set -euo pipefail
+          CDS_CUBE_TLS_CERT=/tmp/cds-smoke-tls/tls.crt \
+          CDS_CUBE_TLS_KEY=/tmp/cds-smoke-tls/tls.key \
+          CDS_CUBE_TLS_CA=/tmp/cds-smoke-tls/ca.crt \
+            bash deploy/cube-node/verify.sh --json | tee verify-report.json
+          python3 -c "import json; r=json.load(open('verify-report.json')); assert r['ok'], r"

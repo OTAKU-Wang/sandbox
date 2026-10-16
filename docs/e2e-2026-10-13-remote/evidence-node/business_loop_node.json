@@ -1,0 +1,174 @@
+{
+  "started": "2026-10-14T17:04:26+0800",
+  "finished": "2026-10-14T17:05:04+0800",
+  "total": 22,
+  "passed": 22,
+  "failed": 0,
+  "evidence": [
+    {
+      "step": "health",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "{\"status\": \"ok\", \"service\": \"cds\", \"version\": \"0.1.0\", \"capability\": {\"levels\": [\"L0\", \"L1\", \"L2\", \"l2c\", \"L3\", \"k8s\"], \"l2c_planned\": false, \"baseline\": \"2026-10-12\"}}",
+      "time": "2026-10-14T17:04:26+0800"
+    },
+    {
+      "step": "admin.login",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "existing admin",
+      "time": "2026-10-14T17:04:26+0800"
+    },
+    {
+      "step": "apikey.create.full",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "prefix=cds_ak_eGXp len=50",
+      "time": "2026-10-14T17:04:26+0800"
+    },
+    {
+      "step": "apikey.create.readonly",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "",
+      "time": "2026-10-14T17:04:26+0800"
+    },
+    {
+      "step": "apikey.auth.meta",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "API key subject authenticates on /meta",
+      "time": "2026-10-14T17:04:27+0800"
+    },
+    {
+      "step": "apikey.scope.write_denied",
+      "status": "PASS",
+      "status_code": 403,
+      "note": "readonly key on write endpoint -> 403",
+      "time": "2026-10-14T17:04:27+0800",
+      "excerpt": "{\"code\":\"API_KEY_SCOPE_DENIED\",\"message\":\"API key lacks scope data:write\",\"request_id\":\"e3c6da9470314c53\",\"detail\":{\"group\":\"data\",\"verb\":\"write\",\"path\":\"/api/v1/data-products\"}}"
+    },
+    {
+      "step": "apikey.scope.human_only_denied",
+      "status": "PASS",
+      "status_code": 403,
+      "note": "full key on human-only /api-keys -> 403",
+      "time": "2026-10-14T17:04:27+0800",
+      "excerpt": "{\"code\":\"API_KEY_SCOPE_DENIED\",\"message\":\"API key subjects cannot access human-only endpoints\",\"request_id\":\"90efaa7496664daf\",\"detail\":{\"path\":\"/api/v1/api-keys\",\"reason\":\"human_only\"}}"
+    },
+    {
+      "step": "apikey.scope.users_denied",
+      "status": "PASS",
+      "status_code": 403,
+      "note": "full key on human-only /users -> 403",
+      "time": "2026-10-14T17:04:27+0800",
+      "excerpt": "{\"code\":\"API_KEY_SCOPE_DENIED\",\"message\":\"API key subjects cannot access human-only endpoints\",\"request_id\":\"0b3f1cfc4a0d4606\",\"detail\":{\"path\":\"/api/v1/users/options\",\"reason\":\"human_only\"}}"
+    },
+    {
+      "step": "loop.resource.upload",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "26be444b-fdbc-46f5-abc6-2ca2384a184e",
+      "time": "2026-10-14T17:04:27+0800"
+    },
+    {
+      "step": "loop.product.create",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "3eab9e37-2e21-42c1-ba1c-49fc78e724ff",
+      "time": "2026-10-14T17:04:27+0800"
+    },
+    {
+      "step": "loop.product.submit",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "time": "2026-10-14T17:04:27+0800",
+      "excerpt": "{\"id\":\"3eab9e37-2e21-42c1-ba1c-49fc78e724ff\",\"provider_id\":\"17ad7e1e-1ba1-451c-ae88-33a1dcea68ee\",\"resource_id\":\"26be444b-fdbc-46f5-abc6-2ca2384a184e\",\"name\":\"e2e-loop-c98e51\",\"description\":null,\"prod"
+    },
+    {
+      "step": "loop.product.approve",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "human admin approves",
+      "time": "2026-10-14T17:04:27+0800",
+      "excerpt": "{\"id\":\"3eab9e37-2e21-42c1-ba1c-49fc78e724ff\",\"provider_id\":\"17ad7e1e-1ba1-451c-ae88-33a1dcea68ee\",\"resource_id\":\"26be444b-fdbc-46f5-abc6-2ca2384a184e\",\"name\":\"e2e-loop-c98e51\",\"description\":null,\"prod"
+    },
+    {
+      "step": "loop.product.publish",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "time": "2026-10-14T17:04:27+0800",
+      "excerpt": "{\"id\":\"3eab9e37-2e21-42c1-ba1c-49fc78e724ff\",\"provider_id\":\"17ad7e1e-1ba1-451c-ae88-33a1dcea68ee\",\"resource_id\":\"26be444b-fdbc-46f5-abc6-2ca2384a184e\",\"name\":\"e2e-loop-c98e51\",\"description\":null,\"prod"
+    },
+    {
+      "step": "loop.session.create",
+      "status": "PASS",
+      "status_code": 201,
+      "note": "level=l2c status=running",
+      "time": "2026-10-14T17:04:27+0800"
+    },
+    {
+      "step": "loop.file.upload",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "time": "2026-10-14T17:04:43+0800",
+      "excerpt": "{\"session_id\":\"51e46217-c709-4730-ac0b-a0caf522e884\",\"filename\":\"loop.csv\",\"size\":31}"
+    },
+    {
+      "step": "loop.execute",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "python print via sandbox",
+      "time": "2026-10-14T17:04:53+0800",
+      "excerpt": "{\"output\":\"ss14-hello\\n\u2060\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200b\u200c\u200d\u200c\u200c\u200c\u200d\u200b\ufeff\u200b\ufeff\u200b\u200b\u200c\u200d\u200b\u200d\u200c\u200d\u200c\u200d\u200b\ufeff\u200d\u200c\u200b\ufeff\u200c\u200b\u200c\u200d\u200b\u200c\u200b\ufeff\u200c\u200b\u200b\ufeff\u200c\u200d\u200b\ufeff\u200b\u200c\u200b\ufeff\u200b\u200c\u200c\u200d\u200b\u200c\u200c\u200d\u200b\ufeff\u200c\u200d\u200b\ufeff\u200b\ufeff\u200b\ufeff\",\"exit_code\":0,\"duration_ms\":10321,\"sandbox_level\":\"l2c\",\"audit_events_collected\":0,\"output_blocked\":false,\"security_report\":{\"passed\":true,\"blocked\":false,\"stage_results\":{\"scene_routing\":true,\"format_v"
+    },
+    {
+      "step": "loop.file.download.gated",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "X-CDS-Output-Review='passed; findings=0'",
+      "time": "2026-10-14T17:05:04+0800",
+      "excerpt": "name,Alice\nname,Bob\nname,Carol\n"
+    },
+    {
+      "step": "loop.usage",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "time": "2026-10-14T17:05:04+0800",
+      "excerpt": "{\"session_id\":\"51e46217-c709-4730-ac0b-a0caf522e884\",\"status\":\"running\",\"runtime\":\"cubesandbox\",\"workspace\":{\"files\":null,\"bytes\":0,\"data_volume_bytes\":0,\"vm_directories\":{\"data\":0,\"results\":0,\"scratc"
+    },
+    {
+      "step": "loop.proof_bundle",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "evidence_hash=True bundle_meta=True",
+      "time": "2026-10-14T17:05:04+0800"
+    },
+    {
+      "step": "loop.session.terminate",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "",
+      "time": "2026-10-14T17:05:04+0800",
+      "excerpt": "{\"id\":\"51e46217-c709-4730-ac0b-a0caf522e884\",\"user_id\":\"17ad7e1e-1ba1-451c-ae88-33a1dcea68ee\",\"data_product_id\":\"3eab9e37-2e21-42c1-ba1c-49fc78e724ff\""
+    },
+    {
+      "step": "audit.api_key_created",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "admin audit trail carries api_key.created",
+      "time": "2026-10-14T17:05:04+0800"
+    },
+    {
+      "step": "apikey.list.no_bare_key",
+      "status": "PASS",
+      "status_code": 200,
+      "note": "list exposes key_prefix only (no bare key, no key field)",
+      "time": "2026-10-14T17:05:04+0800"
+    }
+  ]
+}

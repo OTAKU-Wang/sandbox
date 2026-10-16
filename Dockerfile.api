@@ -4,7 +4,11 @@ FROM python:3.12-slim AS deps
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# PIP_INDEX_URL / DEBIAN_MIRROR: build-arg overrides so restricted networks
+# (e.g. China) can point at domestic mirrors without forking the Dockerfile.
+# Defaults keep the official upstream for unrestricted builds.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN pip install --no-cache-dir -i ${PIP_INDEX_URL} -r requirements.txt
 
 # Stage 2: Application
 FROM python:3.12-slim AS app
@@ -12,7 +16,9 @@ FROM python:3.12-slim AS app
 WORKDIR /app
 
 # System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ARG DEBIAN_MIRROR=https://deb.debian.org
+RUN (sed -i "s|https://deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true) \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl iptables iproute2 \
     && rm -rf /var/lib/apt/lists/*
 

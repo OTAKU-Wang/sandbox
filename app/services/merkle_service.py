@@ -13,13 +13,48 @@ logger = logging.getLogger(__name__)
 # Use SM3 if available, fall back to SHA-256 for dev
 try:
     from gmssl import sm3 as _sm3
-    def _hash(data: bytes) -> bytes:
-        return bytes.fromhex(_sm3.sm3_hash(list(data)))
+    _GMSSL_AVAILABLE = True
     _HASH_NAME = "SM3"
 except ImportError:
-    def _hash(data: bytes) -> bytes:
-        return hashlib.sha256(data).digest()
+    _GMSSL_AVAILABLE = False
     _HASH_NAME = "SHA-256"
+
+# PZ-04 (MR-A14): one process-lifetime warning when the Merkle layer runs on
+# the SHA-256 fallback instead of real SM3.
+_hash_fallback_warned = False
+
+
+def _sm3_fallback_allowed() -> bool:
+    """Whether the SHA-256 fallback for SM3 (gmssl missing) may be used."""
+    try:
+        from app.core.config import get_settings
+        return bool(get_settings().SM3_FALLBACK_ALLOWED)
+    except Exception:
+        return True
+
+
+def _hash(data: bytes) -> bytes:
+    """Merkle leaf/node hash — real SM3 when gmssl is installed.
+
+    Fallback (dev only): SHA-256, gated by CDS_SM3_FALLBACK_ALLOWED and
+    surfaced with one process-lifetime warning (PZ-04/MR-A14).
+    """
+    global _hash_fallback_warned
+    if _GMSSL_AVAILABLE:
+        return bytes.fromhex(_sm3.sm3_hash(list(data)))
+    if not _sm3_fallback_allowed():
+        raise RuntimeError(
+            "gmssl is not installed and CDS_SM3_FALLBACK_ALLOWED=false: "
+            "Merkle hashing cannot fall back to SHA-256. Install gmssl (or "
+            "Tongsuo) to run real SM3."
+        )
+    if not _hash_fallback_warned:
+        logger.warning(
+            "gmssl not installed — Merkle service falls back to SHA-256 "
+            "(CDS_SM3_FALLBACK_ALLOWED=true). Install gmssl for real SM3."
+        )
+        _hash_fallback_warned = True
+    return hashlib.sha256(data).digest()
 
 
 @dataclass

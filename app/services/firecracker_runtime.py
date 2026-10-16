@@ -1,5 +1,11 @@
 """Firecracker microVM Runtime Adapter — L2 sandbox isolation.
 
+.. deprecated:: SS-10 CB-01
+    L2 (Firecracker) is deprecated in favour of the L2' (Cube) node data plane
+    (``l2c``). This adapter is registered only when CDS_LEGACY_L2_ENABLED=true
+    (default false) and is retained for the transition; new L2-class work goes
+    to the Cube data plane.
+
 Provides hardware-level isolation using Firecracker microVMs:
 - Each sandbox runs in its own lightweight VM
 - Network isolation via TAP devices
@@ -30,6 +36,20 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _seccomp_fallback_allowed() -> bool:
+    """PZ-04 (MR-A13, closes S4): whether bwrap exec may retry without seccomp.
+
+    Mirrors app.services.sandbox_runtime._seccomp_fallback_allowed — the
+    seccomp-less retry must be gated by CDS_SECCOMP_FALLBACK_ALLOWED everywhere
+    it exists, not only in the L0 adapter.
+    """
+    try:
+        from app.core.config import get_settings
+        return bool(get_settings().SECCOMP_FALLBACK_ALLOWED)
+    except Exception:
+        return True
 
 
 class VMState(str, Enum):
@@ -638,10 +658,29 @@ class FirecrackerRuntime:
             )
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
-            # Retry without seccomp if kernel doesn't support it
+            # Retry without seccomp if kernel doesn't support it — gated by
+            # CDS_SECCOMP_FALLBACK_ALLOWED (PZ-04/MR-A13, S4 closed), same as
+            # sandbox_runtime. When denied, the exec fails honestly instead of
+            # silently degrading isolation.
             if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
-                cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
+                if _seccomp_fallback_allowed():
+                    cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
+                    result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
+                else:
+                    duration = int((time.monotonic() - start) * 1000)
+                    logger.warning(
+                        "[firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for %s", vm.vm_id
+                    )
+                    return ExecutionResult(
+                        output=(
+                            "SECURITY ERROR: seccomp unavailable and "
+                            "CDS_SECCOMP_FALLBACK_ALLOWED=false — refusing to retry "
+                            "without seccomp. Original error: " + (result.stderr or "").strip()
+                        ),
+                        exit_code=result.returncode,
+                        duration_ms=duration,
+                        vm_id=vm.vm_id,
+                    )
             duration = int((time.monotonic() - start) * 1000)
             return ExecutionResult(
                 output=result.stdout + result.stderr,
@@ -780,10 +819,24 @@ class FirecrackerRuntime:
             )
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
-            # Retry without seccomp if kernel doesn't support it
+            # Retry without seccomp if kernel doesn't support it — gated by
+            # CDS_SECCOMP_FALLBACK_ALLOWED (PZ-04/MR-A13, S4 closed).
             if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
-                cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
+                if _seccomp_fallback_allowed():
+                    cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
+                    result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
+                else:
+                    logger.warning(
+                        "[firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for %s", vm.vm_id
+                    )
+                    return {
+                        "output": (
+                            "SECURITY ERROR: seccomp unavailable and "
+                            "CDS_SECCOMP_FALLBACK_ALLOWED=false — refusing to retry "
+                            "without seccomp. Original error: " + (result.stderr or "").strip()
+                        ),
+                        "exit_code": result.returncode,
+                    }
             return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
         except subprocess.TimeoutExpired:
             return {"output": f"Execution timed out ({effective_timeout}s)", "exit_code": -1}

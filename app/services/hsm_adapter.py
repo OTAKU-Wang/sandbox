@@ -8,6 +8,7 @@ Provides:
 In production, HSM stores the Key Encryption Key (KEK) that wraps DEKs.
 DEKs are never stored in plaintext outside TEE.
 """
+import base64
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -86,7 +87,11 @@ class VaultTransitAdapter(HSMAdapter):
         client = self._get_client()
         if client:
             try:
-                client.secrets.transit.create_key(name=key_id, type="aes256-gcm96")
+                # D-e2e-12: hvac's create_key takes key_type= (not type=) —
+                # the wrong kwarg raised TypeError on a REAL Vault and every
+                # KEK op 500'd; local suites use the software HSM and never
+                # reached this path (2871-green structural blind spot).
+                client.secrets.transit.create_key(name=key_id, key_type="aes256-gcm96")
                 # KEK stays in HSM — return marker
                 return f"hsm:{key_id}".encode()
             except Exception as e:
@@ -97,8 +102,19 @@ class VaultTransitAdapter(HSMAdapter):
         client = self._get_client()
         if client:
             try:
-                response = client.secrets.transit.encrypt_data(name=kek_id, plaintext=dek_bytes.hex())
-                return bytes.fromhex(response["data"]["ciphertext"])
+                # D-e2e-13: Vault transit's REST contract is BASE64 in both
+                # directions (hvac passes plaintext through, no client-side
+                # conversion). The old code sent hex plaintext and ran the
+                # returned "vault:v1:<base64>" ciphertext through
+                # bytes.fromhex — guaranteed to fail on a real Vault (local
+                # suites use the software adapter; structural blind spot).
+                response = client.secrets.transit.encrypt_data(
+                    name=kek_id,
+                    plaintext=base64.b64encode(dek_bytes).decode(),
+                )
+                # Store the versioned ciphertext verbatim ("vault:v1:<b64>")
+                # — it is self-describing across KEK rotations.
+                return response["data"]["ciphertext"].encode()
             except Exception as e:
                 logger.warning(f"Vault wrap failed: {e}")
         raise RuntimeError("HSM unavailable — cannot wrap DEK")
@@ -107,8 +123,11 @@ class VaultTransitAdapter(HSMAdapter):
         client = self._get_client()
         if client:
             try:
-                response = client.secrets.transit.decrypt_data(name=kek_id, ciphertext=wrapped_dek.hex())
-                return bytes.fromhex(response["data"]["plaintext"])
+                ciphertext = wrapped_dek.decode() if isinstance(wrapped_dek, (bytes, bytearray)) else wrapped_dek
+                response = client.secrets.transit.decrypt_data(
+                    name=kek_id, ciphertext=ciphertext,
+                )
+                return base64.b64decode(response["data"]["plaintext"])
             except Exception as e:
                 logger.warning(f"Vault unwrap failed: {e}")
         raise RuntimeError("HSM unavailable — cannot unwrap DEK")
@@ -129,8 +148,10 @@ class VaultTransitAdapter(HSMAdapter):
         if client:
             try:
                 # Vault Transit supports RSA/ECDSA but not SM2
+                # (D-e2e-13: sign input is base64 in the transit REST contract)
                 response = client.secrets.transit.sign_data(
-                    name=key_id, input=data.hex(), hash_algorithm="sha2-256",
+                    name=key_id, input=base64.b64encode(data).decode(),
+                    hash_algorithm="sha2-256",
                 )
                 sig_hex = response["data"]["signature"]
                 # Vault returns "vault:v1:<base64>" format

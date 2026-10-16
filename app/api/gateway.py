@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.errors import QuotaExceeded
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
 from app.models.app_credential import AppCredential, CredentialStatus
@@ -225,7 +226,7 @@ async def gateway_query(
     # 3. Check quota
     allowed, quota_reason = await gateway_service.check_quota(db, cred)
     if not allowed:
-        raise HTTPException(status_code=429, detail=f"Quota exceeded: {quota_reason}")
+        raise QuotaExceeded(f"Quota exceeded: {quota_reason}")
 
     # 4. Execute query
     response = await gateway_service.execute_query(db, contract, body.product_id, body.sql, body.format)

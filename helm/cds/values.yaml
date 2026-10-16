@@ -38,7 +38,17 @@ api:
     CDS_LOG_JSON: "false"
     CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
     CDS_KMS_REQUIRE_ATTESTATION: "true"
+    # CB-01: service token for the Go volume plugin's KMS volume-key endpoints.
+    # Must match the plugin's CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN. Ship empty and
+    # supply via the cds-secrets secret; empty = volume-key endpoints fail-closed.
+    CDS_KMS_SERVICE_TOKEN: ""
     CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+    # PZ-10 (spec ss-11): MFA (TOTP) + SM2 cert login. The chart ships the
+    # fail-closed posture: deployers MUST supply a real MFA encryption key
+    # (empty key refuses to boot in prod via validate_security_config).
+    CDS_AUTH_MFA_ENABLED: "true"
+    CDS_MFA_SECRET_ENCRYPTION_KEY: ""
+    CDS_AUTH_CERT_LOGIN: "true"
     # W3 rate limiting (Redis fixed window, fail-open on Redis outage)
     CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
     CDS_EXEC_STREAM_MAX_CONCURRENT: "3"
@@ -65,6 +75,43 @@ api:
     CDS_RATE_LIMIT_PER_MINUTE_IP: "60"
     CDS_RATE_LIMIT_PER_MINUTE_USER: "600"
     CDS_RATE_LIMIT_AUTH_PER_MINUTE: "10"
+    # PZ-04/PZ-05 (specs/ss-11-cds-productization.md §7.1) — prod honesty &
+    # federation gates. The chart ships the fail-closed posture; deployers must
+    # supply real values (empty key/measurements RAISE at startup via
+    # validate_security_config) or disable the feature they cannot back.
+    CDS_MIA_SHADOW_MODEL: "false"
+    CDS_SM3_FALLBACK_ALLOWED: "false"
+    CDS_COLUMN_ENCRYPTION_KEY: ""  # 16-byte column DEK (hex or base64) — required in prod
+    CDS_ATTESTATION_ALLOWED_MEASUREMENTS: ""  # csv SM3 whitelist — required with KMS_REQUIRE_ATTESTATION=true
+    CDS_FEDERATION_ENABLED: "false"  # flip true only with real mTLS material below (FG-008)
+    CDS_FEDERATION_CA_BUNDLE: ""
+    CDS_FEDERATION_CERT: ""
+    CDS_FEDERATION_KEY: ""
+    # SS-10 CB-01: Cube (L2') node data plane — off by default. Enabling in prod
+    # requires real node mTLS material (CDS_CUBE_NODE_TLS_CA) + a results dir.
+    CDS_CUBE_DATAPLANE_ENABLED: "false"
+    CDS_LEGACY_L2_ENABLED: "false"
+    CDS_CUBE_NODE_GRPC_TLS: "true"
+    CDS_CUBE_NODE_TLS_CA: ""
+    CDS_CUBE_NODE_TLS_CERT: ""
+    CDS_CUBE_NODE_TLS_KEY: ""
+    CDS_CUBE_NODE_TLS_PROXY_PORT: "9443"
+    CDS_CUBE_NODE_GRPC_DEADLINE_MS: "5000"
+    CDS_CUBE_NODE_HEARTBEAT_SECONDS: "30"
+    CDS_CUBE_RESULTS_DIR: /var/lib/cds/sandbox-results
+    CDS_CUBE_SANDBOX_IMAGE: cds/cube-sandbox:latest
+    CDS_CUBE_DEK_LENGTH: "16"
+    # CB-04: CubeEgress root CA artifact (CDS-side copy of node bring-up output
+    # /etc/cube/ca/cube-root-ca.crt); consumed by the CB-05 template probe.
+    CDS_CUBE_EGRESS_CA: ""
+    # CB-06: cube egress audit ingestion token (POST /internal/audit/egress);
+    # empty = fail-closed (401).
+    CDS_CUBE_AUDIT_SERVICE_TOKEN: ""
+    # CB-05: cube template artifact token signing (presigned URL TTL + HMAC token);
+    # required in production when the cube data plane is enabled (fail-closed boot).
+    CDS_CUBE_TEMPLATE_SIGNING_KEY: ""
+    CDS_CUBE_TEMPLATE_URL_TTL_SECONDS: "3600"
+    CDS_CUBE_TEMPLATE_DIST_RETRY: "2"
 
 # ─── Frontend Service ───
 frontend:

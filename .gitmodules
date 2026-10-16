@@ -1,0 +1,5 @@
+[submodule "Tongsuo"]
+	path = Tongsuo
+	url = https://github.com/Tongsuo-Project/Tongsuo.git
+	shallow = true
+	ignore = untracked

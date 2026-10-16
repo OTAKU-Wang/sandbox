@@ -66,7 +66,7 @@ class SandboxNode(Base):
     error_rate: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0 - 1.0
 
     # W14: operations — isolate/unisolate and health observation.
-    scheduling_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    scheduling_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     health_state: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown", server_default="unknown")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

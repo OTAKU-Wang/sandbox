@@ -14,6 +14,7 @@ class SandboxLevel(str, Enum):
     L0 = "L0"  # Process isolation (cgroup + output limits)
     L1 = "L1"  # TEE (SGX/Occlum)
     L2 = "L2"  # Firecracker + gVisor
+    L2C = "l2c"  # L2' (Cube) node data plane (SS-10)
     L3 = "L3"  # bwrap namespace isolation
     K8S = "k8s"  # Kubernetes/K3s pod isolation
 
@@ -71,8 +72,13 @@ class SandboxSession(Base):
     # lets a subsequent interaction wake a suspended session — gated on the
     # governing contract still being ACTIVE.
     idle_policy: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    auto_resume: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("0"))
+    auto_resume: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
     resource_limits: Mapped[dict | None] = mapped_column(JSON)  # CPU/memory/disk limits
+    # SS-13: TEE selection policy (tee_if_available|tee_required|none) and the
+    # per-session trust root of the selected cube node (tdx|sev_snp|none).
+    # Nullable + Python defaults: migration 0016 backfills via server_default.
+    tee_policy: Mapped[str | None] = mapped_column(String(32), nullable=True, default="tee_if_available")
+    trust_root: Mapped[str | None] = mapped_column(String(16), nullable=True, default="none")
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

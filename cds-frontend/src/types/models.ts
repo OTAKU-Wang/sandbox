@@ -70,6 +70,7 @@ export interface SandboxSession {
   contract_id: string | null;
   sandbox_level: SandboxLevel;
   sandbox_mode: string;
+  trust_root?: 'tdx' | 'sev_snp' | 'none';
   status: SandboxSessionStatus;
   container_id: string | null;
   session_key_id: string | null;

@@ -90,6 +90,8 @@ export interface SessionFile {
   name: string;
   size: number;
   encrypted: boolean;
+  // PZ-16：list/preview 若有审查预告字段则消费（后端当前不下发，防御式可选）
+  output_review?: { status?: string; findings_count?: number } | null;
 }
 
 export interface SessionFilesResponse {
@@ -103,6 +105,27 @@ export interface FileDownloadBlockedError {
     error?: string;
   };
 }
+
+// ---------- Operations (W11 202 异步模型) ----------
+
+export interface SessionOperation {
+  operation_id: string;
+  session_id: string;
+  op_type: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | string;
+  progress: number;
+  error: string | null;
+  result_ref: Record<string, unknown> | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export const isTerminalOperation = (op: SessionOperation | null | undefined): boolean =>
+  !!op && (op.status === 'succeeded' || op.status === 'failed');
+
+/** 202 响应与同步响应的判别（同步路径也带 operation_id，但没有 progress 字段）。 */
+export const isSessionOperation = (payload: unknown): payload is SessionOperation =>
+  typeof payload === 'object' && payload !== null && 'progress' in payload && 'op_type' in payload;
 
 // ---------- Snapshots ----------
 
@@ -231,6 +254,19 @@ export interface UpdateNetworkPolicyRequest {
   active?: boolean;
 }
 
+// X-CDS-Output-Review 头解析："passed; findings=N" / "redacted; findings=N"（PZ-16 ③）
+export interface FileReviewStatus {
+  status: 'passed' | 'redacted';
+  findings: number;
+}
+
+export const parseReviewHeader = (header?: string | null): FileReviewStatus | null => {
+  if (typeof header !== 'string' || !header) return null;
+  const status: 'passed' | 'redacted' = header.trim().startsWith('redacted') ? 'redacted' : 'passed';
+  const m = /findings=(\d+)/.exec(header);
+  return { status, findings: m ? Number(m[1]) : 0 };
+};
+
 export const sandboxApi = {
   list: (params?: { page?: number; page_size?: number; status?: string }): Promise<PaginatedResponse<SandboxSession>> =>
     api.get('/sandbox-sessions', {
@@ -311,36 +347,44 @@ export const sandboxApi = {
     });
   },
 
-  // Blob download — returns blob plus redacted flag from response header
-  downloadFile: async (id: string, filename: string): Promise<{ blob: Blob; redacted: boolean }> => {
-    const axios = (await import('axios')).default;
-    const { useAuthStore } = await import('../stores/authStore');
-    const token = useAuthStore.getState().token;
-    const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
-
+  // Blob download — returns blob plus review status parsed from the
+  // X-CDS-Output-Review header (passed/redacted + findings count, PZ-16 ③).
+  // Rides the shared instance (single-flight 401 refresh); since that
+  // interceptor unwraps `response.data`, the review header and status are
+  // captured here via the transformResponse/validateStatus hooks.
+  downloadFile: async (id: string, filename: string): Promise<{ blob: Blob; review: FileReviewStatus | null }> => {
+    const meta: { review: FileReviewStatus | null; status?: number } = { review: null };
     try {
-      const response = await axios.get(
-        `${baseURL}/sandbox-sessions/${id}/files/${encodeURIComponent(filename)}`,
-        {
-          responseType: 'blob',
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const blob: Blob = await api.get(`/sandbox-sessions/${id}/files/${encodeURIComponent(filename)}`, {
+        responseType: 'blob',
+        transformResponse: [(data: unknown, headers: Record<string, unknown>) => {
+          const reviewHeader = headers?.['x-cds-output-review'] ?? headers?.['X-CDS-Output-Review'];
+          meta.review = parseReviewHeader(typeof reviewHeader === 'string' ? reviewHeader : null);
+          return data;
+        }],
+        validateStatus: (status: number) => {
+          meta.status = status;
+          return status >= 200 && status < 300;
         },
-      );
-      const reviewHeader = response.headers['x-cds-output-review'] || response.headers['X-CDS-Output-Review'];
-      const redacted = typeof reviewHeader === 'string' && reviewHeader.startsWith('redacted');
-      return { blob: response.data, redacted };
+      });
+      return { blob, review: meta.review };
     } catch (error: unknown) {
-      // 409 DLP block: the response data is a JSON blob with detail.findings_count
-      const axiosErr = error as { response?: { status: number; data: Blob; headers: Record<string, string> } };
-      if (axiosErr.response?.status === 409 && axiosErr.response.data instanceof Blob) {
-        // Try to parse JSON from blob for findings_count; re-throw with structured info
-        const text = await axiosErr.response.data.text();
-        let detail: { findings_count?: number; error?: string } = {};
+      // 409 DLP block: the shared interceptor rejects with the raw response body,
+      // which is a JSON Blob here (responseType 'blob'); parse findings_count
+      // and re-throw with structured info.
+      if (error instanceof Blob && meta.status === 409) {
+        const text = await error.text();
+        let envelope: Record<string, unknown> = {};
         try {
-          detail = JSON.parse(text);
+          envelope = JSON.parse(text);
         } catch {
           // ignore parse errors
         }
+        // The W2 body wraps the payload as {code, message, detail, request_id};
+        // reading findings off the envelope itself made every blocked download
+        // report "0 findings" to the operator.
+        const detail = ((envelope as { detail?: unknown }).detail ?? envelope) as
+          { findings_count?: number; error?: string; findings?: unknown[] };
         const blockedErr = new Error('输出审查阻断') as Error & { status: number; detail: typeof detail };
         blockedErr.status = 409;
         blockedErr.detail = detail;
@@ -353,15 +397,27 @@ export const sandboxApi = {
   deleteFile: (id: string, filename: string): Promise<void> =>
     api.delete(`/sandbox-sessions/${id}/files/${encodeURIComponent(filename)}`),
 
-  // Snapshots
+  // Operations (W11)：202 异步操作的轮询端点
+  getOperation: (opId: string): Promise<SessionOperation> =>
+    api.get(`/sandbox-sessions/operations/${opId}`),
+
+  // Snapshots — asyncMode=true 时 202 {operation_id}（PZ-16 ④），否则同步返回
   listSnapshots: (id: string): Promise<SessionSnapshotsResponse> =>
     api.get(`/sandbox-sessions/${id}/snapshots`),
 
-  createSnapshot: (id: string, data?: CreateSnapshotRequest): Promise<SessionSnapshot> =>
-    api.post(`/sandbox-sessions/${id}/snapshots`, data || {}),
+  createSnapshot: (
+    id: string,
+    data?: CreateSnapshotRequest,
+    asyncMode = false,
+  ): Promise<SessionSnapshot | SessionOperation> =>
+    api.post(`/sandbox-sessions/${id}/snapshots`, data || {}, { params: asyncMode ? { async: true } : undefined }),
 
-  rollbackSnapshot: (id: string, snapshotId: string): Promise<{ status: string }> =>
-    api.post(`/sandbox-sessions/${id}/snapshots/${snapshotId}/rollback`),
+  rollbackSnapshot: (
+    id: string,
+    snapshotId: string,
+    asyncMode = false,
+  ): Promise<{ status: string } | SessionOperation> =>
+    api.post(`/sandbox-sessions/${id}/snapshots/${snapshotId}/rollback`, undefined, { params: asyncMode ? { async: true } : undefined }),
 
   deleteSnapshot: (id: string, snapshotId: string): Promise<void> =>
     api.delete(`/sandbox-sessions/${id}/snapshots/${snapshotId}`),

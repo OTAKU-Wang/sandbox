@@ -519,7 +519,7 @@ async def connector_create_session(
         mode="deny_all",
         active=True,
     ))
-    await network_policy_engine.create_policy(str(session.id), NetworkPolicyConfig(mode="deny_all"))
+    await network_policy_engine.create_policy(str(session.id), NetworkPolicyConfig(mode="deny_all"), db=db)
 
     # Create connector session record
     conn_session = ConnectorSession(

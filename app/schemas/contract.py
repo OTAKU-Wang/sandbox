@@ -9,7 +9,7 @@ VALID_CONTRACT_TYPES = (
     "data_query", "model_training", "data_application",
     "api_service", "joint_compute", "product_dev", "data_modeling",
 )
-VALID_SANDBOX_LEVELS = ("L1", "L2", "L3", "k8s")
+VALID_SANDBOX_LEVELS = ("L1", "L2", "l2c", "L3", "k8s")
 
 
 class ContractCreate(BaseModel):
@@ -18,7 +18,7 @@ class ContractCreate(BaseModel):
     product_ids: list[uuid.UUID]  # 1:N: at least one data product required
     title: str
     terms: dict | None = None
-    allowed_sandbox_levels: str = "L3"
+    allowed_sandbox_levels: str = "l2c"
     allowed_sandbox_modes: list[str] | None = None  # e.g. ["query","train","develop"]
     allowed_operations: str = "read,analyze"
     max_duration_hours: int = 24

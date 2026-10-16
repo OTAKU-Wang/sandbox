@@ -1,5 +1,6 @@
 import uuid
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -72,6 +73,41 @@ def decode_access_token(token: str) -> dict:
 def decode_refresh_token(token: str) -> dict:
     payload = jwt.decode(token, _effective_jwt_secret_key(), algorithms=[settings.JWT_ALGORITHM])
     if payload.get("type") != "refresh":
+        raise ValueError("Invalid token type")
+    return payload
+
+
+# --- CR-2026-10-15 B1: server-issued single-use certificate-login challenge ---
+
+CERT_CHALLENGE_TTL_SECONDS = 300
+
+
+def create_cert_challenge(username: str) -> tuple[str, int]:
+    """Mint a certificate-login challenge bound to ``username``.
+
+    The token is self-contained and signed, so every worker can verify it
+    without shared state; single use is enforced separately by
+    ``app.core.challenge_store``. A client-chosen nonce is NOT accepted by
+    ``/auth/login/cert`` any more: without a server-issued, consumed challenge
+    a captured request body could be replayed forever (the signature covers
+    whatever nonce the attacker picked), which would bypass the password and
+    TOTP factors this login path replaces.
+    """
+    expire = datetime.now(timezone.utc) + timedelta(seconds=CERT_CHALLENGE_TTL_SECONDS)
+    payload = {
+        "sub": username,
+        "nonce": secrets.token_urlsafe(24),
+        "exp": expire,
+        "type": "cert_challenge",
+    }
+    token = jwt.encode(payload, _effective_jwt_secret_key(), algorithm=settings.JWT_ALGORITHM)
+    return token, CERT_CHALLENGE_TTL_SECONDS
+
+
+def decode_cert_challenge(token: str) -> dict:
+    """Decode + verify a cert-login challenge; raise ValueError if not one."""
+    payload = jwt.decode(token, _effective_jwt_secret_key(), algorithms=[settings.JWT_ALGORITHM])
+    if payload.get("type") != "cert_challenge":
         raise ValueError("Invalid token type")
     return payload
 

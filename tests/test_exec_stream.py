@@ -184,6 +184,5 @@ async def _token_for(client) -> str:
         "username": f"wsmint_{unique}",
         "email": f"wsmint_{unique}@example.com",
         "password": "testpass123",
-        "role": "data_provider",
     })
     return resp.json()["access_token"]

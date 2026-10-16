@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Card, Table, Tag, Typography, Space, Button, Drawer, Descriptions, message, Modal, Form, Input, InputNumber, Select, Result, Spin } from 'antd';
 import { PlusOutlined, StopOutlined, EyeOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { certificateApi, type Certificate, type CertificateDetail, type ChainVerifyResult } from '../../services/identityApi';
+import { certificateApi, type Certificate, type ChainVerifyResult } from '../../services/identityApi';
 import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import type { ColumnsType } from 'antd/es/table';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
@@ -29,12 +30,12 @@ export default function Certificates() {
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [form] = Form.useForm();
 
-  const { data: certificates, isLoading } = useQuery({
+  const { data: certificates, isLoading, isError: certsIsError, error: certsError, refetch: refetchCerts } = useQuery({
     queryKey: ['certificates'],
     queryFn: () => certificateApi.listCertificates(),
   });
 
-  const { data: certDetail, isLoading: detailLoading } = useQuery({
+  const { data: certDetail, isLoading: detailLoading, isError: detailIsError, error: detailError, refetch: refetchDetail } = useQuery({
     queryKey: ['certificate-detail', selectedCertId],
     queryFn: () => certificateApi.getCertificate(selectedCertId!),
     enabled: !!selectedCertId && detailDrawerOpen,
@@ -153,6 +154,7 @@ export default function Certificates() {
           </Button>
         }
       >
+        {certsIsError && <QueryErrorAlert error={certsError} message="证书列表加载失败" onRetry={() => { void refetchCerts(); }} />}
         <Table
           columns={columns}
           dataSource={certificates || []}
@@ -206,6 +208,7 @@ export default function Certificates() {
         }}
         width={560}
       >
+        {detailIsError && <QueryErrorAlert error={detailError} message="证书详情加载失败" onRetry={() => { void refetchDetail(); }} />}
         {detailLoading ? (
           <Spin style={{ display: 'block', margin: '40px auto' }} />
         ) : certDetail ? (

@@ -1,0 +1,80 @@
+# SS-10 CB-00 · upstream contract watch (spec §5.3 实时跟紧机制)
+#
+# Weekly + manual. Runs scripts/cube-upstream-check.sh against a read-only
+# upstream clone and gates on contract drift:
+#   exit 0 = no contract drift   -> green (auto-follow territory, spec §5.3)
+#   exit 1 = CONTRACT DRIFT      -> job fails: breaking candidates (files +
+#                                   diff stat) are printed for human review
+#                                   against spec §二; pin is NOT auto-pushed
+#   exit 2 = non-contract drift  -> notice only (info, non-fatal)
+#
+# No upstream mirror exists in this org's CI (spec §5.1's /opt/cds/cube-mirror.git
+# is a CI/prod-host concern), so the "periodic fetch of the remote ref" is a
+# fresh read-only clone per run. No secrets are used; the clone is public.
+name: cube-upstream-watch
+
+on:
+  schedule:
+    # 周一 09:00 UTC（spec §5.3: weekly）
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: cube-upstream-watch
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone upstream (read-only, no mirror in this org's CI)
+        id: clone
+        env:
+          CUBE_UPSTREAM_REPO: ${{ vars.CUBE_UPSTREAM_REPO }}
+        run: |
+          REPO="${CUBE_UPSTREAM_REPO:-https://github.com/tencentcloud/CubeSandbox.git}"
+          if git clone --quiet "$REPO" "$RUNNER_TEMP/cubesandbox"; then
+            echo "clone-ok"
+          else
+            echo "::warning::upstream clone failed — drift check will be skipped (non-fatal; rerun via workflow_dispatch)"
+            echo "clone-failed" > "$RUNNER_TEMP/clone-failed"
+          fi
+
+      - name: Upstream contract drift check
+        id: check
+        run: |
+          if [ -f "$RUNNER_TEMP/clone-failed" ]; then
+            echo "code=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          CUBE_UPSTREAM_DIR="$RUNNER_TEMP/cubesandbox" scripts/cube-upstream-check.sh
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Gate on contract drift
+        run: |
+          case "${{ steps.check.outputs.code }}" in
+            0)
+              echo "no contract drift since the pinned sha — auto-follow safe (spec §5.3)"
+              ;;
+            1)
+              echo "::error::CONTRACT DRIFT detected: review the breaking-candidate list above against spec §二 before pushing the pin. Not auto-merged."
+              exit 1
+              ;;
+            2)
+              echo "::notice::non-contract upstream drift only — no action required"
+              ;;
+            skipped)
+              echo "check skipped (upstream clone failed)"
+              ;;
+            *)
+              echo "::error::upstream check errored (exit code ${{ steps.check.outputs.code }})"
+              exit 1
+              ;;
+          esac

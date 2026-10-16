@@ -71,7 +71,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "user": settings.RATE_LIMIT_PER_MINUTE_USER,
             "ip": settings.RATE_LIMIT_PER_MINUTE_IP,
         }
-        if path.endswith("/api/v1/auth/login"):
+        if path.endswith(("/api/v1/auth/login", "/api/v1/auth/register",
+                          "/api/v1/auth/login/cert", "/api/v1/auth/login/cert/challenge")):
+            # CR-2026-10-15 M1: the cert-login pair used to fall into the loose
+            # per-IP bucket, so the strict auth bucket never covered it.
             return "auth", client_ip, limits["auth"]
         sub = _unverified_jwt_sub(request.headers.get("Authorization", ""))
         if sub:

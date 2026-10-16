@@ -41,7 +41,7 @@
 | B2 | **RAG 二期（生成式）** | 一期抽取式已上线（`rag_service.py` `answer_mode="extractive_retrieval"`）；transformers 仅宿主侧实验后端且 `build_corpus` 对其 fail-closed | 沙箱内生成式 LLM、transformers 沙箱侧检索、模型水印/MIA 门禁、推理计量（T11 二期清单） |
 | B3 | **智能体执行框架** | `cdc_agent.py` 是 CDC 数据同步（Debezium/Kafka），非 AI 智能体（gap review C4） | 供方/需方智能体运行时（沙箱内受限执行 + 工具白名单 + 全程审计）ABSENT；命名易误导 |
 | B4 | **同态加密 / MPC 计算** | `mpc_service.py` 仅 Shamir 秘密分享（split/reconstruct），**且纯内存态**（无 DB 模型/表，重启即丢） | 无 HE/两方 MPC 计算协议（SecretFlow HEU/SPU 评估，P2-1）；密钥托管态无持久化 |
-| B5 | **训练编排产化** | CPU torch 真实训练 + `TRAINING_REQUIRE_TORCH` fail-closed；模拟路径诚实标注 | 真实分布式训练平台/GPU 调度未接（=FG-011，环境验收） |
+| B5 | **训练编排产化** | ~~CPU torch 真实训练~~ + `TRAINING_REQUIRE_TORCH` fail-closed；模拟路径诚实标注（2026-10-12 回写：代码实证 SFT 调用方硬编码 `model=None` 恒走模拟路径，"CPU torch 真实训练"表述与现状不符；真实化收口移交 SS-11 PZ-01 选项 a） | 真实分布式训练平台/GPU 调度未接（=FG-011，环境验收） |
 | B6 | **非结构化生产引擎镜像** | 脚本级真实（OCR/ASR/ffmpeg/DICOM 脚本 + 失败重试 + partial_success） | 生产镜像内引擎可用性未验证（=FG-010，环境验收） |
 
 #### C 类 · 本轮扫描新发现的代码级缺陷（未登记于任何 tracker）

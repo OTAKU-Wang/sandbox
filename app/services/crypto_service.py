@@ -107,12 +107,19 @@ class CryptoService:
         return verifier.verify(signature, digest_bytes)
 
     def sm3_hash(self, data: bytes) -> str:
-        """Compute SM3 hash of data (64-char hex)."""
+        """Compute SM3 hash of data (64-char hex).
+
+        The SHA-256 fallback for a missing gmssl goes through the single gated
+        implementation in app.utils.crypto, so CDS_SM3_FALLBACK_ALLOWED=false
+        raises here too (PZ-04/MR-A14). This is the function that hashes audit
+        Merkle leaves, so an ungated fallback would keep minting SHA-256
+        "SM3" roots in production while the gate looked enforced.
+        """
         if _HAS_GMSSL:
             return _sm3.sm3_hash(list(data))
-        logger.warning("[CRYPTO] gmssl not installed — SM3 falling back to SHA-256. "
-                       "Install gmssl for GM/T 0004 compliance.")
-        return hashlib.sha256(data).hexdigest()
+        from app.utils.crypto import sm3_hash as _gated_sm3_hash
+
+        return _gated_sm3_hash(data)
 
     def _sm3_hash_with_z(self, data: bytes, public_key: str) -> str:
         """Compute SM3 hash with Z value (GM/T 0009 standard).
