@@ -1,0 +1,182 @@
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+DeliveryMethod = Literal["dataset", "open_api", "result_push"]
+ComputeFrequency = Literal["manual", "hourly", "daily"]
+WorkloadEnv = Literal["test", "production"]
+
+
+class ResourceSpec(BaseModel):
+    cpu_cores: float | None = None
+    memory_mb: int | None = None
+    disk_gb: int | None = None
+    gpu_count: int | None = None
+    image_template: str | None = None
+    timeout_seconds: int | None = None
+
+
+class FlowConfigRequest(BaseModel):
+    delivery_methods: list[DeliveryMethod] = Field(default_factory=lambda: ["dataset"])
+    auto_compute: bool = False
+    compute_frequency: ComputeFrequency = "manual"
+    compute_minute: int = Field(0, ge=0, le=59)
+    compute_hour: int = Field(2, ge=0, le=23)
+    compute_tz: str = "Asia/Shanghai"
+    sandbox_resource_spec: ResourceSpec | None = None
+
+
+class NotebookCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    path: str = Field(..., min_length=1, max_length=512)
+    contract_id: uuid.UUID | None = None
+    session_id: uuid.UUID | None = None
+    content: dict[str, Any] | str | None = None
+    language: str = "python"
+
+
+class NotebookUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=255)
+    content: dict[str, Any] | str | None = None
+    session_id: uuid.UUID | None = None
+
+
+class CellExecuteRequest(BaseModel):
+    code: str = Field(..., max_length=200_000)
+    cell_index: int | None = None
+    persist: bool = True
+
+
+class WorkloadCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    contract_id: uuid.UUID | None = None
+    notebook_id: uuid.UUID | None = None
+    entrypoint: str | None = None
+    language: str = "python"
+    resource_spec: ResourceSpec | None = None
+    data_product_ids: list[uuid.UUID] | None = None
+
+
+class WorkloadTestRequest(BaseModel):
+    keep_session: bool = False
+    timeout_seconds: int = Field(900, ge=60, le=3600)
+
+
+class ComputeRunCreate(BaseModel):
+    contract_id: uuid.UUID
+
+
+class DatasetBundleRequest(BaseModel):
+    session_id: uuid.UUID
+    contract_id: uuid.UUID
+    watermark: bool = True
+
+
+class WebhookCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    url: str = Field(..., min_length=8, max_length=1024)
+    events: list[str] = Field(..., min_length=1)
+    contract_id: uuid.UUID | None = None
+
+
+class WebhookUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    url: str | None = Field(None, min_length=8, max_length=1024)
+    events: list[str] | None = None
+    status: Literal["active", "paused"] | None = None
+
+
+class OpenApiEndpointCreate(BaseModel):
+    contract_id: uuid.UUID
+    workload_id: uuid.UUID | None = None
+    name: str = Field(..., min_length=1, max_length=128)
+    slug: str | None = Field(None, min_length=1, max_length=64)
+    request_schema: dict[str, Any] | None = None
+    rate_limit_per_minute: int = Field(60, ge=1, le=10000)
+    quota_total: int | None = Field(None, ge=1)
+
+
+class OpenApiEndpointUpdate(BaseModel):
+    status: Literal["enabled", "disabled"] | None = None
+    rate_limit_per_minute: int | None = Field(None, ge=1, le=10000)
+    quota_total: int | None = Field(None, ge=1)
+
+
+class NotebookOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    contract_id: uuid.UUID | None
+    session_id: uuid.UUID | None
+    title: str
+    path: str
+    kernel: str
+    language: str
+    content: dict[str, Any] | None
+    version: int
+    status: str
+    execution_backend: str | None
+    last_executed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class WorkloadOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    user_id: uuid.UUID
+    contract_id: uuid.UUID | None
+    source_notebook_id: uuid.UUID | None
+    language: str
+    entrypoint_hash: str | None
+    resource_spec: dict | None
+    data_product_ids: list | None
+    env: str
+    status: str
+    version: int
+    is_latest: bool
+    test_run_id: uuid.UUID | None
+    published_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TestRunOut(BaseModel):
+    id: uuid.UUID
+    workload_id: uuid.UUID
+    session_id: uuid.UUID | None
+    status: str
+    passed: bool
+    checks: list | None
+    exit_code: int | None
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ComputeRunOut(BaseModel):
+    id: uuid.UUID
+    contract_id: uuid.UUID
+    workload_id: uuid.UUID | None
+    trigger: str
+    scheduled_for: datetime | None
+    status: str
+    attempt: int
+    session_id: uuid.UUID | None
+    output_files: list | None
+    output_rows: int
+    resource_usage: dict | None
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

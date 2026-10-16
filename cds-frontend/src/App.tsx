@@ -7,6 +7,7 @@ import ProtectedRoute from './components/Auth/ProtectedRoute';
 import RoleRoute from './components/Auth/RoleRoute';
 import MainLayout from './components/Layout/MainLayout';
 import { ROLE_GROUPS } from './utils/roles';
+import { ADMIN_WORKSPACE_ROLES } from './utils/workspace';
 import { UserRole } from './types/enums';
 
 // Route-level lazy loading — each page becomes a separate chunk
@@ -22,6 +23,11 @@ const ContractDetail = lazy(() => import('./pages/Contracts/ContractDetail'));
 const SessionList = lazy(() => import('./pages/Sandbox/SessionList'));
 const SessionDetail = lazy(() => import('./pages/Sandbox/SessionDetail'));
 const DataProductDev = lazy(() => import('./pages/Sandbox/DataProductDev'));
+const NotebookWorkbench = lazy(() => import('./pages/Flow/NotebookWorkbench'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+const WorkloadCenter = lazy(() => import('./pages/Flow/WorkloadCenter'));
+const ComputeSchedule = lazy(() => import('./pages/Flow/ComputeSchedule'));
+const DeliveryCenter = lazy(() => import('./pages/Flow/DeliveryCenter'));
 const AuditLog = lazy(() => import('./pages/Audit/AuditLog'));
 const InspectionPipeline = lazy(() => import('./pages/OutputControl/InspectionPipeline'));
 const MonitoringDashboard = lazy(() => import('./pages/Monitoring'));
@@ -78,6 +84,10 @@ export default function App() {
                 <Route path="sandbox-sessions" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><SessionList /></RoleRoute>} />
                 <Route path="sandbox-sessions/:id" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><SessionDetail /></RoleRoute>} />
                 <Route path="dev-sandbox" element={<RoleRoute allowedRoles={ROLE_GROUPS.devSandboxUsers}><DataProductDev /></RoleRoute>} />
+                <Route path="notebooks" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><NotebookWorkbench /></RoleRoute>} />
+                <Route path="workloads" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkloadCenter /></RoleRoute>} />
+                <Route path="compute" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><ComputeSchedule /></RoleRoute>} />
+                <Route path="deliveries" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><DeliveryCenter /></RoleRoute>} />
                 <Route path="audit" element={<RoleRoute allowedRoles={ROLE_GROUPS.auditReaders}><AuditLog /></RoleRoute>} />
                 <Route path="output-control" element={<RoleRoute allowedRoles={ROLE_GROUPS.outputControlReaders}><InspectionPipeline /></RoleRoute>} />
                 <Route path="catalog" element={<RoleRoute allowedRoles={ROLE_GROUPS.catalogReaders}><CatalogPage /></RoleRoute>} />
@@ -91,13 +101,14 @@ export default function App() {
                 <Route path="ops/network-policies" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sNetworkPolicies /></RoleRoute>} />
                 <Route path="ops/pvcs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sPvcs /></RoleRoute>} />
                 <Route path="ops/logs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><K8sLogs /></RoleRoute>} />
-                <Route path="capability-matrix" element={<CapabilityMatrix />} />
+                <Route path="capability-matrix" element={<RoleRoute allowedRoles={ADMIN_WORKSPACE_ROLES}><CapabilityMatrix /></RoleRoute>} />
                 <Route path="data-pipeline" element={<DataPipeline />} />
                 <Route path="compliance-disclosure" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><ComplianceDisclosure /></RoleRoute>} />
                 <Route path="mpc" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><MpcPage /></RoleRoute>} />
                 <Route path="system-status" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><SystemStatus /></RoleRoute>} />
                 <Route path="users" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><UserManagement /></RoleRoute>} />
                 <Route path="api-keys" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><ApiKeys /></RoleRoute>} />
+                <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>
           </Suspense>

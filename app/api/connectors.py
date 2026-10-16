@@ -603,8 +603,8 @@ async def connector_execute_in_session(
     scan_result = code_scanner.scan(code, language, sandbox_mode)
     if not scan_result.passed:
         fatal_issues = [i for i in scan_result.issues if i.severity.value == "FATAL"]
-        await audit_service.log(
-            db, action="connector.session.code_scan_rejected", resource_type="connector_session",
+        await audit_service.log_standalone(
+            action="connector.session.code_scan_rejected", resource_type="connector_session",
             user_id=session.user_id, session_id=session.id,
             detail={
                 "connector_id": str(connector.id),

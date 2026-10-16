@@ -16,11 +16,18 @@ import {
   ClusterOutlined,
   NodeIndexOutlined,
   TeamOutlined,
+  PartitionOutlined,
+  BookOutlined,
+  ThunderboltOutlined,
+  ScheduleOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, normalizeUserRole, ROLE_GROUPS, type RoleLike } from '../../utils/roles';
+import { filterMenuByWorkspace, resolveWorkspace } from '../../utils/workspace';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { UserRole } from '../../types/enums';
 
 function getMenuItems(role?: RoleLike): MenuProps['items'] {
@@ -74,6 +81,24 @@ function getMenuItems(role?: RoleLike): MenuProps['items'] {
         ...(hasAnyRole(normalizedRole, ROLE_GROUPS.devSandboxUsers) ? [{ key: '/dev-sandbox', label: '开发沙箱' }] : []),
       ],
     });
+  }
+
+  const flowChildren: NonNullable<MenuProps['items']> = [
+    ...(hasAnyRole(normalizedRole, ROLE_GROUPS.flowDevUsers)
+      ? [
+          { key: '/notebooks', icon: <BookOutlined />, label: 'Notebook 开发' },
+          { key: '/workloads', icon: <ThunderboltOutlined />, label: '负载测试与发布' },
+        ]
+      : []),
+    ...(hasAnyRole(normalizedRole, ROLE_GROUPS.sandboxReaders)
+      ? [{ key: '/compute', icon: <ScheduleOutlined />, label: '计算调度' }]
+      : []),
+    ...(hasAnyRole(normalizedRole, ROLE_GROUPS.contractReaders)
+      ? [{ key: '/deliveries', icon: <SendOutlined />, label: '成果交付' }]
+      : []),
+  ];
+  if (flowChildren.length > 0) {
+    items.push({ key: 'flow', icon: <PartitionOutlined />, label: '数据流通', children: flowChildren });
   }
 
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.outputControlReaders)) {
@@ -162,7 +187,9 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
-  const items = getMenuItems(user?.role);
+  const storedWorkspace = useWorkspaceStore((s) => s.workspace);
+  const workspace = resolveWorkspace(user?.role, storedWorkspace);
+  const items = filterMenuByWorkspace(getMenuItems(user?.role) ?? [], workspace);
 
   const selectedKey = location.pathname;
   const openKeys = (items ?? [])

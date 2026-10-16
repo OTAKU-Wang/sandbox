@@ -1,4 +1,18 @@
-FROM node:20-alpine AS builder
+# CN-region / offline-cluster builds: both base images are overridable, e.g. the
+# ddn mirror prefix (swr.cn-north-4.myhuaweicloud.com/ddn-k8s/<registry>/<repo>:<tag>):
+#   --build-arg NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:20-bookworm-slim
+#   --build-arg NGINX_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/nginx:alpine
+# Defaults are the upstream images, so CI and unrestricted networks are unchanged.
+# The builder must be glibc, not musl: package-lock.json pins the glibc native
+# binding of rolldown (Vite 8), so an alpine (musl) builder dies with
+# "Cannot find module '@rolldown/binding-linux-x64-musl'" — verified by an actual
+# build on 2026-10-16. The runtime stage stays alpine (only the builder is heavier).
+ARG NODE_IMAGE=node:20-bookworm-slim
+# Both base-image args must live in the GLOBAL scope (before the first FROM): an ARG
+# line placed just before a later FROM belongs to the preceding stage, so the later
+# FROM would see it as blank ("base name (${NGINX_IMAGE}) should not be blank").
+ARG NGINX_IMAGE=nginx:alpine
+FROM ${NODE_IMAGE} AS builder
 
 # CN-region builds: pass --build-arg NPM_REGISTRY=https://registry.npmmirror.com
 # (slow default-registry fetches trip npm's "Exit handler never called" race,
@@ -20,7 +34,7 @@ RUN npm config set registry ${NPM_REGISTRY} \
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+FROM ${NGINX_IMAGE}
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

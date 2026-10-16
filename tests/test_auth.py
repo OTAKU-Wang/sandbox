@@ -64,6 +64,47 @@ async def test_login_wrong_password(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_login_failure_records_audit(client: AsyncClient, db_session):
+    from sqlalchemy import select
+
+    from app.models.audit_log import AuditLog
+
+    unique = uuid.uuid4().hex[:8]
+    await client.post("/api/v1/auth/register", json={
+        "username": f"audit_{unique}",
+        "email": f"audit_{unique}@example.com",
+        "password": "correctpass",
+    })
+    resp = await client.post("/api/v1/auth/login", json={
+        "username": f"audit_{unique}",
+        "password": "nope",
+    })
+    assert resp.status_code == 401
+
+    rows = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "user.login_failed")
+    )).scalars().all()
+    matched = [r for r in rows if (r.detail or {}).get("username") == f"audit_{unique}"]
+    assert len(matched) == 1
+    assert matched[0].detail["reason"] == "invalid_credentials"
+
+
+@pytest.mark.asyncio
+async def test_login_failure_audit_outage_still_denies(client: AsyncClient, monkeypatch):
+    from app.core import database as db_module
+
+    def _no_connection():
+        raise RuntimeError("audit write must not break the denial")
+
+    monkeypatch.setattr(db_module, "async_session", _no_connection)
+    resp = await client.post("/api/v1/auth/login", json={
+        "username": "whoever",
+        "password": "nope",
+    })
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_get_me(client: AsyncClient, auth_headers: dict):
     resp = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert resp.status_code == 200

@@ -346,7 +346,7 @@ CubeNetworkConfig {
 **实施步骤**：
 
 1. `deploy/cube-node/`：
-   - `preflight.sh`：`/dev/kvm` 可读写、XFS refllink（`xfs_info` + `FICLONE` 实测）、eBPF（`bpftool prog list` + 内核版本）、containerd 版本、内存/磁盘水位——逐项硬门禁，失败即非零退出（不降级）
+   - `preflight.sh`：`/dev/kvm` 可读写、XFS refllink（`xfs_info` + `FICLONE` 实测）、eBPF（`bpftool prog list` + 内核版本）、containerd 版本、内存/磁盘水位、**沙箱网段冲突**（检查项 10：待用网段与本机接口前缀 + main 表路由前缀做重叠判定，重叠即 FAIL；上游默认 `192.168.0.0/18` 盖住常见 LAN，详见 §八 2026-10-16）、**cubelet 发布钉 AND 判定**（版本 **与** git sha 同时命中才过，失败时归因到具体不匹配项）——逐项硬门禁，失败即非零退出（不降级）
    - `install.sh`：wrapper 调官方 `install-compute.sh`（`DEPLOY_ROLE=compute`）；注入 CDS 配置：egress 审计路径（`CDS_CUBE_AUDIT_DIR`）、`volume_plugins` 注册 `cds-encrypted`（CB-03 二进制+socket）、host_dir 允许前缀（`CDS_CUBE_RESULTS_DIR`）、CA bake 说明、TLS sidecar 证书安装（certificate_service 签发，§2.10）
    - `tls-proxy.service`（CDS 组件②，§2.10）：mTLS 前置代理（`CDS_CUBE_NODE_TLS_PROXY_PORT` 终结 → 明文 `127.0.0.1:<cubelet gRPC 端口>`）；独立 systemd 单元，不触碰 stock 单元（diff 清单归档）
    - `verify.sh`：`smoke.sh` + sidecar mTLS 握手探活（CDS 控制面源）+ CDS 节点注册探测（CB-01 客户端 List 探活）
@@ -510,6 +510,7 @@ CubeNetworkConfig {
 - 钉住单位 = **上游 git sha**（不是分支、不是 "latest"）；`app/_stubs/cube/_VERSION.json` 记录 `{cube_version（tag 人读标注）, git_sha, proto_hash, stub_hash, generated_at}`
 - 一切 proto / 资产提取走镜像的 `git archive <sha>`（5.1）——不依赖工作副本状态，工作副本停在哪个 ref 都无所谓
 - 节点侧 `sandbox_nodes.runtime_version` 记录节点实际运行版本；CDS 客户端拒绝调度到与 pin 不匹配的节点（CB-01 选点过滤）
+- **两个钉不得混用**（2026-10-16 回填）：`scripts/cube-bundle-manifest.json` 里 `cubesandbox.version/git_sha` 是**源码钉**（上游干净 checkout 的 ref，供 stub 生成与契约监视），`cubesandbox.release.version/git_sha/built_at` 是**发布钉**（`install.sh` 实际装到节点的二进制，供 preflight `check_cubelet_bin` 比对 `cubelet --version`）。两者历史上同值所以混用看不出来，一旦发布包重建而源码钉未动（或反之），旧 OR 判定会把“版本对、sha 不对”的二进制当成合法节点放行——现收紧为 AND，并在失败文案里分别输出期望/实测两项
 
 ### 5.3 实时跟紧机制（upstream watch）
 
@@ -697,3 +698,15 @@ CB-01 (client + adapter)
 **CB-04 缺陷与修复（父任务审计记录）**：初版 `_session_is_l2c` 在 create_policy 内自开第二 DB 会话——测试环境（conftest 单连接 in-memory SQLite 共享）关闭时回滚请求会话未提交事务（e2e 3×401 wipe）；生产（连接池）则永远查不到未提交 session 行导致 l2c 分支失效。修复：create_policy/remove_policy 增加 db 参数（11 个调用点全部透传请求会话），_session_is_l2c 不再开任何会话；回归 test_e2e_flows 42/42（修复前 39/3）。
 
 **全量回归**（2026-10-13 定讫）：**2758 passed / 0 failed / 3 skipped（724.03s，排除 `tests/test_e2e_full_lifecycle.py` 与 CI 同口径）**——零失败，pass 增量 +104（基线 2654/0/3，2026-10-13 known-failures 行）全部为 CB-00..06 新增测试；3 项 skip 与基线同集。中间轮次（v3，2756/2/3）的 2 个失败为 `tests/test_sandbox_sessions.py` 两处测试 fake 未接 `create_policy/remove_policy` 新 `db` 参数（CB-04 签名变更波及，测试侧修复后全绿）。详见 ci/known-failures.md 2026-10-13 SS-10 行。
+
+### 节点工具链修正（2026-10-16）
+
+背景：本主机无嵌套虚拟化（`systemd-detect-virt=kvm`、`grep -c 'vmx|svm' /proc/cpuinfo`=0），Cube 真实执行链暂时关门；本轮只修工具链本身的两处真缺陷，并使“装上去会把宿主机网络压桩”在门禁阶段就被拦住。
+
+1. **cubelet 默认路径修正**：`preflight.sh` 原默认 `/usr/local/services/cubetoolbox/Cubelet/cubelet`，真实发布布局是 `Cubelet/bin/cubelet` → 真机该项由 FAIL 转 PASS（远程实机取证）。
+2. **发布钉 vs 源码钉 + AND 判定**（见 §5.2）：`scripts/cube-bundle-manifest.json` 新增 `cubesandbox.release` 块（逐字取自发布包 release-manifest：`v0.7.3-rc2` / `b0c4cc33fbfccbacc1a72241918ef280e9a32772` / built_at）；判定由“版本 OR sha”收紧为“版本 AND sha”，失败时输出期望/实测归因；`tests/test_cube_node_tooling.py` 的 fixture 版本行改为真实二进制输出格式，并新增“版本对、commit 错 → 拒绝”用例。
+3. **新增检查项 10：沙箱网段冲突**（硬门禁）。CubeSandbox 默认沙箱网段 `192.168.0.0/18`（发布包 `cube-egress-start.sh` / `cube-proxy-iptables-init.sh` 均为 `${CUBE_SANDBOX_NETWORK_CIDR:-192.168.0.0/18}`），会盖住 `192.168.0.0/24` 这类常见 LAN；egress 一起来，网关、本地代理（clash TUN）与 VPN（EasyConnect）的下一跳全被沙箱网段抢走，表象是整机断网。门禁解析顺序：上游键 `CUBE_SANDBOX_NETWORK_CIDR` → `.one-click.env` → 上游默认（读不到即按默认判定，宁误拦不放过），与本机接口前缀 + main 表路由前缀（采集后归一为网络号并去重）做双向包含判定。`install.sh` 同步默认写入 `10.100.0.0/18`（不再继承上游默认）。
+4. **真机取证**：本 LAN 为 `192.168.0.190/24` 的开发机上，未设网段时 preflight 输出 `FAIL: sandbox_cidr: … 与本机前缀重叠: 192.168.0.0/24`（并自带改法）；显式 `CUBE_SANDBOX_NETWORK_CIDR=10.100.0.0/18` 后 `PASS: … 与本机 10 个 IPv4 前缀无重叠`。远程测试主机（实有 `192.168.17.0/24`、`192.168.18.0/24`）上同一门禁在测试里拦下过上游默认——即该机器若按默认装 Cube 同样会碎，这不是纸面推断。
+5. **权威验证**（远程 py3.12 镜像，验证树 `src2`，本地与远程 md5 一致）：`tests/test_cube_node_tooling.py` + `tests/test_ss13_node_tee_probe.py` = **29 passed in 20.18s / `CIDR_GATE_DONE rc=0`**（新增 2 条：冲突 LAN → 硬 FAIL 且文案含 `10.100.0.0/18` 改法；同 LAN 迁移后 → 整门全绿）。中途一轮为 `2 failed / 27 passed`：新门禁踩到了 sibling fixture（`test_ss13_node_tee_probe.py` 自带一份 `build_mock_root`，无 `ip` 垫片，拿到测试机真实网段后按上游默认判定为冲突）——补上同一份网段 fixture（仓内“各文件自带 helper”惯例）后转绿，不是产品缺陷。
+6. **未落地的半边**（当时记账；当晚已落地，见第 7 条）（诚实记帐）：把本机 `.one-click.env`（`0600 root`）真改到新网段、清理 3 个 IP 命名的残留 tap 与可能的 iptables 残留，需 root；无免密 sudo（`sudo -n` 实测 `interactive authentication is required`），本轮未执行。clash 侧已完成：`mixin.yaml`/`runtime.yaml` 的 `tun.route-exclude-address` 加入 `10.100.0.0/18` 并经 `PUT :9090/configs` 热重载（204），控制器回读确认排除项在场，`ip route get 10.100.5.5` 不再走 TUN。
+7. **root 半边当日落地 + 依赖硬坑修正（同日晚些）**：`.one-click.env` 已写 `CUBE_SANDBOX_NETWORK_CIDR=10.100.0.0/18`（root 复跑 preflight → `PASS: sandbox_cidr …（来源: /usr/local/services/cubetoolbox/.one-click.env）`），删 497 个旧网段 obsolete tap（判据：`type tun` + `NO-CARRIER` + 无 inet），`iptables-save` 里 `192.168.0.0/18` 残留 0 条；`10.100.x.x` 一代 tap（`ip -d link` = `tun type tap … persist on user root group root` 的 per-sandbox 池，与在用网段一致且全惰性）故意保留——删它无收益有风险。同日修掉与 CB-03 直接相关的依赖硬坑：`Tongsuo/` 此前是**有 sha 无 `.gitmodules`** 的 gitlink（`160000 baa1bb2b95…`），干净 clone 后镜像 `tongsuo` 阶段无处取源 → 补子模块登记（上游 https + shallow + `ignore=untracked`）与 `scripts/prepare_tongsuo.sh`（内网 sha256 钉版源包 / 内网 git 镜像 / 上游 submodule 三条路径均 fail-closed），远程构建机按 Dockerfile 原命令整树构建出含 `T EVP_sm4_gcm` 的 `libcrypto.a`（`CONF_RC=0 / MAKE_RC=0 / INSTALL_RC=0 / SM4_GCM_SYMS=1 / FULLBUILD_DONE rc=0`）；取用规则见 `specs/productization-deployment-runbook.md` §9.0.1，契约由 `tests/test_prepare_tongsuo.py` 钉住。

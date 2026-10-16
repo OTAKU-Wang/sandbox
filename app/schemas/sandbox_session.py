@@ -15,6 +15,28 @@ VALID_SANDBOX_MODES = (
 )
 
 
+# 合约侧 allowed_sandbox_modes 用的是业务词表（query/train/develop…），会话侧
+# sandbox_mode 用的是执行档词表（VALID_SANDBOX_MODES）。两表在这里一次性对齐，
+# 任何一侧都不再自己维护别名，避免把业务词直接塞进会话校验导致 500。
+SANDBOX_MODE_ALIASES: dict[str, frozenset[str]] = {
+    "structured_query": frozenset({"structured_query", "query", "read"}),
+    "structured_modeling": frozenset({"structured_modeling", "modeling", "analyze", "analysis"}),
+    "structured_app": frozenset({"structured_app", "app", "application", "invoke"}),
+    "llm_training": frozenset({"llm_training", "train", "training", "model_training"}),
+    "product_dev": frozenset({"product_dev", "develop", "development", "dev", "product_develop"}),
+    "joint_federated": frozenset({"joint_federated", "federated", "compute"}),
+}
+
+
+def canonical_sandbox_mode(mode: str | None) -> str | None:
+    """合约业务词 -> 会话执行档；无法归类时返回 None（调用方决定 fail-closed）。"""
+    token = str(mode or "").strip().lower()
+    for canonical, aliases in SANDBOX_MODE_ALIASES.items():
+        if token in aliases:
+            return canonical
+    return None
+
+
 VALID_TEE_POLICIES = ("tee_if_available", "tee_required", "none")
 
 
@@ -112,6 +134,7 @@ class SandboxSessionResponse(BaseModel):
 class SandboxExecuteRequest(BaseModel):
     code: str
     language: str = "python"
+    trusted_runner: bool = False
 
     @field_validator("code")
     @classmethod

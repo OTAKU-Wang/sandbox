@@ -7,6 +7,8 @@ import {
 } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 import { hintForCode } from './errorHints';
+import { useAuthStore } from '../../stores/authStore';
+import { canAccessAdminWorkspace } from '../../utils/workspace';
 
 const { Text } = Typography;
 
@@ -37,6 +39,8 @@ export default function ErrorCard({
   actions,
 }: ErrorCardInfo & { status?: number; actions?: ReactNode }) {
   const base = hintForCode(code, status);
+  const role = useAuthStore((s) => s.user?.role);
+  const showCapability = base.showCapability && canAccessAdminWorkspace(role);
   // 调用方显式 retryable 优先；410 强制不可重试（GONE 契约）。
   const canRetry = status === 410 ? false : retryable ?? base.retryable;
   const warning = base.retryable && canRetry;
@@ -91,7 +95,7 @@ export default function ErrorCard({
               重试
             </Button>
           )}
-          {base.showCapability && (
+          {showCapability && (
             <Button
               icon={<DashboardOutlined />}
               href="/capability-matrix"

@@ -1,20 +1,23 @@
 import uuid
-
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_business_user
+from app.core.errors import CDSError
 from app.models.user import User, UserRole
 from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.models.data_product import DataProduct
 from app.schemas.contract import ContractCreate, ContractSign, ContractResponse
+from app.schemas.flow import FlowConfigRequest
 from app.services.contract_service import contract_service
+from app.services.compute_scheduler import compute_next_run
 from app.services.audit_service import audit_service
 from app.services.contract_fulfillment import contract_fulfillment
 from app.services.dp_budget import dp_budget_ledger
-from app.models.contract import Contract
+from app.models.contract import Contract, ComputeFrequency
 
 router = APIRouter()
 
@@ -299,3 +302,51 @@ async def get_dp_budget_status(
             for e in ledger[:20]
         ],
     }
+
+
+@router.post("/{contract_id}/flow-config", response_model=ContractResponse)
+async def configure_contract_flow(
+    contract_id: uuid.UUID,
+    body: FlowConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    contract = await contract_service.get_by_id(db, contract_id)
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    if current_user.id not in (contract.provider_id, contract.buyer_id) and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Not a party to this contract")
+    if contract.status == "terminated":
+        raise CDSError("合约已终止，无法修改交付与调度配置", code="CONTRACT_TERMINATED", http_status=410)
+
+    try:
+        ZoneInfo(body.compute_tz)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise CDSError("无法识别的时区", code="INVALID_TIMEZONE", http_status=400, detail={"compute_tz": body.compute_tz}) from exc
+
+    contract.delivery_methods = list(body.delivery_methods)
+    contract.auto_compute = body.auto_compute
+    contract.compute_frequency = body.compute_frequency if body.auto_compute else ComputeFrequency.MANUAL.value
+    contract.compute_minute = body.compute_minute
+    contract.compute_hour = body.compute_hour
+    contract.compute_tz = body.compute_tz
+    contract.sandbox_resource_spec = body.sandbox_resource_spec.model_dump(exclude_none=True) if body.sandbox_resource_spec else None
+    contract.next_compute_at = compute_next_run(
+        auto_compute=contract.auto_compute,
+        frequency=contract.compute_frequency,
+        minute=contract.compute_minute,
+        hour=contract.compute_hour,
+        tz_name=contract.compute_tz,
+    )
+    await audit_service.log(
+        db, action="contract.flow_configured", resource_type="contract",
+        user_id=current_user.id, resource_id=str(contract.id),
+        detail={
+            "delivery_methods": contract.delivery_methods,
+            "auto_compute": contract.auto_compute,
+            "compute_frequency": contract.compute_frequency,
+            "next_compute_at": contract.next_compute_at.isoformat() if contract.next_compute_at else None,
+        },
+    )
+    await db.refresh(contract)
+    return contract

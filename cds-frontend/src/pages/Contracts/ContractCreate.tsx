@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Form, Input, Select, Button, Card, Typography, InputNumber, message } from 'antd';
+import { useEffect, useRef } from 'react';
+import { Collapse, Form, Input, Select, Button, Card, Typography, InputNumber, message } from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { contractApi } from '../../services/contractApi';
@@ -7,11 +7,21 @@ import { dataProductApi } from '../../services/dataProductApi';
 import { usersApi } from '../../services/usersApi';
 import { levelSelectOptions, metaApi } from '../../services/metaApi';
 import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import FlowConfigFields from '../Flow/FlowConfigFields';
+import {
+  DEFAULT_COMPUTE_TZ,
+  ComputeFrequency,
+  buildFlowConfigPayload,
+  describeFlowError,
+  flowApi,
+  validateFlowConfig,
+} from '../../services/flow';
+import type { FlowConfigFormValues, FlowConfigIssue, FlowConfigPayload } from '../../services/flow';
 
 const { Title } = Typography;
 const { TextArea } = Input;
 
-interface ContractFormValues {
+interface ContractFormValues extends FlowConfigFormValues {
   title: string;
   contract_type: string;
   product_ids: string[];
@@ -49,13 +59,29 @@ export default function ContractCreate() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // 记录已建成的合约 id：流程配置是第二次请求，失败时不能让用户以为整单未创建
+  const createdContractRef = useRef<string | null>(null);
+
   const mutation = useMutation({
-    mutationFn: contractApi.create,
+    mutationFn: async (input: { contract: Parameters<typeof contractApi.create>[0]; flow: FlowConfigPayload | null }) => {
+      const created = await contractApi.create(input.contract);
+      createdContractRef.current = created.id;
+      if (input.flow) await flowApi.saveFlowConfig(created.id, input.flow);
+      return created;
+    },
     onSuccess: (contract) => {
       message.success('合约创建成功');
       navigate(`/contracts/${contract.id}`);
     },
-    onError: () => message.error('创建失败'),
+    onError: (error) => {
+      const createdId = createdContractRef.current;
+      if (createdId) {
+        message.warning('合约已创建，但交付与计算配置未保存：请到合约详情页重新配置');
+        navigate(`/contracts/${createdId}`);
+        return;
+      }
+      message.error(describeFlowError(error, '创建失败'));
+    },
   });
 
   useEffect(() => {
@@ -84,20 +110,46 @@ export default function ContractCreate() {
   const onFinish = (values: ContractFormValues) => {
     try {
       const joinOrUndefined = (items?: string[]) => items?.length ? items.join(',') : undefined;
+      const methods = values.delivery_methods ?? [];
+      const flowValues: FlowConfigFormValues = {
+        delivery_methods: methods,
+        auto_compute: values.auto_compute === true,
+        compute_frequency: values.compute_frequency,
+        compute_minute: values.compute_minute,
+        compute_hour: values.compute_hour,
+        compute_tz: values.compute_tz,
+        cpu_cores: values.cpu_cores,
+        memory_mb: values.memory_mb,
+        disk_gb: values.disk_gb,
+        gpu_count: values.gpu_count,
+        timeout_seconds: values.timeout_seconds,
+        image_template: values.image_template,
+      };
+      // 未展开该面板即不提交流程配置，后端按默认（仅数据集交付 + 手动计算）处理
+      if (methods.length) {
+        const issues: FlowConfigIssue[] = validateFlowConfig(flowValues);
+        if (issues.length) {
+          message.error(issues[0].message);
+          return;
+        }
+      }
       mutation.mutate({
-        title: values.title,
-        contract_type: values.contract_type,
-        product_ids: values.product_ids,
-        buyer_id: values.buyer_id,
-        allowed_sandbox_levels: joinOrUndefined(values.allowed_sandbox_levels),
-        allowed_sandbox_modes: values.allowed_sandbox_modes,
-        allowed_operations: joinOrUndefined(values.allowed_operations),
-        max_duration_hours: values.max_duration_hours,
-        dp_epsilon_budget: values.dp_epsilon_budget,
-        max_output_rows: values.max_output_rows,
-        allowed_output_formats: joinOrUndefined(values.allowed_output_formats),
-        terms: parseJsonField(values.terms, '合约条款'),
-        inspection_rule_set: parseJsonField(values.inspection_rule_set, '审查规则'),
+        flow: methods.length ? buildFlowConfigPayload(flowValues) : null,
+        contract: {
+          title: values.title,
+          contract_type: values.contract_type,
+          product_ids: values.product_ids,
+          buyer_id: values.buyer_id,
+          allowed_sandbox_levels: joinOrUndefined(values.allowed_sandbox_levels),
+          allowed_sandbox_modes: values.allowed_sandbox_modes,
+          allowed_operations: joinOrUndefined(values.allowed_operations),
+          max_duration_hours: values.max_duration_hours,
+          dp_epsilon_budget: values.dp_epsilon_budget,
+          max_output_rows: values.max_output_rows,
+          allowed_output_formats: joinOrUndefined(values.allowed_output_formats),
+            terms: parseJsonField(values.terms, '合约条款'),
+            inspection_rule_set: parseJsonField(values.inspection_rule_set, '审查规则'),
+        },
       });
     } catch (error) {
       message.error(error instanceof Error ? error.message : '表单格式错误');
@@ -120,6 +172,11 @@ export default function ContractCreate() {
             max_duration_hours: 24,
             max_output_rows: 10000,
             allowed_output_formats: ['csv', 'json'],
+            auto_compute: false,
+            compute_frequency: ComputeFrequency.Daily,
+            compute_hour: 2,
+            compute_minute: 30,
+            compute_tz: DEFAULT_COMPUTE_TZ,
           }}
         >
           {matrixIsError && (
@@ -227,6 +284,17 @@ export default function ContractCreate() {
           <Form.Item name="inspection_rule_set" label="输出审查规则">
             <TextArea rows={3} placeholder='{"k_anonymity":true,"block_raw_rows":true}' />
           </Form.Item>
+          <Collapse
+            defaultActiveKey={['flow']}
+            style={{ marginBottom: 24 }}
+            items={[
+              {
+                key: 'flow',
+                label: '交付与计算配置（不展开则默认仅数据集交付、手动计算，可稍后在合约详情页配置）',
+                children: <FlowConfigFields />,
+              },
+            ]}
+          />
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={mutation.isPending} block>创建合约</Button>
           </Form.Item>

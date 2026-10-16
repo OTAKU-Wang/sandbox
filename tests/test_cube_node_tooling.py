@@ -32,6 +32,27 @@ def _write_shim(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+# 检查项 10（沙箱网段冲突）的 `ip` 输出 fixture：形状照真实 `ip -o -4 addr show` /
+# `ip -o -4 route show table main`（垫片对两种子命令输出同一份，采集端只提前缀并去重）。
+# CLEAN 与两种候选网段（上游 192.168.0.0/18、CDS 10.100.0.0/18）均不重叠；
+# LAN_CLASH 把 LAN 换成最常见的 192.168.0.0/24（附 VPN 静态路由，验证只靠路由也能拦）。
+IP_PREFIXES_CLEAN = """1: lo    inet 127.0.0.1/8 scope host lo
+2: eth0    inet 172.20.5.21/24 brd 172.20.5.255 scope global eth0
+3: tun0    inet 2.0.1.111/24 scope global tun0
+default via 172.20.5.1 dev eth0 proto dhcp src 172.20.5.21 metric 100
+172.20.5.0/24 dev eth0 proto kernel scope link src 172.20.5.21
+2.0.1.0/24 dev tun0 proto kernel scope link src 2.0.1.111
+100.112.0.0/16 via 2.0.1.1 dev tun0 proto static metric 50"""
+
+IP_PREFIXES_LAN_CLASH = """1: lo    inet 127.0.0.1/8 scope host lo
+2: wlp0s20f3    inet 192.168.0.190/24 brd 192.168.0.255 scope global dynamic wlp0s20f3
+3: tun0    inet 2.0.1.111/24 scope global tun0
+default via 192.168.0.1 dev wlp0s20f3 proto dhcp src 192.168.0.190 metric 600
+192.168.0.0/24 dev wlp0s20f3 proto kernel scope link src 192.168.0.190 metric 600
+2.0.1.0/24 dev tun0 proto kernel scope link src 2.0.1.111
+100.112.0.0/16 via 2.0.1.1 dev tun0 proto static metric 50"""
+
+
 def _make_unix_socket(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -41,9 +62,11 @@ def _make_unix_socket(path: Path) -> None:
 
 def build_mock_root(root: Path, *, with_kvm: bool = True, fs_type: str = "xfs",
                     xfs_info_exit: int = 0, with_bpftool: bool = True,
-                    cubelet_version_line: str = "cubelet version v0.7.3-rc2 (9b75d33907ed7336b1eef73a935ae2d1990d9b35)",
+                    cubelet_version_line: str = "cubelet v0.7.3-rc2 (b0c4cc33fbfccbacc1a72241918ef280e9a32772) built at 2026-10-12T06:28:39Z",
                     with_sock: bool = True, mem_total_kb: int = 16_000_000,
                     ebpf_syscall: int = 1, disk_pct: int = 42,
+                    ip_prefixes: str = IP_PREFIXES_CLEAN,
+                    ip_route_get_body: str = 'echo "10.100.0.2 dev cube-dev proto kernel scope link src 10.100.0.1"',
                     with_systemctl: bool = False) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / "etc").mkdir(exist_ok=True)
@@ -75,6 +98,13 @@ def build_mock_root(root: Path, *, with_kvm: bool = True, fs_type: str = "xfs",
     _write_shim(b / "cubelet", f'echo "{cubelet_version_line}"')
     # FICLONE 实测探针垫片（生产走 coreutils cp --reflink=always）
     _write_shim(b / "cp", "exit 0")
+    # `ip` 垫片：把“本机网段”固定成 fixture，否则检查项 10 会随跑测试机器的真实网段翻脸
+    # （开发机 LAN 常为 192.168.0.0/24，与上游默认沙箱网段天然重叠）
+    _write_shim(b / "ip",
+                'case "$*" in\n'
+                '  *"route get"*) ' + ip_route_get_body + ' ;;\n'
+                "  *) cat <<'FIXTURE'\n" + ip_prefixes + "\nFIXTURE\n  ;;\n"
+                "esac")
     if with_systemctl:
         _write_shim(b / "systemctl",
                     'case "$1" in is-active) echo "active";; *) exit 0;; esac')
@@ -213,7 +243,7 @@ def test_preflight_all_good(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stdout + r.stderr
     assert "FAIL:" not in r.stdout
     for name in ("kvm", "data_fs", "ebpf", "cubelet_bin", "volume_sock",
-                 "tls_sidecar", "containerd", "resources"):
+                 "tls_sidecar", "containerd", "sandbox_cidr", "resources"):
         assert f"PASS: {name}" in r.stdout, f"缺少 PASS: {name}\n{r.stdout}"
 
 
@@ -281,6 +311,24 @@ def test_preflight_cubelet_version_mismatch(tmp_path: Path) -> None:
         listener.stop()
     assert r.returncode == 1
     assert "FAIL: cubelet_bin" in r.stdout
+
+
+def test_preflight_cubelet_right_version_wrong_commit(tmp_path: Path) -> None:
+    """版本号对、commit 不是钉住发布构建 → 仍必须 FAIL（旧 OR 语义会假 PASS）。"""
+    root = build_mock_root(
+        tmp_path / "mock",
+        cubelet_version_line="cubelet v0.7.3-rc2 (1111111111111111111111111111111111111111)",
+    )
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port), timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 1
+    assert "FAIL: cubelet_bin" in r.stdout
+    assert "commit 非钉住发布构建" in r.stdout
 
 
 def test_preflight_volume_sock_missing(tmp_path: Path) -> None:
@@ -386,3 +434,113 @@ def test_verify_tailer_pending_skips(tmp_path: Path, cds_cert: Path) -> None:
     doc = json.loads(r.stdout)
     assert doc["ok"] is True
     assert doc["checks"]["audit_tailer"]["status"] == "skip"
+
+
+def test_preflight_sandbox_cidr_upstream_default_clash_fails(tmp_path: Path) -> None:
+    """检查项 10：本机 LAN 落在上游默认沙箱网段 192.168.0.0/18 内 → 硬 FAIL（2026-10-16 现场教训）。"""
+    root = build_mock_root(tmp_path / "mock", ip_prefixes=IP_PREFIXES_LAN_CLASH)
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port,
+                                        CUBE_SANDBOX_NETWORK_CIDR=None,
+                                        CDS_CUBE_SANDBOX_CIDR=None),
+                           timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 1
+    assert "FAIL: sandbox_cidr" in r.stdout
+    assert "192.168.0.0/24" in r.stdout
+    assert "10.100.0.0/18" in r.stdout  # 失败文案必须自带可执行的改法
+
+
+def test_preflight_sandbox_cidr_migrated_passes(tmp_path: Path) -> None:
+    """同一冲突 LAN 下把沙箱网段显式迁到独立私网段 → 检查项 10 放行（整个门禁仍绿）。"""
+    root = build_mock_root(tmp_path / "mock", ip_prefixes=IP_PREFIXES_LAN_CLASH)
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port,
+                                        CUBE_SANDBOX_NETWORK_CIDR="10.100.0.0/18"),
+                           timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "PASS: sandbox_cidr" in r.stdout
+
+
+def test_preflight_sandbox_cidr_tun_captured_fails(tmp_path: Path) -> None:
+    """检查项 10 归属探针：段与本机前缀不重叠，但代理策略路由把整段吞进 TUN 表 → 必须 FAIL（2026-10-16 实测：`ip route get` 落 `dev Meta table 2022`）。"""
+    root = build_mock_root(
+        tmp_path / "mock",
+        ip_prefixes=IP_PREFIXES_CLEAN,
+        ip_route_get_body='if [ "$3" = "240.0.0.1" ]; then '
+                          'echo "240.0.0.1 via 172.20.5.1 dev eth0"; else '
+                          'echo "10.100.0.2 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1"; fi',
+    )
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port,
+                                        CUBE_SANDBOX_NETWORK_CIDR="10.100.0.0/18"),
+                           timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "FAIL: sandbox_cidr" in r.stdout
+    assert "route-exclude-address" in r.stdout  # 文案必须直接给出可执行的修法
+
+
+def test_preflight_sandbox_cidr_blanket_tunnel_passes(tmp_path: Path) -> None:
+    """整机默认出口本就是隧道（探针与对照地址同路）时不得误拦——此时 egress 的 link 路由更具体，仍会赢。"""
+    root = build_mock_root(tmp_path / "mock", ip_prefixes=IP_PREFIXES_CLEAN,
+                           ip_route_get_body='echo "10.100.0.2 via 2.0.1.1 dev tun0"')
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port,
+                                        CUBE_SANDBOX_NETWORK_CIDR="10.100.0.0/18"),
+                           timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "如实放行" in r.stdout
+
+
+def test_preflight_sandbox_cidr_bridge_attribution_passes(tmp_path: Path) -> None:
+    """建站后探针直落 cube 网桥 → 归属正常（防止只比对前缀、不看归属的旧行为回归）。"""
+    root = build_mock_root(tmp_path / "mock", ip_prefixes=IP_PREFIXES_CLEAN)
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port,
+                                        CUBE_SANDBOX_NETWORK_CIDR="10.100.0.0/18"),
+                           timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "归属正常" in r.stdout
+    assert "dev cube-dev" in r.stdout
+
+
+def test_preflight_missing_data_dir_does_not_abort(tmp_path: Path) -> None:
+    """数据盘目录不存在时必须 FAIL data_fs 并继续跑完剩下八项（`set -e + pipefail` 下 `df` 失败会让脚本中途退出，只剩两行结果——2026-10-16 远程实测到此缺陷）。"""
+    root = build_mock_root(tmp_path / "mock")
+    port = free_port()
+    listener = _TcpListener(port)
+    try:
+        r = subprocess.run(["bash", str(PREFLIGHT)], capture_output=True, text=True,
+                           env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=port,
+                                        CDS_CUBE_DATA_DIR=str(tmp_path / "no-such-mount")),
+                           timeout=60)
+    finally:
+        listener.stop()
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "FAIL: data_fs" in r.stdout
+    assert "PASS: resources" in r.stdout
+    assert r.stdout.count(": ") >= 9

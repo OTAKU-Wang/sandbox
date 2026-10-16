@@ -68,7 +68,7 @@ const normalizeConnector = (item: ConnectorResponse): Connector => ({
 export const connectorApi = {
   // List all connectors
   listConnectors: (): Promise<Connector[]> =>
-    api.get('/connectors').then((res) => {
+    api.get('/connectors/').then((res) => {
       const data = res as unknown as { items?: ConnectorResponse[] } | ConnectorResponse[];
       return (Array.isArray(data) ? data : data.items || []).map(normalizeConnector);
     }),

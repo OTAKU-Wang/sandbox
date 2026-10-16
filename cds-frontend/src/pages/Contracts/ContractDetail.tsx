@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Descriptions, Tag, Button, Typography, Space, message, Modal, Alert, Progress, Table, Card } from 'antd';
+import { Descriptions, Tag, Button, Typography, Space, message, Alert, Progress, Table, Card } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { contractApi } from '../../services/contractApi';
 import { authApi } from '../../services/authApi';
@@ -14,6 +14,8 @@ import {
   saveSM2PrivateKey,
 } from '../../utils/crypto';
 import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
+import FlowConfigCard from '../Flow/FlowConfigCard';
+import type { ContractWithFlow } from '../../services/flow';
 
 const { Title, Text } = Typography;
 
@@ -190,6 +192,8 @@ export default function ContractDetail() {
         <Descriptions.Item label="创建时间">{new Date(contract.created_at).toLocaleString()}</Descriptions.Item>
         <Descriptions.Item label="合约条款" span={2}>{contract.terms ? JSON.stringify(contract.terms) : '-'}</Descriptions.Item>
       </Descriptions>
+
+      <FlowConfigCard contract={contract as unknown as ContractWithFlow} />
 
       {/* DP Budget Status */}
       {contract.status === 'active' && dpBudget && (

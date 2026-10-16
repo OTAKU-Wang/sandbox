@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAuthStore } from '../authStore';
+import { useWorkspaceStore } from '../workspaceStore';
+import { resolveWorkspace, WORKSPACE_STORAGE_KEY } from '../../utils/workspace';
+import { UserRole } from '../../types/enums';
 
 const mockUser = {
   id: 'u1',
@@ -65,5 +68,18 @@ describe('authStore', () => {
   it('updateUser is no-op when no user', () => {
     useAuthStore.getState().updateUser({ organization: 'X' });
     expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('logout drops the persisted workspace choice so the next login lands on its role default', () => {
+    useAuthStore.getState().login(mockUser, 'tok', 'rtok');
+    useWorkspaceStore.getState().setWorkspace('developer');
+    expect(localStorage.getItem(WORKSPACE_STORAGE_KEY)).toContain('developer');
+
+    useAuthStore.getState().logout();
+
+    expect(useWorkspaceStore.getState().workspace).toBeNull();
+    expect(localStorage.getItem(WORKSPACE_STORAGE_KEY)).not.toContain('developer');
+    // 下一个登录的运营/管理员必须回到管理员工台，而不是上一个会话留下的开发者台。
+    expect(resolveWorkspace(UserRole.ADMIN, useWorkspaceStore.getState().workspace)).toBe('admin');
   });
 });

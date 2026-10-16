@@ -176,8 +176,8 @@ async def register(body: UserCreate, request: Request, db: AsyncSession = Depend
 async def login(body: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
     user = await authenticate_user(db, body.username, body.password)
     if not user:
-        await audit_service.log(
-            db, action="user.login_failed", resource_type="user",
+        await audit_service.log_standalone(
+            action="user.login_failed", resource_type="user",
             detail={"username": body.username, "reason": "invalid_credentials"},
             ip_address=request.client.host if request.client else None,
         )
@@ -189,8 +189,8 @@ async def login(body: UserLogin, request: Request, db: AsyncSession = Depends(ge
         mfa = await _get_mfa(db, user.id)
         if mfa and mfa.confirmed:
             if not body.mfa_code:
-                await audit_service.log(
-                    db, action="user.login_mfa_missing", resource_type="user", user_id=user.id,
+                await audit_service.log_standalone(
+                    action="user.login_mfa_missing", resource_type="user", user_id=user.id,
                     detail={"username": body.username},
                     ip_address=request.client.host if request.client else None,
                 )
@@ -208,8 +208,8 @@ async def login(body: UserLogin, request: Request, db: AsyncSession = Depends(ge
             if not ok:
                 ok = (await _consume_recovery_code(db, mfa, body.mfa_code)) is not None
             if not ok:
-                await audit_service.log(
-                    db, action="user.login_mfa_failed", resource_type="user", user_id=user.id,
+                await audit_service.log_standalone(
+                    action="user.login_mfa_failed", resource_type="user", user_id=user.id,
                     detail={"username": body.username},
                     ip_address=request.client.host if request.client else None,
                 )
@@ -492,8 +492,8 @@ async def cert_login(body: CertLoginRequest, request: Request, db: AsyncSession 
     from app.services.tlcp_service import tlcp_service
 
     async def _deny(reason: str, detail: dict | None = None) -> None:
-        await audit_service.log(
-            db, action="user.cert_login_failed", resource_type="user",
+        await audit_service.log_standalone(
+            action="user.cert_login_failed", resource_type="user",
             detail={"username": body.username, "reason": reason},
             ip_address=request.client.host if request.client else None,
         )

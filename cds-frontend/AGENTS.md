@@ -50,5 +50,9 @@ npm run build        # tsc -b && vite build → dist/
 npm run lint         # eslint . (flat config, ignores dist)
 npm test             # vitest run; also test:watch, test:coverage (v8 provider)
 npm run preview      # vite preview
-# Dockerfile: node:20-alpine build → nginx:alpine serving dist/ with nginx.conf
+# Dockerfile: node:20-bookworm-slim build (glibc — alpine/musl cannot build: rolldown
+# native binding is lockfile-pinned to glibc) → nginx:alpine serving dist/ with nginx.conf
+# Base images are build-arg overridable (NODE_IMAGE / NGINX_IMAGE, same pattern as
+# NPM_REGISTRY) for CN-restricted networks; on the remote test host both must use the
+# ddn mirror prefix swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/<image>
 ```

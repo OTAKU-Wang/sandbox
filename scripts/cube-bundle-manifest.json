@@ -8,7 +8,15 @@
     "tags_at_pin": ["go-sdk-v0.7.3", "python-sdk-v0.7.3", "sdk/go/v0.7.3"],
     "install_role": "compute",
     "installer": "deploy/one-click/install-compute.sh",
-    "zero_diff": true
+    "zero_diff": true,
+    "release": {
+      "_note": "节点侧实际安装的一键发布包钉住（preflight cubelet_bin 比对这个块）；字段逐字取自发布包自带的 release-manifest.json（上游 build-release 产物），非本机安装后反推",
+      "release_version": "v0.7.3-rc2-amd64",
+      "version": "v0.7.3-rc2",
+      "git_sha": "b0c4cc33fbfccbacc1a72241918ef280e9a32772",
+      "built_at": "2026-10-12T06:28:39Z",
+      "source": "/opt/cds-cube-release/cube-sandbox-one-click-v0.7.3-rc2-amd64/release-manifest.json"
+    }
   },
   "cds_components": {
     "cds-volume-plugin": {

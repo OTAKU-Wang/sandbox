@@ -53,6 +53,7 @@ jobs:
           python -m pytest -q \
             tests/test_observability.py \
             tests/test_error_contract.py \
+            tests/test_auth.py \
             tests/test_admin_auth.py \
             tests/test_session_lifecycle.py \
             tests/test_contract_terminate_cascade.py \
@@ -84,6 +85,7 @@ jobs:
             tests/test_deploy_manifests.py \
             tests/test_pz10_mfa.py \
             tests/test_capability_matrix_consistency.py \
+            tests/test_frontend_api_contract.py \
             tests/test_e2e_data_loop.py
 
       - name: Full suite (informational)

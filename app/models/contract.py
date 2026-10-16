@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Text, ForeignKey, func, JSON, Numeric, Integer, Index
+from sqlalchemy import String, DateTime, Text, ForeignKey, func, JSON, Numeric, Integer, Index, Boolean
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -30,6 +31,34 @@ class ContractType(str, Enum):
     JOINT_COMPUTE = "joint_compute"
     PRODUCT_DEV = "product_dev"
     DATA_MODELING = "data_modeling"
+
+
+class DeliveryMethod(str, Enum):
+    """成果交付方式（SS-15：合约层可多选）。
+
+    DATASET     — 数据集交付：计算产物打包后在控制台下载（带水印/审计）。
+    OPEN_API    — API 交付：把已发布工作负载暴露成 OpenAPI 文档化的服务端点。
+    RESULT_PUSH — 结果推送：计算完成后主动推送到用户登记的回调地址。
+    """
+
+    DATASET = "dataset"
+    OPEN_API = "open_api"
+    RESULT_PUSH = "result_push"
+
+
+class ComputeFrequency(str, Enum):
+    """自动计算频率。MANUAL 表示只允许人工触发（auto_compute=false 时的取值）。"""
+
+    MANUAL = "manual"
+    HOURLY = "hourly"
+    DAILY = "daily"
+
+
+class WorkloadEnv(str, Enum):
+    """工作负载/会话所处环境。测试沙箱验证通过后才能提升到生产沙箱。"""
+
+    TEST = "test"
+    PRODUCTION = "production"
 
 
 class Contract(Base):
@@ -60,6 +89,18 @@ class Contract(Base):
     max_output_rows: Mapped[int] = mapped_column(Integer, default=10000)  # Max rows in query output
     allowed_output_formats: Mapped[str | None] = mapped_column(String(256), default="csv,json")  # e.g. "csv,json,parquet"
     inspection_rule_set: Mapped[dict | None] = mapped_column(JSON)  # Inspection rules config
+
+    # --- SS-15 成果交付 + 自动计算 + 沙箱资源配置 -----------------------------
+    # 全部加性可空/带默认值：历史合约保持原有行为（人工触发、无交付配置）。
+    delivery_methods: Mapped[list | None] = mapped_column(JSON)  # ["dataset","open_api","result_push"]
+    auto_compute: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
+    compute_frequency: Mapped[str] = mapped_column(String(16), nullable=False, default=ComputeFrequency.MANUAL.value, server_default=ComputeFrequency.MANUAL.value)
+    compute_minute: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")  # hourly: 每小时第 N 分
+    compute_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=2, server_default="2")  # daily: 每日第 H 时（按 compute_tz）
+    compute_tz: Mapped[str] = mapped_column(String(64), nullable=False, default="Asia/Shanghai", server_default="Asia/Shanghai")
+    sandbox_resource_spec: Mapped[dict | None] = mapped_column(JSON)  # {cpu_cores,memory_mb,disk_gb,gpu_count,image_template,timeout_seconds}
+    next_compute_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Gap A1: contract validity deadline — ACTIVE contracts past this point
     # are auto-terminated by the session lifecycle sweep. Optional; sourced

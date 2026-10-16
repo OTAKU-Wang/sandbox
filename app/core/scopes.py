@@ -32,12 +32,13 @@ VERBS = ("read", "write", "*")
 # Group → covered route prefixes, per spec 4.2 (mounted in app/main.py).
 # Order is irrelevant — matching is longest-prefix-first at runtime.
 GROUP_PREFIXES: list[tuple[str, tuple[str, ...]]] = [
-    ("sessions", ("/api/v1/sandbox-sessions", "/api/v1/dev-sandbox")),
+    ("sessions", ("/api/v1/sandbox-sessions", "/api/v1/dev-sandbox",
+                  "/api/v1/notebooks", "/api/v1/workloads")),
     ("contracts", ("/api/v1/contracts",)),
     ("data", ("/api/v1/data-products", "/api/v1/data-resources", "/api/v1/catalog")),
     ("pipeline", ("/api/v1/data-pipeline", "/api/v1/training", "/api/v1/mpc",
                   "/api/v1/rag", "/api/v1/inference", "/api/v1/sandbox-db",
-                  "/api/v1/sandbox-tasks")),
+                  "/api/v1/sandbox-tasks", "/api/v1/compute")),
     ("audit", ("/api/v1/audit", "/api/v1/monitoring", "/api/v1/compliance",
                "/metrics", "/health")),
     ("output", ("/api/v1/output-control", "/api/v1/field-exposure",
@@ -47,7 +48,7 @@ GROUP_PREFIXES: list[tuple[str, tuple[str, ...]]] = [
                "/api/v1/ops")),
     ("certs", ("/api/v1/certificates",)),
     ("federation", ("/api/v1/federation",)),
-    ("gateway", ("/api/v1/gateway",)),
+    ("gateway", ("/api/v1/gateway", "/api/v1/deliveries", "/open/v1")),
     ("agent", ("/api/v1/agent",)),
     ("meta", ("/api/v1/meta",)),
 ]

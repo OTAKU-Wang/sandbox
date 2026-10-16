@@ -34,6 +34,9 @@ export const ROLE_GROUPS = {
   sandboxReaders: [UserRole.DATA_PROVIDER, UserRole.BUYER, UserRole.OPERATOR, UserRole.ADMIN],
   sandboxUsers: [UserRole.BUYER],
   devSandboxUsers: [UserRole.DATA_PROVIDER],
+  // 在线 Notebook 开发与负载发布：会话只能由合约买方开（后端 fail-closed），
+  // 所以页面必须对 BUYER 开放；数商保留入口是为了自己产品的开发沙箱。
+  flowDevUsers: [UserRole.DATA_PROVIDER, UserRole.BUYER],
   outputControlReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],
   auditReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],
   monitoringReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],

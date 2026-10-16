@@ -15,6 +15,7 @@ from app.core.database import engine, Base
 from app.core.security import setup_security
 from app.core.redis import get_redis, close_redis
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
+from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api  # SS-15
 from app.api import session_stream  # W10: WebSocket exec stream
 from app.api import sandbox_nodes  # W14: node operations
 from app.api import shared_volumes  # W15: shared volumes
@@ -36,6 +37,8 @@ from app.models import shared_volume  # W15: shared volume tables
 from app.models import volume_key  # CB-01: volume DEK lifecycle tables
 from app.models import cube_egress_dedup  # CB-06: egress audit idempotency keys
 from app.models import cube_template  # CB-05: cube template registry + node distribution
+from app.models import notebook, workload, workload_test_run, compute_run  # SS-15: dev-to-delivery flow
+from app.models import api_endpoint, webhook, webhook_delivery, delivery_bundle  # SS-15: delivery channels
 
 
 @asynccontextmanager
@@ -127,6 +130,25 @@ async def lifespan(app: FastAPI):
         )
         logger.info("[MAIN] Session lifecycle cleanup started")
 
+    _compute_scheduler_task = None
+    if os.environ.get("TESTING") != "1" and settings.COMPUTE_SCHEDULER_ENABLED:
+        from app.services.compute_scheduler import compute_scheduler_loop
+        _compute_scheduler_task = _asyncio.create_task(
+            compute_scheduler_loop(settings.COMPUTE_SCHEDULER_INTERVAL_SECONDS)
+        )
+        logger.info(
+            "[MAIN] Compute scheduler started (interval=%ss; 多副本下靠 idempotency_key 唯一约束抢占)",
+            settings.COMPUTE_SCHEDULER_INTERVAL_SECONDS,
+        )
+
+    _webhook_dispatcher_task = None
+    if os.environ.get("TESTING") != "1" and settings.WEBHOOK_DISPATCH_ENABLED:
+        from app.services.delivery_service import webhook_dispatcher_loop
+        _webhook_dispatcher_task = _asyncio.create_task(
+            webhook_dispatcher_loop(settings.WEBHOOK_DISPATCH_INTERVAL_SECONDS)
+        )
+        logger.info("[MAIN] Webhook dispatcher started (interval=%ss)", settings.WEBHOOK_DISPATCH_INTERVAL_SECONDS)
+
     # Startup: CDC agent (Kafka producer lifecycle)
     try:
         from app.services.cdc_agent import cdc_agent
@@ -156,6 +178,13 @@ async def lifespan(app: FastAPI):
             await _session_cleanup_task
         except _asyncio.CancelledError:
             pass
+    for _bg_task in (_compute_scheduler_task, _webhook_dispatcher_task):
+        if _bg_task is not None:
+            _bg_task.cancel()
+            try:
+                await _bg_task
+            except _asyncio.CancelledError:
+                pass
     # Shutdown: Merkle batch pipeline
     if _merkle_pipeline_task is not None:
         try:
@@ -309,6 +338,12 @@ app.include_router(field_exposure.router, prefix="/api/v1/field-exposure", tags=
 app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["connectors"], dependencies=[Depends(require_group("infra"))])
 app.include_router(network_policy_api.router, prefix="/api/v1/network-policies", tags=["network-policies"], dependencies=[Depends(require_group("output"))])
 app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"], dependencies=[Depends(require_group("gateway"))])
+app.include_router(notebooks_api.router, prefix="/api/v1/notebooks", tags=["notebooks"], dependencies=[Depends(require_group("sessions"))])
+app.include_router(workloads_api.router, prefix="/api/v1/workloads", tags=["workloads"], dependencies=[Depends(require_group("sessions"))])
+app.include_router(flow_runtime_api.router, prefix="/api/v1/flow", tags=["flow"], dependencies=[Depends(require_group("sessions"))])
+app.include_router(compute_api.router, prefix="/api/v1/compute", tags=["compute"], dependencies=[Depends(require_group("pipeline"))])
+app.include_router(deliveries_api.router, prefix="/api/v1/deliveries", tags=["deliveries"], dependencies=[Depends(require_group("gateway"))])
+app.include_router(open_api_router.router, prefix="/open/v1", tags=["open-api"], dependencies=[Depends(require_group("gateway"))])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"], dependencies=[Depends(require_group("pipeline"))])
 app.include_router(inference.router, prefix="/api/v1/inference", tags=["inference"], dependencies=[Depends(require_group("pipeline"))])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"], dependencies=[Depends(require_group("agent"))])

@@ -1,0 +1,1911 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>星信可信数据空间 · 数据沙箱开发平台 - 交互原型 v3 (唯 CubeSandbox 闭环版)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background-color: #f5f7fa;
+    color: #1f2937;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  
+  /* Top Navigation */
+  .top-header {
+    height: 52px;
+    background: #1677ff;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    z-index: 50;
+  }
+  .brand-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .brand-logo svg { width: 22px; height: 22px; fill: #fff; }
+  .top-right-meta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+  }
+  .cluster-badge {
+    background: rgba(255, 255, 255, 0.18);
+    padding: 4px 12px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .cluster-badge .pulse {
+    width: 6px; height: 6px; border-radius: 50%; background: #52c41a;
+  }
+  .user-dropdown {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+  .user-dropdown:hover { background: rgba(255, 255, 255, 0.12); }
+  .admin-switch-btn {
+    background: #fff;
+    color: #1677ff;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .admin-switch-btn:hover { background: #e6f4ff; }
+
+  /* App Layout */
+  .app-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 200px;
+    background: #fff;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 16px 0;
+    flex-shrink: 0;
+  }
+  .nav-group { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #4b5563;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .nav-item:hover { background: #f3f4f6; color: #111827; }
+  .nav-item.active {
+    background: #e6f4ff;
+    color: #1677ff;
+    font-weight: 600;
+  }
+  .nav-item svg { width: 18px; height: 18px; fill: currentColor; }
+  .sidebar-bottom {
+    border-top: 1px solid #f3f4f6;
+    padding: 12px 12px 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .sub-link {
+    font-size: 12px;
+    color: #6b7280;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sub-link:hover { color: #1677ff; background: #f9fafb; }
+  .sub-link.active { color: #1677ff; font-weight: 600; background: #e6f4ff; }
+
+  /* Main Viewport */
+  .main-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px 40px 24px;
+  }
+
+  /* Breadcrumb & Subnav Header */
+  .breadcrumb-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 14px;
+  }
+  .breadcrumb-nav span { cursor: pointer; }
+  .breadcrumb-nav span:hover { color: #1677ff; }
+  .breadcrumb-nav .cur { color: #111827; font-weight: 500; cursor: default; }
+
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 18px;
+  }
+  .page-title { font-size: 20px; font-weight: 600; color: #111827; }
+  .page-subtitle { font-size: 13px; color: #6b7280; margin-top: 4px; }
+  .header-actions { display: flex; gap: 10px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: #1677ff; color: #fff; }
+  .btn-primary:hover { background: #0958d9; }
+  .btn-default { background: #fff; color: #374151; border-color: #d1d5db; }
+  .btn-default:hover { border-color: #1677ff; color: #1677ff; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-danger-outline { background: #fff; color: #ef4444; border-color: #fca5a5; }
+  .btn-danger-outline:hover { background: #fee2e2; }
+
+  /* Cards */
+  .card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  }
+  .card-title-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 14px;
+    background: #1677ff;
+    border-radius: 2px;
+  }
+  .card-desc { font-size: 12px; color: #6b7280; font-weight: normal; }
+
+  /* Metric Grids */
+  .stat-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 18px; }
+  .stat-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; }
+  .stat-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #e6f4ff;
+    color: #1677ff;
+  }
+  .stat-val { font-size: 24px; font-weight: 700; color: #111827; line-height: 1.1; }
+  .stat-label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+  .stat-sub { font-size: 11px; color: #9ca3af; margin-top: 3px; }
+
+  /* Tables */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .data-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: #f9fafb;
+    color: #4b5563;
+    font-weight: 600;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .data-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #f3f4f6;
+    color: #1f2937;
+  }
+  .data-table tr:hover td { background: #fafafa; }
+
+  /* Status Tags */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .tag-green { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+  .tag-blue { background: #e6f4ff; color: #1677ff; border: 1px solid #91caff; }
+  .tag-orange { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
+  .tag-red { background: #fff1f0; color: #ff4d4f; border: 1px solid #ffa39e; }
+  .tag-gray { background: #f5f5f5; color: #8c8c8c; border: 1px solid #d9d9d9; }
+
+  /* Filter Bar */
+  .filter-bar {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .filter-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #4b5563; }
+  .form-input {
+    height: 32px;
+    padding: 4px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1f2937;
+    outline: none;
+    transition: border 0.15s;
+  }
+  .form-input:focus { border-color: #1677ff; box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
+  .form-select {
+    height: 32px;
+    padding: 4px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1f2937;
+    background: #fff;
+    outline: none;
+  }
+
+  /* Task Cards Grid */
+  .task-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .task-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 18px;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .task-card:hover {
+    border-color: #91caff;
+    box-shadow: 0 4px 12px rgba(22,119,255,0.08);
+  }
+  .task-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .task-card-meta { display: flex; gap: 12px; }
+  .task-card-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 6px;
+    background: #f0f5ff;
+    color: #1677ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .task-card-title { font-size: 15px; font-weight: 600; color: #111827; margin-bottom: 2px; }
+  .task-card-id { font-size: 11px; color: #9ca3af; font-family: monospace; }
+  .task-card-info { font-size: 12px; color: #6b7280; display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .task-card-actions {
+    display: flex;
+    gap: 8px;
+    border-top: 1px solid #f3f4f6;
+    padding-top: 12px;
+  }
+
+  /* Two Column Layout */
+  .two-col { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }
+
+  /* Modals & Drawers */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal-box {
+    background: #fff;
+    border-radius: 8px;
+    width: 620px;
+    max-width: 90vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    overflow: hidden;
+    animation: modalIn 0.2s ease-out;
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-title { font-size: 16px; font-weight: 600; color: #111827; }
+  .modal-close { cursor: pointer; color: #9ca3af; font-size: 18px; }
+  .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    background: #f9fafb;
+  }
+
+  /* Drawer */
+  .drawer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    display: none;
+    justify-content: flex-end;
+    z-index: 1000;
+  }
+  .drawer-overlay.active { display: flex; }
+  .drawer-box {
+    width: 720px;
+    max-width: 90vw;
+    background: #fff;
+    height: 100%;
+    box-shadow: -4px 0 16px rgba(0,0,0,0.12);
+    display: flex;
+    flex-direction: column;
+    animation: drawerIn 0.25s ease-out;
+  }
+  @keyframes modalIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+  @keyframes drawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+  /* Web IDE Layout */
+  .ide-container {
+    display: flex;
+    height: calc(100vh - 170px);
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .ide-sidebar {
+    width: 220px;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    background: #fafafa;
+  }
+  .ide-sidebar-header {
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #4b5563;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+  }
+  .ide-file-tree { flex: 1; overflow-y: auto; padding: 8px; font-size: 13px; font-family: monospace; }
+  .ide-file-item {
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #374151;
+  }
+  .ide-file-item:hover { background: #f3f4f6; }
+  .ide-file-item.active { background: #e6f4ff; color: #1677ff; font-weight: 600; }
+  .ide-main { flex: 1; display: flex; flex-direction: column; }
+  .ide-editor-tabbar {
+    height: 38px;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+  }
+  .ide-code-area {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Fira Code', Consolas, monospace;
+    font-size: 13px;
+    padding: 14px;
+    overflow: auto;
+    line-height: 1.6;
+  }
+  .ide-terminal {
+    height: 220px;
+    background: #181818;
+    color: #eee;
+    border-top: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+  }
+  .ide-term-header {
+    background: #252526;
+    padding: 6px 14px;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    color: #ccc;
+  }
+  .ide-term-body {
+    flex: 1;
+    padding: 10px 14px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-y: auto;
+    color: #a3e635;
+  }
+
+  /* Progress Bars */
+  .meter-bar {
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .meter-bar-fill {
+    height: 100%;
+    background: #1677ff;
+    border-radius: 4px;
+  }
+
+  /* Form Helpers */
+  .form-group { margin-bottom: 16px; }
+  .form-label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px; }
+  .form-label .req { color: #ef4444; margin-right: 4px; }
+  .form-tip { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+
+  /* Tab Navigation inside Page */
+  .page-tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 18px;
+  }
+  .page-tab {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6b7280;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .page-tab:hover { color: #1677ff; }
+  .page-tab.active { color: #1677ff; border-bottom-color: #1677ff; }
+
+  /* Callout */
+  .callout-info {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 12px;
+    color: #1e40af;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <div class="top-header">
+    <div class="brand-logo">
+      <svg viewBox="0 0 24 24"><path d="M12 2L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-3zm0 4a3 3 0 110 6 3 3 0 010-6zm0 14.1c-2.82-1.05-5.06-3.88-5.74-7.1h11.48c-.68 3.22-2.92 6.05-5.74 7.1z"/></svg>
+      <span>星信可信数据空间 · 数据沙箱开发平台</span>
+    </div>
+    <div class="top-right-meta">
+      <div class="cluster-badge">
+        <span class="pulse"></span>
+        <span>沙箱集群: 沈阳数据中心R (CubeSandbox MicroVM)</span>
+      </div>
+      <div class="user-dropdown" onclick="alert('用户：张伟\n组织：沈阳数据中心R\n角色：算法模型工程师\n权限：数据沙箱开发与结果集交付')">
+        <span>欢迎登录，张伟</span>
+        <span style="font-size: 10px;">▼</span>
+      </div>
+      <button class="admin-switch-btn" onclick="alert('正在切换至【空间管理后台 (Space Admin Console)】...\n承载模块：节点拓扑、CA 证书、MPC 分布式分片、跨空间联邦等底层平台运维能力。')">
+        ⚙️ 切至空间管理后台
+      </button>
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="app-body">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="nav-group">
+        <div class="nav-item active" data-page="home" onclick="switchPage('home')">
+          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+          <span>首页</span>
+        </div>
+        <div class="nav-item" data-page="dev" onclick="switchPage('dev')">
+          <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+          <span>我的开发</span>
+        </div>
+        <div class="nav-item" data-page="results" onclick="switchPage('results')">
+          <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
+          <span>我的结果集</span>
+        </div>
+        <div class="nav-item" data-page="security" onclick="switchPage('security')">
+          <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+          <span>安全管理</span>
+        </div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="sub-link" data-sub="guide" onclick="switchPage('guide')">
+          <span>📖 开发指引文档</span>
+        </div>
+        <div class="sub-link" data-sub="quota" onclick="switchPage('quota')">
+          <span>📊 环境与配额说明</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Viewport -->
+    <div class="main-content" id="mainViewport">
+      <!-- Content dynamically injected via JS -->
+    </div>
+  </div>
+
+  <!-- Modal: 执行任务确认与参数配置 (P-01 补齐) -->
+  <div class="modal-overlay" id="modalExecuteTask">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">🚀 启动生产任务执行</div>
+        <div class="modal-close" onclick="closeModal('modalExecuteTask')">&times;</div>
+      </div>
+      <div class="modal-body">
+        <div class="callout-info" style="margin-bottom: 16px;">
+          <span>ℹ️</span>
+          <div>
+            <strong>唯 CubeSandbox 硬件级隔离保障：</strong>
+            正式执行将在沈阳数据中心独立的 KVM MicroVM 内进行，输入数据走 DEK 国密解密加载，输出结果受 T5 DLP 审查网关全量过滤。
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><span class="req">*</span>任务名称</label>
+          <input type="text" class="form-input" style="width:100%" value="用户行为分析模型 (TASK-20260812-001)" disabled />
+        </div>
+        <div class="form-group">
+          <label class="form-label"><span class="req">*</span>执行入口代码版本</label>
+          <select class="form-select" style="width:100%">
+            <option>v1.0.0 (固化哈希: sm3:8f2a...c014 · 2026-08-12 10:30)</option>
+            <option>v0.9.2-test (调试通过版本 · 2026-08-11 18:20)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><span class="req">*</span>执行环境内存配额</label>
+          <input type="text" class="form-input" style="width:100%" value="16 GB (CubeSandbox 预留)" disabled />
+        </div>
+        <div class="form-group">
+          <label class="form-label">动态运行参数 (JSON 格式)</label>
+          <textarea class="form-input" style="width:100%;height:70px;font-family:monospace;">{"n_estimators": 200, "max_depth": 8, "batch_size": 256}</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-default" onclick="closeModal('modalExecuteTask')">取消</button>
+        <button class="btn btn-primary" onclick="submitExecute()">确认并立即执行</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: 调试代码固化发布版本 (P-03 补齐) -->
+  <div class="modal-overlay" id="modalPublishWorkload">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">📦 固化并发布任务版本</div>
+        <div class="modal-close" onclick="closeModal('modalPublishWorkload')">&times;</div>
+      </div>
+      <div class="modal-body">
+        <div class="callout-info" style="margin-bottom: 16px;">
+          <span>🛡️</span>
+          <div>
+            <strong>不可篡改证据链：</strong>
+            系统将对当前的 Python 脚本目录生成 SM3 规范化内容摘要，固化后方可正式调度执行或对外提供 OpenAPI 导出。
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><span class="req">*</span>发布版本号</label>
+          <input type="text" class="form-input" style="width:100%" value="v1.0.0" />
+        </div>
+        <div class="form-group">
+          <label class="form-label"><span class="req">*</span>主入口脚本</label>
+          <input type="text" class="form-input" style="width:100%" value="scripts/train_model.py" disabled />
+        </div>
+        <div class="form-group">
+          <label class="form-label">发布更新说明</label>
+          <textarea class="form-input" style="width:100%;height:60px;" placeholder="请输入本次版本更新的特性与模型指标说明...">完成随机森林分类器超参调优，并在调试沙箱内验证测试集 Accuracy 达到 1.0。</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-default" onclick="closeModal('modalPublishWorkload')">取消</button>
+        <button class="btn btn-primary" onclick="confirmPublishWorkload()">确认固化发布</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: 日志存证与区块链验真 (P-07 补齐) -->
+  <div class="modal-overlay" id="modalVerifyAudit">
+    <div class="modal-box" style="width:680px;">
+      <div class="modal-header">
+        <div class="modal-title">🔗 审计日志可信存证与验真报告</div>
+        <div class="modal-close" onclick="closeModal('modalVerifyAudit')">&times;</div>
+      </div>
+      <div class="modal-body">
+        <div style="background:#f6ffed;border:1px solid #b7eb8f;padding:12px;border-radius:6px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:24px;">✅</span>
+          <div>
+            <div style="font-size:14px;font-weight:600;color:#52c41a;">存证哈希校验一致 · 记录真实未篡改</div>
+            <div style="font-size:12px;color:#4b5563;">本操作日志已在 ClickHouse 留存并在星信可信链完成 SM3 根哈希锚定</div>
+          </div>
+        </div>
+        <table class="data-table" style="font-size:12px;">
+          <tr><td style="width:140px;color:#6b7280;">日志编号</td><td>LOG-20260812-095840-0187</td></tr>
+          <tr><td style="color:#6b7280;">操作事件</td><td>EXEC_ENV_ENTER (进入生产沙箱环境)</td></tr>
+          <tr><td style="color:#6b7280;">底层沙箱引擎</td><td>CubeSandbox MicroVM (KVM 零 diff 驱动)</td></tr>
+          <tr><td style="color:#6b7280;">事件原文字节哈希</td><td style="font-family:monospace;">sm3:4e2c90a187b5d12ef3...7a91</td></tr>
+          <tr><td style="color:#6b7280;">Merkle 叶子节点</td><td style="font-family:monospace;">leaf_index: 1042 · batch: 20260812-H10</td></tr>
+          <tr><td style="color:#6b7280;">区块链锚定区块</td><td>Block #1,842,903 · TxHash: 0x8a9f...c31b</td></tr>
+          <tr><td style="color:#6b7280;">出域审查策略</td><td>DLP 正则拦截 + K-匿名 (k=5) + 零宽隐形数字水印注入</td></tr>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-default" onclick="closeModal('modalVerifyAudit')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer: 运行记录日志与 T5 审查抽屉 (P-02 补齐) -->
+  <div class="drawer-overlay" id="drawerRunLog">
+    <div class="drawer-box">
+      <div class="modal-header">
+        <div class="modal-title">📋 任务运行追踪与审查流水 (RUN-20260812-1042)</div>
+        <div class="modal-close" onclick="closeDrawer('drawerRunLog')">&times;</div>
+      </div>
+      <div class="modal-body" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;line-height:1.6;">
+        <div style="color:#9cdcfe;margin-bottom:8px;">[SYSTEM] 正在调度 CubeSandbox 计算节点: node-compute-02.sy...</div>
+        <div style="color:#4ec9b0;">[PROVISION] MicroVM 启动成功，耗时 1.28s · 内存限制: 16 GB</div>
+        <div style="color:#6a9955;">[DEK-KMS] 挂载并解密关联数据产品: TEE离线结构化测试-721 (/sandbox/data)</div>
+        <div style="color:#dcdcaa;">[EXEC] 启动任务主脚本: scripts/train_model.py</div>
+        <div style="color:#ce9178;">[STDOUT] Loading train_dataset: 120 rows, test_dataset: 24 rows...</div>
+        <div style="color:#ce9178;">[STDOUT] Fitting RandomForestClassifier(n_estimators=200, max_depth=8)...</div>
+        <div style="color:#ce9178;">[STDOUT] Accuracy: 1.0000</div>
+        <div style="color:#ce9178;">[STDOUT] Exporting evaluation report to /sandbox/output...</div>
+        <div style="margin:12px 0;padding:8px;background:#2d2d2d;border-left:3px solid #1677ff;color:#93c5fd;">
+          🔍 [T5 OUTPUT INSPECTION GATEWAY] 开始输出审查拦截流水：<br>
+          • 场景路由：Python Modeling Output<br>
+          • DLP 敏感数据扫描：未检出身份证、手机号等 PII 原文 (PASS)<br>
+          • 重构与聚合风险判定：行数 36 行 &lt; 阈值 10000 (PASS)<br>
+          • 隐形数字水印：已在结果集中注入使用者张伟及合约标识隐形水印 (DONE)<br>
+          • SM2 数字签名：已生成输出凭证验真哈希 (DONE)
+        </div>
+        <div style="color:#a3e635;">[COMPLETE] 结果集已通过 OpenAPI 导出至「我的结果集」，耗时 6.4s，退出码 0</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-default" onclick="closeDrawer('drawerRunLog')">关闭抽屉</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  let currentPage = 'home';
+
+  function switchPage(pageKey, subPage) {
+    currentPage = pageKey;
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.sub-link').forEach(el => el.classList.remove('active'));
+    
+    const activeNav = document.querySelector(`.nav-item[data-page="${pageKey}"]`);
+    if (activeNav) activeNav.classList.add('active');
+    
+    const activeSub = document.querySelector(`.sub-link[data-sub="${pageKey}"]`);
+    if (activeSub) activeSub.classList.add('active');
+
+    renderPage(pageKey, subPage);
+  }
+
+  function renderPage(page, sub) {
+    const v = document.getElementById('mainViewport');
+    if (page === 'home') {
+      v.innerHTML = renderHomePage();
+    } else if (page === 'dev') {
+      if (sub === 'create') v.innerHTML = renderDevCreatePage();
+      else if (sub === 'ide') v.innerHTML = renderDevIdePage();
+      else if (sub === 'detail') v.innerHTML = renderDevDetailPage();
+      else v.innerHTML = renderDevListPage();
+    } else if (page === 'results') {
+      if (sub === 'create-api') v.innerHTML = renderNewApiPage();
+      else if (sub === 'monitor-api') v.innerHTML = renderApiMonitorPage();
+      else v.innerHTML = renderResultsHubPage();
+    } else if (page === 'security') {
+      v.innerHTML = renderSecurityPage();
+    } else if (page === 'guide') {
+      v.innerHTML = renderGuidePage();
+    } else if (page === 'quota') {
+      v.innerHTML = renderQuotaPage();
+    }
+  }
+
+  /* 1. 首页-平台总览 */
+  function renderHomePage() {
+    return `
+      <div class="page-header">
+        <div>
+          <div class="page-title">欢迎回来，张伟</div>
+          <div class="page-subtitle">沈阳数据中心R · 数据沙箱开发工作台 (统一 CubeSandbox 算力引擎)</div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-default" onclick="switchPage('dev')">查看开发任务</button>
+          <button class="btn btn-primary" onclick="switchPage('dev', 'create')">+ 创建开发任务</button>
+        </div>
+      </div>
+
+      <div class="stat-grid-4">
+        <div class="stat-card">
+          <div class="stat-icon">📁</div>
+          <div>
+            <div class="stat-label">开发任务总数</div>
+            <div class="stat-val">12</div>
+            <div class="stat-sub">进行中 5 · 已结束 7</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🔌</div>
+          <div>
+            <div class="stat-label">结果集导出接口</div>
+            <div class="stat-val">5</div>
+            <div class="stat-sub">在线 3 · 离线 2</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📈</div>
+          <div>
+            <div class="stat-label">今日数据调用次数</div>
+            <div class="stat-val">18</div>
+            <div class="stat-sub">最近调用 2026-08-12</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🛡️</div>
+          <div>
+            <div class="stat-label">今日操作日志</div>
+            <div class="stat-val">186</div>
+            <div class="stat-sub">失败 3 (不可篡改留存)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-title-bar">
+            <div class="card-title">开发任务总览 <span class="card-desc">仅展示最近创建的 5 个任务</span></div>
+            <span style="font-size:12px;color:#1677ff;cursor:pointer;" onclick="switchPage('dev')">查看全部任务 &gt;</span>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>任务名称</th><th>状态</th><th>调试方法</th><th>创建时间</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>用户行为分析模型</strong></td>
+                <td><span class="tag tag-green">● 进行中</span></td>
+                <td>Python 3.10</td>
+                <td>2026-08-12 10:30</td>
+                <td>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="switchPage('dev', 'ide')">调试</a>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalExecuteTask')">执行</a>
+                  <a style="color:#1677ff;cursor:pointer;" onclick="switchPage('dev', 'detail')">详情</a>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>信用评分模型训练</strong></td>
+                <td><span class="tag tag-gray">已结束</span></td>
+                <td>Python 3.10</td>
+                <td>2026-08-10 15:20</td>
+                <td>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="switchPage('dev', 'ide')">调试</a>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalExecuteTask')">执行</a>
+                  <a style="color:#1677ff;cursor:pointer;" onclick="switchPage('dev', 'detail')">详情</a>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>数据质量校验脚本</strong></td>
+                <td><span class="tag tag-gray">已结束</span></td>
+                <td>Python 3.10</td>
+                <td>2026-08-09 09:15</td>
+                <td>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="switchPage('dev', 'ide')">调试</a>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalExecuteTask')">执行</a>
+                  <a style="color:#1677ff;cursor:pointer;" onclick="switchPage('dev', 'detail')">详情</a>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>反欺诈模型调试</strong></td>
+                <td><span class="tag tag-green">● 进行中</span></td>
+                <td>Python 3.10</td>
+                <td>2026-08-08 14:45</td>
+                <td>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="switchPage('dev', 'ide')">调试</a>
+                  <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalExecuteTask')">执行</a>
+                  <a style="color:#1677ff;cursor:pointer;" onclick="switchPage('dev', 'detail')">详情</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-title-bar">
+            <div class="card-title">沙箱内存使用 <span class="card-desc">CubeSandbox 实时占用</span></div>
+          </div>
+          <div style="margin-bottom:18px;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:#4b5563;">
+              <span>调试内存在线占用</span>
+              <span class="tag tag-green">占用中</span>
+            </div>
+            <div style="font-size:22px;font-weight:700;color:#111827;margin-top:4px;">3.8 G <span style="font-size:12px;color:#9ca3af;font-weight:normal;">/ 8 G 配额</span></div>
+            <div class="meter-bar"><div class="meter-bar-fill" style="width: 47.5%;"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:#4b5563;">
+              <span>正式执行内存占用</span>
+              <span class="tag tag-gray">待执行</span>
+            </div>
+            <div style="font-size:22px;font-weight:700;color:#111827;margin-top:4px;">0 G <span style="font-size:12px;color:#9ca3af;font-weight:normal;">/ 16 G 配额</span></div>
+            <div class="meter-bar"><div class="meter-bar-fill" style="width: 0%;"></div></div>
+          </div>
+          <div style="margin-top:14px;padding:8px 10px;background:#f9fafb;border-radius:4px;font-size:11px;color:#6b7280;line-height:1.5;">
+            💡 调试内存随在线会话占用，退出环境自动释放；正式执行内存仅在任务跑批时独占。
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">最新结果集 <span class="card-desc">按合约约定导出的结果资产</span></div>
+          <span style="font-size:12px;color:#1677ff;cursor:pointer;" onclick="switchPage('results')">前往我的结果集 &gt;</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>结果集名称</th><th>交付类型</th><th>生成时间</th><th>调用/下载次数</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>user_behavior_result_20260812.csv</strong></td>
+              <td><span class="tag tag-blue">离线结果包</span></td>
+              <td>2026-08-12 10:42</td>
+              <td>1,204 次</td>
+              <td><span class="tag tag-green">正常 (已脱敏)</span></td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results')">查看结果集</a></td>
+            </tr>
+            <tr>
+              <td><strong>classification_report.json</strong></td>
+              <td><span class="tag tag-blue">离线结果包</span></td>
+              <td>2026-08-12 10:42</td>
+              <td>856 次</td>
+              <td><span class="tag tag-green">正常</span></td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results')">查看结果集</a></td>
+            </tr>
+            <tr>
+              <td><strong>qwen_answer_result_20260812.csv</strong></td>
+              <td><span class="tag tag-orange">OpenAPI接口</span></td>
+              <td>2026-08-12 10:39</td>
+              <td>2,431 次</td>
+              <td><span class="tag tag-green">正常在线</span></td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results', 'monitor-api')">接口监控</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  /* 2-1. 我的开发-任务列表 */
+  function renderDevListPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span class="cur">我的开发</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">我的开发</div>
+          <div class="page-subtitle">集中管理数据沙箱开发任务，基于 CubeSandbox 支持模型调试、任务执行与详情查看</div>
+        </div>
+        <button class="btn btn-primary" onclick="switchPage('dev', 'create')">+ 创建任务</button>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-item">
+          <span>任务名称:</span>
+          <input type="text" class="form-input" placeholder="请输入任务名称" />
+        </div>
+        <div class="filter-item">
+          <span>任务状态:</span>
+          <select class="form-select">
+            <option>全部</option>
+            <option>进行中</option>
+            <option>已结束</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <span>调试方法:</span>
+          <select class="form-select">
+            <option>Python 3.10</option>
+            <option>SQL (DuckDB)</option>
+          </select>
+        </div>
+        <button class="btn btn-default btn-sm">重置</button>
+        <button class="btn btn-primary btn-sm">查询</button>
+      </div>
+
+      <div class="task-grid">
+        <!-- Task Card 1 -->
+        <div class="task-card">
+          <div class="task-card-top">
+            <div class="task-card-meta">
+              <div class="task-card-icon">🧪</div>
+              <div>
+                <div class="task-card-title">用户行为分析模型</div>
+                <div class="task-card-id">TASK-20260812-001</div>
+              </div>
+            </div>
+            <span class="tag tag-green">● 进行中</span>
+          </div>
+          <div class="task-card-info">
+            <div>沙箱引擎: CubeSandbox (KVM MicroVM)</div>
+            <div>模型调试方法: Python 3.10</div>
+            <div>创建时间: 2026-08-12 10:30</div>
+          </div>
+          <div class="task-card-actions">
+            <button class="btn btn-primary btn-sm" onclick="switchPage('dev', 'ide')">⚙ 调试</button>
+            <button class="btn btn-default btn-sm" onclick="openModal('modalExecuteTask')">▶ 执行</button>
+            <button class="btn btn-default btn-sm" onclick="switchPage('dev', 'detail')">📄 详情</button>
+          </div>
+        </div>
+
+        <!-- Task Card 2 -->
+        <div class="task-card">
+          <div class="task-card-top">
+            <div class="task-card-meta">
+              <div class="task-card-icon">📈</div>
+              <div>
+                <div class="task-card-title">信用评分模型训练</div>
+                <div class="task-card-id">TASK-20260810-004</div>
+              </div>
+            </div>
+            <span class="tag tag-gray">已结束</span>
+          </div>
+          <div class="task-card-info">
+            <div>沙箱引擎: CubeSandbox (KVM MicroVM)</div>
+            <div>模型调试方法: Python 3.10</div>
+            <div>创建时间: 2026-08-10 15:20</div>
+          </div>
+          <div class="task-card-actions">
+            <button class="btn btn-primary btn-sm" onclick="switchPage('dev', 'ide')">⚙ 调试</button>
+            <button class="btn btn-default btn-sm" onclick="openModal('modalExecuteTask')">▶ 执行</button>
+            <button class="btn btn-default btn-sm" onclick="switchPage('dev', 'detail')">📄 详情</button>
+          </div>
+        </div>
+
+        <!-- Task Card 3 -->
+        <div class="task-card">
+          <div class="task-card-top">
+            <div class="task-card-meta">
+              <div class="task-card-icon">📋</div>
+              <div>
+                <div class="task-card-title">数据质量校验脚本</div>
+                <div class="task-card-id">TASK-20260809-002</div>
+              </div>
+            </div>
+            <span class="tag tag-gray">已结束</span>
+          </div>
+          <div class="task-card-info">
+            <div>沙箱引擎: CubeSandbox (KVM MicroVM)</div>
+            <div>模型调试方法: Python 3.10</div>
+            <div>创建时间: 2026-08-09 09:15</div>
+          </div>
+          <div class="task-card-actions">
+            <button class="btn btn-primary btn-sm" onclick="switchPage('dev', 'ide')">⚙ 调试</button>
+            <button class="btn btn-default btn-sm" onclick="openModal('modalExecuteTask')">▶ 执行</button>
+            <button class="btn btn-default btn-sm" onclick="switchPage('dev', 'detail')">📄 详情</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /* 2-2. 我的开发-新增任务 */
+  function renderDevCreatePage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span onclick="switchPage('dev')">我的开发</span> &gt;
+        <span class="cur">新增开发任务</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">新增开发任务</div>
+          <div class="page-subtitle">交付场景 / 数据沙箱开发 · 配置合约、CubeSandbox 资源与关联数据后即可启动调试</div>
+        </div>
+        <button class="btn btn-default" onclick="switchPage('dev')">← 返回列表</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar"><div class="card-title">基本信息</div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label"><span class="req">*</span>任务名称</label>
+            <input type="text" class="form-input" style="width:100%" value="用户行为分析模型" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">任务编号</label>
+            <input type="text" class="form-input" style="width:100%" value="TASK-20260812-001 (系统自动生成)" disabled />
+          </div>
+          <div class="form-group">
+            <label class="form-label">所属节点</label>
+            <input type="text" class="form-input" style="width:100%" value="沈阳数据中心R" disabled />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">任务描述</label>
+          <textarea class="form-input" style="width:100%;height:60px;">基于 CubeSandbox 离线结构化数据，训练用户行为分类模型并输出评估报告。</textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">我的合约 <span class="card-desc">合约用于约束模型输出格式与导出通道</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+          <div class="form-group">
+            <label class="form-label"><span class="req">*</span>合约名称</label>
+            <input type="text" class="form-input" style="width:100%" value="用户行为分析模型-合约A" />
+          </div>
+          <div class="form-group">
+            <label class="form-label"><span class="req">*</span>模型调试方法</label>
+            <select class="form-select" style="width:100%">
+              <option>Python 3.10</option>
+              <option>SQL (DuckDB)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label"><span class="req">*</span>结果导出方式 (交付三通道)</label>
+            <select class="form-select" style="width:100%">
+              <option>OpenAPI 导出 (在线接口调用)</option>
+              <option>离线数据集导出 (水印加密包)</option>
+              <option>结果推送 (Webhook 异步投递)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">资源配置 <span class="card-desc">CubeSandbox 独占微虚机内存与 CPU 配额</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:center;">
+          <div class="form-group">
+            <label class="form-label"><span class="req">*</span>调试环境内存 (G)</label>
+            <input type="number" class="form-input" style="width:100%" value="8" min="2" max="32" />
+            <div class="form-tip">范围 2G ~ 32G，用于在线调试与单元格运行</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label"><span class="req">*</span>执行环境内存 (G)</label>
+            <input type="number" class="form-input" style="width:100%" value="16" min="2" max="64" />
+            <div class="form-tip">范围 2G ~ 64G，用于全量批处理正式执行</div>
+          </div>
+          <div class="callout-info">
+            <div>💡 <strong>配额使用建议：</strong>训练类任务建议调试环境不低于 8G；当关联数据量超过 10 万行时，执行环境建议不低于 16G。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">关联数据产品 <span class="card-desc">选择需要授权到 CubeSandbox 的数据产品</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;">
+          <div>
+            <div style="display:flex;gap:10px;margin-bottom:12px;">
+              <button class="btn btn-primary btn-sm">本节点登记的数据产品</button>
+              <button class="btn btn-default btn-sm">我购买的数据产品</button>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr><th>选择</th><th>产品名称</th><th>类型</th><th>交付场景</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><input type="checkbox" checked /></td>
+                  <td><strong>TEE离线结构化测试-721</strong></td>
+                  <td>数据集</td>
+                  <td>TEE_OFFLINE</td>
+                  <td><a style="color:#1677ff;cursor:pointer;">详情</a></td>
+                </tr>
+                <tr>
+                  <td><input type="checkbox" /></td>
+                  <td><strong>TEE离线结构化测试-724</strong></td>
+                  <td>数据集</td>
+                  <td>TEE_OFFLINE</td>
+                  <td><a style="color:#1677ff;cursor:pointer;">详情</a></td>
+                </tr>
+                <tr>
+                  <td><input type="checkbox" /></td>
+                  <td><strong>TEE离线非结构化</strong></td>
+                  <td>图像集</td>
+                  <td>TEE_OFFLINE</td>
+                  <td><a style="color:#1677ff;cursor:pointer;">详情</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:6px;padding:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:10px;">
+              <span>已选择数据 (1个)</span>
+              <span style="color:#1677ff;cursor:pointer;font-weight:normal;">清空</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;background:#fff;padding:8px 10px;border-radius:4px;border:1px solid #e5e7eb;font-size:12px;">
+              <span>TEE离线结构化测试-721</span>
+              <span style="color:#ef4444;cursor:pointer;">移除</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#fff;padding:14px 20px;border-radius:8px;border:1px solid #e5e7eb;">
+        <span style="font-size:12px;color:#6b7280;">ℹ️ 提交后可在「我的开发」列表中启动 CubeSandbox 进行在线调试与执行</span>
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-default" onclick="switchPage('dev')">取消</button>
+          <button class="btn btn-primary" onclick="alert('任务创建成功！正在进入在线调试环境...');switchPage('dev', 'ide');">完成并进入调试</button>
+        </div>
+      </div>
+    `;
+  }
+
+  /* 2-3. 我的开发-调试环境 (Python IDE) */
+  function renderDevIdePage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span onclick="switchPage('dev')">我的开发</span> &gt;
+        <span class="cur">调试环境 (CubeSandbox Python)</span>
+      </div>
+      <div class="page-header" style="margin-bottom:12px;">
+        <div>
+          <div class="page-title">调试环境 · 用户行为分析模型</div>
+          <div class="page-subtitle">CubeSandbox 独占微虚机运行中 · 内存 8 G · 数据挂载于 /sandbox/data</div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-default" onclick="switchPage('dev')">← 返回列表</button>
+          <button class="btn btn-default" onclick="runIdeCode()">▶ 运行调试脚本</button>
+          <button class="btn btn-primary" onclick="openModal('modalPublishWorkload')">📦 固化发布版本</button>
+        </div>
+      </div>
+
+      <div class="ide-container">
+        <div class="ide-sidebar">
+          <div class="ide-sidebar-header">
+            <span>文件目录</span>
+            <span style="cursor:pointer;" title="新建文件">+</span>
+          </div>
+          <div class="ide-file-tree">
+            <div style="color:#9ca3af;font-size:11px;margin-bottom:4px;">📁 scripts/</div>
+            <div class="ide-file-item active">📄 train_model.py</div>
+            <div class="ide-file-item">📄 classification_report.json</div>
+            <div class="ide-file-item">📄 data_stats.json</div>
+            <div class="ide-file-item">📦 model.pkl</div>
+            <div style="color:#9ca3af;font-size:11px;margin:8px 0 4px 0;">📁 /sandbox/data (只读挂载)</div>
+            <div class="ide-file-item">📊 train_dataset.csv</div>
+            <div class="ide-file-item">📊 test_dataset.csv</div>
+          </div>
+          <div style="padding:10px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;">
+            共 6 个文件 · 占用 128 MB / 2 GB
+          </div>
+        </div>
+
+        <div class="ide-main">
+          <div class="ide-editor-tabbar">
+            <div style="display:flex;align-items:center;gap:12px;font-size:12px;">
+              <strong>train_model.py</strong>
+              <span class="tag tag-green">● CubeSandbox 已连通</span>
+              <span style="color:#9ca3af;">已自动保存 10:42:13</span>
+            </div>
+            <div style="font-size:12px;color:#6b7280;">
+              CPU 12% · 内存 3.8G / 8G
+            </div>
+          </div>
+          <div class="ide-code-area">
+<pre style="margin:0;"><span style="color:#6a9955;"># -*- coding: utf-8 -*-</span>
+<span style="color:#6a9955;"># 合约：用户行为分析模型-合约A · 唯 CubeSandbox 硬件级执行</span>
+<span style="color:#c586c0;">import</span> pandas <span style="color:#c586c0;">as</span> pd
+<span style="color:#c586c0;">from</span> sklearn.ensemble <span style="color:#c586c0;">import</span> RandomForestClassifier
+<span style="color:#c586c0;">from</span> sklearn.metrics <span style="color:#c586c0;">import</span> classification_report
+
+DATA_DIR = <span style="color:#ce9178;">"/sandbox/data"</span>
+OUTPUT_DIR = <span style="color:#ce9178;">"/sandbox/output"</span>
+
+<span style="color:#6a9955;"># 1. 加载沙箱挂载的脱敏/授权数据集</span>
+train_df = pd.read_csv(<span style="color:#ce9178;">f"{DATA_DIR}/train_dataset.csv"</span>)
+test_df = pd.read_csv(<span style="color:#ce9178;">f"{DATA_DIR}/test_dataset.csv"</span>)
+
+feature_cols = [<span style="color:#ce9178;">"road_id"</span>, <span style="color:#ce9178;">"hour"</span>, <span style="color:#ce9178;">"weather"</span>, <span style="color:#ce9178;">"history_flow"</span>]
+X_train, y_train = train_df[feature_cols], train_df[<span style="color:#ce9178;">"label"</span>]
+X_test, y_test = test_df[feature_cols], test_df[<span style="color:#ce9178;">"label"</span>]
+
+<span style="color:#6a9955;"># 2. 训练随机森林模型</span>
+model = RandomForestClassifier(n_estimators=200, max_depth=8, random_state=42)
+model.fit(X_train, y_train)
+
+<span style="color:#6a9955;"># 3. 评估指标与结果导出</span>
+preds = model.predict(X_test)
+report = classification_report(y_test, preds, output_dict=True)
+print(<span style="color:#ce9178;">"accuracy:"</span>, report[<span style="color:#ce9178;">"accuracy"</span>])
+
+<span style="color:#6a9955;"># 4. 结果集通过 OpenAPI 导出至「我的结果集」通道</span>
+export_result(report, method=<span style="color:#ce9178;">"openapi"</span>, target=<span style="color:#ce9178;">"我的结果集"</span>)
+</pre>
+          </div>
+          <div class="ide-terminal">
+            <div class="ide-term-header">
+              <span>终端输出 (Terminal) · 退出码 0 · 耗时 6.4s</span>
+              <span style="cursor:pointer;" onclick="alert('日志已清空')">清屏</span>
+            </div>
+            <div class="ide-term-body">
+              [10:42:07] CubeSandbox MicroVM 初始化完成 · Python 3.10.12 · 分配内存 8 GB<br>
+              [10:42:08] 挂载授权数据集: train_dataset.csv (120 条)、test_dataset.csv (24 条)<br>
+              [10:42:10] 开始执行脚本 scripts/train_model.py...<br>
+              [10:42:11] 模型训练完成 · n_estimators=200 · max_depth=8<br>
+              [10:42:12] accuracy: 1.0<br>
+              [10:42:12] classification_report.json 已在 /sandbox/output 生成并通过 DLP 审查<br>
+              [10:42:13] 结果集已通过 OpenAPI 导出至「我的结果集」<br>
+              <span style="color:#fff;">[10:42:13] ✔ 调试运行成功，可点击右上角「固化发布版本」进行生产调度。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /* 2-4. 我的开发-任务详情 */
+  function renderDevDetailPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span onclick="switchPage('dev')">我的开发</span> &gt;
+        <span class="cur">任务详情</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="page-title">用户行为分析模型</div>
+            <span class="tag tag-green">● 进行中</span>
+          </div>
+          <div class="page-subtitle"># TASK-20260812-001 · 创建时间 2026-08-12 10:30 · 最近执行 2026-08-12 10:42</div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-default" onclick="switchPage('dev')">← 返回列表</button>
+          <button class="btn btn-default" onclick="switchPage('dev', 'ide')">⚙ 进入调试</button>
+          <button class="btn btn-primary" onclick="openModal('modalExecuteTask')">▶ 执行任务</button>
+        </div>
+      </div>
+
+      <div class="stat-grid-4">
+        <div class="stat-card">
+          <div class="stat-icon">⚙</div>
+          <div><div class="stat-label">任务状态</div><div class="stat-val" style="font-size:18px;">进行中</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💻</div>
+          <div><div class="stat-label">调试方法</div><div class="stat-val" style="font-size:18px;">Python 3.10</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📦</div>
+          <div><div class="stat-label">关联数据产品</div><div class="stat-val">3 个</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📑</div>
+          <div><div class="stat-label">产出结果集</div><div class="stat-val">2 个</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar"><div class="card-title">基本信息与合约配置</div></div>
+        <table class="data-table">
+          <tr><td style="width:140px;color:#6b7280;">所属节点</td><td>沈阳数据中心R</td><td style="width:140px;color:#6b7280;">合约名称</td><td>用户行为分析模型-合约A</td></tr>
+          <tr><td style="color:#6b7280;">沙箱运行时</td><td><strong>CubeSandbox MicroVM</strong> (生产默认唯一隔离引擎)</td><td style="color:#6b7280;">结果导出方式</td><td>OpenAPI 导出 (在线接口)</td></tr>
+          <tr><td style="color:#6b7280;">资源规格</td><td>调试内存: 8G · 执行内存: 16G</td><td style="color:#6b7280;">任务描述</td><td>基于 CubeSandbox 离线结构化数据，训练用户行为分类模型并输出评估报告。</td></tr>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">运行记录 <span class="card-desc">记录调试与正式执行历史，保留 90 天不可篡改日志</span></div>
+          <span style="font-size:12px;color:#1677ff;cursor:pointer;">查看全部记录 &gt;</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr><th>执行时间</th><th>操作类型</th><th>执行环境</th><th>状态</th><th>耗时</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2026-08-12 10:42:07</td>
+              <td>调试执行</td>
+              <td>CubeSandbox · 8G</td>
+              <td><span class="tag tag-green">✔ 执行成功</span></td>
+              <td>6.4s</td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="openDrawer('drawerRunLog')">查看日志与DLP审查</a></td>
+            </tr>
+            <tr>
+              <td>2026-08-12 10:31:22</td>
+              <td>调试执行</td>
+              <td>CubeSandbox · 8G</td>
+              <td><span class="tag tag-red">✖ 执行失败</span></td>
+              <td>2.1s</td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="openDrawer('drawerRunLog')">查看日志</a></td>
+            </tr>
+            <tr>
+              <td>2026-08-11 18:20:41</td>
+              <td>正式执行</td>
+              <td>CubeSandbox · 16G</td>
+              <td><span class="tag tag-green">✔ 执行成功</span></td>
+              <td>42.7s</td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="openDrawer('drawerRunLog')">查看日志与DLP审查</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">产出结果集</div>
+          <span style="font-size:12px;color:#1677ff;cursor:pointer;" onclick="switchPage('results')">前往我的结果集 &gt;</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr><th>结果集名称</th><th>生成时间</th><th>数据行数</th><th>文件大小</th><th>导出状态</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>user_behavior_result_20260812.csv</strong></td>
+              <td>2026-08-12 10:42:13</td>
+              <td>24 行</td>
+              <td>1.2 KB</td>
+              <td><span class="tag tag-green">已导出 (OpenAPI/文件)</span></td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results')">查看结果集</a></td>
+            </tr>
+            <tr>
+              <td><strong>classification_report.json</strong></td>
+              <td>2026-08-12 10:42:12</td>
+              <td>36 行</td>
+              <td>1.2 KB</td>
+              <td><span class="tag tag-green">已导出</span></td>
+              <td><a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results')">查看结果集</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  /* 3. 我的结果集-多通道总览 (包含文件资产列表 + OpenAPI + 推送) (P-04 闭环补齐) */
+  function renderResultsHubPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span class="cur">我的结果集</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">我的结果集</div>
+          <div class="page-subtitle">管理所有经 CubeSandbox 计算出域的结果资产，支持文件结果包下载、OpenAPI 导出与 Webhook 推送</div>
+        </div>
+        <button class="btn btn-primary" onclick="switchPage('results', 'create-api')">+ 新建 OpenAPI 接口</button>
+      </div>
+
+      <div class="page-tabs">
+        <div class="page-tab active" onclick="alert('当前位于：文件结果集资产')">📁 文件结果集 (离线交付包)</div>
+        <div class="page-tab" onclick="switchPage('results')">🔌 OpenAPI 导出接口 (3)</div>
+        <div class="page-tab" onclick="alert('结果推送通道：支持 Webhook 配置与投递重试')">🔔 结果推送 (Webhook)</div>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-item">
+          <span>资产名称:</span>
+          <input type="text" class="form-input" placeholder="输入结果集名称" />
+        </div>
+        <div class="filter-item">
+          <span>审查状态:</span>
+          <select class="form-select">
+            <option>全部</option>
+            <option>已脱敏 (DLP PASS)</option>
+            <option>已注入水印</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm">查询</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">文件型结果集列表 (离线结果包)</div>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>结果集文件</th><th>关联合约/任务</th><th>大小</th><th>T5 审查与脱敏状态</th><th>隐形水印/验真</th><th>生成时间</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>user_behavior_result_20260812.csv</strong></td>
+              <td>用户行为分析模型</td>
+              <td>1.2 KB</td>
+              <td><span class="tag tag-green">✔ DLP 审查通过 (0 违规)</span></td>
+              <td><span class="tag tag-blue">已注入数字水印</span></td>
+              <td>2026-08-12 10:42</td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="alert('结果集数据结构预览：\nuser_id, predicted_label, score\n1001, active, 0.98\n1002, churn_risk, 0.85')">预览脱敏数据</a>
+                <a style="color:#1677ff;cursor:pointer;" onclick="alert('正在下载带水印离线交付包 (MANIFEST + 数据文件 + SM2签名)...')">下载结果包</a>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>classification_report.json</strong></td>
+              <td>用户行为分析模型</td>
+              <td>1.2 KB</td>
+              <td><span class="tag tag-green">✔ DLP 审查通过</span></td>
+              <td><span class="tag tag-blue">已注入数字水印</span></td>
+              <td>2026-08-12 10:42</td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="alert('查看指标报告 JSON 内容')">预览</a>
+                <a style="color:#1677ff;cursor:pointer;" onclick="alert('开始下载...')">下载结果包</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">OpenAPI 接口导出列表</div>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr><th>接口名称</th><th>API ID</th><th>有效期</th><th>访问 URL</th><th>状态</th><th>是否在线</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Qwen回答预测</strong></td>
+              <td>6d783131-c29b...</td>
+              <td>永不过期</td>
+              <td><code>https://100.112.3.84/open/v1/qwen-pred</code></td>
+              <td><span class="tag tag-green">正常</span></td>
+              <td><span class="tag tag-blue">● 上线</span></td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="alert('在线调试接口：支持 Header API Key 鉴权与实时请求测试')">在线调试</a>
+                <a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results', 'monitor-api')">监控</a>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>用户行为分析结果导出</strong></td>
+              <td>7a2f9c14-8d3b...</td>
+              <td>2026-12-31</td>
+              <td><code>https://100.112.3.84/open/v1/user-behavior</code></td>
+              <td><span class="tag tag-green">正常</span></td>
+              <td><span class="tag tag-blue">● 上线</span></td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="alert('在线调试')">在线调试</a>
+                <a style="color:#1677ff;cursor:pointer;" onclick="switchPage('results', 'monitor-api')">监控</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  /* 3-2. 新建 API 接口 */
+  function renderNewApiPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span onclick="switchPage('results')">我的结果集</span> &gt;
+        <span class="cur">新建 OpenAPI 导出接口</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">新建 OpenAPI 导出接口</div>
+          <div class="page-subtitle">将 CubeSandbox 任务产生的结果集封装为受控 OpenAPI 端点，对外提供只读查询</div>
+        </div>
+        <button class="btn btn-default" onclick="switchPage('results')">← 返回列表</button>
+      </div>
+
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div>
+            <div class="form-group">
+              <label class="form-label"><span class="req">*</span>接口名称</label>
+              <input type="text" class="form-input" style="width:100%" placeholder="请输入接口名称" value="用户行为预测结果查询接口" />
+            </div>
+            <div class="form-group">
+              <label class="form-label"><span class="req">*</span>关联任务</label>
+              <select class="form-select" style="width:100%">
+                <option>用户行为分析模型 (TASK-20260812-001)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label"><span class="req">*</span>接口描述</label>
+              <textarea class="form-input" style="width:100%;height:80px;">提供针对特定用户预测评分的按需安全查询端点。</textarea>
+            </div>
+          </div>
+
+          <div>
+            <div class="form-group">
+              <label class="form-label">接口状态</label>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <input type="checkbox" checked id="apiStateSwitch" />
+                <label for="apiStateSwitch" style="font-size:13px;">上线 (开启对外访问)</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">接口有效期</label>
+              <div style="display:flex;gap:16px;font-size:13px;">
+                <label><input type="radio" name="validity" checked /> 永不过期</label>
+                <label><input type="radio" name="validity" /> 选择日期</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">安全访问保障</label>
+              <div style="display:flex;gap:16px;font-size:13px;margin-bottom:6px;">
+                <label><input type="radio" name="security" checked /> IP 白名单限制</label>
+                <label><input type="radio" name="security" /> 不限制</label>
+              </div>
+              <textarea class="form-input" style="width:100%;height:60px;" placeholder="支持输入 IP，例如 192.168.22.20, 36.110.223.0/24">192.168.22.0/24, 100.112.3.84</textarea>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div class="card-title-bar"><div class="card-title">结果集字段结构 (来自合约规范)</div></div>
+          <table class="data-table">
+            <thead>
+              <tr><th>字段名</th><th>字段类型</th><th>查询脱敏算子</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>user_id</td><td>STRING</td><td>泛化 / 哈希</td></tr>
+              <tr><td>predicted_label</td><td>STRING</td><td>无</td></tr>
+              <tr><td>confidence_score</td><td>FLOAT</td><td>保留两位小数</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button class="btn btn-default" onclick="switchPage('results')">取消</button>
+        <button class="btn btn-primary" onclick="alert('接口发布成功！');switchPage('results');">新增并发布接口</button>
+      </div>
+    `;
+  }
+
+  /* 3-3. 接口监控 */
+  function renderApiMonitorPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span onclick="switchPage('results')">我的结果集</span> &gt;
+        <span class="cur">接口监控</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="page-title">Qwen回答预测</div>
+            <span class="tag tag-green">● 接口正常</span>
+            <span class="tag tag-blue">已上线</span>
+          </div>
+          <div class="page-subtitle">关联任务: TEE模型预测 · 有效期: 永不过期 · 统一经 CubeSandbox 出域安全网关</div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-default" onclick="switchPage('results')">← 返回列表</button>
+          <button class="btn btn-default" onclick="alert('数据已刷新')">🔄 刷新数据</button>
+        </div>
+      </div>
+
+      <div class="stat-grid-3">
+        <div class="stat-card">
+          <div class="stat-icon">📊</div>
+          <div><div class="stat-label">调用总次数 (次)</div><div class="stat-val">18</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🕒</div>
+          <div><div class="stat-label">最新调用时间</div><div class="stat-val" style="font-size:18px;">2026-08-12</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✔</div>
+          <div><div class="stat-label">调用成功率</div><div class="stat-val" style="color:#52c41a;">100%</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <div class="card-title">使用调用明细流水</div>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr><th>序号</th><th>调用ID</th><th>调用时间</th><th>来源 IP</th><th>耗时</th><th>调用状态</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td><td style="font-family:monospace;">ds202608071024599364b91a8d6</td><td>2026-08-12 10:42</td><td>100.112.3.84</td><td>45ms</td><td><span class="tag tag-green">调用成功</span></td>
+            </tr>
+            <tr>
+              <td>2</td><td style="font-family:monospace;">ds202608071024599364b91a8d7</td><td>2026-08-11 18:20</td><td>192.168.22.20</td><td>52ms</td><td><span class="tag tag-green">调用成功</span></td>
+            </tr>
+            <tr>
+              <td>3</td><td style="font-family:monospace;">ds202608071024599364b91a8d8</td><td>2026-08-11 15:22</td><td>36.110.223.18</td><td>60ms</td><td><span class="tag tag-red">IP不在白名单</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  /* 4-1. 安全管理-操作日志 */
+  function renderSecurityPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span class="cur">安全管理</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">操作日志与可信审计</div>
+          <div class="page-subtitle">留存创建调试沙箱、进入生产环境、结果集导出等全生命周期记录，只读导出，不可篡改</div>
+        </div>
+        <button class="btn btn-default" onclick="alert('已触发加密归档日志导出，哈希验真包生成中...')">📥 导出审计日志</button>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-item">
+          <span>操作类型:</span>
+          <select class="form-select">
+            <option>全部类型</option>
+            <option>创建调试沙箱</option>
+            <option>进入生产环境</option>
+            <option>结果集导出</option>
+            <option>数据调用</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <span>关键字:</span>
+          <input type="text" class="form-input" placeholder="操作人 / 操作对象" />
+        </div>
+        <div class="filter-item">
+          <span>操作结果:</span>
+          <select class="form-select">
+            <option>全部</option>
+            <option>成功</option>
+            <option>失败</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm">查询</button>
+      </div>
+
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr><th>操作时间</th><th>操作类型</th><th>操作人</th><th>来源 IP</th><th>操作结果</th><th>不可篡改存证</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2026-08-12 10:42:13</td>
+              <td><span class="tag tag-blue">结果集导出</span></td>
+              <td>张伟</td>
+              <td>100.112.3.84</td>
+              <td><span class="tag tag-green">✔ 成功</span></td>
+              <td><span class="tag tag-green">区块链已锚定</span></td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalVerifyAudit')">验真详情</a>
+              </td>
+            </tr>
+            <tr>
+              <td>2026-08-12 10:30:05</td>
+              <td><span class="tag tag-blue">创建调试沙箱</span></td>
+              <td>张伟</td>
+              <td>100.112.3.84</td>
+              <td><span class="tag tag-green">✔ 成功</span></td>
+              <td><span class="tag tag-green">区块链已锚定</span></td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalVerifyAudit')">验真详情</a>
+              </td>
+            </tr>
+            <tr>
+              <td>2026-08-12 09:58:40</td>
+              <td><span class="tag tag-orange">进入生产环境</span></td>
+              <td>张伟</td>
+              <td>100.112.3.84</td>
+              <td><span class="tag tag-green">✔ 成功</span></td>
+              <td><span class="tag tag-green">区块链已锚定</span></td>
+              <td>
+                <a style="color:#1677ff;cursor:pointer;margin-right:8px;" onclick="openModal('modalVerifyAudit')">验真详情</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  /* 5-1. 开发指引文档 (P-08 闭环补齐) */
+  function renderGuidePage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span class="cur">开发指引文档</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">数据沙箱开发者开发指引文档</div>
+          <div class="page-subtitle">CubeSandbox 规范、输入输出文件路径约定、预装科学计算与国密环境</div>
+        </div>
+      </div>
+      <div class="card" style="line-height:1.7;font-size:13px;color:#374151;">
+        <h3 style="margin-bottom:8px;color:#111827;">1. 沙箱数据与代码路径约定</h3>
+        <p>• <strong>输入数据挂载路径：</strong><code>/sandbox/data</code>（只读挂载，由 KMS 通过 DEK 动态解密注入，严禁试图修改此目录内容）。</p>
+        <p>• <strong>代码主工程路径：</strong><code>scripts/</code>（支持 Python 脚本与数据建模文件）。</p>
+        <p>• <strong>结果集输出路径：</strong><code>/sandbox/output</code>（唯有写出至此目录的文件才会受到 T5 出域网关审查并导出至「我的结果集」）。</p>
+
+        <h3 style="margin:16px 0 8px 0;color:#111827;">2. 预装计算环境 (CubeSandbox Base Image)</h3>
+        <p>• Python 3.10.12 / 3.12 (含 numpy, pandas, scikit-learn, duckdb, pyarrow, gmssl)。</p>
+        <p>• 预装国密算法组件与轻量化数字水印注入驱动。</p>
+
+        <h3 style="margin:16px 0 8px 0;color:#111827;">3. 唯 CubeSandbox 硬件安全承诺</h3>
+        <p>平台已收敛并彻底下线 Bubblewrap (bwrap) 及 Kubernetes 共享容器。所有计算均在物理 KVM 虚拟化层的 MicroVM 内进行，实现物理内核隔离、内存加密与网络默认阻断。</p>
+      </div>
+    `;
+  }
+
+  /* 5-2. 环境与配额说明 (P-08 闭环补齐) */
+  function renderQuotaPage() {
+    return `
+      <div class="breadcrumb-nav">
+        <span onclick="switchPage('home')">首页</span> &gt;
+        <span class="cur">环境与配额说明</span>
+      </div>
+      <div class="page-header">
+        <div>
+          <div class="page-title">沙箱环境与资源配额说明</div>
+          <div class="page-subtitle">当前租户在沈阳数据中心R所分配的硬件资源与配额消耗规则</div>
+        </div>
+      </div>
+      <div class="stat-grid-3">
+        <div class="stat-card">
+          <div class="stat-icon">💻</div>
+          <div><div class="stat-label">总内存配额</div><div class="stat-val">32 GB</div><div class="stat-sub">调试 8G + 执行 24G</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⚡</div>
+          <div><div class="stat-label">CPU 核心数上限</div><div class="stat-val">16 vCPU</div><div class="stat-sub">CubeSandbox 独占绑定</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💾</div>
+          <div><div class="stat-label">沙箱持久化存储</div><div class="stat-val">50 GB</div><div class="stat-sub">XFS reflink 快速快照</div></div>
+        </div>
+      </div>
+    `;
+  }
+
+  /* Modal Helpers */
+  function openModal(id) { document.getElementById(id).classList.add('active'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+  function openDrawer(id) { document.getElementById(id).classList.add('active'); }
+  function closeDrawer(id) { document.getElementById(id).classList.remove('active'); }
+
+  function runIdeCode() {
+    alert('CubeSandbox MicroVM 开始执行代码...\n[10:43:01] 脚本编译完成\n[10:43:03] 训练运行正常\n[10:43:05] accuracy: 1.00\n[10:43:06] 结果生成并完成 DLP 检查！');
+  }
+
+  function confirmPublishWorkload() {
+    closeModal('modalPublishWorkload');
+    alert('已成功固化并发布版本 v1.0.0！\nSM3 哈希已记录，任务已具备正式批量执行与 OpenAPI 导出资格。');
+  }
+
+  function submitExecute() {
+    closeModal('modalExecuteTask');
+    alert('CubeSandbox 正式执行任务已提交调度！\n任务 ID: RUN-20260812-1042\n可随时点击运行记录查看日志与审查流水。');
+    switchPage('dev', 'detail');
+  }
+
+  // Initial load
+  switchPage('home');
+</script>
+</body>
+</html>

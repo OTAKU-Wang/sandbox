@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     # sessions, dev sessions and contracts.
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 300
 
+    COMPUTE_SCHEDULER_ENABLED: bool = True
+    COMPUTE_SCHEDULER_INTERVAL_SECONDS: int = 60
+    WEBHOOK_DISPATCH_ENABLED: bool = True
+    WEBHOOK_DISPATCH_INTERVAL_SECONDS: int = 15
+    WEBHOOK_ALLOW_PRIVATE_URLS: bool = True
+    NOTEBOOK_KERNEL_ENABLED: bool = True
+    JUPYTER_PROXY_BASE_URL: str | None = None
+
     # W9: idle expiry behavior for sessions that do not declare their own
     # idle_policy. "kill" terminates (CDS historical default); "pause"
     # suspends preserving state (CubeSandbox onTimeout=pause semantics).
@@ -415,6 +423,8 @@ class Settings(BaseSettings):
 
         if self.ALLOW_SIMULATION:
             issues.append("WARN: ALLOW_SIMULATION=true — software-simulated TEE attestation quotes are accepted in production")
+        if self.WEBHOOK_ALLOW_PRIVATE_URLS:
+            issues.append("WARN: WEBHOOK_ALLOW_PRIVATE_URLS=true — 结果推送回调可指向内网/保留地址（SSRF 面），生产应收敛为 false")
         # Pure-degradation switches have NO hardware dependency and MUST fail
         # closed in production — a deployment silently retrying without seccomp,
         # or using an in-memory software KEK, is a hard security failure, not a

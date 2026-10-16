@@ -139,6 +139,55 @@ class AuditService:
 
         return entry
 
+    async def log_standalone(
+        self,
+        *,
+        action: str,
+        resource_type: str,
+        user_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
+        resource_id: str | None = None,
+        detail: dict | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        actor_type: str | None = None,
+        actor_id: str | None = None,
+    ) -> None:
+        """留痕写入独立会话并提交。
+
+        拒绝/失败类审计必须写在本请求事务之外：`get_db` 在端点抛异常时回滚整个
+        请求会话，所“先 `log(db, ...)` 再 raise”的写法在生产里会把这条
+        审计直接吞掉（登录失败、MFA 失败、出口拦截等均属于此类）。本方法开
+        会话、写入、commit，因此调用方随后 raise 不会抹掉它。
+
+        本方法自己占一个连接（请求会话另占一个，池为 20+10），所以审计基础设施
+        故障（包括池耗尽）不能往上抛：那会把一个正确的 401/403 拒访变成 500。
+        失败按本文件 SM2 签名失败的同一先例记 `[CRITICAL]` 错误日志后继续。
+        """
+        from app.core.database import async_session
+
+        try:
+            async with async_session() as own_db:
+                await self.log(
+                    own_db,
+                    action,
+                    resource_type,
+                    user_id=user_id,
+                    session_id=session_id,
+                    resource_id=resource_id,
+                    detail=detail,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
+                await own_db.commit()
+        except Exception as exc:
+            logger.error(
+                f"[CRITICAL] Standalone audit write failed for action={action} "
+                f"resource={resource_type} — denial left no audit trail: {exc}"
+            )
+
     def _write_to_clickhouse(self, entry: AuditLog):
         """Write audit log to ClickHouse with expanded 30+ column schema."""
         ch = self._get_clickhouse()

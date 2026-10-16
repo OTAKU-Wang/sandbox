@@ -1851,7 +1851,8 @@ class SandboxRuntime:
                 from app.core.errors import CDSError
 
                 raise CDSError(
-                    "L2' (cube) data plane is not enabled",
+                    "MicroVM 沙箱数据面未启用或未就绪（需先完成 Cube 计算节点部署并开启"
+                    " CDS_CUBE_DATAPLANE_ENABLED）；按 SS-13 不降级到进程隔离执行",
                     code="RUNTIME_UNAVAILABLE",
                     http_status=400,
                     detail={"level": level, "reason": "dataplane_disabled"},

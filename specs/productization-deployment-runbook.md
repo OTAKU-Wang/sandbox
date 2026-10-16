@@ -267,7 +267,17 @@ cd cds-frontend && npm test
 
 ## 9. Cube 节点部署与升级（SS-10 CB-02）
 
-> 适用范围：CubeSandbox 计算节点（裸金属/VM，`DEPLOY_ROLE=compute`，**不在** CDS k3s 内，§5.1 红线 2）。上游版本钉住见 `scripts/cube-bundle-manifest.json`（§5.2：钉住单位 = 上游 git sha）。真实节点 bring-up + 全链路 e2e 为环境验收项 **FG-017**。
+> 适用范围：CubeSandbox 计算节点（`DEPLOY_ROLE=compute`，**不在** CDS k3s 内，§5.1 红线 2）。上游版本钉住见 `scripts/cube-bundle-manifest.json`（§5.2：钉住单位 = 上游 git sha）。真实节点 bring-up + 全链路 e2e 为环境验收项 **FG-017**。
+>
+> **硬件前提（交付口径，2026-10-16 实测订正）**：计算节点必须是**裸金属**，或**宿主已开启嵌套虚拟化并向 guest 透传 `vmx`/`svm` 的 VM**。普通云 VM（未透传虚拟化指令集）**不能**作为计算节点：guest 内无任何手段可生成 `/dev/kvm`，`preflight.sh` 第一项即硬 FAIL；SS-13 单路径下**不降级到进程隔离/bwrap**，节点仅能以"无数据面"档运行（控制面/目录/契约/审批/审计/交付中心可用，执行类入口返回 `RUNTIME_UNAVAILABLE` + `reason=dataplane_disabled`，不假装可用）。TEE 仍是可选属性（无 TEE = `tee=none` 裸 MicroVM，合法）。
+>
+> 下发/采购前先跑三行判定（只读，售前可用）：
+>
+> ```bash
+> grep -c -m1 hypervisor /proc/cpuinfo        # >0 且下一行为 0 ⇒ 虚机且未透传，不能做计算节点
+> grep -o -m1 -E "vmx|svm" /proc/cpuinfo      # 空 ⇒ 无虚拟化指令集；非空 ⇒ 可继续
+> ls /dev/kvm 2>/dev/null                     # 缺失 ⇒ 先跑 sudo bash deploy/cube-node/preflight.sh 看完整清单
+> ```
 
 ### 9.0 组件所有权边界（谁交付什么，升级谁负责）
 
@@ -308,7 +318,7 @@ bash deploy/cube-node/verify.sh --json      # 机读验收：cubelet gRPC / side
 
 | FAIL 行 | 含义 | 处置 |
 |---|---|---|
-| `FAIL: kvm` | `/dev/kvm` 缺失或权限不足 | 宿主机启用 KVM（虚拟化 BIOS 开关）；权限：`usermod -aG kvm <user>` 或 root 运行（本工具链不代跑 sudo） |
+| `FAIL: kvm` | `/dev/kvm` 缺失或权限不足 | 先分两种情形：**裸金属**→ 宿主机 BIOS 开虚拟化（VT-x/SVM），并确认 `lsmod` 有 `kvm_intel`/`kvm-amd`；**虚拟机**→ 不是 BIOS 问题，缺的是宿主侧嵌套虚拟化透传（AMD/海光需宿主 `kvm_amd.nested=1` 或平台开关，客户侧无法自助），须找云厂换裸金属/支持嵌套虚拟化的实例。判别：`grep -c hypervisor /proc/cpuinfo` > 0 且 `grep -oE "vmx\|svm" /proc/cpuinfo` 为空 ⇒ 就是这种情形（实测：海光 Hygon VM 32 核全带 `hypervisor` 标志、`svm` 为 0，dmesg `kvm: no hardware support`）。仅权限问题才处置：`usermod -aG kvm <user>` 或 root 运行（本工具链不代跑 sudo） |
 | `FAIL: data_fs` | 数据盘非 XFS / 无 reflink / FICLONE 实测失败 | 专用 XFS 分区挂 `/data/cubelet`（`mkfs.xfs` + `mount`）；确认 `xfs_info` 输出 `reflink=1`；上游同类问题：CubeSandbox#311 |
 | `FAIL: ebpf` | bpftool 缺失 / bpf syscall 被拒 / bpffs 未挂载 | 安装 bpf 工具集；检查 seccomp/AppArmor；`mount -t bpf bpf /sys/fs/bpf`（上游 troubleshooting: bpffs-is-not-mounted） |
 | `FAIL: cubelet_bin` | 二进制版本与钉住 sha 不符 | 重跑 install.sh（bundle 换版）或恢复旧 bundle（§9.4 回滚）；**禁止手工替换二进制**（零 diff） |

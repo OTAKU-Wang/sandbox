@@ -30,6 +30,22 @@ class ContractCreate(BaseModel):
     purpose: str | None = None
     purpose_scope: list[str] | None = None
 
+    @field_validator("allowed_sandbox_modes")
+    @classmethod
+    def modes_must_be_known(cls, v: list[str] | None) -> list[str] | None:
+        """合约里写不认识的模式必须在创建时报 422，而不是等到建会话时 500。"""
+        if not v:
+            return v
+        from app.schemas.sandbox_session import canonical_sandbox_mode
+
+        unknown = [m for m in v if canonical_sandbox_mode(m) is None]
+        if unknown:
+            raise ValueError(
+                f"无法识别的沙箱模式: {', '.join(map(str, unknown))}；"
+                "可用 query/train/develop/application/read/modeling/compute 或执行档名"
+            )
+        return v
+
     @field_validator("product_ids")
     @classmethod
     def product_ids_not_empty(cls, v: list[uuid.UUID]) -> list[uuid.UUID]:
@@ -149,6 +165,15 @@ class ContractResponse(BaseModel):
     max_output_rows: int
     allowed_output_formats: str | None
     inspection_rule_set: dict | None
+    delivery_methods: list | None = None
+    auto_compute: bool = False
+    compute_frequency: str = "manual"
+    compute_minute: int = 0
+    compute_hour: int = 2
+    compute_tz: str = "Asia/Shanghai"
+    sandbox_resource_spec: dict | None = None
+    next_compute_at: datetime | None = None
+    last_computed_at: datetime | None = None
     purpose: str | None = None
     purpose_scope: list | None = None
     provider_signed_at: datetime | None

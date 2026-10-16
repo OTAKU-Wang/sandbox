@@ -168,15 +168,10 @@ def _parse_contract_id(contract_id: str | None) -> uuid.UUID | None:
 def _mode_allowed_by_contract(session_mode: str, allowed_modes: list | None) -> bool:
     if not allowed_modes:
         return True
-    aliases = {
-        "structured_query": {"structured_query", "query", "read"},
-        "structured_modeling": {"structured_modeling", "modeling", "analyze"},
-        "structured_app": {"structured_app", "app", "invoke"},
-        "llm_training": {"llm_training", "train", "training"},
-        "product_dev": {"product_dev", "develop", "development"},
-        "joint_federated": {"joint_federated", "federated", "compute"},
-    }.get(session_mode, {session_mode})
-    return bool(aliases.intersection({str(mode) for mode in allowed_modes}))
+    from app.schemas.sandbox_session import SANDBOX_MODE_ALIASES
+
+    aliases = SANDBOX_MODE_ALIASES.get(session_mode, {session_mode})
+    return bool(aliases.intersection({str(mode).strip().lower() for mode in allowed_modes}))
 
 
 def _operation_allowed_by_contract(session_mode: str, allowed_operations: str | None) -> bool:
@@ -402,7 +397,8 @@ async def create_sandbox_session(
 
         if not get_settings().CUBE_DATAPLANE_ENABLED:
             raise CDSError(
-                "L2' (cube) data plane is not enabled",
+                "MicroVM 沙箱数据面未启用或未就绪（需先完成 Cube 计算节点部署并开启"
+                " CDS_CUBE_DATAPLANE_ENABLED）；按 SS-13 不降级到进程隔离执行",
                 code="RUNTIME_UNAVAILABLE",
                 http_status=400,
                 detail={"reason": "dataplane_disabled"},
@@ -500,6 +496,14 @@ async def create_sandbox_session(
     # 若 gRPC 阻塞事件循环则循环依赖死锁（插件 20s 超时 → Attach 拒绝）。
     # DB 访问已全部走 SyncDbBridge（独立 loop+引擎）, 跨线程 native 段错误源
     # （_run_sync 新 loop 复用共享 asyncpg 引擎）已消除。
+    # Provisioning callbacks are cross-connection: the cubelet plugin calls
+    # back into this API's /kms/distribute (and the egress policy loader reads
+    # AppCredential/Contract rows) while this request is still open, so the
+    # session row must be committed before the provision call — an uncommitted
+    # row is invisible to those readers (and a nested service session closing
+    # its own connection would discard it).
+    await db.commit()
+
     provision_result = await asyncio.to_thread(
         runtime.provision,
         session_id=session.id,
@@ -1218,13 +1222,22 @@ async def execute_in_sandbox(
     # Static code analysis before execution (SS-03 §5)
     from app.services.code_scanner import code_scanner
     sandbox_mode = getattr(session, "sandbox_mode", None) or "structured_query"
-    scan_result = code_scanner.scan(exec_code, exec_language, sandbox_mode)
+    scan_code = exec_code
+    trusted_runner = False
+    if body is not None and body.trusted_runner:
+        from app.services.notebook_service import split_trusted_driver
+
+        trusted = split_trusted_driver(exec_code)
+        if trusted is not None:
+            scan_code = trusted["code"]
+            trusted_runner = True
+    scan_result = code_scanner.scan(scan_code, exec_language, sandbox_mode)
     if not scan_result.passed:
         fatal_issues = [i for i in scan_result.issues if i.severity.value == "FATAL"]
-        await audit_service.log(
-            db, action="sandbox.code_scan_rejected", resource_type="sandbox_session",
+        await audit_service.log_standalone(
+            action="sandbox.code_scan_rejected", resource_type="sandbox_session",
             user_id=current_user.id, session_id=session.id,
-            detail={"language": exec_language, "issues": [{"code": i.code, "message": i.message, "line": i.line} for i in fatal_issues]},
+            detail={"language": exec_language, "trusted_runner": trusted_runner, "issues": [{"code": i.code, "message": i.message, "line": i.line} for i in fatal_issues]},
         )
         raise HTTPException(
             status_code=422,
@@ -1711,8 +1724,8 @@ async def _maybe_auto_resume(session: SandboxSession, db: AsyncSession) -> None:
     if not contract_active:
         from app.services.audit_service import audit_service
 
-        await audit_service.log(
-            db, action="session.auto_resume_rejected", resource_type="sandbox_session",
+        await audit_service.log_standalone(
+            action="session.auto_resume_rejected", resource_type="sandbox_session",
             user_id=session.user_id, session_id=session.id,
             detail={"reason": "contract_not_active", "contract_id": session.contract_id},
         )
@@ -1864,8 +1877,8 @@ async def download_session_file(
 
         if _blocked:
             record_output_inspection("blocked")
-            await audit_service.log(
-                db, action="sandbox.file_download_blocked", resource_type="sandbox_session",
+            await audit_service.log_standalone(
+                action="sandbox.file_download_blocked", resource_type="sandbox_session",
                 user_id=current_user.id, session_id=session.id,
                 detail={"filename": filename, "findings": len(_findings)},
             )
@@ -1939,8 +1952,8 @@ async def download_session_file(
 
     if blocked:
         record_output_inspection("blocked")
-        await audit_service.log(
-            db, action="sandbox.file_download_blocked", resource_type="sandbox_session",
+        await audit_service.log_standalone(
+            action="sandbox.file_download_blocked", resource_type="sandbox_session",
             user_id=current_user.id, session_id=session.id,
             detail={"filename": filename, "findings": len(findings)},
         )

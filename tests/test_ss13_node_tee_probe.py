@@ -143,6 +143,17 @@ def _make_unix_socket(path: Path) -> None:
     s.close()  # 文件节点保留
 
 
+# 检查项 10（沙箱网段冲突）的 `ip` fixture：与上游默认 192.168.0.0/18 及 CDS 默认 10.100.0.0/18
+# 均不重叠；不打垫片时，本检查会随跑测试机器的真实网段翻脸（远程测试机实有 192.168.17.0/24）。
+IP_PREFIXES_CLEAN = """1: lo    inet 127.0.0.1/8 scope host lo
+2: eth0    inet 172.20.5.21/24 brd 172.20.5.255 scope global eth0
+3: tun0    inet 2.0.1.111/24 scope global tun0
+default via 172.20.5.1 dev eth0 proto dhcp src 172.20.5.21 metric 100
+172.20.5.0/24 dev eth0 proto kernel scope link src 172.20.5.21
+2.0.1.0/24 dev tun0 proto kernel scope link src 2.0.1.111
+100.112.0.0/16 via 2.0.1.1 dev tun0 proto static metric 50"""
+
+
 def build_mock_root(root: Path) -> Path:
     """自包含版 test_cube_node_tooling.build_mock_root（该文件不在 sys.path，不能跨文件导入）。"""
     root.mkdir(parents=True, exist_ok=True)
@@ -169,8 +180,9 @@ def build_mock_root(root: Path) -> Path:
                 f'echo "name: {root}/data/cubelet (dev /dev/loop0)"\necho "meta-data = ...\\treflink=1"\nexit 0')
     _write_shim(b / "bpftool", "exit 0")
     _write_shim(b / "containerd", 'echo "containerd containerd.io 1.7.20 98535bd5e642f4758b1a9be0b00e5b98985c1c2a"')
-    _write_shim(b / "cubelet", "echo \"cubelet version v0.7.3-rc2 (9b75d33907ed7336b1eef73a935ae2d1990d9b35)\"")
+    _write_shim(b / "cubelet", "echo \"cubelet v0.7.3-rc2 (b0c4cc33fbfccbacc1a72241918ef280e9a32772) built at 2026-10-12T06:28:39Z\"")
     _write_shim(b / "cp", "exit 0")  # FICLONE 实测探针垫片
+    _write_shim(b / "ip", "cat <<'FIXTURE'\n" + IP_PREFIXES_CLEAN + "\nFIXTURE")
     return root
 
 

@@ -129,8 +129,9 @@ async def load_policy_package(session: SandboxSession, config: NetworkPolicyConf
     contract = None
     try:
         async with async_session() as db:
+            contract_id = uuid.UUID(str(session.contract_id))
             row = (await db.execute(
-                select(Contract).where(Contract.id == session.contract_id)
+                select(Contract).where(Contract.id == contract_id)
             )).scalar_one_or_none()
             if row is not None:
                 terms = row.terms or {}
@@ -139,7 +140,7 @@ async def load_policy_package(session: SandboxSession, config: NetworkPolicyConf
 
                 creds = (await db.execute(
                     select(AppCredential).where(
-                        AppCredential.contract_id == session.contract_id,
+                        AppCredential.contract_id == contract_id,
                         AppCredential.status == CredentialStatus.ACTIVE.value,
                         AppCredential.expires_at.is_(None),
                     )

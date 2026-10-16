@@ -18,7 +18,7 @@
 - No module-level prefix: the prefix is assigned ONCE in `main.py` `include_router(...)`. Deviations are deliberate: `health`/`metrics` at root, `session_stream` absolute WS path, `admin` on a separate app.
 - AuthN via `app.core.deps.get_current_user` / `require_roles`. Authorization is NOT shared — each module defines local `_can_view_all_*` / `_can_operate_*` / `_can_manage_*` helpers.
 - List envelope `{items, total, page, page_size}`; opt-in keyset cursor (W8) via `X-Next-Cursor` header (no `total` in cursor mode).
-- Every mutating endpoint calls `audit_service.log(db, action=...)`. `audit.py` adds Merkle anchoring; the PG log is append-only tamper-evident, NOT the chain.
+- Every mutating endpoint calls `audit_service.log(db, action=...)`. **Denial / failure paths call `audit_service.log_standalone(...)` instead** — `get_db` rolls back the request session on exception, so a `log(db, …)` followed by `raise` loses the audit row in production (invisible under `tests/conftest.py`'s override, which neither commits nor rolls back). Success paths stay on the request transaction. `audit.py` adds Merkle anchoring; the PG log is append-only tamper-evident, NOT the chain.
 - Fail-closed intent is written into comments ("never released", "never widen", "never written to disk") — new endpoints must keep that posture.
 
 ## ANTI-PATTERNS (THIS PROJECT)

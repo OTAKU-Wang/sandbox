@@ -74,6 +74,10 @@ class SandboxSession(Base):
     idle_policy: Mapped[str | None] = mapped_column(String(16), nullable=True)
     auto_resume: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
     resource_limits: Mapped[dict | None] = mapped_column(JSON)  # CPU/memory/disk limits
+    # SS-15: test = 测试沙箱（可随便试），production = 生产沙箱（只跑已发布工作负载）。
+    # 历史行保持 NULL = 未标注，不参与环境门禁；新会话必须显式写值。
+    env: Mapped[str | None] = mapped_column(String(16))
+    workload_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     # SS-13: TEE selection policy (tee_if_available|tee_required|none) and the
     # per-session trust root of the selected cube node (tdx|sev_snp|none).
     # Nullable + Python defaults: migration 0016 backfills via server_default.

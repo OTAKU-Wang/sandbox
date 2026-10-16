@@ -24,7 +24,7 @@ export interface UploadResourceRequest {
 
 export const dataResourceApi = {
   list: async (params?: { page?: number; page_size?: number }): Promise<{ items: DataResource[]; total: number }> => {
-    const allItems: DataResource[] = await api.get('/data-resources');
+    const allItems: DataResource[] = await api.get('/data-resources/');
     const page = params?.page ?? 1;
     const pageSize = params?.page_size ?? 20;
     const start = (page - 1) * pageSize;

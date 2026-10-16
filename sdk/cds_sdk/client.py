@@ -131,6 +131,11 @@ def _parse_error(resp: httpx.Response, path: str) -> CDSApiError:
     )
 
 
+def _compact(fields: dict[str, Any]) -> dict[str, Any]:
+    """Drop unset (``None``) keys so PATCH/PUT bodies only carry what the caller passed."""
+    return {key: value for key, value in fields.items() if value is not None}
+
+
 class CDSClient:
     """Small typed wrapper over the ``/sandbox-sessions`` surface.
 
@@ -832,3 +837,296 @@ class CDSClient:
         """
         body: dict[str, Any] = {"sql": sql, "product_id": product_id, "format": format}
         return self._request("POST", f"/api/v1/gateway/{contract_id}/query", json=body)
+
+    # ── flow orchestration: notebook (SS-15 stage 2) ─────────────────
+    def list_notebooks(self, *, contract_id: str | None = None, status: str | None = None,
+                       page: int = 1, page_size: int = 20) -> dict:
+        """List notebooks visible to the caller (``{items, total, page, page_size}``)."""
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if contract_id:
+            params["contract_id"] = contract_id
+        if status:
+            params["status"] = status
+        return self._request("GET", "/api/v1/notebooks", params=params)
+
+    def create_notebook(self, title: str, path: str, *, contract_id: str | None = None,
+                        session_id: str | None = None, content: Any = None,
+                        language: str = "python") -> dict:
+        """Create a notebook. ``content`` is a nbformat v4 document or omitted for an empty one."""
+        body: dict[str, Any] = {
+            "title": title,
+            "path": path,
+            "language": language,
+            **_compact({"contract_id": contract_id, "session_id": session_id, "content": content}),
+        }
+        return self._request("POST", "/api/v1/notebooks", json=body)
+
+    def get_notebook(self, notebook_id: str) -> dict:
+        """Read one notebook, including its persisted ``content`` document and ``version``."""
+        return self._request("GET", f"/api/v1/notebooks/{notebook_id}")
+
+    def update_notebook(self, notebook_id: str, *, title: str | None = None,
+                        content: Any = None, session_id: str | None = None) -> dict:
+        """Save the notebook; every successful save bumps ``version`` server-side."""
+        return self._request(
+            "PUT", f"/api/v1/notebooks/{notebook_id}",
+            json=_compact({"title": title, "content": content, "session_id": session_id}),
+        )
+
+    def archive_notebook(self, notebook_id: str) -> None:
+        """Archive (soft-delete) a notebook. Returns ``None`` on 204."""
+        return self._request("DELETE", f"/api/v1/notebooks/{notebook_id}")
+
+    def start_notebook_dev_session(self, notebook_id: str) -> dict:
+        """Open/reuse the test sandbox session backing this notebook.
+
+        Fails with 400 ``RUNTIME_UNAVAILABLE`` (``detail.reason`` carries the cause, e.g.
+        ``dataplane_disabled``) when no sandbox runtime is reachable — never simulated.
+        """
+        return self._request("POST", f"/api/v1/notebooks/{notebook_id}/dev-session")
+
+    def execute_notebook_cell(self, notebook_id: str, code: str, *, cell_index: int | None = None,
+                             persist: bool = False) -> dict:
+        """Execute one cell in the notebook's sandbox session and return the output envelope."""
+        body: dict[str, Any] = {"code": code, "persist": persist}
+        if cell_index is not None:
+            body["cell_index"] = cell_index
+        return self._request("POST", f"/api/v1/notebooks/{notebook_id}/cells/execute", json=body)
+
+    def get_notebook_jupyter(self, notebook_id: str) -> dict:
+        """Report whether the notebook's session exposes a native Jupyter UI."""
+        return self._request("GET", f"/api/v1/notebooks/{notebook_id}/jupyter")
+
+    def run_notebook(self, notebook_id: str) -> dict:
+        """Execute every code cell in order (per-cell results, stop-on-failure semantics)."""
+        return self._request("POST", f"/api/v1/notebooks/{notebook_id}/run")
+
+    # ── flow orchestration: workload (test → publish gate) ──────────────
+    def list_workloads(self, *, contract_id: str | None = None, env: str | None = None,
+                       status: str | None = None, page: int = 1, page_size: int = 20) -> dict:
+        """List workloads (``env``: ``test`` | ``production``)."""
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if contract_id:
+            params["contract_id"] = contract_id
+        if env:
+            params["env"] = env
+        if status:
+            params["status"] = status
+        return self._request("GET", "/api/v1/workloads", params=params)
+
+    def create_workload(self, name: str, *, contract_id: str | None = None,
+                        notebook_id: str | None = None, entrypoint: str | None = None,
+                        language: str | None = None, resource_spec: dict | None = None,
+                        data_product_ids: list[str] | None = None) -> dict:
+        """Create a workload. With ``notebook_id`` and no ``entrypoint``, the backend derives
+        the entrypoint (and its hash) from the notebook's code cells."""
+        body: dict[str, Any] = {
+            "name": name,
+            **_compact({
+                "contract_id": contract_id,
+                "notebook_id": notebook_id,
+                "entrypoint": entrypoint,
+                "language": language,
+                "resource_spec": resource_spec,
+                "data_product_ids": data_product_ids,
+            }),
+        }
+        return self._request("POST", "/api/v1/workloads", json=body)
+
+    def get_workload(self, workload_id: str) -> dict:
+        return self._request("GET", f"/api/v1/workloads/{workload_id}")
+
+    def test_workload(self, workload_id: str) -> dict:
+        """Run the workload in a test sandbox. ``passed=False`` is a normal 200 outcome."""
+        return self._request("POST", f"/api/v1/workloads/{workload_id}/test")
+
+    def list_workload_test_runs(self, workload_id: str, *, page: int = 1,
+                                page_size: int = 20) -> dict:
+        """History of test runs, including check items and the failure reason."""
+        return self._request(
+            "GET", f"/api/v1/workloads/{workload_id}/test-runs",
+            params={"page": page, "page_size": page_size},
+        )
+
+    def get_workload_test_run(self, workload_id: str, run_id: str) -> dict:
+        return self._request("GET", f"/api/v1/workloads/{workload_id}/test-runs/{run_id}")
+
+    def publish_workload(self, workload_id: str) -> dict:
+        """Publish to production. Rejected with 412 ``WORKLOAD_NOT_PUBLISHED`` family codes
+        until the latest entrypoint hash passed a test run."""
+        return self._request("POST", f"/api/v1/workloads/{workload_id}/publish")
+
+    def rollback_workload(self, workload_id: str) -> dict:
+        """Roll the production slot back to the previously published revision."""
+        return self._request("POST", f"/api/v1/workloads/{workload_id}/rollback")
+
+    def retire_workload(self, workload_id: str) -> dict:
+        """Retire the workload (no further runs or OpenAPI exposure)."""
+        return self._request("POST", f"/api/v1/workloads/{workload_id}/retire")
+
+    # ── flow orchestration: delivery (stage 3, three channels) ─────────
+    def create_dataset_bundle(self, session_id: str, contract_id: str,
+                              watermark: str | None = None) -> dict:
+        """Package the session outputs into a downloadable dataset bundle (watermarked)."""
+        body: dict[str, Any] = {"session_id": session_id, "contract_id": contract_id}
+        if watermark:
+            body["watermark"] = watermark
+        return self._request("POST", "/api/v1/deliveries/dataset/bundle", json=body)
+
+    def download_dataset_bundle(self, bundle_id: str) -> bytes:
+        """Download a bundle zip. Only contract parties may fetch it (404 otherwise)."""
+        path = f"/api/v1/deliveries/dataset/{bundle_id}/download"
+        resp = self._client.get(path)
+        if resp.status_code >= 400:
+            raise _parse_error(resp, path)
+        return resp.content
+
+    def get_contract_openapi(self, contract_id: str) -> dict:
+        """OpenAPI 3.1 document for the contract's published workloads (``paths`` is empty
+        when nothing is published — unpublished workloads are never advertised)."""
+        return self._request("GET", f"/api/v1/deliveries/openapi/contract/{contract_id}")
+
+    def create_openapi_endpoint(self, contract_id: str, name: str, *,
+                                workload_id: str | None = None, slug: str | None = None,
+                                request_schema: dict | None = None,
+                                rate_limit_per_minute: int | None = None,
+                                quota_total: int | None = None) -> dict:
+        """Open an external ``POST /open/v1/{slug}`` entry point (requires ``open_api``
+        among the contract's delivery methods, else 403 ``DELIVERY_METHOD_NOT_ALLOWED``)."""
+        body: dict[str, Any] = {
+            "contract_id": contract_id,
+            "name": name,
+            **_compact({
+                "workload_id": workload_id,
+                "slug": slug,
+                "request_schema": request_schema,
+                "rate_limit_per_minute": rate_limit_per_minute,
+                "quota_total": quota_total,
+            }),
+        }
+        return self._request("POST", "/api/v1/deliveries/openapi/endpoints", json=body)
+
+    def list_openapi_endpoints(self, *, contract_id: str | None = None) -> dict:
+        params: dict[str, Any] = {}
+        if contract_id:
+            params["contract_id"] = contract_id
+        return self._request("GET", "/api/v1/deliveries/openapi/endpoints", params=params)
+
+    def update_openapi_endpoint(self, endpoint_id: str, *, status: str | None = None,
+                                rate_limit_per_minute: int | None = None,
+                                quota_total: int | None = None) -> dict:
+        return self._request(
+            "PATCH", f"/api/v1/deliveries/openapi/endpoints/{endpoint_id}",
+            json=_compact({
+                "status": status,
+                "rate_limit_per_minute": rate_limit_per_minute,
+                "quota_total": quota_total,
+            }),
+        )
+
+    def delete_openapi_endpoint(self, endpoint_id: str) -> None:
+        return self._request("DELETE", f"/api/v1/deliveries/openapi/endpoints/{endpoint_id}")
+
+    def invoke_open_endpoint(self, slug: str, payload: dict) -> dict:
+        """Call the external delivery entry point (agent-side surface; authenticated by a
+        platform API key, not a user token)."""
+        return self._request("POST", f"/open/v1/{slug}", json=payload)
+
+    def create_webhook(self, name: str, url: str, events: list[str], *,
+                       contract_id: str | None = None) -> dict:
+        """Subscribe to result-push events. The plaintext secret is returned once."""
+        body: dict[str, Any] = {"name": name, "url": url, "events": events}
+        if contract_id:
+            body["contract_id"] = contract_id
+        return self._request("POST", "/api/v1/deliveries/webhooks", json=body)
+
+    def list_webhooks(self, *, contract_id: str | None = None) -> dict:
+        params: dict[str, Any] = {}
+        if contract_id:
+            params["contract_id"] = contract_id
+        return self._request("GET", "/api/v1/deliveries/webhooks", params=params)
+
+    def update_webhook(self, subscription_id: str, *, name: str | None = None,
+                       url: str | None = None, events: list[str] | None = None,
+                       status: str | None = None) -> dict:
+        return self._request(
+            "PATCH", f"/api/v1/deliveries/webhooks/{subscription_id}",
+            json=_compact({"name": name, "url": url, "events": events, "status": status}),
+        )
+
+    def delete_webhook(self, subscription_id: str) -> None:
+        """Delete a subscription; delivery history is retained for audit (0 = forever)."""
+        return self._request("DELETE", f"/api/v1/deliveries/webhooks/{subscription_id}")
+
+    def list_webhook_deliveries(self, subscription_id: str, *, status: str | None = None,
+                                page: int = 1, page_size: int = 20) -> dict:
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if status:
+            params["status"] = status
+        return self._request(
+            "GET", f"/api/v1/deliveries/webhooks/{subscription_id}/deliveries", params=params
+        )
+
+    def redeliver_webhook_delivery(self, subscription_id: str, delivery_id: str) -> dict:
+        """Force a redelivery attempt (backoff schedule restarts)."""
+        return self._request(
+            "POST",
+            f"/api/v1/deliveries/webhooks/{subscription_id}/deliveries/{delivery_id}/redeliver",
+        )
+
+    def rotate_webhook_secret(self, subscription_id: str) -> dict:
+        """Rotate the HMAC signing secret; the new plaintext is returned once."""
+        return self._request(
+            "POST", f"/api/v1/deliveries/webhooks/{subscription_id}/rotate-secret"
+        )
+
+    def test_webhook(self, subscription_id: str) -> dict:
+        """Send a probe event so the receiver can be verified before real results flow."""
+        return self._request("POST", f"/api/v1/deliveries/webhooks/{subscription_id}/test")
+
+    # ── flow orchestration: scheduled compute + contract flow config ────
+    def trigger_compute_run(self, contract_id: str) -> dict:
+        """Trigger a compute run now (``trigger=manual``)."""
+        return self._request("POST", "/api/v1/compute/runs", json={"contract_id": contract_id})
+
+    def list_compute_runs(self, *, contract_id: str | None = None, status: str | None = None,
+                          page: int = 1, page_size: int = 20) -> dict:
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if contract_id:
+            params["contract_id"] = contract_id
+        if status:
+            params["status"] = status
+        return self._request("GET", "/api/v1/compute/runs", params=params)
+
+    def get_compute_run(self, run_id: str) -> dict:
+        return self._request("GET", f"/api/v1/compute/runs/{run_id}")
+
+    def cancel_compute_run(self, run_id: str) -> dict:
+        return self._request("POST", f"/api/v1/compute/runs/{run_id}/cancel")
+
+    def get_compute_schedule(self, *, contract_id: str | None = None) -> dict:
+        """Scheduled-compute plan per contract (``next_compute_at`` is server-owned)."""
+        params: dict[str, Any] = {}
+        if contract_id:
+            params["contract_id"] = contract_id
+        return self._request("GET", "/api/v1/compute/schedule", params=params)
+
+    def update_contract_flow_config(self, contract_id: str, *,
+                                    delivery_methods: list[str] | None = None,
+                                    auto_compute: bool | None = None,
+                                    compute_frequency: str | None = None,
+                                    compute_minute: int | None = None,
+                                    compute_hour: int | None = None,
+                                    compute_tz: str | None = None,
+                                    sandbox_resource_spec: dict | None = None) -> dict:
+        """Set the contract's delivery methods, scheduled-compute plan and sandbox sizing."""
+        body = _compact({
+            "delivery_methods": delivery_methods,
+            "auto_compute": auto_compute,
+            "compute_frequency": compute_frequency,
+            "compute_minute": compute_minute,
+            "compute_hour": compute_hour,
+            "compute_tz": compute_tz,
+            "sandbox_resource_spec": sandbox_resource_spec,
+        })
+        return self._request("POST", f"/api/v1/contracts/{contract_id}/flow-config", json=body)

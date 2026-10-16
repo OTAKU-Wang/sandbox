@@ -23,6 +23,7 @@
     "axios": "^1.17.0",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.21",
+    "monaco-editor": "^0.55.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.16.0",

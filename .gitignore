@@ -55,3 +55,5 @@ Thumbs.db
 
 # Runtime artifacts (W13 egress audit trail, app logs)
 logs/
+
+.superpowers/

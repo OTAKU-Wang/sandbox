@@ -26,6 +26,8 @@
 #   CDS_CUBE_TLS_CERT/KEY/CA certificate_service 签发的节点 sidecar 证书（PEM 路径，必配，除非显式明文回退）
 #   CDS_CUBE_TLS_PROXY_PORT  默认 9443（§6.1 CDS_CUBE_NODE_TLS_PROXY_PORT）
 #   CDS_CUBE_GRPC_PORT       默认 9999（cubelet gRPC tcp_address）
+#   CDS_CUBE_SANDBOX_CIDR    写入上游安装器的沙箱网段，默认 10.100.0.0/18（上游默认
+#                            192.168.0.0/18 会盖掉常见 LAN，preflight 第 10 项硬拦）
 #   CDS_CUBE_RESULTS_DIR     默认 /var/lib/cds/sandbox-results（§6.1）
 #   CDS_CUBE_AUDIT_DIR       默认 /data/log/cube-egress（§6.1，egress 审计 JSONL 所在）
 #   CDS_CUBE_VOLUME_PLUGIN_BIN   默认 /usr/local/bin/cds-volume-plugin（CB-03）
@@ -76,6 +78,10 @@ bash "${SCRIPT_DIR}/preflight.sh"
 
 # ---- 2. 上游 compute 安装/升级 ----
 INSTALL_MODE="${CDS_CUBE_INSTALL_MODE:-auto}"
+# 沙箱网段一律显式落到独立私网段（不用上游默认 192.168.0.0/18）；同时交给上游自带的
+# CIDR 冲突预检复核。已在外部显式设上游键时尊重它。
+export CUBE_SANDBOX_NETWORK_CIDR="${CUBE_SANDBOX_NETWORK_CIDR:-${CDS_CUBE_SANDBOX_CIDR:-10.100.0.0/18}}"
+log "沙箱网段 CUBE_SANDBOX_NETWORK_CIDR=${CUBE_SANDBOX_NETWORK_CIDR}"
 log "步骤 2/5: 上游 install-compute.sh（ONE_CLICK_DEPLOY_ROLE=compute，mode=${INSTALL_MODE}）"
 if [[ -n "${MOCK_ROOT}" ]]; then
   log "（mock 模式：跳过上游安装器，测试钩子）"
