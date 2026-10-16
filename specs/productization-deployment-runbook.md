@@ -18,8 +18,10 @@ python scripts/verify_schema_parity.py    # Alembic 链 vs create_all 结构比�
 |---|---|
 | 全新生产库 | `alembic upgrade head`（生产禁止 create_all，见 `app/main.py` 分支条件） |
 | 既有 dev/test 库（create_all 建的） | `alembic stamp head`（列已在，不重放） |
+| stamp 落在旧 revision 的库（历史引导只到 00xx） | 先 `alembic current` 对账，再 `alembic stamp head`，最后 `upgrade head`。直接 `upgrade` 会重放已存在的 `create_table`，PG 报 42701 `relation already exists`（后续加列链会连带报 42703）。已于 2026-10-15 远程部署现场实测。 |
 | 模型改动后 | `alembic revision --autogenerate` → **人工核对** → `upgrade head` → parity 脚本 |
 | 漂移检测 | `alembic check`（CI 中执行；模型与迁移不一致时失败） |
+| 跨过 0021 的存量库（数据集交付包） | 升级本身加性无锁表；但 0021 之前生成的交付包在库里**没有归属记录**，`GET /deliveries/dataset/{bundle_id}/download` 会诚实返回 404（无记录即拒绝，不按"猜到 UUID 就放行"）。告知使用方重新点一次「生成交付包」即可；旧包字节仍留在对象存储里，按留存策略不删。 |
 
 ---
 
@@ -275,6 +277,18 @@ cd cds-frontend && npm test
 | ① cds-volume-plugin | 独立进程 + socket `/run/cds-volume-plugin/cds.sock` | CB-03 | CDS（插件镜像） | stock 配置仅增量注册（diff 留档 `stock-config-diff.log`） |
 | ② TLS 前置代理 | `cds-tls-proxy.service`（stunnel mTLS） | CB-02 | CDS（单元+证书独立升级，不碰 stock） | sidecar 不可达 = 节点 down，无明文回退（§2.10） |
 | ③ 审计 tailer | `cds-audit-tailer.service` | 单元 CB-02 / 二进制 CB-06 | CDS | 红线 5：审计不可丢弃 |
+
+### 9.0.1 ① cds-volume-plugin 的构建前置：Tongsuo 源码取用
+
+插件镜像的 `tongsuo` 阶段要 `COPY Tongsuo/` 编 `libcrypto.a`（SM4-GCM 静态助手），而 `Tongsuo/` 是**只钉 sha 的 gitlink**（`.gitmodules` + `160000 <sha>`，上游 8.5 树 406MB / 23,474 文件不入库），因此干净 clone 后该目录为空——构建前必须先取用：
+
+```bash
+scripts/prepare_tongsuo.sh                       # 默认：git submodule update --init --depth 1（上游 https）
+TONGSUO_TARBALL=/root/thirdparty/tongsuo-<sha>.tar.gz scripts/prepare_tongsuo.sh   # 内网/离线源包
+TONGSUO_GIT_URL=<内网 git 镜像> scripts/prepare_tongsuo.sh                            # 内网镜像
+```
+
+三条路径都以 `git ls-files -s Tongsuo` 的钉住 sha 为准；源包路径还要求 sha256 等于脚本内常量 `TONGSUO_TARBALL_SHA256`（**不可被环境变量覆盖**），不匹配即 fail-closed 且不落地任何源码树——避免用"手边随便一个版本"编出静默换实现的密码库。源包 = 钉住 sha 的 `git archive`（即上游 `util/mktar.sh` 的发布语义：不含 `fuzz/corpora/**` 与 dotfile，构建不需要），内网示例：`100.112.5.253:/root/thirdparty/tongsuo-baa1bb2b95f3.tar.gz`（53,609,980 B，sha256 `5b8483b1…d821005f`）。契约由 `tests/test_prepare_tongsuo.py` 钉住。
 
 ### 9.1 首次 bring-up
 
