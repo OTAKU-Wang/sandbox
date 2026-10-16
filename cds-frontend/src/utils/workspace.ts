@@ -15,14 +15,15 @@ export const DEVELOPER_MENU_KEYS: string[] = [
   '/catalog',
   '/contracts',
   '/contracts/create',
-  '/sandbox-sessions',
   '/dev-sandbox',
   '/notebooks',
   '/workloads',
   '/compute',
   '/deliveries',
+  '/flow/tasks',
+  '/flow/guide',
+  '/flow/quota',
   '/audit',
-  '/compliance-disclosure',
 ];
 
 export function canAccessAdminWorkspace(role?: RoleLike): boolean {

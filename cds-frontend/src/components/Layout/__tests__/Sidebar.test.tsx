@@ -22,7 +22,7 @@ describe('Sidebar', () => {
 
   it('renders base menu items for unauthenticated user', () => {
     renderWithProviders(<Sidebar />);
-    expect(screen.getByText('仪表盘')).toBeInTheDocument();
+    expect(screen.getByText('首页')).toBeInTheDocument();
     expect(screen.queryByText('数据产品')).not.toBeInTheDocument();
     expect(screen.queryByText('沙箱管理')).not.toBeInTheDocument();
   });
@@ -32,7 +32,7 @@ describe('Sidebar', () => {
       user: { id: 'u1', username: 'op', email: 'op@test.com', role: 'operator', organization: null },
     });
     renderWithProviders(<Sidebar />);
-    expect(screen.getByText('审计中心')).toBeInTheDocument();
+    expect(screen.getByText('安全管理')).toBeInTheDocument();
   });
 
   it('hides audit menu for buyer role', () => {
@@ -40,7 +40,7 @@ describe('Sidebar', () => {
       user: { id: 'u1', username: 'buyer', email: 'b@test.com', role: 'buyer', organization: null },
     });
     renderWithProviders(<Sidebar />);
-    expect(screen.queryByText('审计中心')).not.toBeInTheDocument();
+    expect(screen.queryByText('安全管理')).not.toBeInTheDocument();
   });
 
   it('shows audit menu for regulator role', () => {
@@ -48,7 +48,7 @@ describe('Sidebar', () => {
       user: { id: 'u1', username: 'reg', email: 'reg@test.com', role: 'regulator', organization: null },
     });
     renderWithProviders(<Sidebar />);
-    expect(screen.getByText('审计中心')).toBeInTheDocument();
+    expect(screen.getByText('安全管理')).toBeInTheDocument();
   });
 
   it('shows K8s 运营 group for operator role', () => {
@@ -107,8 +107,12 @@ describe('双模式工作台菜单过滤', () => {
     expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
     expect(screen.queryByText('监控中心')).not.toBeInTheDocument();
     expect(screen.queryByText('身份管理')).not.toBeInTheDocument();
-    expect(screen.getByText('沙箱管理')).toBeInTheDocument();
-    expect(screen.getByText('审计中心')).toBeInTheDocument();
+    // SS-18: 开发者工作台按原型 IA —— 沙箱会话列表已不是开发者口径, 开发闭环分组上位
+    expect(screen.queryByText('沙箱管理')).not.toBeInTheDocument();
+    expect(screen.getByText('我的开发')).toBeInTheDocument();
+    expect(screen.getByText('安全管理')).toBeInTheDocument();
+    // 运营方不在 contractReaders: 结果集分组按角色门缺席（角色门不因原型改名而放宽）
+    expect(screen.queryByText('我的结果集')).not.toBeInTheDocument();
   });
 
   it('业务角色残留管理员工台偏好时被强制回到开发者视图', () => {
@@ -118,6 +122,7 @@ describe('双模式工作台菜单过滤', () => {
     useWorkspaceStore.setState({ workspace: 'admin' });
     renderWithProviders(<Sidebar />);
     expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
-    expect(screen.getByText('沙箱管理')).toBeInTheDocument();
+    expect(screen.getByText('首页')).toBeInTheDocument();
+    expect(screen.queryByText('沙箱管理')).not.toBeInTheDocument();
   });
 });

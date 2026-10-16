@@ -14,6 +14,7 @@ const routeMeta = [
   { prefix: '/data-resources', title: '数据资源', trail: ['数据资源'] },
   { prefix: '/contracts/create', title: '创建合约', trail: ['合约管理', '创建合约'] },
   { prefix: '/contracts', title: '合约管理', trail: ['合约管理'] },
+  { prefix: '/flow/tasks', title: '我的开发', trail: ['数据流通', '我的开发'] },
   { prefix: '/notebooks', title: 'Notebook 开发', trail: ['数据流通', 'Notebook 开发'] },
   { prefix: '/workloads', title: '负载测试与发布', trail: ['数据流通', '负载测试与发布'] },
   { prefix: '/compute', title: '计算调度', trail: ['数据流通', '计算调度'] },

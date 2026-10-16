@@ -23,7 +23,7 @@ src/
 | Add an API call | `services/<domain>Api.ts` via the shared axios instance in `services/api.ts` |
 | Role → route access | `utils/roles.ts` ROLE_GROUPS (17 groups) consumed by RoleRoute in App.tsx; `LEGACY_ROLE_ALIASES` normalizes old role names once, here |
 | In-page permissions | per-page `can*` booleans (e.g. SessionDetail) |
-| In-browser SM2/SM3 | `utils/crypto.ts` (sm-crypto; sign payload `CDS-SIGN|<id>|<no>|<role>|<ts>`) |
+| In-browser SM2/SM3 | `utils/crypto.ts` (sm-crypto; sign payload `CDS-SIGN|<id>|<no>|<role>|<ts>[|purpose:<p>][|purpose_scope:<a,b>]`, must stay byte-identical to backend `crypto_service.contract_sign_data`) |
 | High-risk confirm | `utils/highRiskOperation.tsx` — reason ≥8 chars, optional ticket_id |
 | Error/loading/empty UI | `components/Feedback/QueryFeedback.tsx` (getErrorMessage, QueryErrorAlert, CenteredLoading, EmptyState, tableEmpty — used by 13 pages) |
 | Sandbox exec terminal | `components/Sandbox/ExecStreamTerminal.tsx` (@xterm + fit addon) |

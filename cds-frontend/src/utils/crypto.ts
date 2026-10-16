@@ -62,14 +62,24 @@ export function sm3Hash(data: string): string {
 
 /**
  * Build canonical contract signing payload.
+ *
+ * 必须与后端 crypto_service.contract_sign_data 逐字一致（Gap A4：使用目的属于被签原文），
+ * 否则带 purpose 的合约在服务端验签必定失败。
  */
 export function contractSignPayload(
   contractId: string,
   contractNo: string,
   partyRole: 'provider' | 'buyer',
   timestamp: string,
+  purpose?: string | null,
+  purposeScope?: string[] | null,
 ): string {
-  return `CDS-SIGN|${contractId}|${contractNo}|${partyRole}|${timestamp}`;
+  let payload = `CDS-SIGN|${contractId}|${contractNo}|${partyRole}|${timestamp}`;
+  if (purpose) payload += `|purpose:${purpose}`;
+  if (purposeScope && purposeScope.length > 0) {
+    payload += `|purpose_scope:${purposeScope.join(',')}`;
+  }
+  return payload;
 }
 
 /**

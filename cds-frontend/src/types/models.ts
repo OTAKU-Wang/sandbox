@@ -43,6 +43,8 @@ export interface Contract {
   provider_id: string;
   product_ids: string[];
   title: string;
+  purpose: string | null;
+  purpose_scope: string[] | null;
   terms: Record<string, unknown> | null;
   allowed_sandbox_levels: string | null;
   allowed_sandbox_modes: string[] | null;

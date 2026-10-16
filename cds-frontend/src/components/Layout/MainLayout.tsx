@@ -2,6 +2,7 @@ import { Layout, Grid } from 'antd';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import AppHeader from './Header';
+import DataplaneBanner from './DataplaneBanner';
 import { useUIStore } from '../../stores/uiStore';
 
 const { Sider, Content } = Layout;
@@ -39,6 +40,7 @@ export default function MainLayout() {
         <AppHeader />
         <Content className="cds-content">
           <div className="cds-content-inner">
+            <DataplaneBanner />
             <Outlet />
           </div>
         </Content>

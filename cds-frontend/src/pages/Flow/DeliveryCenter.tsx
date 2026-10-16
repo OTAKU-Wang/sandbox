@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import BundlePreviewModal from './BundlePreviewModal';
 import {
   Alert,
   Badge,
@@ -25,9 +26,12 @@ import {
   message,
 } from 'antd';
 import {
+  BugOutlined,
   CopyOutlined,
   DeleteOutlined,
+  EyeOutlined,
   DownloadOutlined,
+  KeyOutlined,
   LockOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -38,20 +42,25 @@ import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import { sandboxApi } from '../../services/sandboxApi';
 import {
+  OPEN_API_DEBUG_BODY_LIMIT,
+  OPEN_API_DEBUG_KEY_SCOPES,
   WEBHOOK_EVENT_OPTIONS,
   buildCurlExample,
   buildRequestExample,
+  callOpenApiWithApiKey,
   describeFlowError,
   flattenOpenApiOperations,
   flowApi,
   formatBytes,
   formatDateTime,
+  openApiCallPathForSlug,
   pickCallCount,
   useApiEndpoints,
   useBuildDatasetBundle,
   useContractOpenApiDoc,
   useCreateEndpoint,
   useCreateWebhook,
+  useDatasetBundles,
   useDeleteEndpoint,
   useDeleteWebhook,
   useRedeliver,
@@ -65,10 +74,14 @@ import {
 import type {
   ApiEndpoint,
   DatasetBundle,
+  DatasetBundleRow,
+  OpenApiDebugAttempt,
   OpenApiDoc,
   WebhookDelivery,
   WebhookSubscription,
 } from '../../services/flow';
+import { apiKeysApi } from '../../services/apiKeysApi';
+import type { ApiKeyCreated } from '../../services/apiKeysApi';
 import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import {
   DELIVERY_STATUS_META,
@@ -152,15 +165,18 @@ async function saveBundleFile(bundleId: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-function DatasetBundleTab() {
+function DatasetBundleTab({ contractId }: { contractId: string | null }) {
   const [form] = Form.useForm();
   const [bundle, setBundle] = useState<DatasetBundle | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const { data: contracts } = useContractOptions();
   const sessionsQuery = useQuery({
     queryKey: ['sandbox-sessions', 'delivery-bundle', 1, 50],
     queryFn: () => sandboxApi.list({ page: 1, page_size: 50 }),
   });
   const bundleMutation = useBuildDatasetBundle();
+  const bundlesQuery = useDatasetBundles(contractId, historyPage, 10);
 
   const build = () => {
     void form
@@ -171,6 +187,8 @@ function DatasetBundleTab() {
           {
             onSuccess: (result) => {
               setBundle(result);
+              setHistoryPage(1);
+              void bundlesQuery.refetch();
               message.success(`打包完成：${result.files?.length ?? 0} 个文件，${formatBytes(result.size_bytes)}`);
             },
             onError: (err) => message.error(describeFlowError(err, '打包失败')),
@@ -180,18 +198,90 @@ function DatasetBundleTab() {
       .catch(() => undefined);
   };
 
+  /** 下载走同一条已有通道（flowApi.downloadBundle → 浏览器落盘），历史行与新包共用。 */
+  const downloadById = (bundleId: string) => {
+    setDownloadingId(bundleId);
+    void flowApi
+      .downloadBundle(bundleId)
+      .then(
+        (blob) => {
+          void saveBundleFile(bundleId, blob);
+          message.success('已开始下载');
+        },
+        (err: unknown) => {
+          void describeDownloadError(err).then((text) => message.error(text));
+        },
+      )
+      .finally(() => setDownloadingId(null));
+  };
+
   const download = () => {
     if (!bundle) return;
-    void flowApi.downloadBundle(bundle.bundle_id).then(
-      (blob) => {
-        void saveBundleFile(bundle.bundle_id, blob);
-        message.success('已开始下载');
-      },
-      (err: unknown) => {
-        void describeDownloadError(err).then((text) => message.error(text));
-      },
-    );
+    downloadById(bundle.bundle_id);
   };
+
+  const [previewBundleId, setPreviewBundleId] = useState<string | null>(null);
+
+  const historyColumns: ColumnsType<DatasetBundleRow> = [
+    {
+      title: '成果包',
+      dataIndex: 'bundle_id',
+      render: (bundleId: string, record) => (
+        <Space direction="vertical" size={0}>
+          <Text code copyable={{ text: bundleId }}>
+            {bundleId.slice(0, 8)}…
+          </Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {record.contract_no}
+          </Text>
+        </Space>
+      ),
+    },
+    { title: '文件数', dataIndex: 'file_count', width: 80 },
+    { title: '大小', dataIndex: 'size_bytes', width: 100, render: (size: number) => formatBytes(size) },
+    { title: '生成时间', dataIndex: 'created_at', width: 170, render: (value: string | null) => formatDateTime(value) },
+    {
+      title: '水印',
+      key: 'watermark',
+      width: 130,
+      render: (_: unknown, record) =>
+        bundle && record.bundle_id === bundle.bundle_id ? (
+          bundle.watermark_applied ? (
+            <Tag color="green">已嵌入水印</Tag>
+          ) : (
+            <Tag color="orange">后端报告未加水印</Tag>
+          )
+        ) : (
+          <Tooltip title="历史列表不下发水印口径：它只写在包内 MANIFEST.json 的 files[].watermark_applied 里。为不伪造，此处不作推定。">
+            <Tag>未下发</Tag>
+          </Tooltip>
+        ),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 180,
+      render: (_: unknown, record) => (
+        <Space>
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => setPreviewBundleId(record.bundle_id)}
+          >
+            预览
+          </Button>
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            loading={downloadingId === record.bundle_id}
+            onClick={() => downloadById(record.bundle_id)}
+          >
+            下载
+          </Button>
+        </Space>
+      ),
+    },
+  ];
 
   return (
     <Row gutter={16}>
@@ -270,6 +360,54 @@ function DatasetBundleTab() {
             )}
           </Card>
         )}
+      </Col>
+      <Col xs={24}>
+        <Card
+          size="small"
+          title="成果包历史"
+          extra={
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                void bundlesQuery.refetch();
+              }}
+            >
+              刷新
+            </Button>
+          }
+        >
+          {bundlesQuery.isError && (
+            <QueryErrorAlert
+              error={bundlesQuery.error}
+              message="成果包历史加载失败"
+              onRetry={() => {
+                void bundlesQuery.refetch();
+              }}
+            />
+          )}
+          <Table<DatasetBundleRow>
+            rowKey="bundle_id"
+            size="small"
+            columns={historyColumns}
+            dataSource={bundlesQuery.data?.items ?? []}
+            loading={bundlesQuery.isLoading}
+            locale={tableEmpty(contractId ? '该合约还没有生成过成果包' : '还没有生成过成果包（选择合约可只看它的历史）')}
+            pagination={{
+              current: historyPage,
+              pageSize: 10,
+              total: bundlesQuery.data?.total ?? 0,
+              size: 'small',
+              showSizeChanger: false,
+              onChange: (next) => setHistoryPage(next),
+            }}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            列表来自交付包归属表{contractId ? '，已按所选合约过滤' : ''}：只看得见自己作为买方/提供方的合约下的包。下载仍会逐次按合约当事方鉴权，
+            加固前生成的旧包会被以“未经出口审查”拦下。
+          </Text>
+          <BundlePreviewModal bundleId={previewBundleId} onClose={() => setPreviewBundleId(null)} />
+        </Card>
       </Col>
     </Row>
   );
@@ -472,6 +610,7 @@ function CreateEndpointModal({
 
 function ApiDeliveryTab({ contractId }: { contractId: string | null }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [debugEndpointId, setDebugEndpointId] = useState<string | null>(null);
   const endpointsQuery = useApiEndpoints(contractId);
   const docQuery = useContractOpenApiDoc(contractId);
   const updateMutation = useUpdateEndpoint();
@@ -481,6 +620,11 @@ function ApiDeliveryTab({ contractId }: { contractId: string | null }) {
   const curlFor = (endpoint: ApiEndpoint) => {
     const row = docRows.find((candidate) => candidate.path.includes(endpoint.slug));
     return buildCurlExample(endpoint.slug, buildRequestExample(row, endpoint));
+  };
+
+  const bodyFor = (endpoint: ApiEndpoint) => {
+    const row = docRows.find((candidate) => candidate.path.includes(endpoint.slug));
+    return JSON.stringify(buildRequestExample(row, endpoint), null, 2);
   };
 
   const columns: ColumnsType<ApiEndpoint> = [
@@ -524,10 +668,13 @@ function ApiDeliveryTab({ contractId }: { contractId: string | null }) {
     {
       title: '操作',
       key: 'actions',
-      width: 260,
+      width: 340,
       render: (_: unknown, record) => (
-        <Space size={4}>
+        <Space size={4} wrap>
           <CopyButton text={curlFor(record)} label="调用示例" />
+          <Button size="small" icon={<BugOutlined />} onClick={() => setDebugEndpointId(record.id)}>
+            调试
+          </Button>
           <Button
             size="small"
             onClick={() =>
@@ -624,7 +771,284 @@ function ApiDeliveryTab({ contractId }: { contractId: string | null }) {
       </Card>
 
       {createOpen && <CreateEndpointModal open onClose={() => setCreateOpen(false)} contractId={contractId} />}
+      {debugEndpointId && (
+        <ApiDebugModal
+          open
+          onClose={() => setDebugEndpointId(null)}
+          endpoints={endpointsQuery.data ?? []}
+          initialEndpointId={debugEndpointId}
+          bodyForEndpoint={bodyFor}
+        />
+      )}
     </Space>
+  );
+}
+
+/**
+ * SS-17 在线试调用：选一个已发布的端点 → 拿一把真实的网关作用域 API Key →
+ * 直接 `POST /open/v1/{slug}` 看真实响应。
+ *
+ * 凭据不是模拟的：密钥由 `POST /api/v1/api-keys`（preset=custom + gateway:write）签发，
+ * 裸密钥后端只回一次。创建需要 ADMIN（该路由 human-only + ADMIN 门），非管理员可以
+ * 粘贴管理员已发的 `cds_ak_…` 走同一条调用——两种路径都不会伪装成“密钥可用”。
+ */
+function ApiDebugModal({
+  open,
+  onClose,
+  endpoints,
+  initialEndpointId,
+  bodyForEndpoint,
+}: {
+  open: boolean;
+  onClose: () => void;
+  endpoints: ApiEndpoint[];
+  initialEndpointId: string | null;
+  bodyForEndpoint: (endpoint: ApiEndpoint) => string;
+}) {
+  const [endpointId, setEndpointId] = useState<string | null>(initialEndpointId ?? endpoints[0]?.id ?? null);
+  const [bodyByEndpoint, setBodyByEndpoint] = useState<Record<string, string>>({});
+  const [keyCreated, setKeyCreated] = useState<ApiKeyCreated | null>(null);
+  const [pastedKey, setPastedKey] = useState('');
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [creatingKey, setCreatingKey] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [attempt, setAttempt] = useState<OpenApiDebugAttempt | null>(null);
+  const [calling, setCalling] = useState(false);
+
+  const endpoint = endpoints.find((item) => item.id === endpointId) ?? null;
+  const apiKey = pastedKey.trim() || keyCreated?.key || '';
+  const bodyText = endpoint ? bodyByEndpoint[endpoint.id] ?? bodyForEndpoint(endpoint) : '';
+
+  const createKey = () => {
+    if (!endpoint) {
+      message.error('请先选择要调试的端点');
+      return;
+    }
+    setKeyError(null);
+    setCreatingKey(true);
+    void apiKeysApi
+      .create({
+        name: `openapi-debug-${endpoint.slug}`.slice(0, 64),
+        description: '成果交付页在线试调用创建（仅 gateway:write，30 天有效）',
+        preset: 'custom',
+        scopes: [...OPEN_API_DEBUG_KEY_SCOPES],
+        expires_in_days: 30,
+        rate_limit: 60,
+      })
+      .then((created) => {
+        setKeyCreated(created);
+        setPastedKey('');
+        setAttempt(null);
+        message.warning('调试密钥已创建：裸密钥只显示这一次，请立即复制保存');
+      })
+      .catch((err: unknown) => {
+        setKeyError(describeFlowError(err, '创建调试密钥失败'));
+      })
+      .finally(() => setCreatingKey(false));
+  };
+
+  const revokeKey = () => {
+    if (!keyCreated) return;
+    setRevoking(true);
+    void apiKeysApi
+      .revoke(keyCreated.id)
+      .then(() => {
+        setKeyCreated(null);
+        setAttempt(null);
+        message.success('调试密钥已吊销');
+      })
+      .catch((err: unknown) => message.error(describeFlowError(err, '吊销密钥失败')))
+      .finally(() => setRevoking(false));
+  };
+
+  const call = () => {
+    if (!endpoint) {
+      message.error('请先选择要调试的端点');
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = bodyText.trim() ? (JSON.parse(bodyText) as unknown) : {};
+    } catch {
+      message.error('请求体不是合法 JSON，未发起调用');
+      return;
+    }
+    setCalling(true);
+    setAttempt(null);
+    void callOpenApiWithApiKey(endpoint.slug, apiKey, parsed)
+      .then((result) => setAttempt(result))
+      .finally(() => setCalling(false));
+  };
+
+  const failureCopy = attempt
+    ? [
+        attempt.errorInfo?.detail,
+        attempt.errorInfo?.message,
+        attempt.errorInfo?.code ? `错误码 ${attempt.errorInfo.code}` : null,
+        attempt.errorInfo?.requestId ? `request_id ${attempt.errorInfo.requestId}` : null,
+      ]
+        .filter((part): part is string => !!part)
+        .join(' · ')
+    : '';
+
+  return (
+    <Modal
+      title="在线试调用 OpenAPI 端点"
+      open={open}
+      onCancel={onClose}
+      width={780}
+      footer={[
+        attempt?.bodyText ? <CopyButton key="copy" text={attempt.bodyText} label="复制响应体" /> : null,
+        <Button key="close" onClick={onClose}>
+          关闭
+        </Button>,
+      ]}
+    >
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        {!endpoints.length && <Alert type="warning" showIcon message="当前合约下没有可调试的端点：请先在上方新建端点。" />}
+        {endpoints.length > 0 && (
+          <Select
+            style={{ width: '100%' }}
+            value={endpointId ?? undefined}
+            placeholder="选择要调试的端点"
+            onChange={(value: string) => {
+              setEndpointId(value);
+              setAttempt(null);
+            }}
+            options={endpoints.map((item) => ({
+              label: `${item.name}（POST ${openApiPathForSlug(item.slug)}）`,
+              value: item.id,
+            }))}
+          />
+        )}
+        {endpoint && endpoint.status !== 'enabled' && (
+          <Alert
+            type="warning"
+            showIcon
+            message={`端点当前状态为 ${endpoint.status}，网关会按后端口径拒绝调用；本页面只如实展示后端返回，不伪装成功。`}
+          />
+        )}
+
+        <div>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            请求体（JSON，已按 OpenAPI 文档预填，可改）
+          </Text>
+          <Input.TextArea
+            rows={5}
+            style={{ marginTop: 4, fontFamily: 'monospace' }}
+            value={bodyText}
+            onChange={(event) => {
+              if (!endpoint) return;
+              setBodyByEndpoint((prev) => ({ ...prev, [endpoint.id]: event.target.value }));
+            }}
+          />
+        </div>
+
+        <Card size="small" title="调用凭据（平台 API Key）">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              密钥走后端真实签发：POST /api/v1/api-keys，作用域仅为 {OPEN_API_DEBUG_KEY_SCOPES.join('、')}（网关组写动词 ={' '}
+              {'POST /open/v1/{slug}'}），30 天过期。创建需要 ADMIN 账号；已有密钥可直接粘贴使用。
+            </Text>
+            {keyCreated && (
+              <Alert
+                type="warning"
+                showIcon
+                icon={<KeyOutlined />}
+                message="裸密钥仅此一次可见"
+                description={
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Paragraph code copyable={{ text: keyCreated.key }} style={{ marginBottom: 0, wordBreak: 'break-all' }}>
+                      {keyCreated.key}
+                    </Paragraph>
+                    <Space wrap>
+                      <CopyButton text={keyCreated.key} label="复制密钥" />
+                      <Button size="small" danger loading={revoking} onClick={revokeKey}>
+                        吊销此密钥
+                      </Button>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        前缀 {keyCreated.key_prefix} · 作域 {(keyCreated.scopes ?? []).join('，')}
+                      </Text>
+                    </Space>
+                  </Space>
+                }
+              />
+            )}
+            <Space wrap>
+              {!keyCreated && (
+                <Button size="small" icon={<KeyOutlined />} loading={creatingKey} onClick={createKey}>
+                  创建网关调试密钥
+                </Button>
+              )}
+              <Input.Password
+                style={{ width: 320 }}
+                placeholder="或粘贴已有的 cds_ak_… 密钥"
+                value={pastedKey}
+                onChange={(event) => setPastedKey(event.target.value)}
+              />
+            </Space>
+            {keyError && (
+              <Alert
+                type="error"
+                showIcon
+                message="拿不到可用的 API Key"
+                description={`${keyError}——创建平台 API Key 需要 ADMIN（该路由 human-only），非管理员请粘贴管理员签发的密钥。未拿到密钥前不会发起调用。`}
+              />
+            )}
+          </Space>
+        </Card>
+
+        <Space wrap>
+          <Tooltip title={apiKey ? '' : '先创建或粘贴一把 API Key'}>
+            <Button type="primary" icon={<BugOutlined />} disabled={!apiKey || !endpoint} loading={calling} onClick={call}>
+              发起调用
+            </Button>
+          </Tooltip>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            每次试调用都会被审计并计入端点配额/限流。
+          </Text>
+        </Space>
+
+        {attempt && (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Descriptions size="small" column={3}>
+              <Descriptions.Item label="HTTP 状态">
+                {attempt.httpStatus === 0 ? (
+                  <Tag>未送达</Tag>
+                ) : (
+                  <Tag color={attempt.ok ? 'green' : responseStatusColor(attempt.httpStatus)}>
+                    {attempt.httpStatus}
+                    {attempt.statusText ? ` ${attempt.statusText}` : ''}
+                  </Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="耗时">{attempt.latencyMs} ms</Descriptions.Item>
+              <Descriptions.Item label="Content-Type">{attempt.contentType ?? '-'}</Descriptions.Item>
+            </Descriptions>
+            {attempt.transportError && (
+              <Alert type="error" showIcon message="请求没有拿到 HTTP 响应" description={attempt.transportError} />
+            )}
+            {!attempt.ok && !attempt.transportError && (
+              <Alert
+                type="error"
+                showIcon
+                message={`网关返回 ${attempt.httpStatus}`}
+                description={failureCopy || '后端未返回可解析的 W2 错误体，原文见下方响应体。'}
+              />
+            )}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              响应体
+              {attempt.bodyTruncated
+                ? `（共 ${attempt.bodyChars} 字符，仅展示前 ${OPEN_API_DEBUG_BODY_LIMIT} 字符）`
+                : attempt.bodyChars
+                  ? `（${attempt.bodyChars} 字符）`
+                  : '为空'}
+            </Text>
+            <pre className="cds-json-block">{attempt.bodyText || '（空响应体）'}</pre>
+          </Space>
+        )}
+      </Space>
+    </Modal>
   );
 }
 
@@ -1023,7 +1447,7 @@ export default function DeliveryCenter() {
             {
               key: 'dataset',
               label: '数据集打包',
-              children: <DatasetBundleTab />,
+              children: <DatasetBundleTab contractId={contractId} />,
             },
             {
               key: 'api',

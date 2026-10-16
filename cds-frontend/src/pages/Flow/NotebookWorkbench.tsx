@@ -377,6 +377,10 @@ function NotebookWorkspace({ notebook }: { notebook: Notebook }) {
   };
 
   const runAll = () => {
+    if (!cells.some((code) => code.trim())) {
+      message.warning('没有可执行的单元格：请先输入代码并保存');
+      return;
+    }
     runAllMutation.mutate(notebook.id, {
       onSuccess: (result) => {
         const byIndex = new Map<number, CellExecuteResult>();
@@ -526,6 +530,11 @@ function NotebookWorkspace({ notebook }: { notebook: Notebook }) {
       )}
 
       <Divider style={{ margin: '4px 0 12px' }} />
+      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+        沙箱目录：<Text code>/sandbox/data</Text> 合约授权数据（只读提供，不进成果包）｜
+        <Text code>/sandbox/output</Text> 产物目录（<Text strong>只有写在这里的文件会进入成果包</Text>）｜
+        <Text code>/scratch</Text> 工作区
+      </Text>
 
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {cells.map((code, index) => {

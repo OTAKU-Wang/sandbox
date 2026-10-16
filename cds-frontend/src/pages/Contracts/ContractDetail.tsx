@@ -7,7 +7,6 @@ import { authApi } from '../../services/authApi';
 import { useAuthStore } from '../../stores/authStore';
 import { CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 import {
-  generateSM2KeyPair,
   sm2Sign,
   contractSignPayload,
   loadSM2PrivateKey,
@@ -55,18 +54,26 @@ export default function ContractDetail() {
 
       let privateKey = loadSM2PrivateKey(user.id);
       if (!privateKey) {
-        const keypair = generateSM2KeyPair();
-        saveSM2PrivateKey(user.id, keypair.privateKey);
-        try { await authApi.generateSM2Keys(); } catch { /* continue with local signing */ }
-        privateKey = keypair.privateKey;
+        // 验签读服务端登记的公钥（user.sm2_certificate），它只由该端点写入，
+        // 因此私钥必须用同一次调用的返回值，本地自生密钥对验不过。
+        const keypair = await authApi.generateSM2Keys();
+        saveSM2PrivateKey(user.id, keypair.private_key);
+        privateKey = keypair.private_key;
         message.info('SM2密钥对已生成并保存在本地，请妥善保管');
       }
 
       const partyRole = user.id === contract.provider_id ? 'provider' : 'buyer';
       const timestamp = new Date().toISOString();
-      const payload = contractSignPayload(contract.id, contract.contract_no, partyRole, timestamp);
+      const payload = contractSignPayload(
+        contract.id,
+        contract.contract_no,
+        partyRole,
+        timestamp,
+        contract.purpose,
+        contract.purpose_scope,
+      );
       const signature = sm2Sign(payload, privateKey);
-      return contractApi.sign(id!, signature);
+      return contractApi.sign(id!, signature, timestamp);
     },
     onSuccess: () => {
       message.success('签署成功');

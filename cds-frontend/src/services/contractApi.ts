@@ -49,8 +49,8 @@ export const contractApi = {
   create: (data: CreateContractRequest): Promise<Contract> =>
     api.post('/contracts', data),
 
-  sign: (id: string, signature: string): Promise<Contract> =>
-    api.post(`/contracts/${id}/sign`, { signature }),
+  sign: (id: string, signature: string, timestamp: string): Promise<Contract> =>
+    api.post(`/contracts/${id}/sign`, { signature, timestamp }),
 
   activate: (id: string): Promise<Contract> =>
     api.post(`/contracts/${id}/activate`),

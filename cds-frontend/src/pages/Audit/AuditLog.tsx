@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Table, Tag, Typography, Space, Select, Button, Drawer, Descriptions, message, Alert } from 'antd';
+import { Table, Tag, Typography, Space, Select, Button, Drawer, Descriptions, message } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { auditApi, type AuditRecord } from '../../services/auditApi';
 import type { ColumnsType } from 'antd/es/table';
 import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import AuditVerifyModal from '../../components/Audit/AuditVerifyModal';
 
-const { Title, Text } = Typography;
+const { Title } = Typography;
 
 const actionColors: Record<string, string> = {
   login: 'blue', create: 'green', update: 'orange', delete: 'red',
@@ -20,8 +21,8 @@ export default function AuditLog() {
   const [actionFilter, setActionFilter] = useState<string | undefined>();
   const [selectedRecord, setSelectedRecord] = useState<AuditRecord | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
-  const [verifyResult, setVerifyResult] = useState<{ verified: boolean; tx_hash: string | null } | null>(null);
-  const [proofResult, setProofResult] = useState<{ record_hash: string; tx_hash: string } | null>(null);
+  const [verifyTargetId, setVerifyTargetId] = useState<string | null>(null);
+  const [verifyOpen, setVerifyOpen] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['audit-records', page, actionFilter],
@@ -31,29 +32,18 @@ export default function AuditLog() {
   const anchorMutation = useMutation({
     mutationFn: (ids: string[]) => auditApi.anchor(ids),
     onSuccess: (r) => {
-      message.success(`已锚定 ${r.anchored} 条记录, Merkle Root: ${r.merkle_root?.slice(0, 16)}...`);
+      const height = r.block_number != null ? `, 区块高度: ${r.block_number}` : '';
+      message.success(`已锚定 ${r.anchored} 条记录, Merkle Root: ${r.merkle_root?.slice(0, 16)}...${height}`);
       queryClient.invalidateQueries({ queryKey: ['audit-records'] });
       setSelectedRowKeys([]);
     },
     onError: () => message.error('锚定失败'),
   });
 
-  const verifyMutation = useMutation({
-    mutationFn: (id: string) => auditApi.verify(id),
-    onSuccess: (r) => {
-      setVerifyResult(r);
-      message.success(r.verified ? '区块链验证通过' : '区块链验证失败');
-    },
-    onError: () => message.error('验证请求失败'),
-  });
-
-  const proofMutation = useMutation({
-    mutationFn: (id: string) => auditApi.getMerkleProof(id),
-    onSuccess: (r) => {
-      setProofResult(r);
-    },
-    onError: () => message.error('获取Merkle证明失败'),
-  });
+  const openVerifyModal = (id: string) => {
+    setVerifyTargetId(id);
+    setVerifyOpen(true);
+  };
 
   const columns: ColumnsType<AuditRecord> = [
     { title: '时间', dataIndex: 'created_at', key: 'created_at', render: (v) => new Date(v).toLocaleString() },
@@ -68,10 +58,8 @@ export default function AuditLog() {
     {
       title: '操作', key: 'action', render: (_, record) => (
         <Space>
-          <a onClick={() => { setSelectedRecord(record); setVerifyResult(null); setProofResult(null); }}>详情</a>
-          {record.blockchain_tx_hash && (
-            <a onClick={() => verifyMutation.mutate(record.id)}>验证</a>
-          )}
+          <a onClick={() => { setSelectedRecord(record); }}>详情</a>
+          <a onClick={() => openVerifyModal(record.id)}>存证验真</a>
         </Space>
       ),
     },
@@ -93,17 +81,6 @@ export default function AuditLog() {
           锚定选中记录 ({selectedRowKeys.length})
         </Button>
       </Space>
-
-      {verifyResult && (
-        <Alert
-          type={verifyResult.verified ? 'success' : 'error'}
-          message={verifyResult.verified ? '区块链验证通过' : '区块链验证失败'}
-          description={verifyResult.tx_hash ? `TX: ${verifyResult.tx_hash}` : '无链上记录'}
-          closable
-          onClose={() => setVerifyResult(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
 
       {isError && (
         <QueryErrorAlert error={error} message="审计日志加载失败" onRetry={() => { void refetch(); }} />
@@ -138,31 +115,13 @@ export default function AuditLog() {
             </Descriptions.Item>
           </Descriptions>
         )}
-
-        {selectedRecord?.blockchain_tx_hash && (
-          <div style={{ marginTop: 16 }}>
-            <Title level={5}>Merkle 证明</Title>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Button
-                loading={proofMutation.isPending}
-                onClick={() => proofMutation.mutate(selectedRecord.id)}
-              >
-                获取 Merkle 证明
-              </Button>
-              {proofResult && (
-                <Descriptions bordered column={1} size="small">
-                  <Descriptions.Item label="记录哈希">
-                    <Text code copyable>{proofResult.record_hash}</Text>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="区块链TX">
-                    <Text code copyable>{proofResult.tx_hash}</Text>
-                  </Descriptions.Item>
-                </Descriptions>
-              )}
-            </Space>
-          </div>
-        )}
       </Drawer>
+
+      <AuditVerifyModal
+        recordId={verifyTargetId}
+        open={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+      />
     </div>
   );
 }

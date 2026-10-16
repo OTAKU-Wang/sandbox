@@ -22,6 +22,14 @@ export interface UploadResourceRequest {
   file: File;
 }
 
+export interface DesensitizeResult {
+  resource_id: string;
+  format: string;
+  data: string;
+  row_count: number;
+  masking_applied: boolean;
+}
+
 export const dataResourceApi = {
   list: async (params?: { page?: number; page_size?: number }): Promise<{ items: DataResource[]; total: number }> => {
     const allItems: DataResource[] = await api.get('/data-resources/');
@@ -50,6 +58,6 @@ export const dataResourceApi = {
   sample: (id: string, params: { sample_size?: number; method?: string }): Promise<unknown> =>
     api.post(`/data-resources/${id}/sample`, null, { params }),
 
-  desensitize: (id: string, params?: { sample_size?: number }): Promise<unknown> =>
-    api.post(`/data-resources/${id}/desensitize`, null, { params }),
+  desensitize: (id: string): Promise<DesensitizeResult> =>
+    api.post(`/data-resources/${id}/desensitize`),
 };

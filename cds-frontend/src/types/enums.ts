@@ -31,14 +31,38 @@ export const ContractType = {
 export type ContractType = typeof ContractType[keyof typeof ContractType];
 
 export const SandboxLevel = {
-  L0: 'L0',
-  L1: 'L1',
-  L2: 'L2',
   L2C: 'l2c',
-  L3: 'L3',
-  K8S: 'k8s',
 } as const;
-export type SandboxLevel = typeof SandboxLevel[keyof typeof SandboxLevel];
+
+// SS-13 收敛后唯一可选的沙箱级别 = CubeSandbox 微虚拟机（l2c）。
+// 旧级别不再出现在任何创建表单里，但它们仍存在于存量会话/合约中，
+// 所以取值域保留历史值（否则旧数据在列表/详情里会变成不可比较、不可渲染的类型错误）。
+export const LEGACY_SANDBOX_LEVELS = ['L0', 'L1', 'L2', 'L3', 'k8s'] as const;
+export type LegacySandboxLevel = typeof LEGACY_SANDBOX_LEVELS[number];
+
+// `string & {}` 的作用：保留 l2c/历史值的字面量补全，同时容忍后端新回传的未知级别。
+export type SandboxLevel =
+  | typeof SandboxLevel[keyof typeof SandboxLevel]
+  | LegacySandboxLevel
+  | (string & {});
+
+export const SANDBOX_LEVEL_LABELS: Record<string, string> = {
+  l2c: "L2' MicroVM (CubeSandbox)",
+  L0: 'L0 进程隔离（历史）',
+  L1: 'L1 TEE（历史）',
+  L2: 'L2 Firecracker（历史）',
+  L3: 'L3 bwrap 隔离（历史）',
+  k8s: 'K8s Pod（历史）',
+};
+
+export function sandboxLevelLabel(level?: string | null): string {
+  if (!level) return '未知级别';
+  return SANDBOX_LEVEL_LABELS[level] ?? `${level}（历史）`;
+}
+
+export function isLegacySandboxLevel(level?: string | null): boolean {
+  return (LEGACY_SANDBOX_LEVELS as readonly string[]).includes(level ?? '');
+}
 
 export const SandboxSessionStatus = {
   PENDING: 'pending',

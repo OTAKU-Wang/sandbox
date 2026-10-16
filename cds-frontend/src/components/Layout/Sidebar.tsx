@@ -17,7 +17,10 @@ import {
   NodeIndexOutlined,
   TeamOutlined,
   PartitionOutlined,
+  ProjectOutlined,
   BookOutlined,
+  ReadOutlined,
+  WalletOutlined,
   ThunderboltOutlined,
   ScheduleOutlined,
   SendOutlined,
@@ -33,7 +36,7 @@ import { UserRole } from '../../types/enums';
 function getMenuItems(role?: RoleLike): MenuProps['items'] {
   const normalizedRole = normalizeUserRole(role);
   const items: MenuProps['items'] = [
-    { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+    { key: '/', icon: <DashboardOutlined />, label: '首页' },
   ];
 
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.productReaders)) {
@@ -83,22 +86,37 @@ function getMenuItems(role?: RoleLike): MenuProps['items'] {
     });
   }
 
-  const flowChildren: NonNullable<MenuProps['items']> = [
+  const devChildren: NonNullable<MenuProps['items']> = [
     ...(hasAnyRole(normalizedRole, ROLE_GROUPS.flowDevUsers)
       ? [
-          { key: '/notebooks', icon: <BookOutlined />, label: 'Notebook 开发' },
-          { key: '/workloads', icon: <ThunderboltOutlined />, label: '负载测试与发布' },
+          { key: '/flow/tasks', icon: <ProjectOutlined />, label: '任务列表' },
+          { key: '/notebooks', icon: <BookOutlined />, label: '在线调试' },
+          { key: '/workloads', icon: <ThunderboltOutlined />, label: '负载与发布' },
         ]
       : []),
     ...(hasAnyRole(normalizedRole, ROLE_GROUPS.sandboxReaders)
       ? [{ key: '/compute', icon: <ScheduleOutlined />, label: '计算调度' }]
       : []),
-    ...(hasAnyRole(normalizedRole, ROLE_GROUPS.contractReaders)
-      ? [{ key: '/deliveries', icon: <SendOutlined />, label: '成果交付' }]
-      : []),
   ];
-  if (flowChildren.length > 0) {
-    items.push({ key: 'flow', icon: <PartitionOutlined />, label: '数据流通', children: flowChildren });
+  if (devChildren.length > 0) {
+    items.push({ key: 'dev', icon: <PartitionOutlined />, label: '我的开发', children: devChildren });
+  }
+
+  if (hasAnyRole(normalizedRole, ROLE_GROUPS.contractReaders)) {
+    items.push({
+      key: 'results',
+      icon: <SendOutlined />,
+      label: '我的结果集',
+      children: [{ key: '/deliveries', label: '成果中心' }],
+    });
+  }
+
+  if (hasAnyRole(normalizedRole, ROLE_GROUPS.flowDevUsers)) {
+    items.push({ key: '/flow/guide', icon: <ReadOutlined />, label: '开发指引' });
+  }
+
+  if (hasAnyRole(normalizedRole, ROLE_GROUPS.sandboxReaders)) {
+    items.push({ key: '/flow/quota', icon: <WalletOutlined />, label: '环境配额' });
   }
 
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.outputControlReaders)) {
@@ -116,9 +134,9 @@ function getMenuItems(role?: RoleLike): MenuProps['items'] {
     items.push({
       key: 'audit',
       icon: <AuditOutlined />,
-      label: '审计中心',
+      label: '安全管理',
       children: [
-        { key: '/audit', label: '审计日志' },
+        { key: '/audit', label: '操作日志' },
         { key: '/compliance-disclosure', label: '合规披露' },
       ],
     });

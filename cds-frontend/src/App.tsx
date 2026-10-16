@@ -28,6 +28,9 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const WorkloadCenter = lazy(() => import('./pages/Flow/WorkloadCenter'));
 const ComputeSchedule = lazy(() => import('./pages/Flow/ComputeSchedule'));
 const DeliveryCenter = lazy(() => import('./pages/Flow/DeliveryCenter'));
+const FlowGuide = lazy(() => import('./pages/Flow/Guide'));
+const FlowDevTasks = lazy(() => import('./pages/Flow/DevTasks'));
+const FlowQuota = lazy(() => import('./pages/Flow/Quota'));
 const AuditLog = lazy(() => import('./pages/Audit/AuditLog'));
 const InspectionPipeline = lazy(() => import('./pages/OutputControl/InspectionPipeline'));
 const MonitoringDashboard = lazy(() => import('./pages/Monitoring'));
@@ -88,6 +91,9 @@ export default function App() {
                 <Route path="workloads" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkloadCenter /></RoleRoute>} />
                 <Route path="compute" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><ComputeSchedule /></RoleRoute>} />
                 <Route path="deliveries" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><DeliveryCenter /></RoleRoute>} />
+                <Route path="flow/tasks" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><FlowDevTasks /></RoleRoute>} />
+                <Route path="flow/guide" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><FlowGuide /></RoleRoute>} />
+                <Route path="flow/quota" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><FlowQuota /></RoleRoute>} />
                 <Route path="audit" element={<RoleRoute allowedRoles={ROLE_GROUPS.auditReaders}><AuditLog /></RoleRoute>} />
                 <Route path="output-control" element={<RoleRoute allowedRoles={ROLE_GROUPS.outputControlReaders}><InspectionPipeline /></RoleRoute>} />
                 <Route path="catalog" element={<RoleRoute allowedRoles={ROLE_GROUPS.catalogReaders}><CatalogPage /></RoleRoute>} />

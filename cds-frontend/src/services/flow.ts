@@ -348,6 +348,25 @@ export interface DatasetBundle {
   watermark_applied: boolean;
 }
 
+export interface BundlePreview {
+  bundle_id: string;
+  available: boolean;
+  reason?: string;
+  member: string | null;
+  members?: string[];
+  data?: string;
+  rows_returned?: number;
+  row_count_total?: number;
+  truncated?: boolean;
+  output_review?: {
+    bundle_scope?: string | null;
+    file_status?: string | null;
+    file_findings?: number | null;
+    preview_findings?: number;
+    preview_blocked?: boolean;
+  };
+}
+
 // ---------- Delivery：Webhook ----------
 
 export interface WebhookSubscription {
@@ -1106,6 +1125,23 @@ export const flowApi = {
   downloadBundle: (bundleId: string): Promise<Blob> =>
     api.get(`/deliveries/dataset/${bundleId}/download`, { responseType: 'blob', timeout: TIMEOUT_BUILD }) as unknown as Promise<Blob>,
 
+  /**
+   * 成果包预览：只回前 N 行，且后端已对片段重跑出口审查（拦截时 403，不给字节）。
+   * 它不是下载的廉价替身：未过 T5 审查的历史包会回 409 要求重新生成。
+   */
+  previewBundle: (bundleId: string, rows = 20): Promise<BundlePreview> =>
+    api.get(`/deliveries/dataset/${bundleId}/preview`, { params: { rows } }) as unknown as Promise<BundlePreview>,
+
+  /** 成果包历史（SS-17）：只看得见调用方作为合约当事方的包，归属口径与上面下载同一规则。 */
+  listBundles: (params: DatasetBundleListParams = {}): Promise<PaginatedResponse<DatasetBundleRow>> =>
+    api.get('/deliveries/dataset/bundles', {
+      params: {
+        contract_id: params.contract_id || undefined,
+        page: params.page ?? 1,
+        page_size: params.page_size ?? 20,
+      },
+    }) as unknown as Promise<PaginatedResponse<DatasetBundleRow>>,
+
   createWebhook: (payload: WebhookCreatePayload): Promise<WebhookSubscription> =>
     api.post('/deliveries/webhooks', payload) as unknown as Promise<WebhookSubscription>,
 
@@ -1177,6 +1213,8 @@ export const flowKeys = {
   deliveries: (id: string, status?: string | null) => ['flow', 'delivery', 'webhook', id, 'deliveries', status ?? null] as const,
   endpoints: (contractId?: string | null) => ['flow', 'delivery', 'endpoints', contractId ?? null] as const,
   openapi: (contractId: string) => ['flow', 'delivery', 'openapi', contractId] as const,
+  bundles: (contractId?: string | null, page?: number | null, pageSize?: number | null) =>
+    ['flow', 'delivery', 'bundles', contractId ?? null, page ?? 1, pageSize ?? 20] as const,
 };
 
 type FlowMutationOptions<TRes, TVars> = {
@@ -1464,3 +1502,181 @@ export function useFlowRuntimeStatus() {
     staleTime: 60_000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// SS-17：成果包历史 / OpenAPI 在线试调用
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /deliveries/dataset/bundles 的一行。
+ *
+ * 只列交付包表已落库的字段：水印标志与逐文件出口审查结论写在包内 MANIFEST.json 里、
+ * 不在这个行上，后端不下发、前端也不猜（列表里的水印列如实标注"未下发"）。
+ */
+export interface DatasetBundleRow {
+  bundle_id: string;
+  contract_id: string;
+  contract_no: string;
+  session_id: string | null;
+  file_count: number;
+  size_bytes: number;
+  created_at: string | null;
+  download_url: string | null;
+}
+
+export interface DatasetBundleListParams {
+  contract_id?: string | null;
+  page?: number;
+  page_size?: number;
+}
+
+export function useDatasetBundles(contractId?: string | null, page = 1, pageSize = 10) {
+  return useQuery({
+    queryKey: flowKeys.bundles(contractId, page, pageSize),
+    queryFn: () => flowApi.listBundles({ contract_id: contractId, page, page_size: pageSize }),
+  });
+}
+
+// ---------- OpenAPI 在线试调用 ----------
+
+/** 响应体最多展示多少字符（超出截断并如实标注，不把整包结果塞进弹窗）。 */
+export const OPEN_API_DEBUG_BODY_LIMIT = 8192;
+
+/** 试调用超时：给网关自身限流/超时之前一个能自己收手的边界。 */
+export const OPEN_API_DEBUG_TIMEOUT_MS = 30_000;
+
+/** 试调用密钥申请的作用域：网关组的写动词 = POST /open/v1/{slug}（最小权限，不给 full）。 */
+export const OPEN_API_DEBUG_KEY_SCOPES: string[] = ['gateway:write'];
+
+export function openApiCallPathForSlug(slug: string): string {
+  return `/open/v1/${encodeURIComponent(slug)}`;
+}
+
+/** 与后端创建端点的 slug 规则一致，避免把非法路径打到网关上。 */
+export function isValidApiSlug(slug: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]{1,63}$/.test(slug);
+}
+
+export interface OpenApiDebugAttempt {
+  /** true = HTTP 2xx。 */
+  ok: boolean;
+  /** 0 = 请求没能到达后端（网络/代理层失败），不是"后端回了 0"。 */
+  httpStatus: number;
+  statusText: string;
+  latencyMs: number;
+  contentType: string | null;
+  /** 展示用响应体：JSON 缩进美化，超上限已截断。 */
+  bodyText: string;
+  bodyTruncated: boolean;
+  bodyChars: number;
+  /** 传输层失败原因（请求根本没发出去 / 超时中断）；成功时为 null。 */
+  transportError: string | null;
+  /** 非 2xx 且后端回了 W2 信封时的结构化错误。 */
+  errorInfo: FlowErrorInfo | null;
+}
+
+function nowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+function prettifyBody(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * 用刚创建的**平台 API Key** 直连数据面 `POST /open/v1/{slug}`（SS-17 在线试调用）。
+ *
+ * 为什么这一条走 fetch 而不是共享 axios 实例：`api.ts` 的请求拦截器无条件把
+ * `Authorization` 覆写为登录态 JWT，于是任何经共享实例的请求都是"人以 JWT 调用"，
+ * 而不是"机器以 API Key 调用"——那是两条不同的鉴权路径（作用域门禁、按 key 限流、
+ * key 停用/过期状态都不会被触发）。用 JWT 试调用后宣称"密钥可用"就是伪造结果，
+ * 所以这一个跨凭据的请求必须自己带 `Bearer cds_ak_…`。本页其余调用照旧走共享实例；
+ * 这里不新建 axios 实例，也不复用登录态。
+ *
+ * 返回结构化结果而不是抛错：调试台要如实展示"多少毫秒、什么状态码、后端原文"，
+ * 包括失败本身。
+ */
+export async function callOpenApiWithApiKey(
+  slug: string,
+  apiKey: string,
+  body: unknown,
+  timeoutMs = OPEN_API_DEBUG_TIMEOUT_MS
+): Promise<OpenApiDebugAttempt> {
+  const startedAt = nowMs();
+  const elapsed = () => Math.max(0, Math.round(nowMs() - startedAt));
+  const base: OpenApiDebugAttempt = {
+    ok: false,
+    httpStatus: 0,
+    statusText: '',
+    latencyMs: 0,
+    contentType: null,
+    bodyText: '',
+    bodyTruncated: false,
+    bodyChars: 0,
+    transportError: null,
+    errorInfo: null,
+  };
+  if (!isValidApiSlug(slug)) {
+    return { ...base, transportError: `slug「${slug}」不符合后端规则（小写字母、数字、下划线与短横线，长度 2~64），未发起调用。` };
+  }
+  if (!apiKey) {
+    return { ...base, transportError: '还没有可用的平台 API Key：请先创建调试密钥再发起调用。' };
+  }
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(openApiCallPathForSlug(slug), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body ?? {}),
+      signal: controller.signal,
+    });
+    const raw = await response.text();
+    const truncated = raw.length > OPEN_API_DEBUG_BODY_LIMIT;
+    const shown = truncated ? raw.slice(0, OPEN_API_DEBUG_BODY_LIMIT) : raw;
+    let errorInfo: FlowErrorInfo | null = null;
+    if (!response.ok) {
+      let envelope: unknown = raw;
+      try {
+        envelope = JSON.parse(raw) as unknown;
+      } catch {
+        envelope = raw;
+      }
+      errorInfo = parseFlowError(envelope);
+      errorInfo.httpStatus = response.status;
+    }
+    return {
+      ...base,
+      ok: response.ok,
+      httpStatus: response.status,
+      statusText: response.statusText,
+      latencyMs: elapsed(),
+      contentType: response.headers.get('content-type'),
+      bodyText: prettifyBody(shown),
+      bodyTruncated: truncated,
+      bodyChars: raw.length,
+      errorInfo,
+    };
+  } catch (error) {
+    const aborted = typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError';
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ...base,
+      latencyMs: elapsed(),
+      transportError: aborted
+        ? `调用超过 ${Math.round(timeoutMs / 1000)}s 未返回，已中断（网关侧可能仍在处理）。`
+        : `请求未能到达后端：${reason}。开发态需 vite 代理转发 /open，部署态需前端 nginx 同样反代 /open；两者都没转发时就是这一行。`,
+    };
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+

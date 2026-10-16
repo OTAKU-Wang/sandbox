@@ -6,6 +6,7 @@ import { dataResourceApi } from '../../services/dataResourceApi';
 import type { DataResource } from '../../services/dataResourceApi';
 import type { ColumnsType } from 'antd/es/table';
 import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import DesensitizedPreviewModal from './DesensitizedPreviewModal';
 
 const { Title } = Typography;
 
@@ -20,6 +21,7 @@ export default function ResourceList() {
   const [page, setPage] = useState(1);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<DataResource | null>(null);
   const [form] = Form.useForm();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -67,12 +69,13 @@ export default function ResourceList() {
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180,
       render: (t: string) => new Date(t).toLocaleString('zh-CN') },
     {
-      title: '操作', key: 'action', width: 150,
+      title: '操作', key: 'action', width: 230,
       render: (_, record) => (
         <Space>
           <Button size="small" icon={<EyeOutlined />} onClick={() => setSelectedResourceId(record.id)}>
             查看
           </Button>
+          <Button size="small" onClick={() => setPreviewTarget(record)}>脱敏预览</Button>
           <Popconfirm title="确认删除？" onConfirm={() => deleteMutation.mutate(record.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -165,6 +168,12 @@ export default function ResourceList() {
           </Space>
         )}
       </Drawer>
+
+      <DesensitizedPreviewModal
+        resourceId={previewTarget?.id ?? null}
+        resourceName={previewTarget?.name}
+        onClose={() => setPreviewTarget(null)}
+      />
     </div>
   );
 }

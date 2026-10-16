@@ -9,7 +9,7 @@ import { UserRole } from '../../types/enums';
 
 const menu = [
   { key: '/' },
-  { key: 'sandbox', children: [{ key: '/sandbox-sessions' }, { key: '/capability-matrix' }] },
+  { key: 'sandbox', children: [{ key: '/sandbox-sessions' }, { key: '/dev-sandbox' }, { key: '/capability-matrix' }] },
   { key: 'identity', children: [{ key: '/identity/keys' }] },
   { key: 'audit', children: [{ key: '/audit' }] },
 ];
@@ -39,7 +39,8 @@ describe('双模式工作台外壳', () => {
   it('开发者视图按叶子保留父分组，并剔除管理态分组', () => {
     const pruned = filterMenuByWorkspace(menu, 'developer');
     expect(pruned.map((item) => item.key)).toEqual(['/', 'sandbox', 'audit']);
-    expect(pruned[1].children?.map((child) => child.key)).toEqual(['/sandbox-sessions']);
+    // SS-18: 会话列表/能力矩阵不属开发者闭环, 但同一分组里的开发沙箱按叶子保留
+    expect(pruned[1].children?.map((child) => child.key)).toEqual(['/dev-sandbox']);
   });
 
   it('管理员工台不裁剪菜单', () => {

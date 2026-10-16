@@ -10,7 +10,7 @@ import type { SandboxSession } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
 import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
-import { levelSelectOptions, metaApi } from '../../services/metaApi';
+import { SandboxLevel, isLegacySandboxLevel, sandboxLevelLabel } from '../../types/enums';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title } = Typography;
@@ -83,25 +83,10 @@ export default function SessionList() {
     enabled: canCreateSession,
   });
 
-  const {
-    data: templates,
-    isLoading: templatesLoading,
-  } = useQuery({
+  const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['sandbox-session-templates'],
     queryFn: () => sandboxApi.getSessionTemplates(),
     enabled: canCreateSession,
-  });
-
-  const {
-    data: capabilityMatrix,
-    isLoading: matrixLoading,
-    isError: matrixIsError,
-    error: matrixError,
-    refetch: refetchMatrix,
-  } = useQuery({
-    queryKey: ['capability-matrix'],
-    queryFn: () => metaApi.getCapabilityMatrix(),
-    staleTime: 5 * 60 * 1000,
   });
 
   const terminateMutation = useMutation({
@@ -156,7 +141,9 @@ export default function SessionList() {
 
   const columns: ColumnsType<SandboxSession> = [
     { title: '会话ID', dataIndex: 'id', key: 'id', render: (v) => <a onClick={() => navigate(`/sandbox-sessions/${v}`)}>{v.slice(0, 8)}...</a> },
-    { title: '沙箱级别', dataIndex: 'sandbox_level', key: 'sandbox_level', render: (v) => <Tag>{v}</Tag> },
+    { title: '沙箱级别', dataIndex: 'sandbox_level', key: 'sandbox_level', render: (v: string) => (
+      <Tag color={isLegacySandboxLevel(v) ? 'default' : 'geekblue'}>{sandboxLevelLabel(v)}</Tag>
+    ) },
     { title: '状态', dataIndex: 'status', key: 'status', render: (v) => <Tag color={statusColors[v] ?? 'default'}>{v}</Tag> },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v) => new Date(v).toLocaleString() },
     {
@@ -216,16 +203,13 @@ export default function SessionList() {
           form={form}
           layout="vertical"
           onFinish={createMutation.mutate}
-          initialValues={{ sandbox_level: 'L3', timeout_seconds: 3600 }}
+          initialValues={{ sandbox_level: SandboxLevel.L2C, timeout_seconds: 3600 }}
         >
           {catalogIsError && (
             <QueryErrorAlert error={catalogError} message="可用数据产品加载失败" onRetry={() => { void refetchCatalog(); }} />
           )}
           {contractsIsError && (
             <QueryErrorAlert error={contractsError} message="可用合约加载失败" onRetry={() => { void refetchContracts(); }} />
-          )}
-          {matrixIsError && (
-            <QueryErrorAlert error={matrixError} message="沙箱级别加载失败" onRetry={() => { void refetchMatrix(); }} />
           )}
           <Form.Item name="data_product_id" label="数据产品" rules={[{ required: true, message: '请选择数据产品' }]}>
             <Select
@@ -254,19 +238,11 @@ export default function SessionList() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="sandbox_level" label="沙箱级别" rules={[{ required: true, message: '请选择沙箱级别' }]}
-            tooltip="级别能力以能力矩阵为权威源（SS-11 PZ-13）；弃用级别灰显">
+          <Form.Item name="sandbox_level" label="沙箱级别"
+            tooltip="SS-13 起执行面只有 MicroVM 单一路径（CubeSandbox / l2c）：级别固定，不可选。没有更轻的隔离档可用——数据面不可用时创建会被直接拒绝。">
             <Select
-              loading={matrixLoading}
-              notFoundContent={matrixLoading ? '加载中' : '能力矩阵加载失败'}
-              options={levelSelectOptions(capabilityMatrix).map((opt) => ({
-                value: opt.value,
-                label: (
-                  <span style={opt.deprecated ? { color: 'rgba(0, 0, 0, 0.45)' } : undefined}>
-                    {opt.label}
-                  </span>
-                ),
-              }))}
+              disabled
+              options={[{ value: SandboxLevel.L2C, label: sandboxLevelLabel(SandboxLevel.L2C) }]}
             />
           </Form.Item>
           <Form.Item name="timeout_seconds" label="超时时间（秒）">
