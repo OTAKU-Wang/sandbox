@@ -1,4 +1,4 @@
-# cds-frontend/ — React admin console for CDS (scored 17: 85 files, ~11k LOC TS, top reference centrality)
+# cds-frontend/ — React admin console for CDS (scored 17: 104 TS files, ~20k LOC, top reference centrality)
 
 Admin UI for the Confidential Data Sandbox (密态沙箱): FastAPI backend at `/api/v1`, all UI copy Chinese (zhCN antd locale, zh-CN html lang).
 
@@ -7,9 +7,9 @@ Admin UI for the Confidential Data Sandbox (密态沙箱): FastAPI backend at `/
 src/
 ├── App.tsx        # all routes; every page React.lazy (route-level code splitting)
 ├── main.tsx       # entry
-├── pages/         # 26 lazy page components, 15 domain folders → pages/AGENTS.md
-├── services/      # one API module per backend domain → services/AGENTS.md
-├── components/    # Auth (ProtectedRoute/RoleRoute), Feedback (QueryFeedback), Layout, Sandbox (ExecStreamTerminal)
+├── pages/         # 38 lazy pages: 16 domain folders (incl. Flow/) + 8 top-level .tsx → pages/AGENTS.md
+├── services/      # 22 API modules, one per backend domain → services/AGENTS.md
+├── components/    # Auth (ProtectedRoute/RoleRoute), Feedback (QueryFeedback, ErrorCard, SimulationBadge honest-degradation disclosure), Layout, Sandbox (ExecStreamTerminal)
 ├── stores/        # zustand: useAuthStore (persist, key auth-storage), useUIStore (sidebar/theme)
 ├── utils/         # cn, crypto.ts (SM2/SM3), highRiskOperation.tsx, roles.ts (ROLE_GROUPS)
 ├── types/         # enums.ts (domain enums, as const), models.ts, api.ts, security.ts
