@@ -155,9 +155,9 @@
   所以补跑一轮以覆盖；gate 车道（fast）的 runtime/compileall/import/alembic upgrade/alembic check/schema_parity
   已全 `STEP_OK`（Python 3.12.15，36 个 gate 文件）。
 - 推送：`56ad292..b8fc5c1` → `origin/feat/ss-11-productization`（本轮 6 个提交，接手请先 `git pull`）。
-  推送前门：远程 gate 车道 **GATE_FILES=36 全 `STEP_OK`**（含 alembic upgrade/check/schema parity，
-  Python 3.12.15），FE 车道补跑 `tsc 0 / vitest 12 files·141 tests / build 0`——详台账 V-16。
-- 待回填：`ss15` 子集结果、full 全量回归对比基线、M2–M5 浏览器全链逐步状态码。
+  推送前门：远程 gate 车道 9 步全 `STEP_OK`（含 alembic upgrade/check/schema parity，Python 3.12.15，
+  **gate 244 passed·2 skipped / ss15 85 passed**），FE 车道补跑 `tsc 0 / vitest 12 files·141 tests / build 0`——详台账 V-16。
+- 待回填：full 全量回归对比基线、M2–M5 浏览器全链逐步状态码。
 - 待做（已计入 §2 改动清单第 4 项）：IDE / 开发指引里把目录约定写成常驻文案（前端全仓现在
   仍无任何目录提示文字，`grep -rn 'scratch' cds-frontend/src` = 0 命中）。
 

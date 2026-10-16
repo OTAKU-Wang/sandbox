@@ -426,8 +426,10 @@ antd Form 内部 store 仍为空 ⇒ 点“登录”既不发请求也不报字�
 修车道后重跑，**未改任何产品代码**。车道脚本已入仓 `scripts/remote-harness/`。
 
 远程 `source_lane.sh fast`（Python 3.12.15，树 `STEP_OK tree_sync`）：
-`compileall` / `import_smoke` / `alembic_upgrade` / `alembic_check` / `schema_parity` / **`gate`（GATE_FILES=36）**
-均 `STEP_OK`；`ss15` 子集结果落地后回填。
+`compileall` / `import_smoke` / `alembic_upgrade` / `alembic_check` / `schema_parity` 均 `STEP_OK`；
+**gate 子集 `244 passed, 2 skipped in 171.71s`（GATE_FILES=36，现场从 `ci.yml` 解析）**；
+**`ss15` 子集 `85 passed in 68.09s`**。车道总结行 `LANE_DONE mode=fast` 已落地（哨兵取的是
+每步真实 rc，不是包装脚本的 `echo DONE`）。
 
 远程 FE 车道（node:20，补跑一轮以覆盖 IDE 目录提示行）：`TSC_RC=0 VITEST_RC=0 BUILD_RC=0 FE_LANE_EXIT=0`，
 `Test Files 12 passed (12) / Tests 141 passed (141)`。
