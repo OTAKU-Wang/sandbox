@@ -77,9 +77,11 @@ def test_build_run_request_proto_fields():
     assert env_keys["CDS_SANDBOX_LEVEL"] == "l2c"
     mounts = {(m.name, m.container_path, m.readonly) for m in c.volume_mounts}
     # SS-14 RT-07 (D-e2e-17): +rootfs 可写卷挂载 /
+    # SS-18 (2026-10-16): 目录口径按字面钉住 —— 授权数据只读、产物唯一采集目录是
+    # /sandbox/output、/scratch 降为工作区; 改路径必须让这条变红而不是静默漂称。
     assert mounts == {
-        ("cds-data-sess-1", "/data", False),
-        ("cds-results-sess-1", "/results", False),
+        ("cds-data-sess-1", "/sandbox/data", True),
+        ("cds-results-sess-1", "/sandbox/output", False),
         ("cds-scratch-sess-1", "/scratch", False),
         ("cds-rootfs-sess-1", "/", False),
     }

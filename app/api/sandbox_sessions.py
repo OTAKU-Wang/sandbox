@@ -618,9 +618,9 @@ async def create_sandbox_session(
     session.session_key_id = session_key_result["key_id"]
 
     # SS-14 RT-07 (2026-10-14): 产品数据注入 VM。上游冷启动沙箱不把声明卷
-    # 挂进 guest（2026-10-14 实证: /data 仅为可写 rootfs 里的普通目录）, 会话
+    # 挂进 guest（2026-10-14 实证: /sandbox/data 仅为可写 rootfs 里的普通目录）, 会话
     # 数据卷是节点侧 SM4 加密副本, VM 内可用副本经 exec 通道注入
-    # /data/session-data。有界重试; 失败 = fail-closed 终止会话（l2c 会话
+    # /sandbox/data/session-data（SS-18 口径）。有界重试; 失败 = fail-closed 终止会话（l2c 会话
     # 的数据面是会话契约的一部分, 不静默降级）。
     if body.sandbox_level == "l2c" and session_data is not None:
         try:
@@ -1620,15 +1620,29 @@ def _session_workspace_or_400(session: SandboxSession) -> Path:
     return workspace
 
 
-# SS-14 RT-07 (2026-10-14): l2c 会话文件面 —— cube MicroVM 无宿主 workspace,
-# 会话文件落在 VM 内 /scratch（empty_dir 会话工作区）, 经 exec 通道读写
-# （exec 输出经结果卷文件中转, 见 CubeRuntimeAdapter.execute）。
-async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", data: bytes | None = None) -> dict:
+# SS-14 RT-07 (2026-10-14) / SS-18 (2026-10-16): l2c 会话文件面 —— cube MicroVM 无宿主 workspace,
+# 文件全在 VM 内, 经 exec 通道读写（exec 输出经 GUEST_EXEC_DIR 中转后由节点插件读回）。
+# SS-18 后的目录口径: /sandbox/output = 成果交付采集面（原型唯一可出域目录）,
+# /scratch = 工作区（兼容期仍参与采集, 逐文件标源目录）, /sandbox/data = 授权数据（不采集）。
+# 注: “不采集”不等于“写不了”—— 上游冷启动不把声明卷挂进 guest, 真只读约不到 hypervisor 层,
+# 真正的出域约束由 T5 出口网关承担（诚实披露, 见 specs/ss-18-prototype-alignment.md §2）.
+async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", data: bytes | None = None,
+                       where: str = "") -> dict:
     from app.services import session_files as sf
     from app.services.cube_runtime_adapter import CubeRuntimeAdapter
     from app.services.sandbox_manager import get_sandbox_manager
 
     name = sf.validate_filename(filename) if filename else ""
+    # SS-18 (2026-10-16): 目录口径收敛到 cube_runtime_adapter 的 GUEST_*/HARVEST_DIRS。
+    #   where=""          读按优先级自动解析 (/sandbox/output → /scratch), 写落 /sandbox/output
+    #   where="output"     仅 /sandbox/output（产物, 原型口径）
+    #   where="workspace" 仅 /scratch（工作区, 兼容期）
+    from app.services.cube_runtime_adapter import HARVEST_DIRS
+
+    if where not in ("", "output", "workspace"):
+        raise HTTPException(status_code=400, detail=f"unknown file dir: {where}")
+    write_dir = {tag: d for d, tag in HARVEST_DIRS}[where or "output"]
+    candidates = tuple(d for d, _tag in HARVEST_DIRS) if not where else (write_dir,)
     runtime = await get_sandbox_manager()
     adapter = runtime.get_adapter("l2c")
     if not isinstance(adapter, CubeRuntimeAdapter):
@@ -1640,13 +1654,15 @@ async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", dat
         # 256KB 上限: 经 exec 参数面传输, 超出应走数据卷（数据产品面）。
         if len(b64) > 256 * 1024:
             raise HTTPException(status_code=400, detail="file too large for the exec channel (>256KB); use data products for large files")
-        code = ("import base64,os;os.makedirs('/scratch',exist_ok=True);"
-                f"open('/scratch/{name}','wb').write(base64.b64decode('{b64}'))")
+        code = ("import base64,os;"
+                f"os.makedirs({write_dir!r},exist_ok=True);"
+                f"open({write_dir!r}+'/{name}','wb').write(base64.b64decode('{b64}'))")
         result = await adapter.execute(session.container_id, code, "python", timeout=120)
     elif op == "download":
         code = ("import base64,os;"
-                f"print(base64.b64encode(open('/scratch/{name}','rb').read()).decode()) "
-                f"if os.path.exists('/scratch/{name}') else print('CDS404')")
+                f"_c=[d+'/{name}' for d in {candidates!r} if os.path.isfile(d+'/{name}')];"
+                "print(base64.b64encode(open(_c[0],'rb').read()).decode()) "
+                "if _c else print('CDS404')")
         result = await adapter.execute(session.container_id, code, "python", timeout=120)
         if result.get("exit_code") != 0 or "error" in result:
             raise HTTPException(status_code=502, detail=f"l2c file download failed: {result.get('error') or result.get('output', '')[:200]}")
@@ -1657,15 +1673,28 @@ async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", dat
 
         return {"data": _b64.b64decode(out.splitlines()[-1])}
     elif op == "list":
-        code = ("import os;print(os.linesep.join(" "sorted(os.listdir('/scratch')))) "
-                "if os.path.isdir('/scratch') else print()")
+        code = ("import os;"
+                f"_h={[(d, t) for d, t in HARVEST_DIRS if not where or d == write_dir]!r};"
+                "_r=[t+'\\t'+n for d,t in _h if os.path.isdir(d) for n in sorted(os.listdir(d)) "
+                "if os.path.isfile(os.path.join(d,n))];"
+                "print(os.linesep.join(_r))")
         result = await adapter.execute(session.container_id, code, "python", timeout=60)
         out = (result.get("output") or "").strip()
-        return {"files": [f for f in out.splitlines() if f.strip()]}
+        entries: list[dict] = []
+        seen: set[str] = set()
+        for line in out.splitlines():
+            if not line.strip() or "\t" not in line:
+                continue
+            tag, fname = line.split("\t", 1)
+            if fname in seen:  # 同名以采集优先级为准 (/sandbox/output 先)
+                continue
+            seen.add(fname)
+            entries.append({"name": fname, "dir": tag})
+        return {"files": [e["name"] for e in entries], "entries": entries}
     elif op == "delete":
         code = ("import os;"
-                f"os.remove('/scratch/{name}') if os.path.exists('/scratch/{name}') "
-                "else __import__('sys').exit(3)")
+                f"_c=[d+'/{name}' for d in {candidates!r} if os.path.isfile(d+'/{name}')];"
+                "os.remove(_c[0]) if _c else __import__('sys').exit(3)")
         result = await adapter.execute(session.container_id, code, "python", timeout=60)
         if result.get("exit_code") == 3:
             raise HTTPException(status_code=404, detail="file not found")
@@ -1806,7 +1835,7 @@ async def upload_session_file(
     _active_or_suspended(session)
     if session.sandbox_level == "l2c":
         data = await file.read()
-        result = await _l2c_file_op(session, "upload", file.filename or "", data)
+        result = await _l2c_file_op(session, "upload", file.filename or "", data, where="workspace")
         await audit_service.log(
             db, action="sandbox.file_upload", resource_type="sandbox_session",
             user_id=current_user.id, session_id=session.id,
@@ -2550,11 +2579,13 @@ async def get_session_usage(
         try:
             _du = await asyncio.to_thread(
                 _cra.execute_sync_for_usage,
-                session.container_id, "du -sk /data /results /scratch 2>/dev/null",
+                session.container_id,
+                f"du -sk {_cra.GUEST_DATA_DIR} {_cra.GUEST_OUTPUT_DIR} {_cra.GUEST_WORK_DIR} 2>/dev/null",
             )
+            _usage_dirs = (_cra.GUEST_DATA_DIR, _cra.GUEST_OUTPUT_DIR, _cra.GUEST_WORK_DIR)
             for line in str(_du.get("output") or "").splitlines():
                 parts = line.split()
-                if len(parts) >= 2 and parts[1].rstrip("/") in ("data", "results", "scratch"):
+                if len(parts) >= 2 and parts[1].rstrip("/") in _usage_dirs:
                     vm_dirs[parts[1].rstrip("/")] = int(parts[0]) * 1024
         except Exception:
             pass

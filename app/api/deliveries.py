@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -82,9 +82,13 @@ async def _collect_session_files(db: AsyncSession, session: SandboxSession) -> l
 
     if session.sandbox_level == "l2c":
         listing = await _l2c_file_op(session, "list")
+        # SS-18: 采集按 HARVEST_DIRS 优先级逐文件标源目录（/sandbox/output 为产物口径,
+        # /scratch 为兼容期）; 老版 listing 无 entries 时回退到 files。
+        items = listing.get("entries") or [{"name": n, "dir": ""} for n in listing.get("files") or []]
         entries = []
-        for name in listing.get("files") or []:
-            payload = await _l2c_file_op(session, "download", name)
+        for item in items:
+            name = item["name"]
+            payload = await _l2c_file_op(session, "download", name, where=item.get("dir") or "")
             entries.append({"name": name, "data": payload["data"], "encrypted": False})
         return entries
 
@@ -231,6 +235,62 @@ async def create_dataset_bundle(
     }
 
 
+@router.get("/dataset/bundles", status_code=200)
+async def list_dataset_bundles(
+    contract_id: uuid.UUID | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """成果包历史（SS-17）：分页返回调用方可见的数据集成果包。
+
+    归属口径与下载端点**同源**：`/dataset/{bundle_id}/download` 经 `_load_contract`
+    → `_is_party`（买方 / 提供方，或 admin / platform_admin）判定；这里把同一条规则
+    写成 SQL 谓词，既免掉逐行查合约的 N+1，也不会出现"列表里看得见、下载 403"
+    （或反之）的口径漂移。合约行缺失的孤儿包因 JOIN 自然不落进列表——与下载端点
+    的 404/403 保持同一口径。
+
+    只下发交付包表已落库的字段：水印标志与逐文件出口审查结论写在包内 MANIFEST.json
+    里、不在这个行上，因此此处不猜（历史行的水印以清单为准）。
+    """
+    query = (
+        select(DeliveryBundle, Contract.contract_no)
+        .join(Contract, Contract.id == DeliveryBundle.contract_id)
+    )
+    if getattr(current_user, "role", None) not in ("admin", "platform_admin"):
+        query = query.where(
+            or_(Contract.buyer_id == current_user.id, Contract.provider_id == current_user.id)
+        )
+    if contract_id is not None:
+        query = query.where(DeliveryBundle.contract_id == contract_id)
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+    res = await db.execute(
+        query.order_by(DeliveryBundle.created_at.desc(), DeliveryBundle.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return {
+        "items": [
+            {
+                "bundle_id": str(bundle.id),
+                "contract_id": str(bundle.contract_id),
+                "contract_no": contract_no,
+                "session_id": str(bundle.session_id) if bundle.session_id else None,
+                "file_count": bundle.file_count,
+                "size_bytes": bundle.size_bytes,
+                "created_at": bundle.created_at,
+                "download_url": f"/api/v1/deliveries/dataset/{bundle.id}/download",
+            }
+            for bundle, contract_no in res.all()
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 def _bundle_output_reviewed(payload: bytes) -> bool:
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as zf:
@@ -284,6 +344,139 @@ async def download_dataset_bundle(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="cds-delivery-{bundle_id}.zip"'},
     )
+
+
+PREVIEW_SCAN_CHARS = 200_000
+TABULAR_SUFFIXES = (".csv", ".tsv")
+
+
+def _first_tabular_member(zf: zipfile.ZipFile) -> str | None:
+    names = [n for n in zf.namelist() if n.startswith("files/") and not n.endswith("/")]
+    for name in names:
+        if name.lower().endswith(TABULAR_SUFFIXES):
+            return name
+    return None
+
+
+def _excerpt_csv(text: str, rows: int) -> tuple[str, int]:
+    lines = text.split("\n")
+    total = len([ln for ln in lines if ln.strip() != ""])
+    if not lines:
+        return "", 0
+    return "\n".join(lines[: rows + 1]), max(0, total - 1)
+
+
+@router.get("/dataset/{bundle_id}/preview")
+async def preview_dataset_bundle(
+    bundle_id: uuid.UUID,
+    rows: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """预览交付包内首个表格类成果的前 N 行（不下载整包）。
+
+    预览是一条新的数据出域口子，因此比下载更保守：先走与下载完全相同的归属
+    与 T5 审查门禁，再对即将返回的片段**重新跑一遍出口审查**，`should_block` 为真
+    就直接 403 不返回任何内容字节。包内无表格文件时如实说“只能整包下载”，
+    不猜、不用其它文件凑一个表。
+    """
+    from app.services.output_inspection import output_inspector
+    from app.services.output_security import should_block
+    from app.services.storage_service import storage_service
+
+    own_res = await db.execute(select(DeliveryBundle).where(DeliveryBundle.id == bundle_id))
+    owner = own_res.scalar_one_or_none()
+    if owner is None:
+        raise HTTPException(status_code=404, detail="交付包不存在或无归属记录，请重新生成交付包")
+    await _load_contract(db, owner.contract_id, current_user)
+
+    object_name = owner.object_name or f"delivery/{bundle_id}.zip"
+    try:
+        payload = storage_service.download(object_name)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"交付包不存在或已过期: {exc}") from exc
+
+    if not _bundle_output_reviewed(payload):
+        await audit_service.log_standalone(
+            action="delivery.dataset.review_required", resource_type="delivery_bundle",
+            user_id=current_user.id, resource_id=str(bundle_id), detail={"purpose": "preview"},
+        )
+        raise CDSError(
+            "该交付包生成于出口审查加固之前，未经 T5 审查不予出域，请重新生成交付包",
+            code="OUTPUT_REVIEW_REQUIRED",
+            http_status=409,
+            detail={"bundle_id": str(bundle_id)},
+        )
+
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        manifest = json.loads(zf.read("MANIFEST.json").decode("utf-8"))
+        member = _first_tabular_member(zf)
+        members = [n for n in zf.namelist() if n.startswith("files/") and not n.endswith("/")]
+        text = zf.read(member).decode("utf-8", errors="replace") if member else ""
+
+    file_review = next(
+        (f for f in (manifest.get("files") or []) if f.get("name") == (member or "").removeprefix("files/")),
+        None,
+    )
+
+    if member is None:
+        await audit_service.log(
+            db, action="delivery.dataset.preview", resource_type="delivery_bundle",
+            user_id=current_user.id, resource_id=str(bundle_id),
+            detail={"available": False, "reason": "no_tabular_member", "members": len(members)},
+        )
+        return {
+            "bundle_id": str(bundle_id),
+            "available": False,
+            "reason": "交付包内没有表格类文件（csv/tsv），只能整包下载后查看",
+            "member": None,
+            "members": [m.removeprefix("files/") for m in members],
+            "output_review_scope": manifest.get("output_review_scope"),
+        }
+
+    scan_text = text[:PREVIEW_SCAN_CHARS]
+    inspect_result = output_inspector.inspect(
+        scan_text,
+        user_id=str(current_user.id),
+        session_id=str(owner.session_id or bundle_id),
+        sandbox_mode="structured_query",
+    )
+    findings = len(inspect_result.findings or [])
+    if should_block(inspect_result):
+        await audit_service.log_standalone(
+            action="delivery.dataset.preview_blocked", resource_type="delivery_bundle",
+            user_id=current_user.id, resource_id=str(bundle_id),
+            detail={"member": member, "findings": findings},
+        )
+        raise CDSError(
+            "预览内容命中出口审查规则，已拦截，不返回任何数据字节",
+            code="OUTPUT_BLOCKED",
+            http_status=403,
+            detail={"bundle_id": str(bundle_id), "member": member.removeprefix("files/"), "findings": findings},
+        )
+
+    excerpt, total_rows = _excerpt_csv(text, rows)
+    await audit_service.log(
+        db, action="delivery.dataset.preview", resource_type="delivery_bundle",
+        user_id=current_user.id, resource_id=str(bundle_id),
+        detail={"available": True, "member": member, "rows": min(rows, total_rows), "findings": findings},
+    )
+    return {
+        "bundle_id": str(bundle_id),
+        "available": True,
+        "member": member.removeprefix("files/"),
+        "data": excerpt,
+        "rows_returned": min(rows, total_rows),
+        "row_count_total": total_rows,
+        "truncated": total_rows > rows or len(text) > PREVIEW_SCAN_CHARS,
+        "output_review": {
+            "bundle_scope": manifest.get("output_review_scope"),
+            "file_status": (file_review or {}).get("output_review"),
+            "file_findings": (file_review or {}).get("output_findings"),
+            "preview_findings": findings,
+            "preview_blocked": False,
+        },
+    }
 
 
 def _sub_dict(sub: WebhookSubscription, *, secret: str | None = None) -> dict[str, Any]:

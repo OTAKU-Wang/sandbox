@@ -260,6 +260,48 @@ class TestWorkloadPublishGate:
         assert resp.status_code == 400
 
 
+class TestNotebookEmptyRun:
+    async def test_run_without_cells_is_a_conflict_not_a_vacuous_pass(self, client, db_session):
+        provider, _, buyer, headers = await _parties(db_session)
+        contract = await _mk_contract(db_session, provider, buyer)
+
+        notebook = await client.post(
+            "/api/v1/notebooks",
+            json={"title": "empty nb", "path": "/dev/empty.ipynb", "contract_id": str(contract.id)},
+            headers=headers,
+        )
+        assert notebook.status_code == 201, notebook.text
+        nb_id = notebook.json()["id"]
+        assert notebook.json()["content"]["cells"] == []
+
+        run = await client.post(f"/api/v1/notebooks/{nb_id}/run", headers=headers)
+        assert run.status_code == 409, run.text
+        assert run.json()["code"] == "NOTEBOOK_NO_CELLS"
+
+        after = await client.get(f"/api/v1/notebooks/{nb_id}", headers=headers)
+        assert after.json()["version"] == notebook.json()["version"]
+        assert after.json()["execution_backend"] is None
+
+    async def test_run_with_blank_cells_is_also_refused(self, client, db_session):
+        provider, _, buyer, headers = await _parties(db_session)
+        contract = await _mk_contract(db_session, provider, buyer)
+
+        notebook = await client.post(
+            "/api/v1/notebooks",
+            json={"title": "blank nb", "path": "/dev/blank.ipynb", "contract_id": str(contract.id)},
+            headers=headers,
+        )
+        nb_id = notebook.json()["id"]
+        doc = notebook.json()["content"]
+        doc["cells"].append({"cell_type": "code", "source": "   \n", "metadata": {}, "outputs": [], "execution_count": None})
+        saved = await client.put(f"/api/v1/notebooks/{nb_id}", json={"content": doc}, headers=headers)
+        assert saved.status_code == 200, saved.text
+
+        run = await client.post(f"/api/v1/notebooks/{nb_id}/run", headers=headers)
+        assert run.status_code == 409, run.text
+        assert run.json()["code"] == "NOTEBOOK_NO_CELLS"
+
+
 class TestNotebookContentTransport:
     """笔记内容的载体契约：库里是 nbformat 4 文档，但编辑器递上来的是它的 JSON 字符串。"""
 

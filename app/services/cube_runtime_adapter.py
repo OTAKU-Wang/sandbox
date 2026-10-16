@@ -40,6 +40,25 @@ _CONTAINER_PREFIX = "l2c-"
 _ENVD_PORT = 49983  # §2.7 day-1: in-sandbox envd HTTP streaming endpoint
 _VOLUME_PLUGIN_DRIVER = "cds-encrypted"
 
+# SS-18 (2026-10-16) 沙箱目录契约 —— 唯一执行路径 (l2c / CubeSandbox) 的 VM 内路径口径,
+# 与 specs/data-sandbox-developer-portal-prd.md + prototype-v3 IDE 屏一致:
+#   GUEST_DATA_DIR    合约授权数据的 VM 内副本（注入口径, 见 _inject_session_data_sync:
+#                     上游冷启动沙箱不把声明卷挂进 guest, 所以“只读”是产品口径 +
+#                     采集面不取它, 真正的出域约束始终由 T5 出口网关把行）
+#   GUEST_OUTPUT_DIR  唯一被成果交付采集的产物目录（原型口径）
+#   GUEST_WORK_DIR    工作区（内核 cwd / 会话文件）; 兼容期内仍参与采集,
+#                     以免存量会话产物在升级后静默丢交付（采集时逐文件标源目录）
+#   GUEST_EXEC_DIR    exec 输出中转目录 —— 宿主读回用, 永远不得进成果包
+GUEST_DATA_DIR = "/sandbox/data"
+GUEST_OUTPUT_DIR = "/sandbox/output"
+GUEST_WORK_DIR = "/scratch"
+GUEST_EXEC_DIR = "/results/.cds-exec"
+# 采集面按优先级排列的目录（output 为正规, work 为兼容期目录）
+HARVEST_DIRS: tuple[tuple[str, str], ...] = (
+    (GUEST_OUTPUT_DIR, "output"),
+    (GUEST_WORK_DIR, "workspace"),
+)
+
 
 def pinned_cube_version() -> str:
     """The CUBE runtime version pinned for the node fleet (from CB-00's pin).
@@ -301,9 +320,11 @@ def build_run_request(
         env.value = value
     for name, path, readonly in (
         (rootfs_name, "/", False),
-        (data_name, "/data", False),
-        (results_name, "/results", False),
-        (scratch_name, "/scratch", False),
+        # SS-18: 目录口径收敛到 GUEST_* 常量（声明面; 上游冷启动不将声明卷带进 guest,
+        # 实际内容靠 inject_session_data / 采集靠 HARVEST_DIRS, 均已在注释里如实写出）。
+        (data_name, GUEST_DATA_DIR, True),
+        (results_name, GUEST_OUTPUT_DIR, False),
+        (scratch_name, GUEST_WORK_DIR, False),
     ):
         mount = container.volume_mounts.add()
         mount.name = name
@@ -586,7 +607,7 @@ class CubeRuntimeAdapter(RuntimeAdapter):
 
     def _inject_session_data_sync(self, container_id: str, data: bytes, max_attempts: int) -> None:
         """SS-14 RT-07 (2026-10-14): 上游冷启动沙箱不把声明卷挂进 guest,
-        VM 内可用副本经 exec 通道写入 /data/session-data（base64 分块
+        VM 内可用副本经 exec 通道写入 /sandbox/data/session-data（base64 分块
         append, 单次 exec ≤ ~170KB 参数面）。VM 刚建出时 exec 可能未就绪
         —— 有界重试。同步方法, 仅经 to_thread 调用。
         """
@@ -609,7 +630,7 @@ class CubeRuntimeAdapter(RuntimeAdapter):
                         sandbox_id=sandbox_id,
                         container_id=sandbox_id,
                         args=["sh", "-c",
-                              f"mkdir -p /data && echo -n '{chunk}' {op} /data/.session-data.b64"],
+                              f"mkdir -p {GUEST_DATA_DIR} && echo -n '{chunk}' {op} {GUEST_DATA_DIR}/.session-data.b64"],
                     )
                     client.exec(request)
                     # 块间小间隔, 避免 exec 进程堆积
@@ -620,8 +641,8 @@ class CubeRuntimeAdapter(RuntimeAdapter):
                     sandbox_id=sandbox_id,
                     container_id=sandbox_id,
                     args=["sh", "-c",
-                          "base64 -d /data/.session-data.b64 > /data/session-data "
-                          "&& rm -f /data/.session-data.b64 "
+                          f"base64 -d {GUEST_DATA_DIR}/.session-data.b64 > {GUEST_DATA_DIR}/session-data "
+                          f"&& rm -f {GUEST_DATA_DIR}/.session-data.b64 "
                           "&& echo CDS-INJECT-OK"],
                 )
                 client.exec(request)
@@ -849,14 +870,16 @@ class CubeRuntimeAdapter(RuntimeAdapter):
         # 节点信息同步缓存, 供后续同步调用（inject/exec 轮询外的同步路径）。
         self._cache_node(node)
         exec_id = uuid.uuid4().hex
-        out_path = f"/results/.cds-exec/{exec_id}"
+        # SS-18: 中转目录走 GUEST_EXEC_DIR 常量 —— 它**不属于**采集面 HARVEST_DIRS,
+        # 因此 .cds-exec 的内部产物永不会被当成成果包内容。
+        out_path = f"{GUEST_EXEC_DIR}/{exec_id}"
         code_path = f"{out_path}.code"
         if language in ("python", "python3"):
             b64 = base64.b64encode(code.encode("utf-8")).decode("ascii")
             inner = f"python3 -c \"import base64;exec(base64.b64decode('{b64}').decode())\""
         else:
             inner = code
-        cmd = (f"mkdir -p /results/.cds-exec && {inner} > {out_path} 2>&1; "
+        cmd = (f"mkdir -p {GUEST_EXEC_DIR} && {inner} > {out_path} 2>&1; "
                f"rc=$?; echo $rc > {code_path}; "
                f"echo $(wc -c < {out_path}) >> {code_path}; "
                f"echo DONE >> {code_path}")
