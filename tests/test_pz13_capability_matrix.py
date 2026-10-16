@@ -29,7 +29,13 @@ async def test_capability_matrix_endpoint_shape(client: AsyncClient, auth_header
     resp = await client.get(MATRIX_URL, headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert set(data.keys()) == {"matrix", "levels"} | DISCLOSURE_KEYS
+    assert set(data.keys()) == {"matrix", "levels", "dataplane"} | DISCLOSURE_KEYS
+
+    # SS-13 交付档声明（前端全局横幅的唯一数据源）：开关与执行行为必须同源
+    dp = data["dataplane"]
+    assert set(dp.keys()) == {"enabled", "mode", "reason", "note"}
+    assert dp["mode"] == ("full" if dp["enabled"] else "control_plane_only")
+    assert (dp["reason"] is None) == dp["enabled"]
 
     # full baseline: every level x capability cell present and well-formed
     assert tuple(data["matrix"].keys()) == LEVELS
@@ -125,7 +131,9 @@ async def test_capability_matrix_service_module_shape():
     from app.services import capability_matrix as cm
 
     payload = cm.get_capability_matrix()
-    assert set(payload.keys()) == {"matrix", "levels"}
+    assert set(payload.keys()) == {"matrix", "levels", "dataplane"}
+    assert payload["dataplane"] == cm.dataplane_status()
+    assert set(payload["dataplane"]) == {"enabled", "mode", "reason", "note"}
     assert tuple(payload["matrix"]) == cm.LEVEL_ORDER
     assert tuple(cm.CAPABILITIES) == CAPABILITIES
     health = cm.health_capability_section()

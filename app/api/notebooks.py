@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.errors import CDSError
 from app.core.deps import get_business_user
 from app.models.contract import WorkloadEnv
 from app.models.notebook import Notebook, NotebookStatus
@@ -334,9 +335,18 @@ async def execute_cell(
 @router.post("/{notebook_id}/run")
 async def run_notebook(notebook_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_business_user)):
     notebook = await _load_notebook(db, notebook_id, current_user)
+    doc = notebook.content or nb.make_notebook(notebook.title)
+    # 空笔记本一跑就是“0 个单元格全部通过”：它会白起一个开发沙箱、把版本+1、进程
+    # 返 200。空细就是空细，当成失败报给调用方（浏览器“新建”落的就是空 doc）。
+    if not any(nb.cell_source(cell).strip() for _index, cell in nb.code_cells(doc)):
+        raise CDSError(
+            "笔记本没有可执行的单元格：请先输入代码并保存",
+            code="NOTEBOOK_NO_CELLS",
+            http_status=409,
+            detail={"notebook_id": str(notebook_id)},
+        )
     session, _ = await _ensure_dev_session(db, notebook, current_user)
     executor = _executor(db, session.id, current_user, notebook.language)
-    doc = notebook.content or nb.make_notebook(notebook.title)
     results: list[dict[str, Any]] = []
     passed = True
     for index, cell in nb.code_cells(doc):

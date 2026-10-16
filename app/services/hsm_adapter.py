@@ -83,6 +83,25 @@ class VaultTransitAdapter(HSMAdapter):
                 logger.warning(f"Vault connection failed: {e}")
         return self._client
 
+    def transit_available(self) -> bool:
+        """Vault 已认证还不够 — transit 引擎未挂载时 KEK 操作必失败。
+
+        2026-10-16 实测：一台 Vault 可达且已认证、但没挂 transit 的机器上，本工厂
+        依然选中 Vault 适配器，之后每次 KEK 都死在
+        `no handler for route "transit/keys/cds-master-kek"`，而日志里那句
+        “falling back to software HSM” 从来不会发生 — 结果推送注册、卷 DEK 登记
+        全部 500。诚实降级的前提是降级路径真的可达。
+        """
+        client = self._get_client()
+        if client is None:
+            return False
+        try:
+            mounts = client.sys.list_mounted_secrets_engines() or {}
+        except Exception as e:
+            logger.warning(f"Vault mount probe failed: {e}")
+            return False
+        return any(str(path).startswith("transit") for path in mounts)
+
     def generate_kek(self, key_id: str) -> bytes:
         client = self._get_client()
         if client:
@@ -241,8 +260,14 @@ def create_hsm_adapter() -> HSMAdapter:
             adapter = VaultTransitAdapter(settings.VAULT_ADDR, settings.VAULT_TOKEN)
             # Probe Vault availability before committing
             if adapter._get_client() is not None:
-                return adapter
-            logger.info("Vault configured but unreachable")
+                if adapter.transit_available():
+                    return adapter
+                logger.warning(
+                    "Vault reachable but the transit engine is not mounted — "
+                    "treating the HSM as unavailable"
+                )
+            else:
+                logger.info("Vault configured but unreachable")
     except Exception:
         pass
 

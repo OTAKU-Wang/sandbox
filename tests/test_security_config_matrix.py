@@ -85,6 +85,71 @@ def test_hsm_software_fallback_gate(monkeypatch):
     assert isinstance(adapter, ha.SoftwareHSMAdapter)
 
 
+class _VaultSys:
+    """Minimal stand-in for hvac's sys backend (only the mount listing is used)."""
+
+    mounts: dict = {"sys/": {}, "token/": {}}
+
+    def list_mounted_secrets_engines(self):
+        return dict(self.mounts)
+
+
+class _VaultClient:
+    def __init__(self):
+        self.sys = _VaultSys()
+
+
+def test_hsm_falls_back_when_transit_engine_missing(monkeypatch):
+    """An authenticated Vault without the transit engine must NOT be selected.
+
+    Regression for the 2026-10-16 live outage: Vault answered and authenticated,
+    but `transit/` was never mounted, so the factory returned the Vault adapter
+    and every KEK op died with `no handler for route "transit/keys/…"` — the
+    advertised software fallback was unreachable in practice, so webhook
+    registration and volume-DEK registration both returned 500.
+    """
+    from app.services import hsm_adapter as ha
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "VAULT_ADDR", "http://vault.test:8200")
+    monkeypatch.setattr(ha.VaultTransitAdapter, "_get_client", lambda self: _VaultClient())
+
+    assert not ha.VaultTransitAdapter("http://v", "t").transit_available()
+
+    # fail-closed still wins over the fallback
+    monkeypatch.setattr(settings, "HSM_SOFTWARE_FALLBACK_ALLOWED", False)
+    with pytest.raises(RuntimeError):
+        ha.create_hsm_adapter()
+
+    monkeypatch.setattr(settings, "HSM_SOFTWARE_FALLBACK_ALLOWED", True)
+    assert isinstance(ha.create_hsm_adapter(), ha.SoftwareHSMAdapter)
+
+    # with transit mounted, the real HSM is preferred again
+    _VaultSys.mounts = {"sys/": {}, "transit/": {}}
+    try:
+        assert ha.VaultTransitAdapter("http://v", "t").transit_available()
+        assert isinstance(ha.create_hsm_adapter(), ha.VaultTransitAdapter)
+    finally:
+        _VaultSys.mounts = {"sys/": {}, "token/": {}}
+
+
+def test_kek_failure_is_a_contract_error_not_a_crash(monkeypatch):
+    """D-09: KEK init failure must surface as KMS_UNAVAILABLE/503, not INTERNAL_ERROR."""
+    from app.core.errors import CDSError
+    from app.services.kms_service import kms_service
+
+    class _DeadHsm:
+        def generate_kek(self, key_id):
+            raise RuntimeError("HSM unavailable — cannot generate KEK")
+
+    monkeypatch.setattr(kms_service, "_hsm", _DeadHsm())
+    monkeypatch.setattr(kms_service, "_kek_ready", False)
+    with pytest.raises(CDSError) as exc:
+        kms_service._ensure_kek()
+    assert exc.value.code == "KMS_UNAVAILABLE"
+    assert exc.value.http_status == 503
+
+
 def test_seccomp_fallback_helper(monkeypatch):
     from app.services.sandbox_runtime import _seccomp_fallback_allowed
 

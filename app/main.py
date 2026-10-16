@@ -15,7 +15,7 @@ from app.core.database import engine, Base
 from app.core.security import setup_security
 from app.core.redis import get_redis, close_redis
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
-from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api  # SS-15
+from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api, quota as quota_api  # SS-15 / SS-17
 from app.api import session_stream  # W10: WebSocket exec stream
 from app.api import sandbox_nodes  # W14: node operations
 from app.api import shared_volumes  # W15: shared volumes
@@ -341,6 +341,9 @@ app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"], d
 app.include_router(notebooks_api.router, prefix="/api/v1/notebooks", tags=["notebooks"], dependencies=[Depends(require_group("sessions"))])
 app.include_router(workloads_api.router, prefix="/api/v1/workloads", tags=["workloads"], dependencies=[Depends(require_group("sessions"))])
 app.include_router(flow_runtime_api.router, prefix="/api/v1/flow", tags=["flow"], dependencies=[Depends(require_group("sessions"))])
+# SS-17: 配额用量只读面——挂在 deliveries 前缀（gateway 组已在 SS-12 前缀映射内；
+# 未映射前缀会被 resolve_group 判为未映射而对 API Key 默认拒绝）。
+app.include_router(quota_api.router, prefix="/api/v1/deliveries", tags=["flow"], dependencies=[Depends(require_group("gateway"))])
 app.include_router(compute_api.router, prefix="/api/v1/compute", tags=["compute"], dependencies=[Depends(require_group("pipeline"))])
 app.include_router(deliveries_api.router, prefix="/api/v1/deliveries", tags=["deliveries"], dependencies=[Depends(require_group("gateway"))])
 app.include_router(open_api_router.router, prefix="/open/v1", tags=["open-api"], dependencies=[Depends(require_group("gateway"))])

@@ -122,10 +122,14 @@ class CryptoService:
         return _gated_sm3_hash(data)
 
     def _sm3_hash_with_z(self, data: bytes, public_key: str) -> str:
-        """Compute SM3 hash with Z value (GM/T 0009 standard).
+        """Compute SM3 hash with Z value (GM/T 0003.2 5.2 / GB 32918.2).
 
-        Z = SM3(ENTL || userId || xG || yG || xA || yA)
-        Then hash = SM3(Z || M)
+        Z = SM3(ENTL || ID_A || a || b || xG || yG || xA || yA)
+        e = SM3(Z || M)
+
+        曲线系数 a/b 属于 Z 的必输入（早期版本遗漏，导致本服务只能验自己签的名，
+        浏览器 sm-crypto / HSM / 第三方验签工具等标准实现一律验不过）。
+        曲线参数取自 gmssl 所用同一张表，与 EC 运算保持同源。
         """
         if not _HAS_GMSSL:
             return hashlib.sha256(data).hexdigest()
@@ -135,9 +139,12 @@ class CryptoService:
         entlen = len(user_id) * 8  # bit length
         entl = entlen.to_bytes(2, 'big')
 
-        # SM2 curve parameters (sm2p256v1)
-        xG = "28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93"
-        yG = "37BF27342DA639B6DCCFFFEB73D69D78C6C27A6009CBBCA1980F8533921E8A68"
+        # SM2 curve parameters (sm2p256v1), same table the EC operations use
+        table = _sm2.default_ecc_table
+        a = table["a"].rjust(64, "0")
+        b = table["b"].rjust(64, "0")
+        xG = table["g"][:64].rjust(64, "0")
+        yG = table["g"][64:128].rjust(64, "0")
 
         # Public key coordinates
         if len(public_key) == 128:
@@ -146,8 +153,8 @@ class CryptoService:
         else:
             raise ValueError(f"Invalid SM2 public key length: {len(public_key)}")
 
-        # Z = SM3(ENTL || ID || xG || yG || xA || yA)
-        z_input = entl + user_id + bytes.fromhex(xG + yG + xA + yA)
+        # Z = SM3(ENTL || ID_A || a || b || xG || yG || xA || yA)
+        z_input = entl + user_id + bytes.fromhex(a + b + xG + yG + xA + yA)
         z_hash = _sm3.sm3_hash(list(z_input))
 
         # Final hash = SM3(Z || M)

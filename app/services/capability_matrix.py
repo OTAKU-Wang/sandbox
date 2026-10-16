@@ -305,15 +305,42 @@ def _validate() -> None:
 _validate()
 
 
+def dataplane_status() -> dict:
+    """SS-13 交付档：本机 MicroVM 数据面是否可用——区分「完整档」与「控制面档」。
+
+    判据是**唯一的**：``CUBE_DATAPLANE_ENABLED`` 关掉时 ``l2c`` 适配器根本不注册，
+    任何执行入口都会得到 400 ``RUNTIME_UNAVAILABLE`` / ``reason=dataplane_disabled``（SS-13 不降级）。
+    这里只陈述事实，**不改变任何执行行为**；控制面能力（目录/契约/审批/审计/交付）与本开关无关。
+
+    注：``enabled=true`` 仅代表开关打开且适配器已注册；节点实际不可达时执行仍会失败，
+    那条路径由 ``RUNTIME_UNAVAILABLE`` 自己披露，不在此掩盖。
+    """
+    from app.core.config import get_settings
+
+    enabled = bool(get_settings().CUBE_DATAPLANE_ENABLED)
+    return {
+        "enabled": enabled,
+        "mode": "full" if enabled else "control_plane_only",
+        "reason": None if enabled else "dataplane_disabled",
+        "note": (
+            "MicroVM 数据面就绪，可执行沙箱计算" if enabled else
+            "未启用 MicroVM 数据面（需 /dev/kvm 或已透传 vmx/svm 的宿主 + Cube 计算节点）："
+            "平台按控制面档交付，目录/契约/审批/审计/交付可用，沙箱执行入口不可用"
+        ),
+    }
+
+
 def get_capability_matrix() -> dict:
     """Return the full matrix payload: ``{"matrix": {...}, "levels": {...}}``.
 
     ``matrix`` is level -> capability -> cell (state/note/evidence?);
     ``levels`` carries per-level metadata (label/positioning/deprecated).
+    ``dataplane`` 是本部署的档位声明（SS-13 交付档，前端全局横幅的唯一数据源）。
     """
     return {
         "matrix": {level: dict(_MATRIX[level]) for level in LEVEL_ORDER},
         "levels": {level: dict(LEVEL_METADATA[level]) for level in LEVEL_ORDER},
+        "dataplane": dataplane_status(),
     }
 
 

@@ -52,7 +52,14 @@ class KMSService:
             logger.info("[KMS] Master KEK initialized in HSM")
         except Exception as e:
             logger.error(f"[KMS] Failed to initialize KEK: {e}")
-            raise
+            from app.core.errors import CDSError
+
+            raise CDSError(
+                "密管服务不可用，无法初始化主密钥（KEK）",
+                code="KMS_UNAVAILABLE",
+                http_status=503,
+                detail={"reason": str(e)},
+            ) from e
 
     def _sm2_encrypt(self, plaintext: bytes, public_key: str) -> bytes:
         """SM2-encrypt data with a certificate public key (P0-8)."""

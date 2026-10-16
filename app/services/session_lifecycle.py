@@ -76,7 +76,7 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
     if session.container_id:
         try:
             runtime = await get_sandbox_manager()
-            runtime.terminate(session.container_id)
+            await asyncio.to_thread(runtime.terminate, session.container_id)
         except Exception as e:
             logger.warning("[SessionLifecycle] Container termination failed for %s: %s", session.id, e)
 
@@ -97,7 +97,7 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
                 if workspace:
                     sdir = snapshots_dir(Path(workspace))
                     if sdir.exists():
-                        shutil.rmtree(sdir, ignore_errors=True)
+                        await asyncio.to_thread(shutil.rmtree, sdir, ignore_errors=True)
                         logger.info("[SessionLifecycle] Snapshot GC removed %s", sdir)
         except Exception as e:
             logger.warning("[SessionLifecycle] Snapshot GC failed for %s: %s", session.id, e)
@@ -105,7 +105,7 @@ async def terminate_session(session: SandboxSession, db: AsyncSession, reason: s
     # Destroy session key + crypto-erase persisted wrapped payload (gap B3)
     if session.session_key_id:
         from app.services.kms_service import kms_service
-        kms_service.destroy_key(session.session_key_id)
+        await asyncio.to_thread(kms_service.destroy_key, session.session_key_id)
         key_result = await db.execute(
             select(KeyMetadata).where(KeyMetadata.key_id == session.session_key_id)
         )

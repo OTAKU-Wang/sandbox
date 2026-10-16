@@ -47,6 +47,8 @@ async def _run_dict(db: AsyncSession, run: ComputeRun) -> dict:
         "output_files": run.output_files,
         "output_rows": run.output_rows,
         "resource_usage": run.resource_usage,
+        "params": run.params,
+        "resource_override": run.resource_override,
         "error_message": run.error_message,
         "started_at": run.started_at,
         "finished_at": run.finished_at,
@@ -87,6 +89,19 @@ async def get_schedule(
     return {"items": items, "total": len(items), "server_time": datetime.now(timezone.utc)}
 
 
+def _check_resource_override(contract: Contract, override: dict) -> None:
+    """规格覆盖只能向下收窄合约已批准的规格（铁律：不得越权扩大资源）。"""
+    approved = contract.sandbox_resource_spec or {}
+    for key, value in override.items():
+        ceiling = approved.get(key)
+        if isinstance(ceiling, (int, float)) and not isinstance(ceiling, bool) and value > ceiling:
+            raise CDSError(
+                f"{key}={value} 超出合约已批准的规格上限 {ceiling}",
+                code="RESOURCE_OVERRIDE_EXCEEDED",
+                http_status=400,
+            )
+
+
 @router.post("/runs")
 async def trigger_manual_run(
     body: ComputeRunCreate,
@@ -94,7 +109,18 @@ async def trigger_manual_run(
     current_user: User = Depends(get_business_user),
 ):
     contract = await _load_contract(db, body.contract_id, current_user)
-    run = await compute_scheduler.claim_run(db, contract, trigger=ComputeTrigger.MANUAL.value, scheduled_for=None, requested_by=current_user.id)
+    if body.resource_override:
+        _check_resource_override(contract, body.resource_override)
+    run = await compute_scheduler.claim_run(
+        db,
+        contract,
+        trigger=ComputeTrigger.MANUAL.value,
+        scheduled_for=None,
+        requested_by=current_user.id,
+        workload_id=body.workload_id,
+        params=body.params,
+        resource_override=body.resource_override,
+    )
     if run is None:
         raise CDSError("该合约已有计算运行在进行中，请稍后再试", code="COMPUTE_RUN_ACTIVE", http_status=409)
     await audit_service.log(

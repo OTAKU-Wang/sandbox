@@ -5,6 +5,8 @@
 同一合约上一轮没跑完时本轮记 skipped_overlap（不排队堆叠，避免雪崩式并发沙箱）。
 """
 import asyncio
+import base64
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -16,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.database import async_session
+from app.core.errors import CDSError
 from app.models.compute_run import ComputeRun, ComputeRunStatus, ComputeTrigger
 from app.models.contract import Contract, ComputeFrequency, WorkloadEnv
 from app.models.user import User
@@ -66,6 +69,21 @@ def compute_next_run(
 
 def idempotency_key(contract_id: uuid.UUID, scheduled_for: datetime) -> str:
     return f"{contract_id}:{scheduled_for.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
+
+def _entrypoint_with_params(entrypoint: str, params: dict | None) -> str:
+    """把运行参数以 CDS_PARAMS 注入入口代码开头（base64 避开任何引号/编码歧义）。
+
+    不伪造环境：参数作为被审代码的一部分进入执行与审计记录，沙箱内可见可取。
+    """
+    if not params:
+        return entrypoint
+    payload = base64.b64encode(json.dumps(params, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    return (
+        "import base64 as _cds_b64, json as _cds_json\n"
+        f'CDS_PARAMS = _cds_json.loads(_cds_b64.b64decode("{payload}").decode("utf-8"))\n'
+        + entrypoint
+    )
 
 
 async def _production_workload(db, contract_id: uuid.UUID) -> Workload | None:
@@ -121,7 +139,23 @@ async def execute_run(db, run: ComputeRun, contract: Contract) -> ComputeRun:
         await db.flush()
         return run
 
-    workload = await _production_workload(db, contract.id)
+    workload = None
+    if run.workload_id is not None:
+        wl_res = await db.execute(select(Workload).where(Workload.id == run.workload_id))
+        workload = wl_res.scalar_one_or_none()
+        if (
+            workload is None
+            or workload.contract_id != contract.id
+            or workload.env != WorkloadEnv.PRODUCTION.value
+            or workload.status != WorkloadStatus.PUBLISHED.value
+        ):
+            run.status = ComputeRunStatus.FAILED.value
+            run.error_message = "指定的生产版本不存在或已不再是本合约的 published 生产版本"
+            run.finished_at = datetime.now(timezone.utc)
+            await db.flush()
+            return run
+    if workload is None:
+        workload = await _production_workload(db, contract.id)
     if workload is None or not (workload.entrypoint or "").strip():
         run.status = ComputeRunStatus.FAILED.value
         run.error_message = "该合约没有处于 published 状态的生产工作负载，请先在测试沙箱验证后发布"
@@ -138,7 +172,7 @@ async def execute_run(db, run: ComputeRun, contract: Contract) -> ComputeRun:
         await db.flush()
         return run
 
-    spec = workload.resource_spec or contract.sandbox_resource_spec or {}
+    spec = {**(contract.sandbox_resource_spec or {}), **(workload.resource_spec or {}), **(run.resource_override or {})}
     session_id: uuid.UUID | None = None
     try:
         body = SandboxSessionCreate(
@@ -161,7 +195,7 @@ async def execute_run(db, run: ComputeRun, contract: Contract) -> ComputeRun:
 
         exec_res = await execute_in_sandbox(
             session_id=session_id,
-            body=SandboxExecuteRequest(code=workload.entrypoint, language=workload.language or "python"),
+            body=SandboxExecuteRequest(code=_entrypoint_with_params(workload.entrypoint, run.params), language=workload.language or "python"),
             db=db,
             current_user=actor,
         )
@@ -223,7 +257,31 @@ async def _dispatch_run_events(db, run: ComputeRun, contract: Contract) -> None:
         logger.warning("delivery dispatch failed run=%s: %s", run.id, exc)
 
 
-async def claim_run(db, contract: Contract, *, trigger: str, scheduled_for: datetime | None, requested_by: uuid.UUID | None = None) -> ComputeRun | None:
+async def claim_run(
+    db,
+    contract: Contract,
+    *,
+    trigger: str,
+    scheduled_for: datetime | None,
+    requested_by: uuid.UUID | None = None,
+    workload_id: uuid.UUID | None = None,
+    params: dict | None = None,
+    resource_override: dict | None = None,
+) -> ComputeRun | None:
+    if workload_id is not None:
+        res = await db.execute(select(Workload).where(Workload.id == workload_id))
+        pinned = res.scalar_one_or_none()
+        if (
+            pinned is None
+            or pinned.contract_id != contract.id
+            or pinned.env != WorkloadEnv.PRODUCTION.value
+            or pinned.status != WorkloadStatus.PUBLISHED.value
+        ):
+            raise CDSError(
+                "指定的工作负载不是本合约已发布(published)的生产版本",
+                code="WORKLOAD_NOT_PUBLISHED",
+                http_status=400,
+            )
     key = idempotency_key(contract.id, scheduled_for) if scheduled_for else None
     if key:
         existing = await db.execute(select(ComputeRun).where(ComputeRun.idempotency_key == key))
@@ -259,6 +317,9 @@ async def claim_run(db, contract: Contract, *, trigger: str, scheduled_for: date
         idempotency_key=key,
         status=ComputeRunStatus.PENDING.value,
         requested_by=requested_by,
+        workload_id=workload_id,
+        params=params,
+        resource_override=resource_override,
     )
     db.add(run)
     try:

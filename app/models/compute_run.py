@@ -51,6 +51,9 @@ class ComputeRun(Base):
     output_files: Mapped[list | None] = mapped_column(JSON)
     output_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     resource_usage: Mapped[dict | None] = mapped_column(JSON)
+    # 人工触发时提交运行参数（向沙箱内的入口代码以 CDS_PARAMS 注入）与规格覆盖。
+    params: Mapped[dict | None] = mapped_column(JSON)
+    resource_override: Mapped[dict | None] = mapped_column(JSON)
     error_message: Mapped[str | None] = mapped_column(Text)
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

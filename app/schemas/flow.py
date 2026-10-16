@@ -2,11 +2,13 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DeliveryMethod = Literal["dataset", "open_api", "result_push"]
 ComputeFrequency = Literal["manual", "hourly", "daily"]
 WorkloadEnv = Literal["test", "production"]
+
+_RESOURCE_OVERRIDE_KEYS = frozenset({"cpu_cores", "memory_mb", "disk_gb", "timeout_seconds"})
 
 
 class ResourceSpec(BaseModel):
@@ -66,6 +68,40 @@ class WorkloadTestRequest(BaseModel):
 
 class ComputeRunCreate(BaseModel):
     contract_id: uuid.UUID
+    # 不指定则使用该合约当前 is_latest 的已发布生产版本；指定则必须是本合约的 published 生产版本。
+    workload_id: uuid.UUID | None = None
+    # 运行参数：写入 compute_runs.params 并以 CDS_PARAMS 注入沙箱内入口代码。
+    params: dict | None = None
+    # 规格覆盖：只允许向下收窄合约已批准的规格，超出一律 400。
+    resource_override: dict | None = None
+
+    @field_validator("params")
+    @classmethod
+    def params_within_limit(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        if len(v) > 32:
+            raise ValueError("运行参数最多 32 个键")
+        import json
+
+        if len(json.dumps(v, ensure_ascii=False)) > 8192:
+            raise ValueError("运行参数序列化后不得超过 8KB")
+        return v
+
+    @field_validator("resource_override")
+    @classmethod
+    def override_keys(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        unknown = set(v) - _RESOURCE_OVERRIDE_KEYS
+        if unknown:
+            raise ValueError(f"不支持的规格覆盖项：{', '.join(sorted(unknown))}")
+        for key, value in v.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise ValueError(f"{key} 必须为正数")
+            if key != "cpu_cores" and not float(value).is_integer():
+                raise ValueError(f"{key} 必须为整数")
+        return v
 
 
 class DatasetBundleRequest(BaseModel):

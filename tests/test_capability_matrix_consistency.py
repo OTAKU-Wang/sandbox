@@ -30,7 +30,24 @@ ERROR_CODES = REPO_ROOT / "docs" / "error-codes.md"
 
 
 def _fe_levels() -> list[str]:
-    """Level values declared in the FE SandboxLevel const (as const object)."""
+    """Level vocabulary declared in cds-frontend: selectable const + historical list.
+
+    The FE splits them on purpose (SS-13 leaves CubeSandbox as the only
+    selectable level, while sessions/contracts created before the convergence
+    still carry L0-L3/k8s and must stay renderable), but the *vocabulary* the FE
+    can handle must still equal the API matrix — which is what this lock checks.
+    """
+    text = FE_ENUMS.read_text(encoding="utf-8")
+    values = _fe_selectable_levels()
+    legacy = re.search(r"export const LEGACY_SANDBOX_LEVELS = \[(.*?)\] as const", text, re.S)
+    assert legacy is not None, "LEGACY_SANDBOX_LEVELS not found in enums.ts"
+    values += re.findall(r"'([^']+)'", legacy.group(1))
+    assert values, "no level values parsed from enums.ts"
+    return values
+
+
+def _fe_selectable_levels() -> list[str]:
+    """Levels the FE declares as selectable (SandboxLevel const, as const object)."""
     text = FE_ENUMS.read_text(encoding="utf-8")
     block = re.search(r"export const SandboxLevel = \{(.*?)\} as const", text, re.S)
     assert block is not None, "SandboxLevel const not found in enums.ts"
@@ -66,6 +83,9 @@ async def test_matrix_level_set_consistent_across_sources(client, auth_headers):
     assert api_levels == fe_levels, (
         f"FE enums.ts SandboxLevel drift: api={sorted(api_levels)} "
         f"fe={sorted(fe_levels)}"
+    )
+    assert set(_fe_selectable_levels()) == {"l2c"}, (
+        "前端可选沙箱级别必须只有 CubeSandbox（SS-13 单一微虚机路径，禁止降级到进程/bwrap/k8s 隔离）"
     )
     assert api_levels == doc_levels, (
         f"docs/error-codes.md 级别能力 table drift: api={sorted(api_levels)} "

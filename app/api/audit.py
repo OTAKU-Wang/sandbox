@@ -16,7 +16,12 @@ from app.core.deps import require_roles
 from app.models.user import User, UserRole
 from app.models.audit_log import AuditLog
 from app.services.audit_service import audit_service
-from app.services.blockchain_adapter import blockchain_adapter, ChainBackend, chain_anchoring_state
+from app.services.blockchain_adapter import (
+    AnchorRecord,
+    blockchain_adapter,
+    ChainBackend,
+    chain_anchoring_state,
+)
 from app.services.merkle_service import merkle_service
 
 router = APIRouter()
@@ -45,6 +50,41 @@ def _backend_disclosure(backend: ChainBackend) -> dict:
         # the local log or an in-process simulation.
         "chain_anchoring": chain_anchoring_state(backend),
     }
+
+
+# SS-17 deterministic Merkle ordering. merkle_service builds the tree from the
+# *positional* order of the leaf list (build_tree pairs neighbours level by level
+# and duplicates the last leaf on odd levels), so every query that feeds it must
+# return rows in one fixed total order — without an ORDER BY the rebuilt root
+# depends on the DB's row-return order and verification can fail on data that
+# was never tampered with. The canonical order is the same one the anchoring side
+# (`POST /anchor`) feeds the tree with, and it is built from the same key the
+# leaf hash payload uses (`id|action|resource_type|resource_id|created_at`):
+# created_at ascending with id as tiebreaker — created_at alone ties (the column
+# defaults to now() at second granularity), and an unordered tie would place the
+# two leaves at different positions on the two sides.
+#
+# NOTE on the egress tailer (app/services/cube_egress_audit._anchor_batch): it
+# anchors a batch in file order and copies the upstream `ts` into created_at, so
+# created_at is monotonic within a batch and this order reproduces it. If two
+# upstream lines ever carry an identical ts, verify recomputes a different root
+# and honestly reports a failure — it never reports a pass it did not compute.
+_MERKLE_ORDER_BY = (AuditLog.created_at.asc(), AuditLog.id.asc())
+
+
+async def _find_anchor_by_tx_hash(tx_hash: str) -> tuple[str | None, AnchorRecord | None]:
+    """Locate the anchor record carrying ``tx_hash`` (cache re-hydrated from DB).
+
+    Returns ``(anchor_id, record)`` or ``(None, None)`` when no anchor matches —
+    callers must surface that as "no on-chain height known", never invent one.
+    """
+    # PZ-03: re-hydrate the in-memory anchor cache from the DB first so
+    # lookups survive process restarts.
+    await blockchain_adapter.hydrate_from_db()
+    for aid, record in blockchain_adapter._anchors.items():
+        if record.tx_hash == tx_hash:
+            return aid, record
+    return None, None
 
 
 class AnchorRequest(BaseModel):
@@ -158,8 +198,11 @@ async def anchor_audit_records(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid record ID: {rid_str}")
 
-    # Fetch records
-    result = await db.execute(select(AuditLog).where(AuditLog.id.in_(record_ids)))
+    # Fetch records in the canonical Merkle leaf order (see _MERKLE_ORDER_BY) so
+    # the anchored root is reproducible by /verify and /merkle-proof.
+    result = await db.execute(
+        select(AuditLog).where(AuditLog.id.in_(record_ids)).order_by(*_MERKLE_ORDER_BY)
+    )
     records = list(result.scalars().all())
 
     if not records:
@@ -194,6 +237,9 @@ async def anchor_audit_records(
         "tx_hash": anchor_result.anchor.tx_hash if anchor_result.anchor else None,
         "anchor_id": anchor_result.anchor.anchor_id if anchor_result.anchor else None,
         "confirmed": anchor_result.anchor.confirmed if anchor_result.anchor else False,
+        # Chain height only when the active backend actually reports one; the PG
+        # append-only log has no block height, so this is null — never 0/fake.
+        "block_number": anchor_result.anchor.block_number if anchor_result.anchor else None,
         "backend": _backend_disclosure(anchor_result.anchor.backend) if anchor_result.anchor else None,
     }
 
@@ -218,9 +264,12 @@ async def verify_audit_record(
     if not log.blockchain_tx_hash:
         return {"verified": False, "reason": "Record not anchored to blockchain"}
 
-    # Reconstruct Merkle root from sibling records to verify
+    # Reconstruct Merkle root from sibling records to verify — in the same
+    # canonical leaf order the anchoring side used (see _MERKLE_ORDER_BY).
     result = await db.execute(
-        select(AuditLog).where(AuditLog.blockchain_tx_hash == log.blockchain_tx_hash)
+        select(AuditLog)
+        .where(AuditLog.blockchain_tx_hash == log.blockchain_tx_hash)
+        .order_by(*_MERKLE_ORDER_BY)
     )
     sibling_records = list(result.scalars().all())
     record_hashes = []
@@ -230,16 +279,12 @@ async def verify_audit_record(
     merkle_root = merkle_service.get_root(record_hashes)
 
     # Verify via blockchain adapter (find anchor by tx_hash).
-    # PZ-03: re-hydrate the in-memory anchor cache from the DB first so
-    # verification survives process restarts.
     verified = False
     anchor_backend = None
-    await blockchain_adapter.hydrate_from_db()
-    for aid, record in blockchain_adapter._anchors.items():
-        if record.tx_hash == log.blockchain_tx_hash:
-            verified = await blockchain_adapter.verify(aid, merkle_root.encode())
-            anchor_backend = _backend_disclosure(record.backend)
-            break
+    anchor_id, anchor_record = await _find_anchor_by_tx_hash(log.blockchain_tx_hash)
+    if anchor_record is not None:
+        verified = await blockchain_adapter.verify(anchor_id, merkle_root.encode())
+        anchor_backend = _backend_disclosure(anchor_record.backend)
 
     if anchor_backend and not anchor_backend["is_consortium_chain"]:
         note = "本地防篡改日志校验通过（非联盟链上链，见 backend 标注）"
@@ -252,6 +297,12 @@ async def verify_audit_record(
         "verified": verified,
         "tx_hash": log.blockchain_tx_hash,
         "record_id": str(log.id),
+        "anchor_id": anchor_id,
+        # Chain height + confirmation straight from the anchor record; null when
+        # the backend has no height (PG append-only log) or no anchor was found.
+        "block_number": anchor_record.block_number if anchor_record else None,
+        "confirmed": bool(anchor_record.confirmed) if anchor_record else False,
+        "merkle_root": merkle_root,
         "backend": anchor_backend,
         "verification_note": note,
     }
@@ -281,9 +332,12 @@ async def get_merkle_proof(
     data = f"{log.id}|{log.action}|{log.resource_type}|{log.resource_id}|{log.created_at}"
     record_hash = crypto_service.sm3_hash(data.encode())
 
-    # Reconstruct Merkle tree from all records sharing the same tx_hash
+    # Reconstruct Merkle tree from all records sharing the same tx_hash, in the
+    # canonical leaf order the anchoring side used (see _MERKLE_ORDER_BY).
     result = await db.execute(
-        select(AuditLog).where(AuditLog.blockchain_tx_hash == log.blockchain_tx_hash)
+        select(AuditLog)
+        .where(AuditLog.blockchain_tx_hash == log.blockchain_tx_hash)
+        .order_by(*_MERKLE_ORDER_BY)
     )
     sibling_records = list(result.scalars().all())
 
@@ -301,15 +355,25 @@ async def get_merkle_proof(
     # Generate Merkle proof
     proof = merkle_service.generate_proof(all_hashes, target_index) if target_index >= 0 else None
 
+    anchor_id, anchor_record = await _find_anchor_by_tx_hash(log.blockchain_tx_hash)
+    disclosure_backend = (
+        anchor_record.backend if anchor_record else blockchain_adapter.get_backend_type()
+    )
+
     return {
         "record_id": str(log.id),
         "record_hash": record_hash,
         "tx_hash": log.blockchain_tx_hash,
+        "anchor_id": anchor_id,
+        # Chain height only when the anchoring backend actually has one (null for
+        # the PG append-only log — no block height exists there).
+        "block_number": anchor_record.block_number if anchor_record else None,
+        "confirmed": bool(anchor_record.confirmed) if anchor_record else False,
         "merkle_root": proof.root_hash if proof else None,
         "proof_path": proof.proof_path if proof else [],
         "leaf_index": proof.leaf_index if proof else target_index,
         "total_leaves": len(all_hashes),
-        "backend": _backend_disclosure(blockchain_adapter.get_backend_type()),
+        "backend": _backend_disclosure(disclosure_backend),
     }
 
 
