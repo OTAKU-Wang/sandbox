@@ -8,6 +8,7 @@ build/
 dist/
 .venv/
 venv/
+.venv*/
 env/
 .pytest_cache/
 .mypy_cache/
@@ -57,3 +58,7 @@ Thumbs.db
 logs/
 
 .superpowers/
+
+# 本机验证工件（证据日志/截图，不入库）
+shots/
+.gate.txt
