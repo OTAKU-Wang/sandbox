@@ -1,0 +1,355 @@
+FFFFFFFF.FFFF                                                            [100%]
+================================== FAILURES ===================================
+__________________ test_successful_connect_logs_no_password ___________________
+
+redis_module = <module 'app.core.redis' from 'D:\\workspace\\sandbox\\app\\core\\redis.py'>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x000001C07AFF18B0>
+
+    @pytest.mark.asyncio
+    async def test_successful_connect_logs_no_password(redis_module, caplog):
+        fake = _FakeAioredis(_FakeRedis())
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(redis_module, "aioredis", fake)
+        try:
+            with caplog.at_level(logging.INFO, logger="app.core.redis"):
+                await redis_module.get_redis()
+        finally:
+            monkey.undo()
+    
+        msgs = _records(caplog)
+        assert msgs, "expected a connect log line"
+>       assert all(SECRET not in m for m in msgs), msgs
+E       AssertionError: ['Redis connected: redis://:Sup3rS3cretP@ss@redis.prod.internal:6379/0']
+E       assert False
+E        +  where False = all(<generator object test_successful_connect_logs_no_password.<locals>.<genexpr> at 0x000001C07AFFB510>)
+
+tests\test_ocr_a038_a043_log_hygiene.py:81: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     app.core.redis:redis.py:39 Redis connected: redis://:Sup3rS3cretP@ss@redis.prod.internal:6379/0
+____________________ test_failed_connect_logs_no_password _____________________
+
+redis_module = <module 'app.core.redis' from 'D:\\workspace\\sandbox\\app\\core\\redis.py'>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x000001C07C0B5310>
+
+    @pytest.mark.asyncio
+    async def test_failed_connect_logs_no_password(redis_module, caplog):
+        # redis 异常文本本身就可能回显整条 URL（含密码）
+        err = ConnectionError(f"Error 111 connecting to {REDIS_URL}: refused")
+        fake = _FakeAioredis(_FakeRedis(ping_error=err))
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(redis_module, "aioredis", fake)
+        try:
+            with caplog.at_level(logging.INFO, logger="app.core.redis"):
+                with pytest.raises(ConnectionError):
+                    await redis_module.get_redis()
+        finally:
+            monkey.undo()
+    
+        msgs = _records(caplog)
+        assert any("Redis connection failed" in m for m in msgs), msgs
+>       assert all(SECRET not in m for m in msgs), msgs
+E       AssertionError: ['Redis connection failed: Error 111 connecting to redis://:Sup3rS3cretP@ss@redis.prod.internal:6379/0: refused']
+E       assert False
+E        +  where False = all(<generator object test_failed_connect_logs_no_password.<locals>.<genexpr> at 0x000001C07C318450>)
+
+tests\test_ocr_a038_a043_log_hygiene.py:102: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.core.redis:redis.py:41 Redis connection failed: Error 111 connecting to redis://:Sup3rS3cretP@ss@redis.prod.internal:6379/0: refused
+____________________ test_redact_helper_scrubs_credentials ____________________
+
+redis_module = <module 'app.core.redis' from 'D:\\workspace\\sandbox\\app\\core\\redis.py'>
+
+    def test_redact_helper_scrubs_credentials(redis_module):
+>       redact = redis_module.redact_url
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.core.redis' has no attribute 'redact_url'
+
+tests\test_ocr_a038_a043_log_hygiene.py:108: AttributeError
+___________ test_json_mode_emits_structured_json_for_stdlib_loggers ___________
+
+root_logging = <RootLogger root (WARNING)>
+
+    def test_json_mode_emits_structured_json_for_stdlib_loggers(root_logging):
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        root_logging.addHandler(handler)
+        request_id_var.set("req-abcdef123456")
+    
+>       doc = _emit_and_parse(root_logging, handler, "app.services.demo", "quota exhausted for %s" % "tenant-7")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ocr_a038_a043_log_hygiene.py:156: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = <RootLogger root (WARNING)>, handler_buf = <StreamHandler (NOTSET)>
+logger_name = 'app.services.demo', message = 'quota exhausted for tenant-7'
+
+    def _emit_and_parse(root, handler_buf: io.StringIO, logger_name: str, message: str) -> dict:
+        setup_logging(True)
+        logging.getLogger(logger_name).warning(message)
+>       line = handler_buf.getvalue().strip().splitlines()[-1]
+               ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'StreamHandler' object has no attribute 'getvalue'
+
+tests\test_ocr_a038_a043_log_hygiene.py:146: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.core.logging:logging.py:37 LOG_JSON=true but structlog is not installed; keeping plain logging
+WARNING  app.services.demo:test_ocr_a038_a043_log_hygiene.py:145 quota exhausted for tenant-7
+_______________________ test_json_mode_keeps_traceback ________________________
+
+root_logging = <RootLogger root (WARNING)>
+
+    def test_json_mode_keeps_traceback(root_logging):
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        root_logging.addHandler(handler)
+    
+        setup_logging(True)
+        try:
+            1 / 0
+        except ZeroDivisionError:
+            logging.getLogger("app.boom").exception("divide failed")
+    
+>       doc = json.loads(buf.getvalue().strip().splitlines()[-1])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ocr_a038_a043_log_hygiene.py:177: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001C070F40200>
+s = 'ZeroDivisionError: division by zero', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:356: JSONDecodeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.core.logging:logging.py:37 LOG_JSON=true but structlog is not installed; keeping plain logging
+ERROR    app.boom:test_ocr_a038_a043_log_hygiene.py:175 divide failed
+Traceback (most recent call last):
+  File "D:\workspace\sandbox\tests\test_ocr_a038_a043_log_hygiene.py", line 173, in test_json_mode_keeps_traceback
+    1 / 0
+    ~~^~~
+ZeroDivisionError: division by zero
+______________ test_json_mode_does_not_replace_existing_handlers ______________
+
+root_logging = <RootLogger root (WARNING)>
+
+    def test_json_mode_does_not_replace_existing_handlers(root_logging):
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        sentinel = logging.Formatter("%(levelname)s|legacy")
+        handler.setFormatter(sentinel)
+        root_logging.addHandler(handler)
+        before = list(root_logging.handlers)
+    
+        setup_logging(True)
+        setup_logging(True)  # 幂等：重复调用不得叠加 handler
+    
+        assert handler in root_logging.handlers
+        assert list(root_logging.handlers) == before, "handler 集必须稳定"
+        logging.getLogger("app.legacy").warning("still here")
+        line = buf.getvalue().strip().splitlines()[-1]
+>       assert json.loads(line)["message"] == "still here"
+               ^^^^^^^^^^^^^^^^
+
+tests\test_ocr_a038_a043_log_hygiene.py:197: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001C070F40200>
+s = 'WARNING|legacy', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:356: JSONDecodeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.core.logging:logging.py:37 LOG_JSON=true but structlog is not installed; keeping plain logging
+WARNING  app.core.logging:logging.py:37 LOG_JSON=true but structlog is not installed; keeping plain logging
+WARNING  app.legacy:test_ocr_a038_a043_log_hygiene.py:195 still here
+___________ test_json_level_policy_never_overrides_explicit_config ____________
+
+root_logging = <RootLogger root (NOTSET)>
+
+    def test_json_level_policy_never_overrides_explicit_config(root_logging):
+        # 未配置（NOTSET → 有效级别 WARNING）时要把 INFO 放出来…
+        root_logging.setLevel(logging.NOTSET)
+        setup_logging(True)
+>       assert root_logging.level == logging.INFO
+E       assert 0 == 20
+E        +  where 0 = <RootLogger root (NOTSET)>.level
+E        +  and   20 = logging.INFO
+
+tests\test_ocr_a038_a043_log_hygiene.py:204: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.core.logging:logging.py:37 LOG_JSON=true but structlog is not installed; keeping plain logging
+___________________ test_text_mode_leaves_logging_untouched ___________________
+
+root_logging = <RootLogger root (WARNING)>
+
+    def test_text_mode_leaves_logging_untouched(root_logging):
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        plain = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        handler.setFormatter(plain)
+        root_logging.addHandler(handler)
+    
+        setup_logging(False)
+    
+        assert handler.formatter is plain
+        logging.getLogger("app.text").info("plain text line")
+>       assert buf.getvalue().strip() == "INFO:app.text:plain text line"
+E       AssertionError: assert '' == 'INFO:app.tex...ain text line'
+E         
+E         - INFO:app.text:plain text line
+
+tests\test_ocr_a038_a043_log_hygiene.py:227: AssertionError
+_____________ test_context_middleware_binds_request_id_from_state _____________
+
+    @pytest.mark.asyncio
+    async def test_context_middleware_binds_request_id_from_state():
+>       mw = log_module.RequestIDContextMiddleware(lambda: None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.core.logging' has no attribute 'RequestIDContextMiddleware'
+
+tests\test_ocr_a038_a043_log_hygiene.py:258: AttributeError
+__________ test_context_middleware_uses_incoming_header_before_state __________
+
+    @pytest.mark.asyncio
+    async def test_context_middleware_uses_incoming_header_before_state():
+>       mw = log_module.RequestIDContextMiddleware(lambda: None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.core.logging' has no attribute 'RequestIDContextMiddleware'
+
+tests\test_ocr_a038_a043_log_hygiene.py:268: AttributeError
+___________ test_context_middleware_is_mounted_inner_of_request_id ____________
+
+    @pytest.mark.asyncio
+    async def test_context_middleware_is_mounted_inner_of_request_id():
+        from app.core.telemetry import RequestIDMiddleware
+        from app.main import app
+    
+        chain = [m.cls for m in app.user_middleware]
+>       assert log_module.RequestIDContextMiddleware in chain, chain
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.core.logging' has no attribute 'RequestIDContextMiddleware'
+
+tests\test_ocr_a038_a043_log_hygiene.py:285: AttributeError
+________________ test_request_id_reaches_logs_through_the_app _________________
+
+client = <httpx.AsyncClient object at 0x000001C07C401C70>
+root_logging = <RootLogger root (WARNING)>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C07C400230>
+
+    @pytest.mark.asyncio
+    async def test_request_id_reaches_logs_through_the_app(client, root_logging, monkeypatch):
+        """/health 处理函数内部打的日志必须带上本次请求的 request_id。"""
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        root_logging.addHandler(handler)
+        setup_logging(True)
+    
+        import app.api.health as health_api
+    
+        real = health_api.health_capability_section
+    
+        def _logging_capability_section():
+            logging.getLogger("app.api.health").warning("inside the request")
+            return real()
+    
+        monkeypatch.setattr(health_api, "health_capability_section", _logging_capability_section)
+    
+        resp = await client.get("/health", headers={"X-Request-ID": "rid-e2e-000111"})
+        assert resp.status_code == 200
+        # /health 响应字段不许缺失（前端按字段渲染）
+        body = resp.json()
+        assert body["status"] == "ok" and body["service"] == "cds" and body["capability"]
+    
+>       doc = json.loads(buf.getvalue().strip().splitlines()[-1])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ocr_a038_a043_log_hygiene.py:315: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001C070F40200>
+s = 'inside the request', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:356: JSONDecodeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.core.logging:logging.py:37 LOG_JSON=true but structlog is not installed; keeping plain logging
+WARNING  app.api.health:test_ocr_a038_a043_log_hygiene.py:304 inside the request
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_successful_connect_logs_no_password
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_failed_connect_logs_no_password
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_redact_helper_scrubs_credentials
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_json_mode_emits_structured_json_for_stdlib_loggers
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_json_mode_keeps_traceback
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_json_mode_does_not_replace_existing_handlers
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_json_level_policy_never_overrides_explicit_config
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_text_mode_leaves_logging_untouched
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_context_middleware_binds_request_id_from_state
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_context_middleware_uses_incoming_header_before_state
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_context_middleware_is_mounted_inner_of_request_id
+FAILED tests/test_ocr_a038_a043_log_hygiene.py::test_request_id_reaches_logs_through_the_app
+12 failed, 1 passed in 3.64s
+STRAGGLER2_RC=1

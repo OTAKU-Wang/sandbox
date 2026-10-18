@@ -21,9 +21,11 @@ Supports:
 """
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -31,12 +33,143 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 _LOCAL_FEDERATION_JWT_KEY = "cds-local-federation-jwt-secret-key-32-bytes-minimum"
+
+# ── Remote-endpoint guard (A60) ────────────────────────────────────────
+#
+# `endpoint` is caller-supplied at POST /federation/trust and every request to
+# it carries a locally-signed federation JWT, so an unvalidated value is a
+# credentialed SSRF primitive (cloud metadata, loopback Redis/Vault, …).
+# Two layers:
+#   1. validate_federation_endpoint() — scheme / host shape / address-range
+#      check, run when the trust is created AND again at request time, so
+#      rows written before this guard existed are covered too.
+#   2. the name is resolved again before dialling, so a *public* name that
+#      points into the internal ranges is refused as well.
+#      Residual (documented, not silently ignored): the guard and the dial
+#      resolve separately, so a DNS record that alternates answers can still
+#      race it — pinning the dialled IP is the follow-up.
+_FEDERATION_ALLOWED_SCHEMES = frozenset({"https"})
+_FEDERATION_INTERNAL_SUFFIXES = (
+    ".localhost", ".local", ".internal", ".cluster.local", ".consul",
+)
+_HOSTNAME_RE = re.compile(
+    r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
+)
+# decimal / octal / hex single-or-quad address encodings (127.0.0.1 lookalikes
+# that ipaddress() rejects but libc getaddrinfo happily accepts)
+_NUMERIC_ADDRESS_RE = re.compile(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.(?:0[xX][0-9a-fA-F]+|[0-9]+)){0,3}")
+
+
+def _is_internal_ip(addr: str) -> bool:
+    """True when *addr* must never be dialled from the federation channel."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return True  # unparseable → refuse, never "allow because unknown"
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return bool(
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+    )
+
+
+def _resolve_addresses(host: str) -> list[str]:
+    """Every address *host* resolves to ([] when it does not resolve at all)."""
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (OSError, UnicodeError):
+        return []
+    return sorted({info[4][0] for info in infos})
+
+
+def validate_federation_endpoint(endpoint: str) -> str:
+    """Validate a remote-space endpoint and return it as a base URL (A60).
+
+    Raises ValueError with an operator-readable reason. Only https is
+    accepted: `verify=` protects nothing on a cleartext target, and the
+    federation channel is mTLS by contract (PZ-05 / MR-A8).
+    """
+    raw = (endpoint or "").strip()
+    if not raw:
+        raise ValueError("federation endpoint is empty")
+    try:
+        parsed = urlparse(raw)
+    except ValueError as exc:  # malformed IPv6 literal etc.
+        raise ValueError(f"not a valid URL: {raw!r}") from exc
+    if parsed.scheme.lower() not in _FEDERATION_ALLOWED_SCHEMES:
+        raise ValueError(
+            f"scheme {parsed.scheme!r} is not allowed, https is required: {raw!r}"
+        )
+    if parsed.username or parsed.password or "@" in (parsed.netloc or ""):
+        raise ValueError(f"endpoint must not carry credentials: {raw!r}")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"endpoint must not carry a query or fragment: {raw!r}")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"endpoint has an invalid port: {raw!r}") from exc
+    if port == 0:
+        raise ValueError(f"endpoint has an invalid port: {raw!r}")
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        raise ValueError(f"endpoint has no host: {raw!r}")
+    if host == "localhost" or host.endswith(_FEDERATION_INTERNAL_SUFFIXES):
+        raise ValueError(f"endpoint points at an internal name: {raw!r}")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        if _NUMERIC_ADDRESS_RE.fullmatch(host):
+            raise ValueError(
+                f"endpoint host {host!r} is a non-canonical address literal "
+                "(only a dotted-quad / IPv6 literal or a DNS name is accepted)"
+            ) from None
+        if not _HOSTNAME_RE.fullmatch(host):
+            raise ValueError(f"endpoint host is not a valid name: {host!r}") from None
+    else:
+        if _is_internal_ip(str(literal)):
+            raise ValueError(
+                f"endpoint points at an internal address ({literal}): {raw!r}"
+            )
+    return raw.rstrip("/")
+
+
+# ── Opaque trust id ↔ DB primary key (A63) ─────────────────────────────
+#
+# Clients see `trust-<12 hex>`; the row's primary key keeps those 12 hex
+# digits and zero-pads the rest. The mapping is deterministic AND reversible,
+# so a trust reloaded from the DB is still addressed by the exact id that
+# POST /federation/trust returned — before this, the loader handed out
+# str(row.id) and POST /trusts/{id}/revoke 404'd for a still-active trust.
+_TRUST_ID_PREFIX = "trust-"
+_HEX_ID_RE = re.compile(r"[0-9a-fA-F]{1,32}")
+
+
+def trust_row_id(trust_id: str) -> uuid.UUID:
+    """Opaque trust id → FederationTrustRecord primary key."""
+    raw = (trust_id or "").strip()
+    body = raw[len(_TRUST_ID_PREFIX):] if raw.startswith(_TRUST_ID_PREFIX) else raw
+    if _HEX_ID_RE.fullmatch(body):
+        return uuid.UUID(hex=body.lower().ljust(32, "0"))
+    # Rows loaded by the previous loader carried str(row.id) as the id.
+    return uuid.UUID(raw)
+
+
+def opaque_trust_id(row_id) -> str:
+    """Primary key → the opaque id clients were given (inverse of the above)."""
+    hex_digits = uuid.UUID(str(row_id)).hex
+    if hex_digits[12:] == "0" * 20:  # written from a short `trust-<12hex>` id
+        return f"{_TRUST_ID_PREFIX}{hex_digits[:12]}"
+    return f"{_TRUST_ID_PREFIX}{hex_digits}"
 
 
 def _default_jwt_secret_key() -> str:
@@ -288,7 +421,7 @@ class FederationConnector:
         # Dynamic trust evaluator — scores degrade on violations, improve on success
         self._trust_scores: dict[str, dict] = {}  # space_id → {quality, compliance, reputation, security}
         self._min_trust_by_op: dict[str, int] = {
-            "search": 0, "read_catalog": 0, "read": 30,
+            "search": 0, "read_catalog": 0, "verify_audit": 0, "read": 30,
             "write": 50, "execute": 60, "admin": 80,
         }
 
@@ -324,7 +457,7 @@ class FederationConnector:
                 )
                 ops = json.loads(row.allowed_operations_json) if row.allowed_operations_json else []
                 trust = FederationTrust(
-                    trust_id=str(row.id),
+                    trust_id=opaque_trust_id(row.id),
                     local_space=local,
                     remote_space=remote,
                     trust_level=TrustLevel(row.trust_level),
@@ -352,7 +485,7 @@ class FederationConnector:
             from app.models.federation_trust import FederationTrustRecord
             async with self._db_session_factory() as session:
                 record = FederationTrustRecord(
-                    id=uuid.UUID(trust.trust_id.replace("trust-", "")[:32].ljust(32, "0")),
+                    id=trust_row_id(trust.trust_id),
                     local_space_id=trust.local_space.space_id,
                     local_space_name=trust.local_space.space_name,
                     local_endpoint=trust.local_space.endpoint,
@@ -381,7 +514,7 @@ class FederationConnector:
             async with self._db_session_factory() as session:
                 await session.execute(
                     update(FederationTrustRecord)
-                    .where(FederationTrustRecord.id == uuid.UUID(trust_id.replace("trust-", "")[:32].ljust(32, "0")))
+                    .where(FederationTrustRecord.id == trust_row_id(trust_id))
                     .values(status=status)
                 )
                 await session.commit()
@@ -439,6 +572,10 @@ class FederationConnector:
         if not self._local_space:
             raise RuntimeError("Local space not configured. Call set_local_space() first.")
 
+        # A60: refuse a non-federation endpoint here, at the operator boundary,
+        # instead of dialling it later with a signed token.
+        validate_federation_endpoint(remote_space.endpoint)
+
         trust_id = f"trust-{uuid.uuid4().hex[:12]}"
         default_ops = ["read_catalog", "search", "verify_audit"]
         trust = FederationTrust(
@@ -454,14 +591,25 @@ class FederationConnector:
         self._trusts[trust_id] = trust
         self._space_index[remote_space.space_id] = trust
         logger.info(f"Trust established: {trust_id} ({trust_level.value}) with {remote_space.space_id}")
-        # Persist to DB (fire-and-forget)
+        self._fire(self._persist_trust(trust))  # fire-and-forget
+        return trust
+
+    def _fire(self, coro, loop=None):
+        """Schedule a fire-and-forget persist coroutine (no-op without a loop).
+
+        A worker thread — `send_request_async` runs the blocking body on one —
+        has no running loop of its own, so it hands back the loop the request
+        came in on and the DB write still lands there instead of being
+        silently skipped.
+        """
         import asyncio
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._persist_trust(trust))
+            if loop is not None:
+                return asyncio.run_coroutine_threadsafe(coro, loop)
+            return asyncio.get_running_loop().create_task(coro)
         except RuntimeError:
-            pass  # No event loop — skip persistence
-        return trust
+            coro.close()
+            return None
 
     def revoke_trust(self, trust_id: str) -> bool:
         """Revoke a trust relationship."""
@@ -471,13 +619,7 @@ class FederationConnector:
         trust.status = FederationStatus.REVOKED
         self._space_index.pop(trust.remote_space.space_id, None)
         logger.info(f"Trust revoked: {trust_id}")
-        # Update DB (fire-and-forget)
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._update_trust_status(trust_id, "revoked"))
-        except RuntimeError:
-            pass
+        self._fire(self._update_trust_status(trust_id, "revoked"))  # fire-and-forget
         return True
 
     def suspend_trust(self, trust_id: str) -> bool:
@@ -487,13 +629,7 @@ class FederationConnector:
             return False
         trust.status = FederationStatus.SUSPENDED
         logger.info(f"Trust suspended: {trust_id}")
-        # Update DB (fire-and-forget)
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._update_trust_status(trust_id, "suspended"))
-        except RuntimeError:
-            pass
+        self._fire(self._update_trust_status(trust_id, "suspended"))  # fire-and-forget
         return True
 
     def get_trust(self, trust_id: str) -> FederationTrust | None:
@@ -511,7 +647,26 @@ class FederationConnector:
             trusts = [t for t in trusts if t.status == status]
         return trusts
 
-    def send_request(
+    def _min_trust_for(self, operation: str) -> int:
+        """Minimum dynamic-trust score for *operation* — fail-closed (A150).
+
+        `operation` comes straight out of the request body, so an unregistered
+        name must never mean "no threshold": unknown verbs get the strictest
+        registered one. The lookup is case-insensitive, so `READ` cannot dodge
+        the bar set for `read`.
+        """
+        key = (operation or "").strip().casefold()
+        if key in self._min_trust_by_op:
+            return self._min_trust_by_op[key]
+        strictest = max(self._min_trust_by_op.values())
+        logger.warning(
+            "[federation] operation %r is not registered in the trust threshold "
+            "table — applying the strictest threshold %d (fail-closed)",
+            operation, strictest,
+        )
+        return strictest
+
+    async def send_request_async(
         self,
         trust: FederationTrust,
         operation: str,
@@ -519,7 +674,32 @@ class FederationConnector:
         payload: dict | None = None,
         user_id: str | None = None,
     ) -> GatewayResponse:
-        """Send a proxied request to a remote space.
+        """Event-loop-safe entry point (A61).
+
+        The gateway dials out with a synchronous httpx client (connect 5s /
+        read 30s) and reads mTLS key material from disk; called from an
+        `async def` route that stalls the whole worker — /health, session
+        exec and the KMS callbacks included — for up to 35s per unreachable
+        remote. Async callers must use this and let it move the blocking body
+        onto a worker thread.
+        """
+        import asyncio
+        return await asyncio.to_thread(
+            self.send_request, trust, operation, resource, payload, user_id,
+            _loop=asyncio.get_running_loop(),
+        )
+
+    def send_request(
+        self,
+        trust: FederationTrust,
+        operation: str,
+        resource: str,
+        payload: dict | None = None,
+        user_id: str | None = None,
+        *,
+        _loop=None,
+    ) -> GatewayResponse:
+        """Send a proxied request to a remote space (blocking — see send_request_async).
 
         Args:
             trust: Trust relationship with the target space
@@ -527,6 +707,8 @@ class FederationConnector:
             resource: Resource path
             payload: Request payload
             user_id: User performing the request
+            _loop: internal — loop that owns fire-and-forget persistence when
+                the body runs on a worker thread
 
         Returns:
             GatewayResponse with result
@@ -562,7 +744,7 @@ class FederationConnector:
             reputation_score=scores.get("reputation", 50),
             security_score=scores.get("security", 50),
         )
-        min_score = self._min_trust_by_op.get(operation, 0)
+        min_score = self._min_trust_for(operation)
         if trust_result.score < min_score:
             logger.warning(
                 f"[federation] Trust score {trust_result.score} below threshold {min_score} "
@@ -606,13 +788,7 @@ class FederationConnector:
             user_id=user_id,
         )
         self._audit_log.append(audit_entry)
-        # Persist audit to DB (fire-and-forget)
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._persist_audit_entry(audit_entry))
-        except RuntimeError:
-            pass
+        self._fire(self._persist_audit_entry(audit_entry), _loop)  # fire-and-forget
 
         # Execute real HTTP request to remote space
         response = self._execute_remote_request(request, trust)
@@ -687,7 +863,32 @@ class FederationConnector:
                 "CDS_FEDERATION_ENABLED=false"
             )
 
-        base_url = trust.remote_space.endpoint.rstrip("/")
+        # A60: re-validate at the point of dialling. Trust rows written before
+        # the guard existed (and any future writer of FederationTrustRecord)
+        # go through the same check as POST /federation/trust.
+        try:
+            base_url = validate_federation_endpoint(trust.remote_space.endpoint)
+        except ValueError as e:
+            logger.error(f"[federation] refusing remote request — invalid endpoint: {e}")
+            return GatewayResponse(
+                request_id=request.request_id,
+                status_code=403,
+                error=f"Federation endpoint refused: {e}",
+                source_space=request.target_space,
+            )
+        host = urlparse(base_url).hostname or ""
+        for addr in _resolve_addresses(host):
+            if _is_internal_ip(addr):
+                logger.error(
+                    f"[federation] refusing remote request — {host} resolves to "
+                    f"internal address {addr}"
+                )
+                return GatewayResponse(
+                    request_id=request.request_id,
+                    status_code=403,
+                    error=f"Federation endpoint {host!r} resolves to internal address {addr}",
+                    source_space=request.target_space,
+                )
         url = f"{base_url}/api/v1/federation/{request.operation}"
 
         # Build request body
@@ -700,6 +901,11 @@ class FederationConnector:
         if request.payload:
             body["payload"] = request.payload
 
+        return self._http_post(request, url, base_url, body, mtls)
+
+    def _http_post(self, request: GatewayRequest, url: str, base_url: str,
+                   body: dict, mtls: dict | None) -> GatewayResponse:
+        """Blocking POST to the remote space (runs off-loop via send_request_async)."""
         timeout = httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0)
 
         try:
@@ -712,6 +918,14 @@ class FederationConnector:
                     url,
                     json=body,
                     headers=request.headers,
+                )
+                data = response.json() if response.headers.get("content-type", "").startswith("application/json") else None
+                return GatewayResponse(
+                    request_id=request.request_id,
+                    status_code=response.status_code,
+                    data=data,
+                    error=data.get("detail") if data and response.status_code >= 400 else None,
+                    source_space=request.target_space,
                 )
                 data = response.json() if response.headers.get("content-type", "").startswith("application/json") else None
                 return GatewayResponse(

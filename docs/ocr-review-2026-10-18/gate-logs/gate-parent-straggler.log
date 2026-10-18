@@ -1,0 +1,562 @@
+FFF......FFFFFFFFFFFFFFFFFFFFFF....FFFFF.FFFFFF                          [100%]
+================================== FAILURES ===================================
+_______ TestA150TrustGateFailClosed.test_unregistered_operation_denied ________
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA150TrustGateFailClosed object at 0x000001C0FE66FBF0>
+
+    def test_unregistered_operation_denied(self):
+        connector = _connector()
+        trust = connector.establish_trust(_remote(), allowed_operations=["query"])
+        with patch.object(FederationConnector, "_execute_remote_request", _ok):
+            response = connector.send_request(trust, "query", "/data")
+>       assert response.status_code == 403, response.error
+E       AssertionError: None
+E       assert 200 == 403
+E        +  where 200 = GatewayResponse(request_id='req-957eb714d218', status_code=200, data={'ok': True}, error=None, duration_ms=15, source_space='cds-remote').status_code
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:105: AssertionError
+_ TestA150TrustGateFailClosed.test_unregistered_operation_takes_strictest_threshold _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA150TrustGateFailClosed object at 0x000001C0FEA59D90>
+
+    def test_unregistered_operation_takes_strictest_threshold(self):
+        connector = _connector()
+        strictest = max(connector._min_trust_by_op.values())
+>       assert connector._min_trust_for("some-future-verb") == strictest
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'FederationConnector' object has no attribute '_min_trust_for'. Did you mean: '_min_trust_by_op'?
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:111: AttributeError
+_ TestA150TrustGateFailClosed.test_case_variant_falls_back_on_registered_threshold _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA150TrustGateFailClosed object at 0x000001C0FEE9EC30>
+
+    def test_case_variant_falls_back_on_registered_threshold(self):
+        """`READ` must not be a free pass ¡ª it scores against `read` (30)."""
+        connector = _connector()
+>       assert connector._min_trust_for("READ") == connector._min_trust_by_op["read"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'FederationConnector' object has no attribute '_min_trust_for'. Did you mean: '_min_trust_by_op'?
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:118: AttributeError
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[http://remote.example.com] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB2D20>
+endpoint = 'http://remote.example.com'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://169.254.169.254] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB0500>
+endpoint = 'https://169.254.169.254'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://169.254.169.254/latest/meta-data/] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB03B0>
+endpoint = 'https://169.254.169.254/latest/meta-data/'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://127.0.0.1:8200] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB0440>
+endpoint = 'https://127.0.0.1:8200'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://localhost:6379] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB0530>
+endpoint = 'https://localhost:6379'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://LOCALHOST:8200] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB05F0>
+endpoint = 'https://LOCALHOST:8200'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://[::1]:8200] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FE0EDCD0>
+endpoint = 'https://[::1]:8200'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://10.0.0.7] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9FE90>
+endpoint = 'https://10.0.0.7'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://192.168.1.5:8443] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9FE30>
+endpoint = 'https://192.168.1.5:8443'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://172.16.0.9] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9FAD0>
+endpoint = 'https://172.16.0.9'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://100.64.0.1] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9FA10>
+endpoint = 'https://100.64.0.1'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://[fd00::1]] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9F980>
+endpoint = 'https://[fd00::1]'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://metadata.google.internal] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9F320>
+endpoint = 'https://metadata.google.internal'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://redis.service.consul] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9F3B0>
+endpoint = 'https://redis.service.consul'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://db.svc.cluster.local:6379] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9EA80>
+endpoint = 'https://db.svc.cluster.local:6379'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://user:pass@remote.example.com] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9E900>
+endpoint = 'https://user:pass@remote.example.com'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[remote.example.com] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9E690>
+endpoint = 'remote.example.com'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[ftp://remote.example.com] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9E600>
+endpoint = 'ftp://remote.example.com'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9E3C0>
+endpoint = 'https://'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://remote.example.com/x?a=b] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEE9E300>
+endpoint = 'https://remote.example.com/x?a=b'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://2130706433] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB0680>
+endpoint = 'https://2130706433'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+_ TestA60EndpointValidation.test_establish_trust_rejects_unsafe_endpoint[https://0177.0.0.1] _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB07A0>
+endpoint = 'https://0177.0.0.1'
+
+    @pytest.mark.parametrize("endpoint", UNSAFE_ENDPOINTS)
+    def test_establish_trust_rejects_unsafe_endpoint(self, endpoint):
+        connector = _connector()
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:181: Failed
+______ TestA60EndpointValidation.test_validator_is_reachable_for_callers ______
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB1340>
+
+    def test_validator_is_reachable_for_callers(self):
+>       assert fc.validate_federation_endpoint("https://fed.example.com").startswith("https://fed.example.com")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.services.federation_connector' has no attribute 'validate_federation_endpoint'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:191: AttributeError
+_ TestA60EndpointValidation.test_request_time_resolver_guard_refuses_internal_resolution _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB1700>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C0FF3184A0>
+
+    def test_request_time_resolver_guard_refuses_internal_resolution(self, monkeypatch):
+        """A public name that resolves to loopback must never be dialled."""
+        connector = _connector()
+        trust = connector.establish_trust(_remote(endpoint="https://partner.example.com"))
+        request = GatewayRequest(
+            request_id="req-1", source_space="cds-local", target_space=REMOTE,
+            operation="read", resource="/data",
+        )
+        dialed: list = []
+>       monkeypatch.setattr(fc, "_resolve_addresses", lambda host: ["127.0.0.1"])
+E       AttributeError: <module 'app.services.federation_connector' from 'D:\\workspace\\sandbox\\app\\services\\federation_connector.py'> has no attribute '_resolve_addresses'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:204: AttributeError
+_ TestA60EndpointValidation.test_request_time_guard_lets_public_resolution_through _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB1AC0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C0FF319D30>
+
+    def test_request_time_guard_lets_public_resolution_through(self, monkeypatch):
+        connector = _connector()
+        trust = connector.establish_trust(_remote(endpoint="https://partner.example.com"))
+        request = GatewayRequest(
+            request_id="req-2", source_space="cds-local", target_space=REMOTE,
+            operation="read", resource="/data",
+        )
+>       monkeypatch.setattr(fc, "_resolve_addresses", lambda host: ["93.184.216.34"])
+E       AttributeError: <module 'app.services.federation_connector' from 'D:\\workspace\\sandbox\\app\\services\\federation_connector.py'> has no attribute '_resolve_addresses'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:217: AttributeError
+_ TestA60EndpointValidation.test_legacy_db_loaded_trust_is_validated_at_request_time _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA60EndpointValidation object at 0x000001C0FEEB1EB0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C0FF31A060>
+
+    def test_legacy_db_loaded_trust_is_validated_at_request_time(self, monkeypatch):
+        """A trust row written before the guard existed still cannot dial out."""
+        trust = FederationTrust(
+            trust_id="trust-legacy",
+            local_space=SpaceIdentity(space_id="cds-local", space_name="L", endpoint="https://local.example.com"),
+            remote_space=_remote(endpoint="http://127.0.0.1:6379"),
+            trust_level=TrustLevel.BASIC,
+            status=FederationStatus.ACTIVE,
+            allowed_operations=["read"],
+        )
+        request = GatewayRequest(
+            request_id="req-3", source_space="cds-local", target_space=REMOTE,
+            operation="read", resource="/",
+        )
+        dialed: list = []
+        monkeypatch.setattr(fc.httpx, "Client", lambda *a, **k: dialed.append(1))
+        response = _connector()._execute_remote_request(request, trust)
+>       assert response.status_code == 403, response.error
+E       AssertionError: Federation request failed: 'NoneType' object does not support the context manager protocol
+E       assert 500 == 403
+E        +  where 500 = GatewayResponse(request_id='req-3', status_code=500, data=None, error="Federation request failed: 'NoneType' object does not support the context manager protocol", duration_ms=0, source_space='cds-remote').status_code
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:239: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.services.federation_connector:federation_connector.py:741 [federation] Request failed: 'NoneType' object does not support the context manager protocol
+_ TestA61EventLoopSafety.test_send_request_async_runs_blocking_body_off_loop __
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA61EventLoopSafety object at 0x000001C0FEEB2300>
+
+    @pytest.mark.asyncio
+    async def test_send_request_async_runs_blocking_body_off_loop(self):
+        connector = _connector()
+        trust = connector.establish_trust(_remote(), allowed_operations=["search"])
+        release = threading.Event()
+        started = threading.Event()
+        worker: list = []
+    
+        def slow(self, request, trust_):
+            worker.append(threading.current_thread().name)
+            started.set()
+            release.wait(10)
+            return GatewayResponse(request_id=request.request_id, status_code=200, data={})
+    
+        current = threading.current_thread().name
+>       task = asyncio.create_task(connector.send_request_async(trust, "search", "/data"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'FederationConnector' object has no attribute 'send_request_async'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:261: AttributeError
+_ TestA61EventLoopSafety.test_persistence_from_worker_thread_lands_on_the_origin_loop _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA61EventLoopSafety object at 0x000001C0FEEB2DE0>
+
+    @pytest.mark.asyncio
+    async def test_persistence_from_worker_thread_lands_on_the_origin_loop(self):
+        connector = _connector()
+        store = _Store()
+        connector.set_db_session_factory(store.session_factory())
+        entry = fc.FederationAuditEntry(
+            entry_id="audit-1", request_id="req-1", source_space="cds-local",
+            target_space=REMOTE, operation="read", resource="/x", status="sent",
+        )
+        future = await asyncio.to_thread(
+>           connector._fire, connector._persist_audit_entry(entry), asyncio.get_running_loop(),
+            ^^^^^^^^^^^^^^^
+        )
+E       AttributeError: 'FederationConnector' object has no attribute '_fire'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:298: AttributeError
+_ TestA61EventLoopSafety.test_async_call_sites_do_not_call_the_blocking_entry_point _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA61EventLoopSafety object at 0x000001C0FEEB2480>
+
+    def test_async_call_sites_do_not_call_the_blocking_entry_point(self):
+        for rel in ("app/api/federation.py", "app/services/catalog_sync.py"):
+            src = (REPO / rel).read_text(encoding="utf-8")
+>           assert "send_request_async(" in src, f"{rel} still blocks the event loop"
+E           AssertionError: app/api/federation.py still blocks the event loop
+E           assert 'send_request_async(' in '"""Federation API ¡ª Cross-space trust and request proxying."""\nimport uuid\n\nfrom fastapi import APIRouter, Depends...e.ADMIN, UserRole.OPERATOR)),\n):\n    """Get federation statistics."""\n    return federation_connector.get_stats()\n'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:307: AssertionError
+_ TestA63TrustIdRoundTrip.test_trust_id_created_now_is_revocable_after_restart _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA63TrustIdRoundTrip object at 0x000001C0FEEB2420>
+
+    @pytest.mark.asyncio
+    async def test_trust_id_created_now_is_revocable_after_restart(self):
+        connector = _connector()
+        store = _Store()
+        connector.set_db_session_factory(store.session_factory())
+        trust = connector.establish_trust(_remote())
+        await connector._persist_trust(trust)
+        assert len(store.added) == 1, "trust was not persisted (id derivation failed)"
+        row = store.added[0]
+    
+        reloaded = _connector()
+        store.rows = [row]
+        reloaded.set_db_session_factory(store.session_factory())
+        assert await reloaded.load_trusts_from_db() == 1
+    
+>       assert reloaded.get_trust(trust.trust_id) is not None, (
+            f"POST /trust returned {trust.trust_id}, after restart it 404s"
+        )
+E       AssertionError: POST /trust returned trust-b1b50f5cd90f, after restart it 404s
+E       assert None is not None
+E        +  where None = get_trust('trust-b1b50f5cd90f')
+E        +    where get_trust = <app.services.federation_connector.FederationConnector object at 0x000001C0FF3196A0>.get_trust
+E        +    and   'trust-b1b50f5cd90f' = FederationTrust(trust_id='trust-b1b50f5cd90f', local_space=SpaceIdentity(space_id='cds-local', space_name='Local CDS',...d_at=datetime.datetime(2026, 10, 18, 15, 14, 17, 77301, tzinfo=datetime.timezone.utc), expires_at=None, last_sync=None).trust_id
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:329: AssertionError
+___________ TestA63TrustIdRoundTrip.test_id_mapping_is_a_bijection ____________
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA63TrustIdRoundTrip object at 0x000001C0FEEB15B0>
+
+    @pytest.mark.asyncio
+    async def test_id_mapping_is_a_bijection(self):
+        connector = _connector()
+        trust = connector.establish_trust(_remote())
+>       row_id = fc.trust_row_id(trust.trust_id)
+                 ^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.services.federation_connector' has no attribute 'trust_row_id'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:338: AttributeError
+______ TestA63TrustIdRoundTrip.test_legacy_hyphenated_id_still_resolves _______
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA63TrustIdRoundTrip object at 0x000001C0FEEB2F30>
+
+    def test_legacy_hyphenated_id_still_resolves(self):
+        """Rows loaded by the previous loader carried str(row.id) as the id."""
+        raw = uuid.uuid4()
+>       assert fc.trust_row_id(str(raw)) == raw
+               ^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.services.federation_connector' has no attribute 'trust_row_id'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:346: AttributeError
+_ TestA63TrustIdRoundTrip.test_legacy_padded_row_id_maps_back_to_the_short_form _
+
+self = <tests.test_ocr_a150_a060_a061_a063_federation.TestA63TrustIdRoundTrip object at 0x000001C0FEEB3320>
+
+    def test_legacy_padded_row_id_maps_back_to_the_short_form(self):
+        """Rows written by the old `.ljust(32,'0')` code keep their old id."""
+        short = f"trust-{uuid.uuid4().hex[:12]}"
+>       row_id = fc.trust_row_id(short)
+                 ^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.services.federation_connector' has no attribute 'trust_row_id'
+
+tests\test_ocr_a150_a060_a061_a063_federation.py:352: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA150TrustGateFailClosed::test_unregistered_operation_denied
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA150TrustGateFailClosed::test_unregistered_operation_takes_strictest_threshold
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA150TrustGateFailClosed::test_case_variant_falls_back_on_registered_threshold
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[http://remote.example.com]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://169.254.169.254]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://169.254.169.254/latest/meta-data/]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://127.0.0.1:8200]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://localhost:6379]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://LOCALHOST:8200]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://[::1]:8200]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://10.0.0.7]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://192.168.1.5:8443]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://172.16.0.9]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://100.64.0.1]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://[fd00::1]]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://metadata.google.internal]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://redis.service.consul]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://db.svc.cluster.local:6379]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://user:pass@remote.example.com]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[remote.example.com]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[ftp://remote.example.com]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://remote.example.com/x?a=b]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://2130706433]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_establish_trust_rejects_unsafe_endpoint[https://0177.0.0.1]
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_validator_is_reachable_for_callers
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_request_time_resolver_guard_refuses_internal_resolution
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_request_time_guard_lets_public_resolution_through
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA60EndpointValidation::test_legacy_db_loaded_trust_is_validated_at_request_time
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA61EventLoopSafety::test_send_request_async_runs_blocking_body_off_loop
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA61EventLoopSafety::test_persistence_from_worker_thread_lands_on_the_origin_loop
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA61EventLoopSafety::test_async_call_sites_do_not_call_the_blocking_entry_point
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA63TrustIdRoundTrip::test_trust_id_created_now_is_revocable_after_restart
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA63TrustIdRoundTrip::test_id_mapping_is_a_bijection
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA63TrustIdRoundTrip::test_legacy_hyphenated_id_still_resolves
+FAILED tests/test_ocr_a150_a060_a061_a063_federation.py::TestA63TrustIdRoundTrip::test_legacy_padded_row_id_maps_back_to_the_short_form
+36 failed, 11 passed in 10.79s
+STRAGGLER_RC=1
