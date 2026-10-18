@@ -68,7 +68,7 @@ class TestUploadSanitization:
             headers=auth_headers,
         )
         second = await client.post(
-            "/api/v1/data_pipeline/upload".replace("_pipeline/", "data-pipeline/"),
+            "/api/v1/data-pipeline/upload",
             files={"file": (name, b"second", "text/plain")},
             headers=auth_headers,
         )
@@ -93,7 +93,6 @@ class TestProcessPathContainment:
         assert resp.status_code == 400, (
             f"上传根外的绝对路径必须被拒（A3②/A165①），实得 {resp.status_code}: {resp.text}"
         )
-        assert not outside.stat().st_size == -1  # 文件本身当然还在，被拒的是流水线读取
 
     async def test_traversal_input_path_rejected(
         self, client: AsyncClient, operator_headers: dict

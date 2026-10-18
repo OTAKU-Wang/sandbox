@@ -19,7 +19,7 @@ import uuid
 import pytest
 
 from app.models.data_product import DataProduct, DataProductStatus
-from app.models.field_exposure import ExposureRequest, ExposureRequestStatus
+from app.models.field_exposure import FieldExposureRequest, ExposureRequestStatus
 from app.models.user import User
 from app.services.auth_service import create_access_token
 
@@ -95,7 +95,7 @@ async def test_blank_rejection_reason_never_approves(
     )
     assert resp.json()["code"] == "HTTP_400"
 
-    request = await db_session.get(ExposureRequest, uuid.UUID(request_id))
+    request = await db_session.get(FieldExposureRequest, uuid.UUID(request_id))
     assert request.status == ExposureRequestStatus.PENDING.value
     assert not request.approved_fields, "the reversal stored every requested field as approved"
     assert request.reviewed_by is None
@@ -113,7 +113,7 @@ async def test_empty_approved_fields_list_does_not_approve_everything(
 
     assert resp.status_code == 400, f"empty approved_fields must not grant all: {resp.json()}"
     assert resp.json()["code"] == "HTTP_400"
-    request = await db_session.get(ExposureRequest, uuid.UUID(request_id))
+    request = await db_session.get(FieldExposureRequest, uuid.UUID(request_id))
     assert request.status == ExposureRequestStatus.PENDING.value
     assert not request.approved_fields
 
@@ -127,7 +127,7 @@ async def test_reject_and_approve_together_is_still_refused(client, db_session, 
                          {"rejection_reason": "not comfortable", "approved_fields": ["city"]})
 
     assert resp.status_code == 400
-    request = await db_session.get(ExposureRequest, uuid.UUID(request_id))
+    request = await db_session.get(FieldExposureRequest, uuid.UUID(request_id))
     assert request.status == ExposureRequestStatus.PENDING.value
 
 
@@ -170,6 +170,6 @@ async def test_reviewer_role_boundary_unchanged(client, db_session, make_user):
         assert resp.status_code == 403, payload
         assert resp.json()["code"] == "HTTP_403", payload
 
-    request = await db_session.get(ExposureRequest, uuid.UUID(request_id))
+    request = await db_session.get(FieldExposureRequest, uuid.UUID(request_id))
     assert request.status == ExposureRequestStatus.PENDING.value
     assert not request.approved_fields
