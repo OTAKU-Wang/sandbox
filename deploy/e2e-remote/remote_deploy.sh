@@ -75,7 +75,7 @@ run cds-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -e CLICKHOUSE_DB=cds_audit -e CLICKHOUSE_USER=cds -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" \
   -p 8123:8123 -p 9000:9000 -v "$(vol clickhouse-data):/var/lib/clickhouse"
 
-run cds-minio minio/minio:latest \
+run cds-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -e MINIO_ROOT_USER="${MINIO_ROOT_USER:-cds_minio_admin}" -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   -p 9001:9000 -p 9002:9001 -v "$(vol minio-data):/data" \
   -- server /data --console-address ":9001"
@@ -172,7 +172,9 @@ run cds-api cds-api:latest \
   -e CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED="true" \
   -e CDS_RATE_LIMIT_ENABLED="true" \
   -e CDS_RATE_LIMIT_AUTH_PER_MINUTE="10" \
-  -v "$(vol sandbox-workspace):/tmp/cds_sandbox"
+  -v "$(vol sandbox-workspace):/tmp/cds-sandbox" \
+  -v "$(vol sandbox-workspace-l0):/tmp/cds-sandbox-l0" \
+  -v "$(vol cds-storage):/tmp/cds-storage"
 
 echo "== waiting for api /health =="
 i=0

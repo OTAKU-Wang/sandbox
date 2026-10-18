@@ -43,6 +43,9 @@ api:
     # supply via the cds-secrets secret; empty = volume-key endpoints fail-closed.
     CDS_KMS_SERVICE_TOKEN: ""
     CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+    # SS-19: 开发环等级。chart 默认 l2c（MicroVM）且不开 cds-jupyter；
+    # 要开开发环需额外部一份 Jupyter 服务并填 CDS_JUPYTER_PROXY_BASE_URL。
+    CDS_DEV_SANDBOX_LEVEL: "l2c"
     # PZ-10 (spec ss-11): MFA (TOTP) + SM2 cert login. The chart ships the
     # fail-closed posture: deployers MUST supply a real MFA encryption key
     # (empty key refuses to boot in prod via validate_security_config).

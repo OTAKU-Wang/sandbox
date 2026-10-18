@@ -44,7 +44,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
     command: server /data --console-address ":9001"
     ports:
       - "9001:9000"
@@ -129,6 +129,9 @@ services:
       # (must match the plugin's CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN; required).
       CDS_KMS_SERVICE_TOKEN: ${CDS_KMS_SERVICE_TOKEN}
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
+      # SS-19: 生产不在开发环里降级隔离等级 —— l2c 是唯一允许的开发环等级，
+      # 生产 compose 也不携带 cds-jupyter 服务（未配 CDS_JUPYTER_PROXY_BASE_URL = 无入口）。
+      CDS_DEV_SANDBOX_LEVEL: "l2c"
       # PZ-10 (spec ss-11): MFA (TOTP) + SM2 cert login. Prod requires an
       # explicit MFA encryption key (empty key refuses to boot).
       CDS_AUTH_MFA_ENABLED: "true"
@@ -228,7 +231,12 @@ services:
       vault:
         condition: service_healthy
     volumes:
-      - sandbox-workspace:/tmp/cds_sandbox
+      # 代码真值是 `/tmp/cds-sandbox*`（BwrapAdapter/ProcessAdapter 默认 root）；旧写法
+      # 挂在 `/tmp/cds_sandbox`（下划线）上，从未覆盖真目录。两处写入都必须入卷：
+      # 会话产物与降级后的对象存储原件，否则容器重建后库里 ready 指向空盘。
+      - sandbox-workspace:/tmp/cds-sandbox
+      - sandbox-workspace-l0:/tmp/cds-sandbox-l0
+      - cds-storage:/tmp/cds-storage
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -250,3 +258,5 @@ volumes:
   minio-data:
   vault-data:
   sandbox-workspace:
+  sandbox-workspace-l0:
+  cds-storage:

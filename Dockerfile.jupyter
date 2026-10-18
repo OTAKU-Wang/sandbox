@@ -1,0 +1,21 @@
+# CDS 开发环 JupyterLab（SS-19）：SS-13 生产路径是 CubeSandbox MicroVM；
+# 本机没有 Cube 节点，这一层用容器隔离如实替代（前端与文档都标徽，不冒充 MicroVM）。
+# 产物口径不变：笔记本写进会话工作区的文件，仍由成果包打包时的 T5 出口网关审查。
+FROM python:3.12-slim
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG JUPYTERLAB_VERSION=4.3.5
+
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -i ${PIP_INDEX_URL} \
+        "jupyterlab==${JUPYTERLAB_VERSION}" "pandas>=2.0" "pyarrow>=15.0.0"
+
+ENV JUPYTER_WORKSPACE_ROOT=/workspaces \
+    JUPYTER_BASE_URL=/api/jupyter \
+    JUPYTER_TOKEN=
+
+EXPOSE 8888
+
+# base_url 必须与后端反代前缀逐字一致：反代按原样转发、不改写 HTML 里的静态资源路径。
+# --allow-root：基础镜像以 root 运行，jupyter_server 默认拒绝 root 启动（退出码 1）；
+# 隔离靠容器边界，与 api 容器同一口径。
+CMD ["sh", "-c", "jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --ServerApp.root_dir=${JUPYTER_WORKSPACE_ROOT} --ServerApp.base_url=${JUPYTER_BASE_URL} --ServerApp.token=${JUPYTER_TOKEN} --ServerApp.password='' --ServerApp.terminals_enabled=False --ServerApp.allow_remote_access=True --ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True --IdentityProvider.token=${JUPYTER_TOKEN}"]

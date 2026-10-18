@@ -102,7 +102,10 @@ spec:
                 - ALL
           volumeMounts:
             - name: sandbox-workspace
-              mountPath: /tmp/cds_sandbox
+              # 真值路径是 /tmp/cds-sandbox（连字符）；旧写法 /tmp/cds_sandbox 从未覆盖真目录。
+              # L0 卷（/tmp/cds-sandbox-l0）与对象存储卷（/tmp/cds-storage）尚未由本 chart 供给 PVC：
+              # 未挂前 L0/存储写入只在容器层，重建即丢——多租户生产前必须补 PVC（对齐 compose prod 三卷）。
+              mountPath: /tmp/cds-sandbox
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone

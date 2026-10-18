@@ -68,5 +68,9 @@ prometheus-client>=0.20.0
 # === 文档水印 / 非结构化解析 ===
 pillow>=10.0.0  # app/utils/watermark.py、data_processing、unstructured_pipeline 的 PIL 导入（此前未声明 → 部署镜像内能力不可用）
 
+# === 对象存储 (MinIO) ===
+minio>=7.2.0  # app/services/storage_service.py：缺这个包时 _get_minio_client() 静默降级到容器内 /tmp/cds-storage，
+              # 上传的供数原件随 api 容器重建消失而库里仍是 ready（SS-19 数据注入断链的真因）
+
 # === Cube 数据面 (SS-10 CB-00) ===
 grpcio>=1.60.0   # gRPC 运行时：Cubelet 节点直驱客户端（SS-10 §5.1）；grpcio-tools 仅构建期 stub 再生成工具，不入运行时依赖

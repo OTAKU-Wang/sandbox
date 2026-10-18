@@ -75,7 +75,7 @@ run l-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -e CLICKHOUSE_HTTP_PORT=8124 -e CLICKHOUSE_PORT=9005 \
   -v "l_cds_ch:/var/lib/clickhouse"
 
-run l-minio minio/minio:latest \
+run l-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -e MINIO_ROOT_USER=cds_minio_admin -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   -v "l_cds_minio:/data" \
   -- server /data --address "127.0.0.1:9010" --console-address "127.0.0.1:9011"
@@ -160,7 +160,9 @@ run l-cds-api cds-api:latest \
   -e CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED="true" \
   -e CDS_NODE_STALE_SECONDS="300" \
   -e CDS_RATE_LIMIT_ENABLED="true" \
-  -v "l_cds_sandbox:/tmp/cds_sandbox"
+  -v "l_cds_sandbox:/tmp/cds-sandbox" \
+  -v "l_cds_sandbox_l0:/tmp/cds-sandbox-l0" \
+  -v "l_cds_storage:/tmp/cds-storage"
 
 i=0
 until curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do

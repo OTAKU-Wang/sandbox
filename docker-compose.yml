@@ -42,7 +42,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-cds_dev_ch}
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
     command: server /data --console-address ":9001"
     ports:
       - "9001:9000"
@@ -71,7 +71,10 @@ services:
     volumes:
       - ./policies:/policies
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      # opa:0.68.0 是 distroless 镜像，里面没有 wget/shell——原来的 wget 健康检查永远过不了，
+      # 于是 cds-api（depends_on opa: service_healthy）在任何机器上都起不来。
+      # 与 docker-compose.prod.yml 保持同一写法（只用镜像里确实存在的 /opa 二进制）。
+      test: ["CMD", "/opa", "version"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -86,12 +89,11 @@ services:
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-cds_vault_dev_token}
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
-      VAULT_LOCAL_CONFIG: |
-        {
-          "backend": {"file": {"path": "/vault/file"}},
-          "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": true}},
-          "ui": true
-        }
+      # 不能再叠 VAULT_LOCAL_CONFIG：dev 模式已用 DEV_LISTEN_ADDRESS 占了 8200，
+      # 两份监听配置同时存在时 vault 报 `bind: address already in use` 直接退出，
+      # 于是依赖 vault:service_healthy 的 cds-api 永远起不来。dev 存储为内存型，
+      # 重启即清空，与 CDS_VAULT_TOKEN 的开发令牌口径一致；持久化 KV 请走
+      # docker-compose.middleware.yml 里的 cds-vault-init 路径。
     volumes:
       - vault-data:/vault/file
     healthcheck:
@@ -105,6 +107,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+      args:
+        # Dockerfile.api 已支持换源；CN 网络下直接 PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple 起构建。
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     ports:
       - "8000:8000"
     environment:
@@ -183,6 +188,25 @@ services:
 
       CDS_RATE_LIMIT_ENABLED: "true"
       CDS_RATE_LIMIT_AUTH_PER_MINUTE: "10"
+      # SS-19 开发环：笔记本经后端反代访问 cds-jupyter；本机无 Cube 节点，
+      # 开 legacy 适配器仅供 dev（生产 validate_security_config 直接拒这个开关）。
+      CDS_JUPYTER_PROXY_BASE_URL: http://cds-jupyter:8888
+      CDS_JUPYTER_UPSTREAM_TOKEN: ${CDS_JUPYTER_UPSTREAM_TOKEN:-cds_dev_jupyter_token_change_me}
+      CDS_SANDBOX_LEGACY_ENABLED: "true"
+      # 本机没 Cube 节点，l2c 会 RUNTIME_UNAVAILABLE。开发环降到 L3=bwrap：
+      # 它是合同 `allowed_sandbox_levels` 允许、且本机真实能跑的唯一等级
+      # （L0=ProcessAdapter 不在线合同枚举里，L1/L2/k8s 需 k8s 集群），不是模拟。
+      CDS_DEV_SANDBOX_LEVEL: "L3"
+    # bwrap 需要建命名空间： Docker 默认 seccomp 下 `unshare(CLONE_NEWUSER)` 直接 EPERM
+    # （本机实测），所以 dev 给这一份容器加宽免。NET_ADMIN 不是可选：bwrap 建新 netns 后
+    # 要拉起 loopback（RTM_NEWADDR），实测缺它时报
+    # `bwrap: loopback: Failed RTM_NEWADDR` 并 exit 1。仅 dev compose：
+    # prod compose / helm 不带。代价是外层容器隔离变强能力交换，不得用于生产。
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    security_opt:
+      - seccomp:unconfined
     depends_on:
       postgres:
         condition: service_healthy
@@ -197,7 +221,15 @@ services:
       vault:
         condition: service_healthy
     volumes:
-      - sandbox-workspace:/tmp/cds_sandbox
+      # 会话工作区真实根目录是 `/tmp/cds-sandbox*`（BwrapAdapter/ProcessAdapter 默认值，见
+      # app/services/AGENTS.md）；旧写法挂在 `/tmp/cds_sandbox`（下划线）上，从未覆盖真目录，
+      # 成果物随容器重建丢掉。这里按代码真值挂，并与 cds-jupyter 共享同一卷。
+      - cds-workspaces:/tmp/cds-sandbox
+      - cds-workspaces-l0:/tmp/cds-sandbox-l0
+      # 对象存储本地后端的真根目录（storage_service._local_dir）。没有这个卷时，
+      # 上传的供数原件只活在容器可写层：api 一重建字节就没了，而 data_resources
+      # 行仍是 ready，开发环数据注入只能拿到空 input/（SS-19 e2e 实比）。
+      - cds-storage:/tmp/cds-storage
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -214,10 +246,38 @@ services:
       cds-api:
         condition: service_healthy
 
+  # SS-19 开发环：JupyterLab 作为在线笔记本开发环境（容器隔离，非 MicroVM，前端标徒）。
+  # 不映射宿主端口：只能经后端 /api/jupyter 反代访问，反代那一道验我们的 JWT + 一次性票据。
+  cds-jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile.jupyter
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    environment:
+      JUPYTER_TOKEN: ${CDS_JUPYTER_UPSTREAM_TOKEN:-cds_dev_jupyter_token_change_me}
+      JUPYTER_WORKSPACE_ROOT: /tmp/cds-sandbox
+      JUPYTER_BASE_URL: /api/jupyter
+    volumes:
+      # 两卷与 cds-api 指同一卷但路径不同：L0 那一卷在开发环里只能从 root 下的 l0/
+      # 看到，root_dir 以内就只有沙箱工作区（/tmp 里的 cds-uploads 与 data-load 明文供数
+      # 对笔记本不可见）。jupyter_gateway._LEVEL_LAYOUT 与这里逐字对应。
+      - cds-workspaces:/tmp/cds-sandbox
+      - cds-workspaces-l0:/tmp/cds-sandbox/l0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,os; urllib.request.urlopen('http://127.0.0.1:8888' + os.environ['JUPYTER_BASE_URL'] + '/api/status?token=' + os.environ['JUPYTER_TOKEN'])"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres-data:
   redis-data:
   clickhouse-data:
   minio-data:
   vault-data:
-  sandbox-workspace:
+  # 开发环与 api 共享的会话工作区：Jupyter 写产物，api 负采集与 T5 审查。
+  cds-workspaces:
+  cds-workspaces-l0:
+  # MinIO 客户端不可用时的降级落盘位（见 app/services/storage_service.py 告警）。
+  cds-storage:

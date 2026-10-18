@@ -57,7 +57,7 @@ services:
 
   # ── MinIO (S3-compatible object storage) ───────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
     container_name: cds-minio
     restart: unless-stopped
     ports:
