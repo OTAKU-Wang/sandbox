@@ -25,12 +25,18 @@ _hash_fallback_warned = False
 
 
 def _sm3_fallback_allowed() -> bool:
-    """Whether the SHA-256 fallback for SM3 (gmssl missing) may be used."""
+    """Whether the SHA-256 fallback for SM3 (gmssl missing) may be used.
+
+    A148: an unreadable config must not flip this honesty gate open — the
+    production contract (PZ-04/MR-A14) is that SHA-256 masquerading as SM3 is
+    opt-in, so any failure here returns False (fail closed).
+    """
     try:
         from app.core.config import get_settings
         return bool(get_settings().SM3_FALLBACK_ALLOWED)
     except Exception:
-        return True
+        logger.warning("SM3_FALLBACK_ALLOWED unreadable; refusing SHA-256 fallback (fail closed)")
+        return False
 
 
 def _hash(data: bytes) -> bytes:
@@ -55,6 +61,55 @@ def _hash(data: bytes) -> bytes:
         )
         _hash_fallback_warned = True
     return hashlib.sha256(data).digest()
+
+
+# ─── Audit Merkle leaf preimage (single source of truth) ────────────────────
+#
+# The leaf string format below is FROZEN. /api/v1/audit/anchor, /verify and
+# /merkle-proof all recompute it, and the resulting Merkle root is anchored
+# immutably on-chain (contracts/AuditRegistry.sol). Any change to this string —
+# separator, field order, or None-rendering — silently makes every previously
+# anchored root unverifiable. Do NOT "improve" it; fix ambiguity on the write
+# side with escape_leaf_field() instead.
+
+LEAF_FIELD_SEP = "|"
+LEAF_ESCAPE_CHAR = "\\"
+
+
+def merkle_leaf_preimage(log) -> bytes:
+    """Return the exact bytes hashed into the Merkle tree for one audit row.
+
+    Byte-for-byte identical to the f-string that app/api/audit.py and
+    app/services/cube_egress_audit.py used to duplicate, including `None`
+    rendering for a null resource_id (f"{None}" == "None"). Duck-typed: any
+    object exposing id/action/resource_type/resource_id/created_at works, which
+    lets the format be pinned without a DB round-trip.
+
+    Pinned literally by tests/test_merkle_leaf_preimage.py.
+    """
+    return f"{log.id}|{log.action}|{log.resource_type}|{log.resource_id}|{log.created_at}".encode()
+
+
+def escape_leaf_field(value: str | None) -> str | None:
+    """Make one free-text leaf field unambiguous under the frozen "|" join.
+
+    The join is neither length-prefixed nor escaped, so a raw "|" inside a field
+    lets two different field tuples produce one preimage (action="a|b",
+    resource_type="c" vs action="a", resource_type="b|c") — the same anchored
+    root for two different facts.
+
+    Encoding: escape char first, then the separator (``\\`` -> ``\\\\``,
+    ``|`` -> ``\\|``). That ordering makes it injective and information
+    preserving, unlike substituting another character. Values without "|" are
+    returned untouched, and a pass-through value can never contain the ``\\|``
+    digraph (it holds no "|" at all), so escaped and unescaped fields cannot
+    collide with each other either.
+    """
+    if not isinstance(value, str) or LEAF_FIELD_SEP not in value:
+        return value
+    return value.replace(LEAF_ESCAPE_CHAR, LEAF_ESCAPE_CHAR * 2).replace(
+        LEAF_FIELD_SEP, LEAF_ESCAPE_CHAR + LEAF_FIELD_SEP
+    )
 
 
 @dataclass

@@ -1,0 +1,192 @@
+
+Preview: 185 file(s) changed  |  +32071  -0
+
+Will review (137):
+  [S]  cds-frontend/src/App.tsx                                          +141  -0   
+  [S]  cds-frontend/src/antdLocale.ts                                    +21   -0   
+  [S]  cds-frontend/src/antdReact19Patch.ts                              +19   -0   
+  [S]  cds-frontend/src/components/Audit/AuditVerifyModal.tsx            +327  -0   
+  [S]  cds-frontend/src/components/Auth/ProtectedRoute.tsx               +12   -0   
+  [S]  cds-frontend/src/components/Auth/RoleRoute.tsx                    +14   -0   
+  [S]  cds-frontend/src/components/Feedback/ErrorCard.tsx                +116  -0   
+  [S]  cds-frontend/src/components/Feedback/QueryFeedback.tsx            +67   -0   
+  [S]  cds-frontend/src/components/Feedback/SimulationBadge.tsx          +72   -0   
+  [S]  cds-frontend/src/components/Feedback/errorHints.ts                +140  -0   
+  [S]  cds-frontend/src/components/Layout/DataplaneBanner.tsx            +49   -0   
+  [S]  cds-frontend/src/components/Layout/Header.tsx                     +91   -0   
+  [S]  cds-frontend/src/components/Layout/MainLayout.tsx                 +58   -0   
+  [S]  cds-frontend/src/components/Layout/PageCrumb.tsx                  +40   -0   
+  [S]  cds-frontend/src/components/Layout/Sidebar.tsx                    +318  -0   
+  [S]  cds-frontend/src/components/Layout/WorkspaceHome.tsx              +26   -0   
+  [S]  cds-frontend/src/components/Layout/WorkspaceRoute.tsx             +58   -0   
+  [S]  cds-frontend/src/components/Layout/routeCrumb.ts                  +81   -0   
+  [S]  cds-frontend/src/components/Layout/useCrumbSegments.ts            +11   -0   
+  [S]  cds-frontend/src/components/Sandbox/ExecStreamTerminal.tsx        +290  -0   
+  [S]  cds-frontend/src/index.css                                        +983  -0   
+  [S]  cds-frontend/src/main.tsx                                         +11   -0   
+  [S]  cds-frontend/src/pages/ApiKeys.tsx                                +709  -0   
+  [S]  cds-frontend/src/pages/Audit/AuditLog.tsx                         +524  -0   
+  [S]  cds-frontend/src/pages/Audit/auditDisplay.ts                      +130  -0   
+  [S]  cds-frontend/src/pages/Audit/auditLog.css                         +434  -0   
+  [S]  cds-frontend/src/pages/Auth/Login.tsx                             +94   -0   
+  [S]  cds-frontend/src/pages/Auth/Register.tsx                          +89   -0   
+  [S]  cds-frontend/src/pages/CapabilityMatrix.tsx                       +122  -0   
+  [S]  cds-frontend/src/pages/Catalog/index.tsx                          +265  -0   
+  [S]  cds-frontend/src/pages/ComplianceDisclosure.tsx                   +182  -0   
+  [S]  cds-frontend/src/pages/Connectors/index.tsx                       +404  -0   
+  [S]  cds-frontend/src/pages/Contracts/ContractCreate.tsx               +278  -0   
+  [S]  cds-frontend/src/pages/Contracts/ContractDetail.tsx               +238  -0   
+  [S]  cds-frontend/src/pages/Contracts/ContractList.tsx                 +70   -0   
+  [S]  cds-frontend/src/pages/Dashboard/index.tsx                        +620  -0   
+  [S]  cds-frontend/src/pages/DataPipeline.tsx                           +174  -0   
+  [S]  cds-frontend/src/pages/DataProducts/ProductCreate.tsx             +230  -0   
+  [S]  cds-frontend/src/pages/DataProducts/ProductDetail.tsx             +578  -0   
+  [S]  cds-frontend/src/pages/DataProducts/ProductList.tsx               +193  -0   
+  [S]  cds-frontend/src/pages/DataResources/DesensitizedPreviewModal.tsx +88   -0   
+  [S]  cds-frontend/src/pages/DataResources/ResourceList.tsx             +179  -0   
+  [S]  cds-frontend/src/pages/Federation/CrossSpaceDashboard.tsx         +187  -0   
+  [S]  cds-frontend/src/pages/Flow/BundlePreviewModal.tsx                +100  -0   
+  [S]  cds-frontend/src/pages/Flow/ComputeSchedule.tsx                   +603  -0   
+  [S]  cds-frontend/src/pages/Flow/ContractDataBoard.tsx                 +133  -0   
+  [S]  cds-frontend/src/pages/Flow/DeliveryCenter.tsx                    +2317 -0   
+  [S]  cds-frontend/src/pages/Flow/DevHome.tsx                           +685  -0   
+  [S]  cds-frontend/src/pages/Flow/DevTaskCreatePage.tsx                 +338  -0   
+  [S]  cds-frontend/src/pages/Flow/DevTaskDataPicker.tsx                 +316  -0   
+  [S]  cds-frontend/src/pages/Flow/DevTasks.tsx                          +280  -0   
+  [S]  cds-frontend/src/pages/Flow/FlowConfigCard.tsx                    +194  -0   
+  [S]  cds-frontend/src/pages/Flow/FlowConfigFields.tsx                  +161  -0   
+  [S]  cds-frontend/src/pages/Flow/Guide.tsx                             +357  -0   
+  [S]  cds-frontend/src/pages/Flow/JupyterDevEnv.tsx                     +415  -0   
+  [S]  cds-frontend/src/pages/Flow/NotebookWorkbench.tsx                 +1355 -0   
+  [S]  cds-frontend/src/pages/Flow/Quota.tsx                             +244  -0   
+  [S]  cds-frontend/src/pages/Flow/RuntimeStatusBanner.tsx               +42   -0   
+  [S]  cds-frontend/src/pages/Flow/TaskDetail.tsx                        +672  -0   
+  [S]  cds-frontend/src/pages/Flow/TaskRunRecords.tsx                    +237  -0   
+  [S]  cds-frontend/src/pages/Flow/WorkloadCenter.tsx                    +603  -0   
+  [S]  cds-frontend/src/pages/Flow/contractDataModel.ts                  +38   -0   
+  [S]  cds-frontend/src/pages/Flow/copyText.ts                           +20   -0   
+  [S]  cds-frontend/src/pages/Flow/deliveryOpenapi.css                   +86   -0   
+  [S]  cds-frontend/src/pages/Flow/devTaskCreate.css                     +302  -0   
+  [S]  cds-frontend/src/pages/Flow/devTasksModel.ts                      +511  -0   
+  [S]  cds-frontend/src/pages/Flow/directoryContract.ts                  +32   -0   
+  [S]  cds-frontend/src/pages/Flow/display.ts                            +276  -0   
+  [S]  cds-frontend/src/pages/Flow/flowResource.ts                       +20   -0   
+  [S]  cds-frontend/src/pages/Flow/homeModel.ts                          +132  -0   
+  [S]  cds-frontend/src/pages/Flow/monacoSetup.ts                        +19   -0   
+  [S]  cds-frontend/src/pages/Flow/notebookWorkbench.css                 +331  -0   
+  [S]  cds-frontend/src/pages/Flow/notebookWorkbenchModel.ts             +403  -0   
+  [S]  cds-frontend/src/pages/Flow/notebookWorkbenchPanels.tsx           +333  -0   
+  [S]  cds-frontend/src/pages/Flow/taskDetail.css                        +473  -0   
+  [S]  cds-frontend/src/pages/Flow/useContractOptions.ts                 +63   -0   
+  [S]  cds-frontend/src/pages/Identity/Certificates.tsx                  +313  -0   
+  [S]  cds-frontend/src/pages/Identity/KeyManagement.tsx                 +248  -0   
+  [S]  cds-frontend/src/pages/K8sOps/Deployments.tsx                     +112  -0   
+  [S]  cds-frontend/src/pages/K8sOps/Logs.tsx                            +91   -0   
+  [S]  cds-frontend/src/pages/K8sOps/NetworkPolicies.tsx                 +121  -0   
+  [S]  cds-frontend/src/pages/K8sOps/Pvcs.tsx                            +101  -0   
+  [S]  cds-frontend/src/pages/MPC.tsx                                    +311  -0   
+  [S]  cds-frontend/src/pages/Monitoring/index.tsx                       +578  -0   
+  [S]  cds-frontend/src/pages/NotFound.tsx                               +17   -0   
+  [S]  cds-frontend/src/pages/OutputControl/InspectionPipeline.tsx       +403  -0   
+  [S]  cds-frontend/src/pages/Sandbox/DataProductDev.tsx                 +359  -0   
+  [S]  cds-frontend/src/pages/Sandbox/ProofBundleDrawer.tsx              +201  -0   
+  [S]  cds-frontend/src/pages/Sandbox/SessionDetail.tsx                  +1613 -0   
+  [S]  cds-frontend/src/pages/Sandbox/SessionList.tsx                    +270  -0   
+  [S]  cds-frontend/src/pages/Sandbox/SessionStatusStrip.tsx             +138  -0   
+  [S]  cds-frontend/src/pages/Sandbox/sessionWorkbench.ts                +100  -0   
+  [S]  cds-frontend/src/pages/SystemStatus.tsx                           +193  -0   
+  [S]  cds-frontend/src/pages/Training/TrainingDashboard.tsx             +209  -0   
+  [S]  cds-frontend/src/pages/UserManagement.tsx                         +151  -0   
+  [S]  cds-frontend/src/services/api.ts                                  +102  -0   
+  [S]  cds-frontend/src/services/apiKeysApi.ts                           +75   -0   
+  [S]  cds-frontend/src/services/auditApi.ts                             +193  -0   
+  [S]  cds-frontend/src/services/authApi.ts                              +22   -0   
+  [S]  cds-frontend/src/services/catalogApi.ts                           +37   -0   
+  [S]  cds-frontend/src/services/complianceApi.ts                        +36   -0   
+  [S]  cds-frontend/src/services/computeApi.ts                           +62   -0   
+  [S]  cds-frontend/src/services/connectorApi.ts                         +99   -0   
+  [S]  cds-frontend/src/services/contractApi.ts                          +63   -0   
+  [S]  cds-frontend/src/services/dataPipelineApi.ts                      +38   -0   
+  [S]  cds-frontend/src/services/dataProductApi.ts                       +81   -0   
+  [S]  cds-frontend/src/services/dataResourceApi.ts                      +63   -0   
+  [S]  cds-frontend/src/services/federationApi.ts                        +101  -0   
+  [S]  cds-frontend/src/services/fieldExposureApi.ts                     +62   -0   
+  [S]  cds-frontend/src/services/flow.ts                                 +2296 -0   
+  [S]  cds-frontend/src/services/identityApi.ts                          +201  -0   
+  [S]  cds-frontend/src/services/jupyterContents.ts                      +166  -0   
+  [S]  cds-frontend/src/services/k8sOpsApi.ts                            +107  -0   
+  [S]  cds-frontend/src/services/metaApi.ts                              +79   -0   
+  [S]  cds-frontend/src/services/monitoringApi.ts                        +129  -0   
+  [S]  cds-frontend/src/services/mpcApi.ts                               +59   -0   
+  [S]  cds-frontend/src/services/outputControlApi.ts                     +64   -0   
+  [S]  cds-frontend/src/services/quotaApi.ts                             +99   -0   
+  [S]  cds-frontend/src/services/sandboxApi.ts                           +448  -0   
+  [S]  cds-frontend/src/services/trainingApi.ts                          +175  -0   
+  [S]  cds-frontend/src/services/usersApi.ts                             +20   -0   
+  [S]  cds-frontend/src/stores/authStore.ts                              +37   -0   
+  [S]  cds-frontend/src/stores/crumbStackStore.ts                        +16   -0   
+  [S]  cds-frontend/src/stores/uiStore.ts                                +17   -0   
+  [S]  cds-frontend/src/stores/workspaceStore.ts                         +22   -0   
+  [S]  cds-frontend/src/test/setup.ts                                    +1    -0   
+  [S]  cds-frontend/src/test/test-utils.tsx                              +37   -0   
+  [S]  cds-frontend/src/types/api.ts                                     +34   -0   
+  [S]  cds-frontend/src/types/enums.ts                                   +115  -0   
+  [S]  cds-frontend/src/types/models.ts                                  +88   -0   
+  [S]  cds-frontend/src/types/security.ts                                +21   -0   
+  [S]  cds-frontend/src/utils/cn.ts                                      +6    -0   
+  [S]  cds-frontend/src/utils/crypto.ts                                  +104  -0   
+  [S]  cds-frontend/src/utils/csvPreview.ts                              +93   -0   
+  [S]  cds-frontend/src/utils/highRiskOperation.tsx                      +52   -0   
+  [S]  cds-frontend/src/utils/roles.ts                                   +58   -0   
+  [S]  cds-frontend/src/utils/workspace.ts                               +140  -0   
+
+Excluded from review (48):
+  [S]  cds-frontend/src/__tests__/antdLocale.test.ts                              (default_path)
+  [S]  cds-frontend/src/components/Feedback/__tests__/ErrorCard.test.tsx          (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/App.routes.test.tsx           (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/Header.test.tsx               (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/MainLayout.test.tsx           (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/PageCrumb.test.tsx            (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/Sidebar.test.tsx              (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/WorkspaceHome.test.tsx        (default_path)
+  [S]  cds-frontend/src/components/Layout/__tests__/WorkspaceRoute.test.tsx       (default_path)
+  [S]  cds-frontend/src/pages/AGENTS.md                                           (unsupported_ext)
+  [S]  cds-frontend/src/pages/Audit/AuditLog.test.tsx                             (default_path)
+  [S]  cds-frontend/src/pages/Audit/__tests__/auditDisplay.test.ts                (default_path)
+  [S]  cds-frontend/src/pages/Dashboard/__tests__/Dashboard.test.tsx              (default_path)
+  [S]  cds-frontend/src/pages/Flow/DevHome.test.tsx                               (default_path)
+  [S]  cds-frontend/src/pages/Flow/OpenApiMonitor.test.tsx                        (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/ContractDataBoard.test.tsx           (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/DeliveryCenterOpenApi.test.tsx       (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/DevTaskCreatePage.test.tsx           (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/DevTaskDataPicker.test.tsx           (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/DevTasks.test.tsx                    (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/JupyterDevEnv.test.tsx               (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/NotebookWorkbench.taskParam.test.tsx (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/NotebookWorkbenchFrame.test.tsx      (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/TaskDetail.test.tsx                  (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/TaskRunRecords.test.tsx              (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devFixtures.ts                       (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devHomeOverview.test.tsx             (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devTaskCards.test.ts                 (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devTaskExecution.test.tsx            (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devTaskForm.test.ts                  (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devTaskHomeA1.test.tsx               (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/devTasksModel.test.ts                (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/directoryContract.test.tsx           (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/display.test.ts                      (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/homeFixtures.ts                      (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/homeModel.test.ts                    (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts       (default_path)
+  [S]  cds-frontend/src/pages/Flow/__tests__/taskDetailSpec.test.ts               (default_path)
+  [S]  cds-frontend/src/pages/__tests__/ApiKeys.test.tsx                          (default_path)
+  [S]  cds-frontend/src/services/AGENTS.md                                        (unsupported_ext)
+  [S]  cds-frontend/src/services/__tests__/api.test.ts                            (default_path)
+  [S]  cds-frontend/src/services/__tests__/flow.test.ts                           (default_path)
+  [S]  cds-frontend/src/services/__tests__/k8sOpsApi.test.ts                      (default_path)
+  [S]  cds-frontend/src/services/__tests__/uploadBoundary.test.ts                 (default_path)
+  [S]  cds-frontend/src/stores/__tests__/authStore.test.ts                        (default_path)
+  [S]  cds-frontend/src/utils/__tests__/crypto.test.ts                            (default_path)
+  [S]  cds-frontend/src/utils/__tests__/csvPreview.test.ts                        (default_path)
+  [S]  cds-frontend/src/utils/__tests__/workspace.test.ts                         (default_path)
+

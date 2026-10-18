@@ -55,6 +55,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     _REDIS_WARNING_INTERVAL = 30.0
+    _MAX_LOCAL_BUCKETS = 4096
 
     def __init__(self, app, requests_per_minute: int | None = None):
         super().__init__(app)
@@ -62,7 +63,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_redis_warning = 0.0
         self._default_limit = requests_per_minute
 
-    def _resolve_scope(self, request: Request) -> tuple[str, str, int]:
+    def _resolve_scopes(self, request: Request) -> list[tuple[str, str, int]]:
+        """Buckets a request must pass. All of them are enforced (A45).
+
+        A JWT whose signature was never verified only earns the caller its own
+        ``user`` bucket; the per-IP bucket stays enforced alongside it, so
+        forging ``sub`` values cannot turn the per-IP ceiling into a
+        per-forged-identity ceiling.
+        """
         settings = get_settings()
         client_ip = request.client.host if request.client else "unknown"
         path = request.url.path.rstrip("/")
@@ -71,15 +79,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "user": settings.RATE_LIMIT_PER_MINUTE_USER,
             "ip": settings.RATE_LIMIT_PER_MINUTE_IP,
         }
+        ip_limit = self._default_limit or limits["ip"]
         if path.endswith(("/api/v1/auth/login", "/api/v1/auth/register",
                           "/api/v1/auth/login/cert", "/api/v1/auth/login/cert/challenge")):
             # CR-2026-10-15 M1: the cert-login pair used to fall into the loose
             # per-IP bucket, so the strict auth bucket never covered it.
-            return "auth", client_ip, limits["auth"]
+            return [("auth", client_ip, limits["auth"])]
         sub = _unverified_jwt_sub(request.headers.get("Authorization", ""))
         if sub:
-            return "user", sub, limits["user"]
-        return "ip", client_ip, self._default_limit or limits["ip"]
+            return [("user", sub, limits["user"]), ("ip", client_ip, ip_limit)]
+        return [("ip", client_ip, ip_limit)]
 
     def _reject(self, request: Request, scope: str, retry_after: int) -> Response:
         from app.core.metrics import RATE_LIMITED
@@ -123,26 +132,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         bucket_key = f"{scope}:{identifier}"
         now = time.time()
         window_start = now - _WINDOW_SECONDS
-        self._local[bucket_key] = [t for t in self._local[bucket_key] if t > window_start]
-        if len(self._local[bucket_key]) >= limit:
+        live = [t for t in self._local[bucket_key] if t > window_start]
+        if len(live) >= limit:
+            self._local[bucket_key] = live
             return True, _WINDOW_SECONDS - int(now) % _WINDOW_SECONDS
-        self._local[bucket_key].append(now)
+        live.append(now)
+        self._local[bucket_key] = live
+        if len(self._local) > self._MAX_LOCAL_BUCKETS:
+            self._prune_local(now)
         return False, 0
+
+    def _prune_local(self, now: float) -> None:
+        """Keep the Redis-outage fallback from growing one key per identity (A46)."""
+        stale = [k for k, ts in self._local.items() if not ts or ts[-1] <= now - _WINDOW_SECONDS]
+        for key in stale:
+            del self._local[key]
+        overflow = len(self._local) - self._MAX_LOCAL_BUCKETS
+        if overflow > 0:
+            for key in list(self._local)[:overflow]:
+                del self._local[key]
 
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
         if not settings.RATE_LIMIT_ENABLED:
             return await call_next(request)
 
-        scope, identifier, limit = self._resolve_scope(request)
-        result = await self._redis_hit(request, scope, identifier, limit)
-        if result is None:
-            limited, retry_after = self._local_hit(scope, identifier, limit)
-        else:
-            limited, retry_after = result
+        for scope, identifier, limit in self._resolve_scopes(request):
+            result = await self._redis_hit(request, scope, identifier, limit)
+            if result is None:
+                limited, retry_after = self._local_hit(scope, identifier, limit)
+            else:
+                limited, retry_after = result
 
-        if limited:
-            return self._reject(request, scope, retry_after)
+            if limited:
+                return self._reject(request, scope, retry_after)
         return await call_next(request)
 
 
@@ -173,22 +196,64 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
-    """Limit request body size to prevent DoS via large payloads."""
+class RequestSizeLimitMiddleware:
+    """ASGI body-size gate covering declared and streamed bodies (A47).
+
+    ``Content-Length`` is checked up front; a ``Transfer-Encoding: chunked``
+    request declares nothing, so its bytes are counted as they stream and the
+    connection is dropped once the cap is passed. Counting happens without
+    buffering, so the cap holds without paying for it in memory.
+    """
 
     def __init__(self, app, max_size_bytes: int = 10 * 1024 * 1024):  # 10MB default
-        super().__init__(app)
+        self.app = app
         self.max_size_bytes = max_size_bytes
 
-    async def dispatch(self, request: Request, call_next):
-        content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > self.max_size_bytes:
-            return Response(
-                content='{"detail":"Request body too large"}',
-                status_code=413,
-                media_type="application/json",
-            )
-        return await call_next(request)
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        headers = {}
+        for raw_name, raw_value in scope.get("headers", []):
+            headers[raw_name.decode("latin-1").lower()] = raw_value.decode("latin-1")
+
+        declared = headers.get("content-length")
+        if declared is not None:
+            try:
+                size = int(declared)
+            except ValueError:
+                return await self._reject(send, 400, "Invalid Content-Length")
+            if size > self.max_size_bytes:
+                return await self._reject(send, 413, "Request body too large")
+            return await self.app(scope, receive, send)
+
+        if headers.get("transfer-encoding", "").lower() != "chunked":
+            return await self.app(scope, receive, send)
+
+        consumed = 0
+
+        async def counting_receive():
+            nonlocal consumed
+            message = await receive()
+            if message["type"] == "http.request":
+                consumed += len(message.get("body", b""))
+                if consumed > self.max_size_bytes:
+                    return {"type": "http.disconnect"}
+            return message
+
+        return await self.app(scope, counting_receive, send)
+
+    async def _reject(self, send, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("latin-1")),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
 
 
 def setup_security(app: FastAPI, allowed_origins: list[str] | None = None, enable_rate_limit: bool = True):
@@ -207,6 +272,15 @@ def setup_security(app: FastAPI, allowed_origins: list[str] | None = None, enabl
         allow_credentials=use_credentials,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
+        # PZ-16 ③：跨域部署下浏览器默认只暴露 CORS-safelisted 响应头，必须显式 expose
+        # X-CDS-Output-Review，前端才看得见下载内容是否被输出审查 REDACTED（否则是静默
+        # 泄露失败）；Content-Disposition 供审计导出/交付包下载读取服务端文件名。
+        expose_headers=[
+            "X-CDS-Output-Review",
+            "Content-Disposition",
+            "Content-Length",
+            "Content-Type",
+        ],
     )
 
     # Security headers

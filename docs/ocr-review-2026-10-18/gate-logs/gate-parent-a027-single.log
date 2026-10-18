@@ -1,0 +1,15 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________________ test_a027_cache_clear_escapes_glob_metachars _________________
+tests\test_ocr_a184_a027.py:106: in test_a027_cache_clear_escapes_glob_metachars
+    assert pattern == "cache:orders:v1\\?\\*"
+E   AssertionError: assert 'cache:orders:v1\\**' == 'cache:orders:v1\\?\\*'
+E     
+E     - cache:orders:v1\?\*
+E     ?                 --
+E     + cache:orders:v1\**
+E     ?                  +
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a184_a027.py::test_a027_cache_clear_escapes_glob_metachars
+1 failed in 1.10s
+A027S_RC=1

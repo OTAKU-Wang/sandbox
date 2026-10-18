@@ -1,0 +1,685 @@
+.....FFFF.FFFFFFF.FFFFFFFFFFFFFFFFF                                      [100%]
+================================== FAILURES ===================================
+_______________________ test_preflight_full_pass_matrix _______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_full_pass_matri0')
+
+    @needs_bash
+    def test_preflight_full_pass_matrix(tmp_path: Path) -> None:
+        """全好 fixture：除 volume_sock（Windows 造不出 AF_UNIX socket 文件，-S 必假）
+        外 9 项全 PASS，且汇总行存在、失败数为 1。"""
+        root = make_mock(tmp_path / "mock")
+        acc = TcpAccepter()
+        try:
+            r = run_bash([PREFLIGHT], env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=acc.port),
+                         timeout=180)
+        finally:
+            acc.stop()
+        out = r.stdout + r.stderr
+        lines = [l for l in out.splitlines() if re.match(r"^(PASS|FAIL): ", l)]
+>       assert len(lines) == 10, f"必须十项检查全有结果行（不得中途静默退出）:\n{out}"
+E       AssertionError: 必须十项检查全有结果行（不得中途静默退出）:
+E         Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 0 == 10
+E        +  where 0 = len([])
+
+tests\test_cube_node_scripts.py:263: AssertionError
+______________ test_preflight_broken_manifest_falls_back_to_pins ______________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_broken_manifest0')
+
+    @needs_bash
+    def test_preflight_broken_manifest_falls_back_to_pins(tmp_path: Path) -> None:
+        """P1：manifest 非法 JSON 时必须告警并回退内置钉住值，继续跑完十项——
+        而不是 read/EOF 在 set -e 下静默 exit 1（一行输出都没有）。"""
+        root = make_mock(tmp_path / "mock")
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        env = base_env(root, CDS_CUBE_BUNDLE_MANIFEST=str(bad.as_posix()))
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+        out = r.stdout + r.stderr
+>       assert "回退内置钉住" in out, f"manifest 解析失败必须显式披露:\n{out}"
+E       AssertionError: manifest 解析失败必须显式披露:
+E         Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                    ^^^^^^^^^^^^^^^^
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 346, in loads
+E             return _default_decoder.decode(s)
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 338, in decode
+E             obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+E                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py", line 354, in raw_decode
+E             obj, end = self.scan_once(s, idx)
+E                        ^^^^^^^^^^^^^^^^^^^^^^
+E         json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+E         
+E       assert '回退内置钉住' in 'Traceback (most recent call last):\n  File "<stdin>", line 2, in <module>\n  File "C:\\Program Files\\WindowsApps\\Py...^^^^^^^^^\njson.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\n'
+
+tests\test_cube_node_scripts.py:282: AssertionError
+_________________ test_preflight_cube_bridge_prefix_excluded __________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_cube_bridge_pre0')
+
+    @needs_bash
+    def test_preflight_cube_bridge_prefix_excluded(tmp_path: Path) -> None:
+        """P2：已建站节点的 cube0 桥自带沙箱网段地址——`ip addr` 行没有 ` dev `，
+        旧 grep 完全没排除它 → 每台已部署节点永久误报重叠。修复后必须 PASS。"""
+        root = make_mock(tmp_path / "mock", ip_body=IP_CUBE_BRIDGE)
+        env = base_env(root, CDS_CUBE_SANDBOX_CIDR="192.168.0.0/18",
+                       CUBE_SANDBOX_NETWORK_CIDR=None)
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+>       assert "PASS: sandbox_cidr" in r.stdout, r.stdout + r.stderr
+E       AssertionError: Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 'PASS: sandbox_cidr' in ''
+E        +  where '' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\preflight.sh'], returncode=1, stdout='', st...   ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n').stdout
+
+tests\test_cube_node_scripts.py:295: AssertionError
+________________ test_preflight_ds_abort_paths_still_summarize ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_ds_abort_paths_0')
+
+    @needs_bash
+    def test_preflight_ds_abort_paths_still_summarize(tmp_path: Path) -> None:
+        """P4/P15：DATA_DIR 不可 df（无 disk_pct fixture + 目录不存在）时，
+        必须 FAIL: resources（含可读原因）并继续出汇总；resources 不得排在最后
+        被前面的 abort 吞掉（头部清单顺序：resources 在 tee/cidr 之前）。"""
+        root = make_mock(tmp_path / "mock", disk_pct=None)
+        env = base_env(root, CDS_CUBE_DATA_DIR=(tmp_path / "no-such-mount").as_posix())
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+        out = r.stdout + r.stderr
+>       assert "FAIL: resources" in out, out
+E       AssertionError: Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 'FAIL: resources' in 'Traceback (most recent call last):\n  File "<stdin>", line 2, in <module>\n  File "C:\\Program Files\\WindowsApps\\Py...    ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n'
+
+tests\test_cube_node_scripts.py:308: AssertionError
+_________________________ test_preflight_mock_banner __________________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_mock_banner0')
+
+    @needs_bash
+    def test_preflight_mock_banner(tmp_path: Path) -> None:
+        """P9：CDS_CUBE_MOCK_ROOT 会静默弱化整个硬门禁——必须在输出里一眼可见。"""
+        root = make_mock(tmp_path / "mock")
+        r = run_bash([PREFLIGHT], env=base_env(root), timeout=180)
+>       assert "MOCK" in r.stdout, "演练模式必须打印醒目标记（生产误设可被发现）"
+E       AssertionError: 演练模式必须打印醒目标记（生产误设可被发现）
+E       assert 'MOCK' in ''
+E        +  where '' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\preflight.sh'], returncode=1, stdout='', st...   ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n').stdout
+
+tests\test_cube_node_scripts.py:332: AssertionError
+_______________ test_preflight_tls_sidecar_discloses_port_only ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_tls_sidecar_dis0')
+
+    @needs_bash
+    def test_preflight_tls_sidecar_discloses_port_only(tmp_path: Path) -> None:
+        """P11：这一项只能证明端口有监听者；pass 文案必须如实限定范围。"""
+        root = make_mock(tmp_path / "mock")
+        r = run_bash([PREFLIGHT], env=base_env(root), timeout=180)
+        m = re.search(r"PASS: tls_sidecar .*", r.stdout)
+>       assert m and ("端口" in m.group(0) or "verify.sh" in m.group(0)), \
+            f"tls_sidecar PASS 必须声明其仅为端口可达性: {m}"
+E       AssertionError: tls_sidecar PASS 必须声明其仅为端口可达性: None
+E       assert (None)
+
+tests\test_cube_node_scripts.py:341: AssertionError
+______________ test_preflight_meminfo_unreadable_fails_honestly _______________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_meminfo_unreada0')
+
+    @needs_bash
+    def test_preflight_meminfo_unreadable_fails_honestly(tmp_path: Path) -> None:
+        """P12：meminfo 无 MemTotal 行 → 必须 FAIL「无法读取」，而不是 [[ -lt 报错
+        走 else 分支」把读不到数据报成 PASS 0GB（fail-open）。"""
+        root = make_mock(tmp_path / "mock", meminfo="HugePages: 0\n")
+        r = run_bash([PREFLIGHT], env=base_env(root), timeout=180)
+>       assert "FAIL: resources" in r.stdout, r.stdout + r.stderr
+E       AssertionError: Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 'FAIL: resources' in ''
+E        +  where '' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\preflight.sh'], returncode=1, stdout='', st...   ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n').stdout
+
+tests\test_cube_node_scripts.py:351: AssertionError
+_______________ test_preflight_oneclick_env_export_form_parsed ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_oneclick_env_ex0')
+
+    @needs_bash
+    def test_preflight_oneclick_env_export_form_parsed(tmp_path: Path) -> None:
+        """P13：.one-click.env 里 `export KEY=` / 缩进写法都必须解析出来——
+        否则在已迁移网段的机器上按上游默认误 FAIL。"""
+        root = make_mock(tmp_path / "mock", ip_body=IP_LAN_CLASH)
+        oc = root / "usr/local/services/cubetoolbox"
+        oc.mkdir(parents=True, exist_ok=True)
+        (oc / ".one-click.env").write_text(
+            "  export CUBE_SANDBOX_NETWORK_CIDR=10.100.0.0/18\n", encoding="utf-8")
+        env = base_env(root, CDS_CUBE_SANDBOX_CIDR=None, CUBE_SANDBOX_NETWORK_CIDR=None)
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+>       assert "PASS: sandbox_cidr" in r.stdout, \
+            f"export 行必须被读到（否则按 192.168.0.0/18 误拦）:\n{r.stdout}{r.stderr}"
+E       AssertionError: export 行必须被读到（否则按 192.168.0.0/18 误拦）:
+E         Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 'PASS: sandbox_cidr' in ''
+E        +  where '' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\preflight.sh'], returncode=1, stdout='', st...   ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n').stdout
+
+tests\test_cube_node_scripts.py:366: AssertionError
+________________ test_preflight_cds_key_wins_over_upstream_key ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_cds_key_wins_ov0')
+
+    @needs_bash
+    def test_preflight_cds_key_wins_over_upstream_key(tmp_path: Path) -> None:
+        """P8：运维显式设 CDS_CUBE_SANDBOX_CIDR 预验候选段时，它必须赢过环境里
+        残留的上游键 CUBE_SANDBOX_NETWORK_CIDR（与文件头注释一致）。"""
+        root = make_mock(tmp_path / "mock", ip_body=IP_LAN_CLASH)
+        env = base_env(root, CDS_CUBE_SANDBOX_CIDR="10.100.0.0/18",
+                       CUBE_SANDBOX_NETWORK_CIDR="192.168.0.0/18")
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+>       assert "PASS: sandbox_cidr" in r.stdout, \
+            f"CDS 键必须优先（否则校验的是另一个网段）:\n{r.stdout}{r.stderr}"
+E       AssertionError: CDS 键必须优先（否则校验的是另一个网段）:
+E         Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 'PASS: sandbox_cidr' in ''
+E        +  where '' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\preflight.sh'], returncode=1, stdout='', st...   ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n').stdout
+
+tests\test_cube_node_scripts.py:378: AssertionError
+________________________ test_preflight_probe_dir_trap ________________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_preflight_probe_dir_trap0')
+
+    @needs_bash
+    def test_preflight_probe_dir_trap(tmp_path: Path) -> None:
+        """P14/P5：dd 写探针失败（只读盘/满盘的真实形态）时，必须给出 FAIL: data_fs
+        而不是 set -e 中途夭折；探针目录任何路径都不得残留在数据盘上。"""
+        root = make_mock(tmp_path / "mock")
+        _sh(root / "bin" / "dd", "exit 1")  # 数据盘只读时 dd 的真实退出形态
+        env = base_env(root)
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+>       assert "FAIL: data_fs" in r.stdout, f"dd 失败必须落为 FAIL 行:\n{r.stdout}{r.stderr}"
+E       AssertionError: dd 失败必须落为 FAIL 行:
+E         Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py", line 293, in load
+E             return loads(fp.read(),
+E                          ^^^^^^^^^
+E         UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 507: illegal multibyte sequence
+E         
+E       assert 'FAIL: data_fs' in ''
+E        +  where '' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\preflight.sh'], returncode=1, stdout='', st...   ^^^^^^^^^\nUnicodeDecodeError: \'gbk\' codec can\'t decode byte 0x80 in position 507: illegal multibyte sequence\n').stdout
+
+tests\test_cube_node_scripts.py:391: AssertionError
+____________________ test_preflight_structural_invariants _____________________
+
+    def test_preflight_structural_invariants() -> None:
+        src = read_src(PREFLIGHT)
+        # P7：CIDR 八位组必须限 0-255，ip2int 越界必须拒
+>       assert "25[0-5]" in src and "2[0-4]" in src, "CIDR 正则必须约束八位组 0-255"
+E       AssertionError: CIDR 正则必须约束八位组 0-255
+E       assert ('25[0-5]' in '#!/usr/bin/env bash\n# preflight.sh — SS-10 CB-02：Cube 计算节点 bring-up 硬门禁（逐项 PASS/FAIL，任一 FAIL → exit 1，不降级）\n#\n# 检查项..._cidr\ncheck_resources\n\necho "== 结果: ${FAILURES} 项失败 =="\nif [[ "${FAILURES}" -gt 0 ]]; then\n  exit 1\nfi\nexit 0\n')
+
+tests\test_cube_node_scripts.py:399: AssertionError
+_____________________ test_install_structural_invariants ______________________
+
+    def test_install_structural_invariants() -> None:
+        src = read_src(INSTALL)
+        # I2/I5：服务令牌 env 文件必须 0600 且先预建（umask/install -m），不得 sed 直出全局可读
+>       assert re.search(r"umask 077|install -m 0600 /dev/null", src), \
+            "audit-tailer.env 必须先收紧 umask/预建再渲染（0640+umask 竞态）"
+E       AssertionError: audit-tailer.env 必须先收紧 umask/预建再渲染（0640+umask 竞态）
+E       assert None
+E        +  where None = <function search at 0x0000026F81F0D120>('umask 077|install -m 0600 /dev/null', '#!/usr/bin/env bash\n# install.sh — SS-10 CB-02：Cube 计算节点安装/升级幂等 wrapper\n#\n# 流程（spec §4 CB-02 步骤 1，幂等：可重复执行；节点重装/上游...，§5.2 钉住版本）；"\nlog "    tee 能力由 preflight 探测落存 ${CDS_CUBE_CAPABILITIES_FILE}（SS-13 RT-03，随 capabilities 上报）"\nexit 0\n')
+E        +    where <function search at 0x0000026F81F0D120> = re.search
+
+tests\test_cube_node_scripts.py:435: AssertionError
+___________________ test_verify_contract_statuses_and_exit ____________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_contract_statuses_0')
+
+    @needs_bash
+    def test_verify_contract_statuses_and_exit(tmp_path: Path) -> None:
+        """AGENTS.md 契约：status ∈ pass|fail|skipped；有 fail → 非零；--json 可解析。"""
+        root = make_mock(tmp_path / "mock")
+        r = _run_verify(root, CDS_CUBE_GRPC_PORT=free_port(), CDS_CUBE_CDS_API_URL=None)
+>       doc = json.loads(r.stdout)
+              ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_cube_node_scripts.py:482: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000026F826636E0>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:356: JSONDecodeError
+_______________ test_verify_http2_probe_requires_settings_frame _______________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_http2_probe_requir0')
+
+    @needs_bash
+    def test_verify_http2_probe_requires_settings_frame(tmp_path: Path) -> None:
+        """V3：裸 TCP echo（第 4 字节恰落在 0..8）不得被判成 gRPC/HTTP2 应答——
+        必须校验首帧 type==SETTINGS(4) 且长度自洽。"""
+        root = make_mock(tmp_path / "mock")
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        port = srv.getsockname()[1]
+        srv.listen(4)
+        import threading
+    
+        def _echo():
+            try:
+                conn, _ = srv.accept()
+                conn.recv(64)
+                conn.sendall(b"\x16\x03\x03\x00\x00\x00\x00\x00\x00")  # TLS record hdr
+                conn.close()
+            except OSError:
+                pass
+    
+        t = threading.Thread(target=_echo, daemon=True)
+        t.start()
+        try:
+            r = _run_verify(root, CDS_CUBE_GRPC_PORT=port, CDS_CUBE_CDS_API_URL=None)
+        finally:
+            srv.close()
+>       doc = json.loads(r.stdout)
+              ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_cube_node_scripts.py:521: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000026F826636E0>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\json\decoder.py:356: JSONDecodeError
+____________________ test_verify_socket_liveness_not_stale ____________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_socket_liveness_no0')
+
+    @needs_bash
+    def test_verify_socket_liveness_not_stale(tmp_path: Path) -> None:
+        """V10：只判 -S 会把插件崩溃后的 stale socket 记 pass——至少要探测/声明。"""
+        src = read_src(VERIFY)
+        body = body_of(src, "check_volume_sock")
+>       assert "AF_UNIX" in src or "陈旧" in body or "未做活性探测" in body, \
+            "volume_sock 需要 connect 探测或如实降级声明"
+E       AssertionError: volume_sock 需要 connect 探测或如实降级声明
+E       assert ('AF_UNIX' in '#!/usr/bin/env bash\n# verify.sh — SS-10 CB-02：Cube 计算节点安装后验收（post-install acceptance）\n#\n# 检查项（spec §4 CB-02 步骤 1 验...点 verify 完成 =="\nfi\nif awk -F\'\\t\' \'$2=="fail"{f=1} END{exit f+0}\' "${RESULT_FILE}"; then\n  exit 0\nfi\nexit 1\n' or '陈旧' in 'check_volume_sock() {\n  if [[ -S "${SOCK_PATH}" ]]; then\n    record volume_sock pass "socket 存活: ${SOCK_PATH}"\n  else\n    record volume_sock fail "socket 不存在: ${SOCK_PATH}（CB-03 插件未部署/未启动）"\n  fi\n  say_last volume_sock\n}' or '未做活性探测' in 'check_volume_sock() {\n  if [[ -S "${SOCK_PATH}" ]]; then\n    record volume_sock pass "socket 存活: ${SOCK_PATH}"\n  else\n    record volume_sock fail "socket 不存在: ${SOCK_PATH}（CB-03 插件未部署/未启动）"\n  fi\n  say_last volume_sock\n}')
+
+tests\test_cube_node_scripts.py:531: AssertionError
+_____________________ test_verify_tls_ca_when_configured ______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_tls_ca_when_config0')
+
+    @needs_bash
+    def test_verify_tls_ca_when_configured(tmp_path: Path) -> None:
+        """V4/V5：设了 CDS_CUBE_TLS_CA 后握手必须做链+主机名校验；CDS 标记只查
+        subject/issuer（不再整 blob 子串）。"""
+        src = read_src(VERIFY)
+        body = body_of(src, "check_tls_sidecar")
+        assert "CERT_NONE" in body  # 无 CA 时仍宽松（自签 CI 冒烟）
+        assert re.search(r"if ca|ca[^\n]*:|check_hostname = True", body)
+>       assert re.search(r"cafile", body), "CA 在场必须 load_verify_locations(cafile=…)"
+E       AssertionError: CA 在场必须 load_verify_locations(cafile=…)
+E       assert None
+E        +  where None = <function search at 0x0000026F81F0D120>('cafile', 'check_tls_sidecar() {\n  local out\n  if ! out="$(CDS_TLS_CA="${TLS_CA}" CDS_TLS_EXPECT="${TLS_EXPECT}" python3 - "${...} 未出示 CDS 证书（${out:-连接失败}）"\n  else\n    record tls_sidecar pass "证书含 CDS 标记（${out}）"\n  fi\n  say_last tls_sidecar\n}')
+E        +    where <function search at 0x0000026F81F0D120> = re.search
+
+tests\test_cube_node_scripts.py:543: AssertionError
+___________________________ test_verify_mock_guard ____________________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_mock_guard0')
+
+    @needs_bash
+    def test_verify_mock_guard(tmp_path: Path) -> None:
+        """V9：CDS_CUBE_MOCK_ROOT 是 test-only 钩子——被生产误继承时必须拒绝，
+        除非显式 CDS_CUBE_ACCEPT_MOCK=1（演练入口本身要设它）。"""
+        root = make_mock(tmp_path / "mock")
+        env = base_env(root, CDS_CUBE_ACCEPT_MOCK=None)
+        env.pop("CDS_CUBE_ACCEPT_MOCK", None)
+        r = run_bash([VERIFY], env=env, timeout=60)
+        assert r.returncode != 0
+>       assert "MOCK" in (r.stdout + r.stderr)
+E       assert 'MOCK' in ('[FAIL] cubelet_grpc: 127.0.0.1:9999 无 HTTP/2 应答（cubelet 未运行或端口不符）\n[FAIL] tls_sidecar: TLS sidecar 127.0.0.1:49357 未出...彧/pytest-104/test_verify_mock_guard0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）\n== CDS Cube 节点 verify 完成 ==\n' + 'Traceback (most recent call last):\n  File "<stdin>", line 3, in <module>\n  File "C:\\Program Files\\WindowsApps\\Py...y", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。\n')
+E        +  where '[FAIL] cubelet_grpc: 127.0.0.1:9999 无 HTTP/2 应答（cubelet 未运行或端口不符）\n[FAIL] tls_sidecar: TLS sidecar 127.0.0.1:49357 未出...彧/pytest-104/test_verify_mock_guard0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）\n== CDS Cube 节点 verify 完成 ==\n' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\verify.sh'], returncode=1, stdout='[FAIL] c...", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。\n').stdout
+E        +  and   'Traceback (most recent call last):\n  File "<stdin>", line 3, in <module>\n  File "C:\\Program Files\\WindowsApps\\Py...y", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。\n' = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\verify.sh'], returncode=1, stdout='[FAIL] c...", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。\n').stderr
+
+tests\test_cube_node_scripts.py:558: AssertionError
+______________________ test_verify_unknown_args_rejected ______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_unknown_args_rejec0')
+
+    @needs_bash
+    def test_verify_unknown_args_rejected(tmp_path: Path) -> None:
+        """V11：--json 的拼写变体/多余参数必须 usage+exit 2，不得静默出人类文本。"""
+        root = make_mock(tmp_path / "mock")
+        r = run_bash([VERIFY, "--json=1"], env=base_env(root), timeout=60)
+>       assert r.returncode == 2
+E       assert 1 == 2
+E        +  where 1 = CompletedProcess(args=['bash', 'D:\\workspace\\sandbox\\deploy\\cube-node\\verify.sh', '--json=1'], returncode=1, stdo...", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。\n').returncode
+
+tests\test_cube_node_scripts.py:570: AssertionError
+_________________ test_verify_tee_uses_device_root_and_stderr _________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_verify_tee_uses_device_ro0')
+
+    @needs_bash
+    def test_verify_tee_uses_device_root_and_stderr(tmp_path: Path) -> None:
+        """V8：必须把 mock 的 device root 传给 tee_probe 并捕获 stderr（失败原因可见）。"""
+        src = read_src(VERIFY)
+        body = body_of(src, "check_tee_probe")
+>       assert "CDS_CUBE_TEE_DEVICE_ROOT" in body
+E       assert 'CDS_CUBE_TEE_DEVICE_ROOT' in 'check_tee_probe() {\n  if ! command -v python3 >/dev/null 2>&1; then\n    record tee_probe fail "python3 不存在，无法执行 TEE...E}）" ;;\n    *)           record tee_probe fail "tee_probe.py 输出格式异常: ${TEE_LINE}" ;;\n  esac\n  say_last tee_probe\n}'
+
+tests\test_cube_node_scripts.py:579: AssertionError
+_____________________ test_verify_record_sanitizes_detail _____________________
+
+    def test_verify_record_sanitizes_detail() -> None:
+        """V1/V2：detail 嵌命令输出，TSV 里出现 tab/换行会让 JSON 段静默丢行、
+        awk 列错位——record() 必须清洗；JSON 段对坏行必须显式 FATAL 非零。"""
+        src = read_src(VERIFY)
+        m = re.search(r"record\(\)\s*\{.*", src)
+>       assert m and "| tr" in m.group(0), "record() 必须把 detail 里的 tab/换行压平（| tr …）"
+E       AssertionError: record() 必须把 detail 里的 tab/换行压平（| tr …）
+E       assert (<re.Match object; span=(2780, 2879), match='record() { LAST_ST="$2"; LAST_DET="$3"; printf \'> and '| tr' in 'record() { LAST_ST="$2"; LAST_DET="$3"; printf \'%s\\t%s\\t%s\\n\' "$1" "$2" "$3" >> "${RESULT_FILE}"; }')
+E        +  where 'record() { LAST_ST="$2"; LAST_DET="$3"; printf \'%s\\t%s\\t%s\\n\' "$1" "$2" "$3" >> "${RESULT_FILE}"; }' = <built-in method group of re.Match object at 0x0000026F8B060EC0>(0)
+E        +    where <built-in method group of re.Match object at 0x0000026F8B060EC0> = <re.Match object; span=(2780, 2879), match='record() { LAST_ST="$2"; LAST_DET="$3"; printf \'>.group
+
+tests\test_cube_node_scripts.py:588: AssertionError
+_____________________ test_bringup_structural_invariants ______________________
+
+    def test_bringup_structural_invariants() -> None:
+        src = read_src(BRINGUP)
+        # B1：blkid 三态（0=有 FS，2=确无，其他=中止），失败绝不落 mkfs
+>       assert "blkid_rc" in src and re.search(r"\$\{blkid_rc\}.*-eq 2", src) and \
+            "无法确认" in src, \
+            "blkid 非 0/2 退出码必须中止（不得把探测失败当无文件系统直接 mkfs -f）"
+E       AssertionError: blkid 非 0/2 退出码必须中止（不得把探测失败当无文件系统直接 mkfs -f）
+E       assert ('blkid_rc' in '#!/usr/bin/env bash\n# node_bringup.sh — SS-14 RT-07：本机 Cube 计算节点一键 bring-up（需 sudo）\n#\n# 用法: sudo bash deploy/cube-...E_DIR/install.sh"\n\n# 4. verify\necho "[bringup] verify..."\nbash "$NODE_DIR/verify.sh" --json\necho "BRINGUP_DONE"\n')
+
+tests\test_cube_node_scripts.py:599: AssertionError
+____________________ test_tee_probe_non_dict_doc_preserved ____________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tee_probe_non_dict_doc_pr0')
+
+    def test_tee_probe_non_dict_doc_preserved(tmp_path: Path) -> None:
+        """T1：capabilities 文件是合法 JSON 但顶层非 dict → 必须走 recovered 路径
+        （保留标记 + warn），不得静默整体覆盖既有节点能力键。"""
+        mod = load_script(PROBE_PY)
+        p = tmp_path / "caps.json"
+        p.write_text("[1, 2, 3]", encoding="utf-8")
+        mod.write_capabilities(p, {"tee": "none", "providers": {}})
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        assert doc.get("tee") == "none"
+>       assert doc.get("_capabilities_file_recovered_from_corrupt") is True, \
+            "非 dict 文档也必须留 recovered 标记（既有键丢失必须可归因）"
+E       AssertionError: 非 dict 文档也必须留 recovered 标记（既有键丢失必须可归因）
+E       assert None is True
+E        +  where None = <built-in method get of dict object at 0x0000026F8AFA5DC0>('_capabilities_file_recovered_from_corrupt')
+E        +    where <built-in method get of dict object at 0x0000026F8AFA5DC0> = {'tee': 'none', 'tee_probed_at': '2026-10-18T14:43:39.490542+00:00'}.get
+
+tests\test_cube_node_scripts.py:643: AssertionError
+_________________________ test_tee_probe_atomic_write _________________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tee_probe_atomic_write0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026F8B3C2030>
+
+    def test_tee_probe_atomic_write(tmp_path: Path, monkeypatch) -> None:
+        """T2：capabilities 重写必须 tmp+os.replace 原子替换——中途失败不得留下
+        被截断的 JSON（否则节点能力键就此丢失）。"""
+        mod = load_script(PROBE_PY)
+        p = tmp_path / "caps.json"
+        p.write_text(json.dumps({"gpu": "a100", "tee": "none"}), encoding="utf-8")
+        real_replace = os.replace
+    
+        def boom(a, b, **kw):
+            raise OSError("crash mid-write")
+    
+        monkeypatch.setattr(os, "replace", boom)
+        try:
+>           with pytest.raises(OSError):
+                 ^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE <class 'OSError'>
+
+tests\test_cube_node_scripts.py:660: Failed
+_______________________ test_tee_probe_stream_contract ________________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tee_probe_stream_contract0')
+
+    def test_tee_probe_stream_contract(tmp_path: Path) -> None:
+        """T3：文档承诺必须与实现一致——--json 时 stdout 恒为单行 tee=...，
+        JSON 走 stderr（改文档不改行为：preflight 抓的就是 stdout 单行）。"""
+        caps = tmp_path / "caps.json"
+        r = subprocess.run(
+            [sys.executable, str(PROBE_PY), "--json", "--capabilities-file", str(caps)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        assert r.returncode == 0
+        assert re.fullmatch(r"tee=(tdx|sev_snp|none)", r.stdout.strip()), \
+            f"--json 的 stdout 必须是单行 tee=: {r.stdout!r}"
+        doc = json.loads(r.stderr)
+        assert doc["tee"] in ("tdx", "sev_snp", "none")
+        # 参数错误按文档 = 2
+        r2 = subprocess.run([sys.executable, str(PROBE_PY), "--bogus"],
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=60)
+        assert r2.returncode == 2
+        doc_src = read_src(PROBE_PY)
+        assert "stderr" in doc_src.split("退出码")[0] or "stderr" in doc_src
+>       assert "2 = 参数错误" in doc_src or "2 = argparse" in doc_src
+E       assert ('2 = 参数错误' in '#!/usr/bin/env python3\n"""SS-13 RT-03：Cube 节点 TEE 硬件探测（节点侧独立件，零 app 依赖，仅标准库）。\n\nspec ss-13 §2.2（TEE 作为正交属性）+ §四 RT-...sys.stderr)\n    print(f"tee={result[\'tee\']}")\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n' or '2 = argparse' in '#!/usr/bin/env python3\n"""SS-13 RT-03：Cube 节点 TEE 硬件探测（节点侧独立件，零 app 依赖，仅标准库）。\n\nspec ss-13 §2.2（TEE 作为正交属性）+ §四 RT-...sys.stderr)\n    print(f"tee={result[\'tee\']}")\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+
+tests\test_cube_node_scripts.py:687: AssertionError
+________________ test_tee_probe_device_root_isolates_commands _________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tee_probe_device_root_iso0')
+
+    def test_tee_probe_device_root_isolates_commands(tmp_path: Path) -> None:
+        """T4：device_root != "/" 时命令探测也必须落在 <root>/bin，
+        否则宿主机真实 tdx-attest/snpguest 会让 fixture 场景假阳性。"""
+        mod = load_script(PROBE_PY)
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        hit = fake_bin / "snpguest"
+        hit.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        hit.chmod(0o755)
+        res = mod.probe(device_root=tmp_path)
+>       assert res["tee"] == "sev_snp", f"命令探测必须限定在 device_root/bin: {res}"
+E       AssertionError: 命令探测必须限定在 device_root/bin: {'tee': 'none', 'providers': {'tdx': [], 'sev_snp': []}}
+E       assert 'none' == 'sev_snp'
+E         
+E         - sev_snp
+E         + none
+
+tests\test_cube_node_scripts.py:700: AssertionError
+___________ test_tailer_tls_fail_closed_rejects_plaintext_endpoint ____________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tailer_tls_fail_closed_re0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026F8B3C3200>
+
+    def test_tailer_tls_fail_closed_rejects_plaintext_endpoint(tmp_path: Path, monkeypatch) -> None:
+        """A7：endpoint 写 http:// 会把 Bearer 令牌明文发出——启动必须拒绝。"""
+        mod = load_script(TAILER_PY)
+        for name in ("crt", "key", "ca"):
+            (tmp_path / f"t.{name}").write_text("PEM", encoding="utf-8")
+        base = {
+            "AUDIT_TAILER_NODE_ID": "n1",
+            "AUDIT_TAILER_CDS_ENDPOINT": "http://cds:8000",
+            "AUDIT_TAILER_TLS_CERT": str(tmp_path / "t.crt"),
+            "AUDIT_TAILER_TLS_KEY": str(tmp_path / "t.key"),
+            "AUDIT_TAILER_TLS_CA": str(tmp_path / "t.ca"),
+            "AUDIT_TAILER_SERVICE_TOKEN": "t0k",
+        }
+        for k, v in base.items():
+            monkeypatch.setenv(k, v)
+>       with pytest.raises(mod.TailerConfigError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'audit_tailer.TailerConfigError'>
+
+tests\test_cube_node_scripts.py:723: Failed
+_____________________ test_tailer_tls_material_must_load ______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tailer_tls_material_must_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026F8AF6C590>
+
+    def test_tailer_tls_material_must_load(tmp_path: Path, monkeypatch) -> None:
+        """A7：空/坏 PEM 得过存在性检查，必须真加载校验（否则跑到推送期才烂）。"""
+        mod = load_script(TAILER_PY)
+        (tmp_path / "t.crt").write_text("not a pem", encoding="utf-8")
+        (tmp_path / "t.key").write_text("not a pem", encoding="utf-8")
+        (tmp_path / "t.ca").write_text("not a pem", encoding="utf-8")
+        for k, v in {
+            "AUDIT_TAILER_NODE_ID": "n1",
+            "AUDIT_TAILER_CDS_ENDPOINT": "https://cds:8000",
+            "AUDIT_TAILER_TLS_CERT": str(tmp_path / "t.crt"),
+            "AUDIT_TAILER_TLS_KEY": str(tmp_path / "t.key"),
+            "AUDIT_TAILER_TLS_CA": str(tmp_path / "t.ca"),
+            "AUDIT_TAILER_SERVICE_TOKEN": "t0k",
+            "AUDIT_TAILER_OFFSET_FILE": str(tmp_path / "offset.json"),
+            "AUDIT_TAILER_QUEUE_FILE": str(tmp_path / "queue.jsonl"),
+            "AUDIT_TAILER_OVERFLOW_MARKER": str(tmp_path / "marker"),
+            "AUDIT_TAILER_AUDIT_DIR": str(tmp_path / "audit"),
+        }.items():
+            monkeypatch.setenv(k, v)
+>       with pytest.raises(mod.TailerConfigError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'audit_tailer.TailerConfigError'>
+
+tests\test_cube_node_scripts.py:746: Failed
+________________ test_tailer_poll_interval_validated_at_build _________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-104/test_tailer_poll_interval_vali0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026F8B3C13A0>
+
+    def test_tailer_poll_interval_validated_at_build(tmp_path: Path, monkeypatch) -> None:
+        """A12：poll 间隔解析/取值错误必须走 fail-closed（TailerConfigError→exit 2），
+        不得 traceback，也不得 0 间隔 busy-loop。"""
+        mod = load_script(TAILER_PY)
+        for name in ("crt", "key", "ca"):
+            (tmp_path / f"t.{name}").write_text("PEM", encoding="utf-8")
+        for k, v in {
+            "AUDIT_TAILER_NODE_ID": "n1",
+            "AUDIT_TAILER_CDS_ENDPOINT": "https://cds:8000",
+            "AUDIT_TAILER_TLS_CERT": str(tmp_path / "t.crt"),
+            "AUDIT_TAILER_TLS_KEY": str(tmp_path / "t.key"),
+            "AUDIT_TAILER_TLS_CA": str(tmp_path / "t.ca"),
+            "AUDIT_TAILER_SERVICE_TOKEN": "t0k",
+            "AUDIT_TAILER_OFFSET_FILE": str(tmp_path / "offset.json"),
+            "AUDIT_TAILER_QUEUE_FILE": str(tmp_path / "queue.jsonl"),
+            "AUDIT_TAILER_OVERFLOW_MARKER": str(tmp_path / "marker"),
+            "AUDIT_TAILER_AUDIT_DIR": str(tmp_path / "audit"),
+            "AUDIT_TAILER_POLL_INTERVAL_SEC": "500ms",
+        }.items():
+            monkeypatch.setenv(k, v)
+>       with pytest.raises(mod.TailerConfigError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'audit_tailer.TailerConfigError'>
+
+tests\test_cube_node_scripts.py:770: Failed
+=========================== short test summary info ===========================
+FAILED tests/test_cube_node_scripts.py::test_preflight_full_pass_matrix - Ass...
+FAILED tests/test_cube_node_scripts.py::test_preflight_broken_manifest_falls_back_to_pins
+FAILED tests/test_cube_node_scripts.py::test_preflight_cube_bridge_prefix_excluded
+FAILED tests/test_cube_node_scripts.py::test_preflight_ds_abort_paths_still_summarize
+FAILED tests/test_cube_node_scripts.py::test_preflight_mock_banner - Assertio...
+FAILED tests/test_cube_node_scripts.py::test_preflight_tls_sidecar_discloses_port_only
+FAILED tests/test_cube_node_scripts.py::test_preflight_meminfo_unreadable_fails_honestly
+FAILED tests/test_cube_node_scripts.py::test_preflight_oneclick_env_export_form_parsed
+FAILED tests/test_cube_node_scripts.py::test_preflight_cds_key_wins_over_upstream_key
+FAILED tests/test_cube_node_scripts.py::test_preflight_probe_dir_trap - Asser...
+FAILED tests/test_cube_node_scripts.py::test_preflight_structural_invariants
+FAILED tests/test_cube_node_scripts.py::test_install_structural_invariants - ...
+FAILED tests/test_cube_node_scripts.py::test_verify_contract_statuses_and_exit
+FAILED tests/test_cube_node_scripts.py::test_verify_http2_probe_requires_settings_frame
+FAILED tests/test_cube_node_scripts.py::test_verify_socket_liveness_not_stale
+FAILED tests/test_cube_node_scripts.py::test_verify_tls_ca_when_configured - ...
+FAILED tests/test_cube_node_scripts.py::test_verify_mock_guard - assert 'MOCK...
+FAILED tests/test_cube_node_scripts.py::test_verify_unknown_args_rejected - a...
+FAILED tests/test_cube_node_scripts.py::test_verify_tee_uses_device_root_and_stderr
+FAILED tests/test_cube_node_scripts.py::test_verify_record_sanitizes_detail
+FAILED tests/test_cube_node_scripts.py::test_bringup_structural_invariants - ...
+FAILED tests/test_cube_node_scripts.py::test_tee_probe_non_dict_doc_preserved
+FAILED tests/test_cube_node_scripts.py::test_tee_probe_atomic_write - Failed:...
+FAILED tests/test_cube_node_scripts.py::test_tee_probe_stream_contract - asse...
+FAILED tests/test_cube_node_scripts.py::test_tee_probe_device_root_isolates_commands
+FAILED tests/test_cube_node_scripts.py::test_tailer_tls_fail_closed_rejects_plaintext_endpoint
+FAILED tests/test_cube_node_scripts.py::test_tailer_tls_material_must_load - ...
+FAILED tests/test_cube_node_scripts.py::test_tailer_poll_interval_validated_at_build
+28 failed, 7 passed in 32.22s

@@ -1,0 +1,453 @@
+==========================================================================================
+[0] app/services/certificate_service.py :: critical :: bug :: located=True fileExists=True
+--- CONTENT ---
+**DER INTEGER 编码错误（critical）**：`_int_to_bytes` 用 `(n.bit_length()+7)//8` 计算长度，会丢掉所有高位零字节。证书 serial 是由 20 字节（或 `CDS-` 前缀导致的首字节为 0x00）派生的大整数，编码后首字节非 0x80，因此这里补的 `0x00` 会被 `_int_to_bytes` 再次剥离，产出首字节 0x00 的非最小/非法 INTEGER；OpenSSL、gmssl、浏览器等标准解析器会直接判定证书损坏（"nested ASN.1 - invalid encoding"）。此外 `_int_to_bytes` 对负数调用 `to_bytes` 会抛 `OverflowError`。建议统一由 `_encode_integer` 负责补符号位（`_int_to_bytes` 已无其他调用点）。
+--- EXISTING ---
+def _encode_integer(n: int | bytes) -> bytes:
+    if isinstance(n, int):
+        b = _int_to_bytes(n)
+        if b and b[0] & 0x80:
+            b = b'\x00' + b
+    else:
+        b = n
+        if b and b[0] & 0x80:
+            b = b'\x00' + b
+    return _encode_tlv(0x02, b)
+--- SUGGESTION ---
+def _encode_integer(n: int | bytes) -> bytes:
+    if isinstance(n, int):
+        if n < 0:
+            raise ValueError("Negative integers are not supported in certificate DER")
+        b = n.to_bytes(max(1, (n.bit_length() + 7) // 8), 'big')
+    else:
+        b = n or b'\x00'
+    if b[0] & 0x80:
+        b = b'\x00' + b
+    return _encode_tlv(0x02, b)
+==========================================================================================
+[1] app/services/certificate_service.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+**KeyUsage 位序错误（安全相关）**：X.509 BIT STRING 的命名位从 MSB 起编号（bit0=digitalSignature=0x80，bit2=keyEncipherment=0x20，bit5=keyCertSign=0x04，bit6=cRLSign=0x02）。`0x05` 实际是 bit5(keyCertSign) + bit7(nonRepudiation)，即给**终端实体证书授予了证书签发权限**，与注释意图完全相反；同时 unused bits 应为 0（`0x05` 末位为 1），写成 `0x01` 也是非法编码。另：两个扩展都缺少 `critical BOOLEAN` 字段，RFC 5280 要求 basicConstraints 在 CA 证书中必须为 critical，多数严格校验方会拒发/拒验。
+--- EXISTING ---
+        else:
+            # digitalSignature + keyEncipherment = bits 0+2 = 0x05
+            ku_value = _encode_tlv(0x03, b'\x01\x05')
+--- SUGGESTION ---
+        else:
+            # digitalSignature(0x80) + keyEncipherment(0x20)
+            ku_value = _encode_tlv(0x03, b'\x05\xa0')
+==========================================================================================
+[2] app/services/certificate_service.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+**私钥保管设计缺陷**：签发 CA 证书所需私钥以明文 hex 存放在模块单例字典中，存在多重问题：1) 无淘汰/TTL，长期驻留进程内存，扩大密钥暴露面（dump/core 文件即可批量提取 CA 私钥）；2) 进程重启或多 worker 部署后密钥丢失，`issue_certificate` 随即抛 “Issuer private key is not available”，同一 CA 在不同 worker 上行为不一致；3) dict 在异步/多线程环境下无锁保护。建议改由 HSM/KMS 或加密的密钥库（带访问控制与轮换）承担签名运算，至少不要以“证书是否签发成功”依赖进程内状态。
+--- EXISTING ---
+        self._local_private_keys: dict[str, str] = {}
+--- SUGGESTION ---
+
+==========================================================================================
+[3] app/services/certificate_service.py :: high :: bug :: located=True fileExists=True
+--- CONTENT ---
+`signature.signature` 是 r||s 裸拼接（各 64 hex），但 X.509 的 `signatureValue` 必须是 DER `ECDSA-Sig-Value ::= SEQUENCE { r INTEGER, s INTEGER }`。当前直接放进 BIT STRING 会使任何标准 X.509 解析器（OpenSSL/Java/浏览器）都无法解析证书，与模块声明的“构建真实 X.509v3 证书”目标不符。另外 unused-bits 为 0 时前导 `0x00` 的写法正确，但需与内层结构一并修正。
+--- EXISTING ---
+            signature = crypto_service.sign(tbs_cert, signing_key, signing_pub)
+            sig_bytes = bytes.fromhex(signature.signature)
+            sig_value = _encode_bitstring(sig_bytes)
+--- SUGGESTION ---
+
+==========================================================================================
+[4] app/services/certificate_service.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+**吊销级联的失败被吞掉**：会话终止失败仅记日志，随后仍写入 `certificate.cascade.complete` 审计（且 `sessions_terminated` 可能是 0 或部分值），DEK 已在库中标为 REVOKED 但活动会话仍能继续用旧密钥工作，形成安全状态不一致却被记录为“完成”。此外 `except Exception` 会连 `asyncio.CancelledError`（Py3.8+ 属 BaseException 则不受影响，但 `ImportError` 等配置错误一并被掩盖）吞掉。建议向上抛出或返回失败计数，并在审计中明确 `partial_failure`，同时按 P0-10 的语义保证吊销的原子性。
+--- EXISTING ---
+        except Exception as e:
+            logger.error(f"[CertRevoke] Session termination failed: {e}")
+--- SUGGESTION ---
+
+==========================================================================================
+[5] app/services/certificate_service.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+**CRL 签名等于没有签名**：每次调用都临时 `generate_keypair()` 生成一次性密钥来签 CRL，验证方拿不到对应公钥，签名不具备任何认证意义，反而给消费方“已签名 CRL”的错觉；签名失败时只 `logger.warning` 后照样返回**无 signature 字段的 CRL**，调用方无法区分“未签”与“签失败”，攻击者可利用降级窗口伪造 CRL。应使用签发者私钥（显式传入并校验）签名，失败时直接抛异常；`import json` 也应移到模块顶部。
+--- EXISTING ---
+        try:
+            keypair = crypto_service.generate_keypair()
+            import json
+            crl_data = json.dumps(crl, sort_keys=True).encode()
+            signature = crypto_service.sign(crl_data, keypair.private_key, keypair.public_key)
+            crl["signature"] = signature.signature
+        except Exception as e:
+            logger.warning(f"CRL signing failed: {e}")
+--- SUGGESTION ---
+
+==========================================================================================
+[6] app/services/certificate_service.py :: critical :: security :: located=True fileExists=True
+--- CONTENT ---
+信任锚判定过弱：任何数据库中 `is_ca=True` 且 `issuer == subject` 的记录都被当作可信根，既没有对照可信根清单/指纹，也没有校验其自签名。结合 `issue_certificate` 允许为任意用户签发 PLATFORM(CA) 证书，攻击者可为自己签发一张“自签根”并让 `verify_chain` 返回 valid:True，从而伪造整条链。建议维护受信根集合（预置指纹/序列号）并对根证书验证自签名。
+--- EXISTING ---
+            # Self-signed CA (issuer == subject) = root of trust
+            if cert.is_ca and cert.issuer == cert.subject:
+                chain_entry["is_root"] = True
+                break
+--- SUGGESTION ---
+
+==========================================================================================
+[7] app/services/certificate_service.py :: critical :: security :: located=True fileExists=True
+--- CONTENT ---
+**链校验未做密码学签名验证**：整个 `verify_chain` 只比较字符串 issuer/subject、检查 status 与有效期，从未用父证书公钥验证子证书 TBS 的 SM2 签名。这意味着只要数据库里存在（或攻击者可通过 `issue_certificate` 创建）一条 `is_ca` 记录并填上匹配的 subject/issuer，就能让任意证书链通过校验，PKI 的信任传递完全失效。应在遍历链时用 `parent.certificate_pem` 解析出的公钥调用 `crypto_service.verify(child_tbs, child_sig, parent_pub)`（注意必须用**签发者**公钥），并对最终根证书验证自签名。
+--- EXISTING ---
+        # Verify issuer consistency: each cert's issuer should match parent's subject
+        for i in range(len(chain) - 1):
+--- SUGGESTION ---
+
+==========================================================================================
+[8] app/services/certificate_service.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+两处问题：1) **用错了验签公钥**——签名由签发者私钥生成（`_build_cert_pem` 中 `signing_key = issuer_private_key or private_key`），这里却用证书自身主体公钥验签，非自签证书必然得到 `signature_valid=False`；若上游按 `valid=False` 直接拒绝则所有 CA 签发证书被误拒，若忽略该字段则形成虚假信任。需要按签发者证书公钥验签（或先区分自签/CA 签）。2) `startswith("04")` 会破坏合法密钥：`crypto_service` 的公钥约定是 128 hex 且**不含** `04` 前缀，若 x 坐标以 `04` 开头就误删两字符，导致验签失败或落到错误密钥上；应按长度精确判断（130 hex 才剥离前缀）。
+--- EXISTING ---
+                if pub_key.startswith("04"):
+                    pub_key = pub_key[2:]
+                valid = crypto_service.verify(tbs_der, sig_hex, pub_key)
+--- SUGGESTION ---
+
+==========================================================================================
+[9] app/services/certificate_service.py :: high :: bug :: located=True fileExists=True
+--- CONTENT ---
+扩展解析块是**永不执行的死代码**：运算符优先级使条件等价于 `(tbs_buf[idx] & 0xa0) == 0xa3`，而 `x & 0xa0` 结果只可能是 0x00/0x20/0x80/0xa0，永远不等于 0xa3，因此上下文扩展从不被解析，`parsed["is_ca"]` 恒为 False（应写成 `tbs_buf[idx] == 0xa3`）。同时 `is_ca` 的判定逻辑也不对：basicConstraints 存在不代表 CA，必须解析 value 中的 `BOOLEAN`（`bc_value` 里 `_encode_integer(1)`），否则非 CA 证书也会被标记为 CA。
+--- EXISTING ---
+        if idx < len(tbs_buf) and tbs_buf[idx] & 0xa0 == 0xa3:
+            _, ext_body, idx = read_tlv(tbs_buf, idx)
+            ext_items = parse_sequence_items(ext_body)
+            for ext_seq in ext_items:
+                if ext_seq[0] == 0x30:
+                    ext_parts = parse_sequence_items(ext_seq[1])
+                    if ext_parts:
+                        oid = self._decode_oid(ext_parts[0][1])
+                        if oid == "2.5.29.19":  # basicConstraints
+                            result["is_ca"] = True  # Simplified: presence = CA
+--- SUGGESTION ---
+        if idx < len(tbs_buf) and tbs_buf[idx] == 0xa3:
+            _, ext_body, idx = read_tlv(tbs_buf, idx)
+            ext_items = parse_sequence_items(ext_body)
+            for ext_seq in ext_items:
+                if ext_seq[0] == 0x30:
+                    ext_parts = parse_sequence_items(ext_seq[1])
+                    if ext_parts:
+                        oid = self._decode_oid(ext_parts[0][1])
+                        if oid == "2.5.29.19":  # basicConstraints
+                            result["is_ca"] = self._parse_basic_constraints(ext_parts)
+==========================================================================================
+[10] app/services/column_encryption.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+确定性加密在缺少 gmssl 时静默回退到 **AES-128-CBC**，而主路径是 **SM4-CBC**：同一份密文在两种环境下互不可解（`encrypt_deterministic`/`decrypt_deterministic` 交叉调用只会得到乱码或 padding 异常），并且 `hash_for_index`（SM3 vs SHA-256）与 `derive_column_key` 也会产生不同结果，直接破坏“加密列等值查询/索引”的正确性。由于 `_HAS_GMSSL` 只在导入期通过 ImportError 决定，部署镜像是否带 gmssl 会静默改变数据格式，且没有任何格式标识位可供回退判断。建议：在密文头部加入算法/版本标识（1 字节 scheme tag），或在生产环境强制要求 gmssl（缺失即启动失败）而非静默回退。
+--- EXISTING ---
+        if not _HAS_GMSSL:
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+            data = plaintext.encode("utf-8")
+            iv = self._derive_iv_siv(self.dek, column_name, data)
+            encryptor = Cipher(algorithms.AES(self.dek), modes.CBC(iv)).encryptor()
+--- SUGGESTION ---
+
+==========================================================================================
+[11] app/services/column_encryption.py :: high :: bug :: located=True fileExists=True
+--- CONTENT ---
+缺少密文结构校验：只判断总长 `>= 16`，未校验去掉 16 字节 IV 后的密文非空且为 16 的整数倍。当 `len(ciphertext) == 16` 时 `ct` 为空，`_pkcs7_unpad(b"")` 会在 `data[-1]` 抛出 `IndexError`（而非预期的 `ValueError`）；非块对齐长度在 gmssl 下的行为也未定义。同时确定性模式（CBC）无任何完整性校验，`Corrupted PKCS7 padding` 与后续 `UnicodeDecodeError` 的错误差异在错误信息可回传给调用方时构成 padding oracle。建议在解密前显式校验 `(len(ct) == 0 or len(ct) % 16 != 0)` 即抛 ValueError，并统一对外抛出单一的“解密失败”异常。
+--- EXISTING ---
+        if len(encrypted.ciphertext) < 16:
+            raise ValueError("Ciphertext too short for SIV mode")
+
+        iv = encrypted.ciphertext[:16]
+        ct = encrypted.ciphertext[16:]
+        padded = crypt.crypt_cbc(iv, ct)
+--- SUGGESTION ---
+        if len(encrypted.ciphertext) < 32 or (len(encrypted.ciphertext) - 16) % 16 != 0:
+            raise ValueError("Invalid SIV ciphertext length")
+
+        iv = encrypted.ciphertext[:16]
+        ct = encrypted.ciphertext[16:]
+        padded = crypt.crypt_cbc(iv, ct)
+==========================================================================================
+[12] app/services/column_encryption.py :: high :: security :: located=True fileExists=True
+--- CONTENT ---
+AEAD 使用 `associated_data=None`，密文未与 `column_name` / `key_id` / `mode` 绑定。在同一个 DEK 下，攻击者（或拥有数据库写权限的一方）可以把某一行的密文原样复制到同库其他行/其他加密列上，GCM 认证标签依然校验通过，从而完成跨字段/跨行的密文替换与重放，而应用层完全无法察觉。建议把上下文字段作为 AAD 传入，例如 `adata = f"{column_name}|{key_id}|sm4-gcm".encode()`，解密时同样重构并校验。
+--- EXISTING ---
+        ct_and_tag = aesgcm.encrypt(nonce, data, None)
+        return EncryptedColumn(
+            ciphertext=nonce + ct_and_tag,
+--- SUGGESTION ---
+
+==========================================================================================
+[13] app/services/column_encryption.py :: high :: bug :: located=True fileExists=True
+--- CONTENT ---
+异常被静默吞掉，是最危险的一处：解密失败时 `result[col]` 会保留原始 hex 密文并被当作“明文”继续返回给下游（写入日志、参与业务判断、甚至回写数据库），既造成静默数据损坏，也可能把密文/PII 暴露给不应看到的调用方。此外存储的 hex 中并不携带 mode/key_id 元数据，调用方一旦 mode 传错就会 100% 失败并落入此 `pass` 分支。同时 `isinstance(result[col], str)` 的字符串若是合法 hex（如纯数字编号）也会被当作密文误解密。建议至少 `logger.warning("column %s decryption failed", col, exc_info=True)` 并让失败显式化（抛错或置 None），由调用方决定降级策略。
+--- EXISTING ---
+                    result[col] = self.decrypt_column(enc)
+                except Exception:
+                    pass  # Skip if not decryptable
+--- SUGGESTION ---
+
+==========================================================================================
+[14] app/services/deterministic_sm4.py :: critical :: bug :: located=True fileExists=True
+--- CONTENT ---
+**静默降级到 AES 会导致历史密文不可解密（数据不可用）**
+
+`_HAS_GMSSL` 只取决于当前进程能否 import gmssl，密文里又没有任何“算法标识”。一旦出现下列情况：生产环境未装/后装 gmssl、单测环境与生产环境依赖不一致、镜像换基线，同一份 DEK 就会在 SM4-CBC 与 AES-CBC 之间切换，并且 `_derive_iv` 也随之在 SM3 与 SHA-256 之间切换。结果是：旧密文解密时得到乱码并在 `.decode("utf-8")` 处抛 `UnicodeDecodeError`，新写入的密文在另一环境下同样无法读取，属于静默的数据不可用（甚至可能被上层误判为“密文被篡改”）。
+
+建议：把后端标识显式写入密文头（如 1 字节 scheme/version tag），初始化时校验并拒绝混合后端；对国密合规场景，gmssl 缺失时应直接 fail-fast（`raise RuntimeError`）而不是降级为非国密算法。
+--- EXISTING ---
+        if not _HAS_GMSSL:
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+            encryptor = Cipher(algorithms.AES(self.dek), modes.CBC(self._iv)).encryptor()
+--- SUGGESTION ---
+    def encrypt(self, plaintext: str) -> bytes:
+        """Deterministic encrypt: same plaintext → same ciphertext."""
+        if not _HAS_GMSSL:
+            raise RuntimeError(
+                "gmssl is required for SM4-CBC column encryption; "
+                "AES fallback is disabled to keep stored ciphertexts compatible"
+            )
+==========================================================================================
+[15] app/services/deterministic_sm4.py :: high :: bug :: located=True fileExists=True
+--- CONTENT ---
+确定性分支的 SM4-CBC 在 gmssl 路径依赖库内部补块，而 AES 回退路径自行 `_pkcs7_pad`，两条路径生成的密文互不兼容（算法、IV 派生、补块实现都不同），但密文本身没有算法标识。这与 `encrypt` 的问题同源：环境差异会直接导致旧密文解不出来。此外 gmssl 的 `crypt_cbc` 解密对非法填充通常静默返回空/垃圾字节（不会像 `_pkcs7_unpad` 那样校验），此处直接 `.decode("utf-8")` 会把损坏的密文变成空串或乱码，而不是明确报错。建议统一补块与校验逻辑，并在解密后显式校验填充与后端标识。
+--- EXISTING ---
+        decryptor = _sm4.CryptSM4()
+        decryptor.set_key(self.dek, _sm4.SM4_DECRYPT)
+        plaintext = decryptor.crypt_cbc(self._iv, ciphertext)
+        return plaintext.decode("utf-8")
+--- SUGGESTION ---
+
+==========================================================================================
+[16] app/services/deterministic_sm4.py :: high :: other :: located=True fileExists=True
+--- CONTENT ---
+类名 `RandomizedSM4` 与模块文档（“Both use SM4-CBC per GM/T 0002 national standard”）声称使用国密 SM4，实际实现是 AES-128-GCM。在需要国密合规/等保密评验收的场景下，这是一处会误导调用方与审计人员的算法不一致：注册表里 `tax_amount`、`loan_amount`、`legal_person` 等高敏列实际落库为 AES 密文。建议改用 SM4-GCM（国密 AEAD）或明确改名并在文档中如实说明，避免以“SM4”名义交付非国密实现。
+--- EXISTING ---
+        aesgcm = AESGCM(self.dek)
+        data = plaintext.encode("utf-8")
+        ct_and_tag = aesgcm.encrypt(nonce, data, None)
+--- SUGGESTION ---
+
+==========================================================================================
+[17] app/services/deterministic_sm4.py :: high :: bug :: located=True fileExists=True
+--- CONTENT ---
+`except Exception` 过宽且错误信息有误导性：`aesgcm.decrypt` 抛 `InvalidTag` 才是真正的认证失败，而 `plaintext.decode("utf-8")` 抛的 `UnicodeDecodeError`（或内存/编程类错误）也会被一律报成“Authentication tag mismatch — ciphertext tampered”，既会向运维误报“数据被篡改”，也让真实根因无法定位。同时重抛未使用 `from err`，丢失异常链。应只捕获 AEAD 的认证异常，其余原样抛出或分别处理。
+--- EXISTING ---
+        try:
+            plaintext = aesgcm.decrypt(nonce, ct_and_tag, None)
+            return plaintext.decode("utf-8")
+        except Exception:
+            raise ValueError("Authentication tag mismatch — ciphertext tampered")
+--- SUGGESTION ---
+        from cryptography.exceptions import InvalidTag
+
+        try:
+            plaintext = aesgcm.decrypt(nonce, ct_and_tag, None)
+        except InvalidTag as err:
+            raise ValueError("Authentication tag mismatch — ciphertext tampered") from err
+        return plaintext.decode("utf-8")
+==========================================================================================
+[18] app/services/certificate_service.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+`_decode_oid` 未按 X.690 处理首字节：当 `first >= 80` 时第二分量取值范围是 [0,39]，正确的分解为 `first-40` 且 arcs = (1, 2)，`0x80` 单独表示 {2,0}。当前实现会把它算成 `{2,0}`，`first=200` 时更会算出 `parts[1]=40` 这种非法分量，导致算法 OID / 扩展 OID 解析结果错误（进而影响 `signature_algorithm` 与 `is_ca` 判断）。建议按 {0,1}/{2}/{3} 三种分支处理首字节。
+--- EXISTING ---
+        first = data[0]
+        parts = [first // 40, first % 40]
+--- SUGGESTION ---
+
+==========================================================================================
+[19] app/services/certificate_service.py :: medium :: security :: located=True fileExists=True
+--- CONTENT ---
+未指定 `parent_cert_id` 时，证书的 `issuer` DN 固定写成 "CN=CDS Root CA..."，但实际签名密钥是证书自身主体私钥（`signing_key = private_key`），而 `subject` 默认为 `CN=<user_id>`。产出的既不是合法自签根（issuer != subject），也不是由 Root CA 签发的证书，`verify_chain`/`verify_certificate` 都无法建立信任；一旦这类记录被误标 `is_ca=True`（PLATFORM 类型）还会被当作合法父证书继续签发下级。建议签发根证书时强制 `issuer == subject`，否则要求显式提供可用的签发者。
+--- EXISTING ---
+        issuer = "CN=CDS Root CA,O=CDS,C=CN"
+        issuer_priv_key = None
+--- SUGGESTION ---
+
+==========================================================================================
+[20] app/services/certificate_service.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+`or` 把 `validity_days=0`（以及负数、非数字等假值）静默替换为 365 天：传入 0 期望“立即过期”的调用会拿到一年有效期，传入 `-1` 会生成 `not_after < not_before` 的证书。建议显式判断 `None` 并对取值范围做校验。
+--- EXISTING ---
+        days = validity_days or self.DEFAULT_VALIDITY_DAYS
+--- SUGGESTION ---
+        days = self.DEFAULT_VALIDITY_DAYS if validity_days is None else int(validity_days)
+        if not 1 <= days <= 3650:
+            raise ValueError(f"validity_days out of range: {days}")
+==========================================================================================
+[21] app/services/certificate_service.py :: medium :: security :: located=True fileExists=True
+--- CONTENT ---
+**序列号派生存在碰撞**：serial 格式固定为 `CDS-` + 16 hex，取前 20 字节意味着前 4 字节 "CDS-" 对所有证书相同，随机熵被挪到低位（若受上一条编码 bug 影响高位还会被截断），不同 UUID 派生出相同 DER serialNumber 的概率显著上升。serialNumber 必须在同一签发者下唯一，重复会使 CRL/OCSP 吊销判定串号。建议直接用 `secrets.randbits`/`uuid4.int` 等足够熵的整数。
+--- EXISTING ---
+        serial_int = int.from_bytes(
+            serial.encode('utf-8')[:20].rjust(20, b'\x00'), 'big'
+        )
+--- SUGGESTION ---
+
+==========================================================================================
+[22] app/services/certificate_service.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+Validity 一律使用 UTCTime（2 位年份）。`CA_VALIDITY_DAYS = 3650`（10 年）在 2040-10 之后签发时 `not_after` 会跨过 2049，`%y` 输出 "49/50" 这类会被解析回错误世纪甚至无法表示的年份，产生有效期被悄悄改写（如 2050 → 1950）的证书。RFC 5280 要求 2050 年及以后的时间使用 GeneralizedTime（同时 `_decode_time` 已支持 15 位 GeneralizedTime，可直接复用）。
+--- EXISTING ---
+        validity = _encode_sequence(
+            _encode_utctime(not_before),
+            _encode_utctime(not_after),
+        )
+--- SUGGESTION ---
+
+==========================================================================================
+[23] app/services/certificate_service.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+返回值语义错误：文档声明返回“受影响的会话数”，但 `_cascade_revoke` 只 `logger.info` 不返回计数，这里恒定 `return 1`（只要证书存在），调用方据此判断下线效果会严重失真；证书不存在时又返回 0，与“0 个会话”不可区分。建议让 `_cascade_revoke` 返回 (deks, sessions) 计数并透传。
+--- EXISTING ---
+        await self._cascade_revoke(db, cert, reason)
+        return 1
+--- SUGGESTION ---
+
+==========================================================================================
+[24] app/services/certificate_service.py :: medium :: bug :: located=False fileExists=True
+--- CONTENT ---
+时区感知比较风险：`not_before/not_after` 是 `DateTime(timezone=True)`，但 `_decode_time()` 返回 naive datetime，且 SQLite 等后端或历史数据回读时也会拿到 naive 值；`datetime.now(timezone.utc) < naive_dt` 直接抛 `TypeError`，使证书校验接口以 500 失败而非返回 (False, reason)。建议在比较前统一归一化（naive 视为 UTC）。
+--- EXISTING ---
+        now = datetime.now(timezone.utc)
+        if now < cert.not_before:
+            return False, "Certificate not yet valid"
+        if now > cert.after if False else cert.not_after:
+            return False, "Certificate expired"
+--- SUGGESTION ---
+
+==========================================================================================
+[25] app/services/column_encryption.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+`data[-1]` 在 `data` 为空时抛出的是 `IndexError` 而不是带语义的 `ValueError`，与调用方（`decrypt_deterministic` 及上层 `decrypt_column`）期望的异常类型不一致，容易在上层被当作未知内部错误或被宽泛 `except Exception` 吞掉。
+--- EXISTING ---
+    @staticmethod
+    def _pkcs7_unpad(data: bytes) -> bytes:
+        pad_len = data[-1]
+--- SUGGESTION ---
+    @staticmethod
+    def _pkcs7_unpad(data: bytes) -> bytes:
+        if not data or len(data) % 16 != 0:
+            raise ValueError("Invalid PKCS7 padding: bad ciphertext length")
+        pad_len = data[-1]
+==========================================================================================
+[26] app/services/column_encryption.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+`except Exception` 过宽且误分类：`AESGCM.decrypt` 之外的失败（`nonce` 长度非法、`ciphertext` 长度不足导致 `ct_and_tag` 为空、明文非 UTF-8 触发 `UnicodeDecodeError`、密钥长度错误）都会被统一改写成 “Authentication tag mismatch — ciphertext tampered”，会把实现缺陷或数据损坏误导为一次安全篡改事件；同时裸 `raise` 丢失原始 traceback。另外此处只校验 `< 12`，应校验 `< 28`（12 字节 nonce + 16 字节 tag）。建议只捕获 `cryptography.exceptions.InvalidTag` 并转换为 ValueError，其余异常 `raise ... from err` 原样上抛。
+--- EXISTING ---
+        try:
+            plaintext = aesgcm.decrypt(nonce, ct_and_tag, None)
+            return plaintext.decode("utf-8")
+        except Exception:
+            raise ValueError("Authentication tag mismatch — ciphertext tampered")
+--- SUGGESTION ---
+
+==========================================================================================
+[27] app/services/column_encryption.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+同上：这里连 `len(ciphertext)`/`len(tag)`/`len(nonce)` 都未校验，任何参数错误（例如调用方把 `encrypt_siv` 的输出传给 `decrypt_gcm`）都会被归类成 “tag mismatch”，掩盖真实根因；`decode("utf-8")` 也在 try 内，会把解码错误误报为篡改。建议收窄为 `except InvalidTag`，其余异常保留原始链路。
+--- EXISTING ---
+        try:
+            plaintext = aesgcm.decrypt(nonce, ciphertext + tag, None)
+            return plaintext.decode("utf-8")
+        except Exception:
+--- SUGGESTION ---
+
+==========================================================================================
+[28] app/services/column_encryption.py :: medium :: security :: located=True fileExists=True
+--- CONTENT ---
+密钥派生使用无分隔符的 `dek || column_name || plaintext` 拼接，缺少域分离（domain separation）：变长 `column_name` 与 `plaintext` 边界歧义会导致 `("ab", "cX")` 与 `("a", "bcX")` 派生出相同 IV / 索引哈希，跨列产生可关联的密文前缀与索引值；同时 `hash(dek || message)` 并非安全的 MAC 构造（SM3/SHA-256 存在长度扩展风险）。`hash_for_index` 与 `derive_column_key` 存在同样问题。建议加入定长分隔或长度前缀，并优先使用 HMAC 结构（如 `hmac.new(dek, msg, 'sha256')`）。
+--- EXISTING ---
+        data = dek + column_name.encode("utf-8") + plaintext
+        if _HAS_GMSSL:
+            h = _sm3.sm3_hash(list(data))
+            return bytes.fromhex(h)[:16]
+        return hashlib.sha256(data).digest()[:16]
+--- SUGGESTION ---
+
+==========================================================================================
+[29] app/services/column_encryption.py :: medium :: security :: located=True fileExists=True
+--- CONTENT ---
+硬编码的已知默认 DEK 进入源码仓库，且生产防护依赖 `is_production()`（`not DEBUG and TESTING != '1' and not PYTEST_CURRENT_TEST`）：一旦运维在部署环境误开 `DEBUG=True`，或某个入口在测试标记环境下处理真实数据，模块导入即静默使用这个公开可推导的密钥加密敏感列，密文中不会有任何标记提示密钥来源（仅 `key_id="cds-default"`，而 `encrypt_row` 只持久化 hex，key_id 也被丢弃）。建议默认 DEK 改为启动时随机生成（不落盘即拒绝启动）或至少对默认密钥加密写入做显式报错，并让生产判定基于独立、显式的 env 标记而非 DEBUG 取反。
+--- EXISTING ---
+_default_dek = hashlib.sha256(b"cds-column-encryption-default-key").digest()[:16]
+--- SUGGESTION ---
+
+==========================================================================================
+[30] app/services/deterministic_sm4.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+`_pkcs7_unpad` 未处理空输入：`data[-1]` 会抛 `IndexError`，而不是语义明确的 `ValueError`。这在回退路径上很容易触发——对空 `bytes`（或长度不足一个块的残缺密文）做 AES-CBC 解密，`update()+finalize()` 正好返回 `b""`，调用方拿到的是 `IndexError` 而非可诊断的填充/密文错误。另外此处硬编码 16，与 `_pkcs7_pad(block_size=...)` 参数不一致；也应校验 `pad_len <= len(data)`，否则对短数据判断不严谨。
+--- EXISTING ---
+def _pkcs7_unpad(data: bytes) -> bytes:
+    """PKCS7 unpadding."""
+    pad_len = data[-1]
+    if pad_len < 1 or pad_len > 16:
+--- SUGGESTION ---
+def _pkcs7_unpad(data: bytes, block_size: int = 16) -> bytes:
+    """PKCS7 unpadding."""
+    if not data or len(data) % block_size != 0:
+        raise ValueError("Invalid PKCS7 data: empty or not block-aligned")
+    pad_len = data[-1]
+    if pad_len < 1 or pad_len > block_size or pad_len > len(data):
+==========================================================================================
+[31] app/services/deterministic_sm4.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+`hash_for_index` 的后端切换同样破坏索引一致性：SM3 前 128 位与 SHA-256 前 128 位对不同明文毫无关联。若索引数据是在装有 gmssl 的环境写入、查询进程未装 gmssl（或反之），`WHERE xxx_hash = ?` 会全部匹配不上，表现为“查询结果为空”这种极难定位的静默错误，而不是抛异常。建议与密文一样固定算法并在后端不匹配时 fail-fast。
+--- EXISTING ---
+        if _HAS_GMSSL:
+            data = self.dek + plaintext.encode("utf-8")
+            h = _sm3.sm3_hash(list(data))
+            return h[:32]  # 16 bytes = 32 hex chars
+        return hashlib.sha256(self.dek + plaintext.encode("utf-8")).hexdigest()[:32]
+--- SUGGESTION ---
+
+==========================================================================================
+[32] app/services/deterministic_sm4.py :: medium :: security :: located=True fileExists=True
+--- CONTENT ---
+哈希原语只绑定 DEK 与明文，缺少表/列域分隔（domain separation）。同一明文值在不同列、不同表上会得到完全相同的 `xxx_hash`，持有索引列即可判定“A 表的 ent_id_hash 与 B 表的 phone_hash 指向同一明文”，实现跨列/跨表关联推断，削弱了列级加密的隔离目标；同时也使哈希列可被当作明文指纹字典攻击的靶子。建议把 `table.column`（以及密钥版本）纳入原像，例如 `HMAC-SM3(dek, f"{table}.{column}|{plaintext}")`，并考虑用带密钥的 MAC 而非裸拼接哈希。
+--- EXISTING ---
+            data = self.dek + plaintext.encode("utf-8")
+            h = _sm3.sm3_hash(list(data))
+--- SUGGESTION ---
+
+==========================================================================================
+[33] app/services/deterministic_sm4.py :: medium :: bug :: located=True fileExists=True
+--- CONTENT ---
+长度下界校验不正确：密文格式为 nonce(12) + ciphertext(>=0) + tag(16)，最小合法长度是 28 字节。`len(data) < 12` 会放行 12~27 字节的截断密文，这些非法输入最终也被统一报成“ciphertext tampered”，无法区分“数据被截断”和“标签被篡改”。
+--- EXISTING ---
+        if len(data) < 12:
+            raise ValueError("Ciphertext too short")
+--- SUGGESTION ---
+        if len(data) < 12 + 16:
+            raise ValueError("Ciphertext too short")
+==========================================================================================
+[34] app/services/deterministic_sm4.py :: medium :: security :: located=True fileExists=True
+--- CONTENT ---
+`register` 对 `level` 与配套列没有任何校验：`level` 可为任意字符串（拼错成 `"Det"`、`"det "` 等不会报错），`"det"`/`"rand"` 缺少 `enc_column` 也不会报错。由于该注册表是查询改写器决定“哪些列需要加密”的唯一依据，这类静默失效会让本应加密的列以明文写库（fail-open），且重复注册同一 `table.column` 会直接覆盖旧配置而无任何告警。建议限定 `level` 取值（`Literal["plain", "det", "rand"]`）并在注册时断言必填列与重复键。
+--- EXISTING ---
+        key = f"{table}.{column}"
+        self._columns[key] = EncryptionColumnMeta(
+--- SUGGESTION ---
+        if level not in ("plain", "det", "rand"):
+            raise ValueError(f"Invalid encryption level: {level!r}")
+        if level in ("det", "rand") and not enc_column:
+            raise ValueError(f"{table}.{column}: level={level} requires enc_column")
+        key = f"{table}.{column}"
+        if key in self._columns:
+            logger.warning("Overwriting encryption config for %s", key)
+        self._columns[key] = EncryptionColumnMeta(
+==========================================================================================
+[35] app/services/column_encryption.py :: low :: documentation :: located=True fileExists=True
+--- CONTENT ---
+标签与实际算法不符，存在合规误导风险：`RANDOMIZED` 的枚举值是 `"sm4-gcm"`、模块与 `encrypt_gcm` 文档字符串宣称 “SM4-GCM / Both use SM4 per GM/T 0002”，但实际实现是 AES-128-GCM；`DETERMINISTIC = "sm4-siv"` 实际是 keyed-hash IV + CBC（无 S2V、无完整性保护）。这些标识会被持久化到元数据并被审计/密评引用。建议在枚举值、文档与错误码中明确写出实际算法（如 `aes-128-gcm` / `sm4-cbc-keyed-iv`），避免把 AES 结果声称为国密合规算法。
+--- EXISTING ---
+    RANDOMIZED = "sm4-gcm"     # Randomized: maximum security
+--- SUGGESTION ---
+
+==========================================================================================
+[36] app/services/column_encryption.py :: low :: maintainability :: located=True fileExists=True
+--- CONTENT ---
+`struct` 在本文件中从未被引用，属于无用导入（死代码），建议删除。
+--- EXISTING ---
+import struct
+--- SUGGESTION ---
+

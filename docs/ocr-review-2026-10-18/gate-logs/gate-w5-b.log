@@ -1,0 +1,131 @@
+.F..F..F....F                                                            [100%]
+================================== FAILURES ===================================
+_______________________ test_preflight_full_pass_matrix _______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_full_pass_matri0')
+
+    @needs_bash
+    def test_preflight_full_pass_matrix(tmp_path: Path) -> None:
+        """全好 fixture：除 volume_sock（Windows 造不出 AF_UNIX socket 文件，-S 必假）
+        外 9 项全 PASS，且汇总行存在、失败数为 1。"""
+        root = make_mock(tmp_path / "mock")
+        acc = TcpAccepter()
+        try:
+            r = run_bash([PREFLIGHT], env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=acc.port),
+                         timeout=180)
+        finally:
+            acc.stop()
+        out = r.stdout + r.stderr
+        lines = [l for l in out.splitlines() if re.match(r"^(PASS|FAIL): ", l)]
+>       assert len(lines) == 10, f"必须十项检查全有结果行（不得中途静默退出）:\n{out}"
+E       AssertionError: 必须十项检查全有结果行（不得中途静默退出）:
+E         == MOCK 演练模式：CDS_CUBE_MOCK_ROOT=/c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_full_pass_matri0/mock（测试/演练专用，禁用于生产！）==
+E         == CDS Cube 节点 preflight（SS-10 CB-02）钉住: v0.7.3-rc2 b0c4cc33fbfc ==
+E         PASS: kvm (KVM 设备可读写)
+E         PASS: data_fs (XFS + reflink（xfs_info reflink=1 + FICLONE 实测）)
+E         PASS: ebpf (bpftool 可用 + 内核 bpf 支持 + bpffs 已挂载)
+E         FAIL: cubelet_bin: 版本不匹配：钉住 v0.7.3-rc2 (b0c4cc33fbfc)，实际: cubelet v0.7.3-rc2 (b0c4cc33fbfccbacc1a72241918ef280e9a32772) built at 2026-10-12T06:28:39Z（commit 非钉住发布构建）
+E         FAIL: volume_sock: CDS 卷插件 socket 不存在: /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_full_pass_matri0/mock/run/cds.sock（CB-03 二进制未部署或插件未启动）
+E         PASS: tls_sidecar (TCP 可达 127.0.0.1:51671（仅端口可达性，不含证书/协议校验；sidecar 身份确认属 verify.sh 安装后阶段，任何占用该端口的进程都能满足本项）)
+E         PASS: containerd (containerd containerd.io 1.7.20 abc)
+E         PASS: resources (内存 15GB / 数据盘余量 58%)
+E         tee=none
+E         PASS: tee_probe (无 TEE 硬件——如实上报 tee=none（SS-13 TEE 可选，裸 MicroVM 合法；已记录 /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_full_pass_matri0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）)
+E         PASS: sandbox_cidr (沙箱网段 192.168.0.0/18（来源: 上游默认（.one-click.env 不可读或未设该键））与本机 1 个 IPv4 前缀无重叠)
+E         PASS: sandbox_cidr (沙箱网段归属正常（来源: 上游默认（.one-click.env 不可读或未设该键），探针 192.168.0.2 → dev cube-dev table main）)
+E         == 结果: 2 项失败（MOCK 演练模式，结果不构成节点验收） ==
+E         
+E       assert 11 == 10
+E        +  where 11 = len(['PASS: kvm (KVM 设备可读写)', 'PASS: data_fs (XFS + reflink（xfs_info reflink=1 + FICLONE 实测）)', 'PASS: ebpf (bpftool 可用 + ...）', 'PASS: tls_sidecar (TCP 可达 127.0.0.1:51671（仅端口可达性，不含证书/协议校验；sidecar 身份确认属 verify.sh 安装后阶段，任何占用该端口的进程都能满足本项）)', ...])
+
+tests\test_cube_node_scripts.py:273: AssertionError
+________________ test_preflight_ds_abort_paths_still_summarize ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_ds_abort_paths_0')
+
+    @needs_bash
+    def test_preflight_ds_abort_paths_still_summarize(tmp_path: Path) -> None:
+        """P4/P15：DATA_DIR 不可 df（无 disk_pct fixture + 目录不存在）时，
+        必须 FAIL: resources（含可读原因）并继续出汇总；resources 不得排在最后
+        被前面的 abort 吞掉（头部清单顺序：resources 在 tee/cidr 之前）。"""
+        root = make_mock(tmp_path / "mock", disk_pct=None)
+        env = base_env(root, CDS_CUBE_DATA_DIR=bashpath(tmp_path / "no-such-mount"))
+        r = run_bash([PREFLIGHT], env=env, timeout=180)
+        out = r.stdout + r.stderr
+        assert "FAIL: resources" in out, out
+        assert "结果:" in out, f"df 失败不得掐死汇总:\n{out}"
+        idx = {n: out.find(f": {n} ") for n in ("data_fs", "resources", "sandbox_cidr")}
+>       assert 0 <= idx["data_fs"] < idx["resources"] < idx["sandbox_cidr"], \
+            f"检查顺序必须与头部清单一致 (…data_fs < resources < sandbox_cidr):\n{out}"
+E       AssertionError: 检查顺序必须与头部清单一致 (…data_fs < resources < sandbox_cidr):
+E         == MOCK 演练模式：CDS_CUBE_MOCK_ROOT=/c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_ds_abort_paths_0/mock（测试/演练专用，禁用于生产！）==
+E         == CDS Cube 节点 preflight（SS-10 CB-02）钉住: v0.7.3-rc2 b0c4cc33fbfc ==
+E         PASS: kvm (KVM 设备可读写)
+E         FAIL: data_fs: 数据盘目录 /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_ds_abort_paths_0/no-such-mount 不存在（先 mkfs.xfs 并挂载，见 §9.1）
+E         PASS: ebpf (bpftool 可用 + 内核 bpf 支持 + bpffs 已挂载)
+E         FAIL: cubelet_bin: 版本不匹配：钉住 v0.7.3-rc2 (b0c4cc33fbfc)，实际: cubelet v0.7.3-rc2 (b0c4cc33fbfccbacc1a72241918ef280e9a32772) built at 2026-10-12T06:28:39Z（commit 非钉住发布构建）
+E         FAIL: volume_sock: CDS 卷插件 socket 不存在: /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_ds_abort_paths_0/mock/run/cds.sock（CB-03 二进制未部署或插件未启动）
+E         FAIL: tls_sidecar: TLS sidecar 127.0.0.1:60380 不可达（红线：sidecar 不可达 = 节点 down，不做明文回退）
+E         PASS: containerd (containerd containerd.io 1.7.20 abc)
+E         FAIL: resources: 无法读取数据盘使用率: /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_ds_abort_paths_0/no-such-mount
+E         tee=none
+E         PASS: tee_probe (无 TEE 硬件——如实上报 tee=none（SS-13 TEE 可选，裸 MicroVM 合法；已记录 /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_ds_abort_paths_0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）)
+E         PASS: sandbox_cidr (沙箱网段 192.168.0.0/18（来源: 上游默认（.one-click.env 不可读或未设该键））与本机 1 个 IPv4 前缀无重叠)
+E         PASS: sandbox_cidr (沙箱网段归属正常（来源: 上游默认（.one-click.env 不可读或未设该键），探针 192.168.0.2 → dev cube-dev table main）)
+E         == 结果: 5 项失败（MOCK 演练模式，结果不构成节点验收） ==
+E         Traceback (most recent call last):
+E           File "<stdin>", line 2, in <module>
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\socket.py", line 865, in create_connection
+E             raise exceptions[0]
+E           File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\socket.py", line 850, in create_connection
+E             sock.connect(sa)
+E         ConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。
+E         
+E       assert 0 <= -1
+
+tests\test_cube_node_scripts.py:321: AssertionError
+_______________ test_preflight_tls_sidecar_discloses_port_only ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-118/test_preflight_tls_sidecar_dis0')
+
+    @needs_bash
+    def test_preflight_tls_sidecar_discloses_port_only(tmp_path: Path) -> None:
+        """P11：这一项只能证明端口有监听者；pass 文案必须如实限定范围。"""
+        root = make_mock(tmp_path / "mock")
+        r = run_bash([PREFLIGHT], env=base_env(root), timeout=180)
+        m = re.search(r"PASS: tls_sidecar .*", r.stdout)
+>       assert m and ("端口" in m.group(0) or "verify.sh" in m.group(0)), \
+            f"tls_sidecar PASS 必须声明其仅为端口可达性: {m}"
+E       AssertionError: tls_sidecar PASS 必须声明其仅为端口可达性: None
+E       assert (None)
+
+tests\test_cube_node_scripts.py:351: AssertionError
+____________________ test_preflight_structural_invariants _____________________
+
+    def test_preflight_structural_invariants() -> None:
+        src = read_src(PREFLIGHT)
+        # P7：CIDR 八位组必须限 0-255，ip2int 越界必须拒
+        assert "25[0-5]" in src and "2[0-4]" in src, "CIDR 正则必须约束八位组 0-255"
+        ip2int = body_of(src, "ip2int")
+        assert "255" in ip2int and "return 1" in ip2int, "ip2int 必须拒绝越界八位组"
+        # P3：host_prefixes 的采集赋值不得被 pipefail 带倒（失败走 fail-closed）
+        assert re.search(r"if\s+!\s+hosts=.*host_prefixes", src), \
+            "host_prefixes 命令替换必须在 if 上下文（非零时 fail-closed，不得带崩预检）"
+        # P5：dd 写探针必须在错误处理里，python ebpf 探针失败要如实降级到 proc 判定
+        dfs = body_of(src, "check_data_fs")
+        assert re.search(r"if\s+!\s+dd\b", dfs), "dd 探针必须纳入 if !/|| true 处理"
+        eb = body_of(src, "check_ebpf")
+>       assert re.search(r"probe=.*\|\| true", eb) or "if ! probe=" in eb, \
+            "bpf syscall 探针失败必须显式回退，不得带倒整个 preflight"
+E       AssertionError: bpf syscall 探针失败必须显式回退，不得带倒整个 preflight
+E       assert (None or 'if ! probe=' in 'check_ebpf() {\n  if ! command -v bpftool >/dev/null 2>&1; then\n    fail ebpf "bpftool 不存在（安装 bpftrace/libbpf 工具集或内核...ail ebpf "/sys/fs/bpf 未挂载（bpffs 缺失，Cubelet 内嵌网络运行时需要）"; return; }\n  pass ebpf "bpftool 可用 + 内核 bpf 支持 + bpffs 已挂载"\n}')
+E        +  where None = <function search at 0x00000220DE5BD120>('probe=.*\\|\\| true', 'check_ebpf() {\n  if ! command -v bpftool >/dev/null 2>&1; then\n    fail ebpf "bpftool 不存在（安装 bpftrace/libbpf 工具集或内核...ail ebpf "/sys/fs/bpf 未挂载（bpffs 缺失，Cubelet 内嵌网络运行时需要）"; return; }\n  pass ebpf "bpftool 可用 + 内核 bpf 支持 + bpffs 已挂载"\n}')
+E        +    where <function search at 0x00000220DE5BD120> = re.search
+
+tests\test_cube_node_scripts.py:419: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_cube_node_scripts.py::test_preflight_full_pass_matrix - Ass...
+FAILED tests/test_cube_node_scripts.py::test_preflight_ds_abort_paths_still_summarize
+FAILED tests/test_cube_node_scripts.py::test_preflight_tls_sidecar_discloses_port_only
+FAILED tests/test_cube_node_scripts.py::test_preflight_structural_invariants
+4 failed, 9 passed, 22 deselected in 54.03s

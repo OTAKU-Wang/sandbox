@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIX = "cache:"
 
 
+def _escape_glob(pattern: str) -> str:
+    """Neutralise Redis glob metacharacters in a caller-supplied key fragment."""
+    return pattern.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?").replace("[", "\\[")
+
+
 async def _get_redis():
     from app.core.redis import get_redis
     return await get_redis()
@@ -30,10 +35,16 @@ async def cache_get(key: str) -> Any | None:
 
 
 async def cache_set(key: str, value: Any, ttl_seconds: int = 60) -> None:
-    """Set value in cache with TTL."""
+    """Set value in cache with TTL.
+
+    Serialisation runs outside the best-effort guard: an unserialisable value is
+    a caller bug and must surface, while a Redis outage stays a silent miss.
+    Swallowing both together shows up as a cache that never hits (A27).
+    """
+    payload = json.dumps(value, ensure_ascii=False)
     try:
         redis = await _get_redis()
-        await redis.setex(f"{_KEY_PREFIX}{key}", ttl_seconds, json.dumps(value, ensure_ascii=False))
+        await redis.setex(f"{_KEY_PREFIX}{key}", ttl_seconds, payload)
     except Exception as e:
         logger.error(f"cache_set failed for {key}: {e}")
 
@@ -51,7 +62,7 @@ async def cache_clear(pattern: str = "") -> int:
     """Clear cache entries matching prefix. Empty pattern clears all cache keys."""
     try:
         redis = await _get_redis()
-        search = f"{_KEY_PREFIX}{pattern}*" if pattern else f"{_KEY_PREFIX}*"
+        search = f"{_KEY_PREFIX}{_escape_glob(pattern)}*" if pattern else f"{_KEY_PREFIX}*"
         count = 0
         cursor = 0
         while True:

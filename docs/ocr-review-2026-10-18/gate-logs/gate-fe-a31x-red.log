@@ -1,0 +1,3434 @@
+(node:24884) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19340) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1648) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1648) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:21692) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:6644) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:7632) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27288) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/services/__tests__/connectorApi.test.ts (11 tests | 11 failed) 22ms
+     × 请求显式带上 limit（= 后端默认 100），transformResponse 挂着游标捕获器 10ms
+     × 续拉：游标进 params.cursor 1ms
+     × 还有下一页：暴露 nextCursor，possiblyTruncated=true 2ms
+     × 后端给了 total 且无游标 → 不谎称截断 1ms
+     × 首页 total=null 而游标头丢失（代理剥头）→ 仍如实报截断 1ms
+     × 续拉页（cursor 已给）total 恒 null：游标为空即到底，不报截断 1ms
+     × items 形状不对 → 抛 ListShapeError，绝不 || [] 静默空表 2ms
+     × 原始小写键对象：并入 __next_cursor 0ms
+     × AxiosHeaders 形态（带 get 方法）也能取到 1ms
+     × 没有游标头 → __next_cursor=null（上层据此判断不可续拉） 1ms
+     × 非 JSON 体原样返回（错误响应不许在 transformResponse 里炸） 0ms
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/Contracts/__tests__/ContractDetail.test.tsx > 激活/终止失败 — 透传后端 W2 原因（A316） > 终止失败：提示里带出后端 message
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["contract-dp-budget","ct-1"]
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/Contracts/__tests__/ContractCreate.test.tsx > 创建合约 — 提交载荷（A314/A315） > A314：数据用途与用途白名单随创建请求上行（Gap A4 目的门对 UI 建的合约可达）
+An update to InternalFormItem inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Field inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 还有下一页时给出「加载更多」，点击后用游标真的续拉，新行出现在表里
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 还有下一页时给出「加载更多」，点击后用游标真的续拉，新行出现在表里
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+ ❯ src/pages/Contracts/__tests__/ContractDetail.test.tsx (4 tests | 3 failed) 2071ms
+     × 激活失败：提示里带出后端 message，而不是干巴巴的「激活失败」 707ms
+     × 终止失败：提示里带出后端 message 189ms
+     × entries 满 20 条（后端 ledger[:20] 上限）→ 渲染截断披露，且不把 20 行当全量 1026ms
+ ❯ src/pages/Contracts/__tests__/ContractCreate.test.tsx (3 tests | 2 failed) 4673ms
+     × 守卫：默认勾选原样上行（allowed_operations 是显式非空串），purpose 留空不带上 2879ms
+     × A314：数据用途与用途白名单随创建请求上行（Gap A4 目的门对 UI 建的合约可达） 887ms
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 后端声明还有更多但游标头丢失 → 显式披露「可能不完整」，而不是静默当全量
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 后端声明还有更多但游标头丢失 → 显式披露「可能不完整」，而不是静默当全量
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 全量取回（total 为数字且无游标）→ 不渲染任何截断控件/警示
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 全量取回（total 为数字且无游标）→ 不渲染任何截断控件/警示
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 心跳面板 — 不许把后端的常量 0 当实测延迟（A318） > 心跳弹窗渲染，但不出现「延迟」测量行（后端 latency_ms 恒 0，非实测）
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+stderr | src/pages/Connectors/__tests__/index.test.tsx > 心跳面板 — 不许把后端的常量 0 当实测延迟（A318） > 心跳弹窗渲染，但不出现「延迟」测量行（后端 latency_ms 恒 0，非实测）
+Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.
+
+ ❯ src/pages/Connectors/__tests__/index.test.tsx (4 tests | 4 failed) 5076ms
+     × 还有下一页时给出「加载更多」，点击后用游标真的续拉，新行出现在表里 1765ms
+     × 后端声明还有更多但游标头丢失 → 显式披露「可能不完整」，而不是静默当全量 1113ms
+     × 全量取回（total 为数字且无游标）→ 不渲染任何截断控件/警示 1102ms
+     × 心跳弹窗渲染，但不出现「延迟」测量行（后端 latency_ms 恒 0，非实测） 1093ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 20 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > 请求显式带上 limit（= 后端默认 100），transformResponse 挂着游标捕获器
+AssertionError: expected undefined to be 100 // Object.is equality
+
+- Expected:
+100
+
++ Received:
+undefined
+
+ ❯ src/services/__tests__/connectorApi.test.ts:39:34
+     37|     get.mockResolvedValue({ items: [], total: 0, __next_cursor: null }…
+     38|     await connectorApi.listConnectors();
+     39|     expect(CONNECTOR_PAGE_LIMIT).toBe(100);
+       |                                  ^
+     40|     expect(get).toHaveBeenCalledWith(
+     41|       '/connectors/',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > 续拉：游标进 params.cursor
+TypeError: Cannot read properties of undefined (reading 'params')
+ ❯ src/services/__tests__/connectorApi.test.ts:53:19
+     51|     await connectorApi.listConnectors('cursor-2');
+     52|     const config = get.mock.calls[0][1] as { params: Record<string, un…
+     53|     expect(config.params.cursor).toBe('cursor-2');
+       |                   ^
+     54|   });
+     55|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > 还有下一页：暴露 nextCursor，possiblyTruncated=true
+AssertionError: Target cannot be null or undefined.
+ ❯ src/services/__tests__/connectorApi.test.ts:59:23
+     57|     get.mockResolvedValue({ items: [row('1')], total: null, __next_cur…
+     58|     const res = await connectorApi.listConnectors();
+     59|     expect(res.items).toHaveLength(1);
+       |                       ^
+     60|     expect(res.nextCursor).toBe('cursor-2');
+     61|     expect(res.possiblyTruncated).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > 后端给了 total 且无游标 → 不谎称截断
+AssertionError: Target cannot be null or undefined.
+ ❯ src/services/__tests__/connectorApi.test.ts:67:23
+     65|     get.mockResolvedValue({ items: [row('1'), row('2')], total: 2, __n…
+     66|     const res = await connectorApi.listConnectors();
+     67|     expect(res.items).toHaveLength(2);
+       |                       ^
+     68|     expect(res.nextCursor).toBeNull();
+     69|     expect(res.possiblyTruncated).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > 首页 total=null 而游标头丢失（代理剥头）→ 仍如实报截断
+AssertionError: expected undefined to be null
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/services/__tests__/connectorApi.test.ts:75:28
+     73|     get.mockResolvedValue({ items: [row('1')], total: null, __next_cur…
+     74|     const res = await connectorApi.listConnectors();
+     75|     expect(res.nextCursor).toBeNull();
+       |                            ^
+     76|     expect(res.possiblyTruncated).toBe(true);
+     77|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > 续拉页（cursor 已给）total 恒 null：游标为空即到底，不报截断
+AssertionError: expected undefined to be null
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/services/__tests__/connectorApi.test.ts:82:28
+     80|     get.mockResolvedValue({ items: [row('2')], total: null, __next_cur…
+     81|     const res = await connectorApi.listConnectors('cursor-2');
+     82|     expect(res.nextCursor).toBeNull();
+       |                            ^
+     83|     expect(res.possiblyTruncated).toBe(false);
+     84|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > connectorApi.listConnectors — 游标与截断显式化（A313） > items 形状不对 → 抛 ListShapeError，绝不 || [] 静默空表
+AssertionError: expected error to be instance of ListShapeError
+
+- Expected:
+[Function ListShapeError]
+
++ Received:
+TypeError {
+  "message": "(intermediate value)(intermediate value)(intermediate value).map is not a function",
+}
+
+ ❯ src/services/__tests__/connectorApi.test.ts:88:47
+     86|   it('items 形状不对 → 抛 ListShapeError，绝不 || [] 静默空表', async () => {
+     87|     get.mockResolvedValue({ items: 'oops', total: 1 });
+     88|     await expect(connectorApi.listConnectors()).rejects.toThrow(ListSh…
+       |                                               ^
+     89|   });
+     90| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > captureNextCursor — X-Next-Cursor 响应头并进 body（A313） > 原始小写键对象：并入 __next_cursor
+TypeError: captureNextCursor is not a function
+ ❯ src/services/__tests__/connectorApi.test.ts:94:17
+     92| describe('captureNextCursor — X-Next-Cursor 响应头并进 body（A313）', () => {
+     93|   it('原始小写键对象：并入 __next_cursor', () => {
+     94|     const out = captureNextCursor(JSON.stringify({ items: [], total: n…
+       |                 ^
+     95|     expect(out).toMatchObject({ items: [], __next_cursor: 'abc' });
+     96|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > captureNextCursor — X-Next-Cursor 响应头并进 body（A313） > AxiosHeaders 形态（带 get 方法）也能取到
+TypeError: captureNextCursor is not a function
+ ❯ src/services/__tests__/connectorApi.test.ts:100:17
+     98|   it('AxiosHeaders 形态（带 get 方法）也能取到', () => {
+     99|     const headers = { get: (k: string) => (k.toLowerCase() === 'x-next…
+    100|     const out = captureNextCursor({ items: [] }, headers) as Record<st…
+       |                 ^
+    101|     expect(out.__next_cursor).toBe('zz');
+    102|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > captureNextCursor — X-Next-Cursor 响应头并进 body（A313） > 没有游标头 → __next_cursor=null（上层据此判断不可续拉）
+TypeError: captureNextCursor is not a function
+ ❯ src/services/__tests__/connectorApi.test.ts:105:17
+    103|
+    104|   it('没有游标头 → __next_cursor=null（上层据此判断不可续拉）', () => {
+    105|     const out = captureNextCursor({ items: [], total: 2 }, {}) as Reco…
+       |                 ^
+    106|     expect(out.__next_cursor).toBeNull();
+    107|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/20]⎯
+
+ FAIL  src/services/__tests__/connectorApi.test.ts > captureNextCursor — X-Next-Cursor 响应头并进 body（A313） > 非 JSON 体原样返回（错误响应不许在 transformResponse 里炸）
+TypeError: captureNextCursor is not a function
+ ❯ src/services/__tests__/connectorApi.test.ts:110:12
+    108|
+    109|   it('非 JSON 体原样返回（错误响应不许在 transformResponse 里炸）', () => {
+    110|     expect(captureNextCursor('<html>oops</html>', {})).toBe('<html>oop…
+       |            ^
+    111|   });
+    112| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/20]⎯
+
+ FAIL  src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 还有下一页时给出「加载更多」，点击后用游标真的续拉，新行出现在表里
+TestingLibraryElementError: Unable to find an element with the text: CONN-1. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-row-key[39m=[32m"c-1"[39m
+                          [36m>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<a />[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [36m<button[39m
+                                  [33maria-describedby[39m=[32m"test-id"[39m
+                                  [33maria-label[39m=[32m"Copy"[39m
+                                  [33mclass[39m=[32m"ant-typography-copy ant-typography-copy-icon-only"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m>[39m
+                                  [36m<span[39m
+                                    [33maria-label[39m=[32m"copy"[39m
+                                    [33mclass[39m=[32m"anticon anticon-copy"[39m
+                                    [33mrole[39m=[32m"img"[39m
+                                  [36m>[39m
+                                    [36m<svg[39m
+                                      [33maria-hidden[39m=[32m"true"[39m
+                                      [33mdata-icon[39m=[32m"copy"[39m
+                                      [33mfill[39m=[32m"currentColor"[39m
+                                      [33mfocusable[39m=[32m"false"[39m
+                                      [33mheight[39m=[32m"1em"[39m
+                                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                      [33mwidth[39m=[32m"1em"[39m
+                                    [36m>[39m
+                                      [36m<path[39m
+                                        [33md[39m=[32m"M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"[39m
+                                      [36m/>[39m
+                                    [36m</svg>[39m
+                                  [36m</span>[39m
+                                [36m</button>[39m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0m活跃[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-default css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0mUNKNOWN[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m-[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m无记录[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"pause-circle"[39m
+                                        [33mclass[39m=[32m"anticon anticon-pause-circle"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"pause-circle"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-88-532h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8zm224 0h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m暂停[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"key"[39m
+                                        [33mclass[39m=[32m"anticon anticon-key"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"key"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M608 112c-167.9 0-304 136.1-304 304 0 70.3 23.9 135 63.9 186.5l-41.1 41.1-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-44.9 44.9-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-65.3 65.3a8.03 8.03 0 000 11.3l42.3 42.3c3.1 3.1 8.2 3.1 11.3 0l253.6-253.6A304.06 304.06 0 00608 720c167.9 0 304-136.1 304-304S775.9 112 608 112zm161.2 465.2C726.2 620.3 668.9 644 608 644c-60.9 0-118.2-23.7-161.2-66.8-43.1-43-66.8-100.3-66.8-161.2 0-60.9 23.7-118.2 66.8-161.2 43-43.1 100.3-66.8 161.2-66.8 60.9 0 118.2 23.7 161.2 66.8 43.1 43 66.8 100.3 66.8 161.2 0 60.9-23.7 118.2-66.8 161.2z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m轮换 Key[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"heart"[39m
+                                        [33mclass[39m=[32m"anticon anticon-heart"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"heart"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9zM512 814.8S156 586.7 156 385.5C156 283.6 240.3 201 344.3 201c73.1 0 136.5 40.8 167.7 100.4C543.2 241.8 606.6 201 679.7 201c104 0 188.3 82.6 188.3 184.5 0 201.2-356 429.3-356 429.3z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m心跳[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</td>[39m
+                          [36m</tr>[39m
+                        [36m</tbody>[39m
+                      [36m</table>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-row-key[39m=[32m"c-1"[39m
+                          [36m>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<a />[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [36m<button[39m
+                                  [33maria-describedby[39m=[32m"test-id"[39m
+                                  [33maria-label[39m=[32m"Copy"[39m
+                                  [33mclass[39m=[32m"ant-typography-copy ant-typography-copy-icon-only"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m>[39m
+                                  [36m<span[39m
+                                    [33maria-label[39m=[32m"copy"[39m
+                                    [33mclass[39m=[32m"anticon anticon-copy"[39m
+                                    [33mrole[39m=[32m"img"[39m
+                                  [36m>[39m
+                                    [36m<svg[39m
+                                      [33maria-hidden[39m=[32m"true"[39m
+                                      [33mdata-icon[39m=[32m"copy"[39m
+                                      [33mfill[39m=[32m"currentColor"[39m
+                                      [33mfocusable[39m=[32m"false"[39m
+                                      [33mheight[39m=[32m"1em"[39m
+                                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                      [33mwidth[39m=[32m"1em"[39m
+                                    [36m>[39m
+                                      [36m<path[39m
+                                        [33md[39m=[32m"M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"[39m
+                                      [36m/>[39m
+                                    [36m</svg>[39m
+                                  [36m</span>[39m
+                                [36m</button>[39m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0m活跃[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-default css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0mUNKNOWN[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m-[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m无记录[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"pause-circle"[39m
+                                        [33mclass[39m=[32m"anticon anticon-pause-circle"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"pause-circle"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-88-532h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8zm224 0h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m暂停[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"key"[39m
+                                        [33mclass[39m=[32m"anticon anticon-key"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"key"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M608 112c-167.9 0-304 136.1-304 304 0 70.3 23.9 135 63.9 186.5l-41.1 41.1-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-44.9 44.9-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-65.3 65.3a8.03 8.03 0 000 11.3l42.3 42.3c3.1 3.1 8.2 3.1 11.3 0l253.6-253.6A304.06 304.06 0 00608 720c167.9 0 304-136.1 304-304S775.9 112 608 112zm161.2 465.2C726.2 620.3 668.9 644 608 644c-60.9 0-118.2-23.7-161.2-66.8-43.1-43-66.8-100.3-66.8-161.2 0-60.9 23.7-118.2 66.8-161.2 43-43.1 100.3-66.8 161.2-66.8 60.9 0 118.2 23.7 161.2 66.8 43.1 43 66.8 100.3 66.8 161.2 0 60.9-23.7 118.2-66.8 161.2z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m轮换 Key[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"heart"[39m
+                                        [33mclass[39m=[32m"anticon anticon-heart"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"heart"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9zM512 814.8S156 586.7 156 385.5C156 283.6 240.3 201 344.3 201c73.1 0 136.5 40.8 167.7 100.4C543.2 241.8 606.6 201 679.7 201c104 0 188.3 82.6 188.3 184.5 0 201.2-356 429.3-356 429.3z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m心跳[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</td>[39m
+                          [36m</tr>[39m
+                        [36m</tbody>[39m
+                      [36m</table>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Connectors/__tests__/index.test.tsx:73:18
+     71|     });
+     72|     renderWithProviders(<ConnectorsPage />);
+     73|     await screen.findByText('CONN-1');
+       |                  ^
+     74|
+     75|     const more = await screen.findByTestId('connectors-load-more');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/20]⎯
+
+ FAIL  src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 后端声明还有更多但游标头丢失 → 显式披露「可能不完整」，而不是静默当全量
+TestingLibraryElementError: Unable to find an element with the text: CONN-1. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-row-key[39m=[32m"c-1"[39m
+                          [36m>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<a />[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [36m<button[39m
+                                  [33maria-describedby[39m=[32m"test-id"[39m
+                                  [33maria-label[39m=[32m"Copy"[39m
+                                  [33mclass[39m=[32m"ant-typography-copy ant-typography-copy-icon-only"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m>[39m
+                                  [36m<span[39m
+                                    [33maria-label[39m=[32m"copy"[39m
+                                    [33mclass[39m=[32m"anticon anticon-copy"[39m
+                                    [33mrole[39m=[32m"img"[39m
+                                  [36m>[39m
+                                    [36m<svg[39m
+                                      [33maria-hidden[39m=[32m"true"[39m
+                                      [33mdata-icon[39m=[32m"copy"[39m
+                                      [33mfill[39m=[32m"currentColor"[39m
+                                      [33mfocusable[39m=[32m"false"[39m
+                                      [33mheight[39m=[32m"1em"[39m
+                                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                      [33mwidth[39m=[32m"1em"[39m
+                                    [36m>[39m
+                                      [36m<path[39m
+                                        [33md[39m=[32m"M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"[39m
+                                      [36m/>[39m
+                                    [36m</svg>[39m
+                                  [36m</span>[39m
+                                [36m</button>[39m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0m活跃[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-default css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0mUNKNOWN[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m-[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m无记录[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"pause-circle"[39m
+                                        [33mclass[39m=[32m"anticon anticon-pause-circle"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"pause-circle"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-88-532h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8zm224 0h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m暂停[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"key"[39m
+                                        [33mclass[39m=[32m"anticon anticon-key"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"key"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M608 112c-167.9 0-304 136.1-304 304 0 70.3 23.9 135 63.9 186.5l-41.1 41.1-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-44.9 44.9-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-65.3 65.3a8.03 8.03 0 000 11.3l42.3 42.3c3.1 3.1 8.2 3.1 11.3 0l253.6-253.6A304.06 304.06 0 00608 720c167.9 0 304-136.1 304-304S775.9 112 608 112zm161.2 465.2C726.2 620.3 668.9 644 608 644c-60.9 0-118.2-23.7-161.2-66.8-43.1-43-66.8-100.3-66.8-161.2 0-60.9 23.7-118.2 66.8-161.2 43-43.1 100.3-66.8 161.2-66.8 60.9 0 118.2 23.7 161.2 66.8 43.1 43 66.8 100.3 66.8 161.2 0 60.9-23.7 118.2-66.8 161.2z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m轮换 Key[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"heart"[39m
+                                        [33mclass[39m=[32m"anticon anticon-heart"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"heart"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9zM512 814.8S156 586.7 156 385.5C156 283.6 240.3 201 344.3 201c73.1 0 136.5 40.8 167.7 100.4C543.2 241.8 606.6 201 679.7 201c104 0 188.3 82.6 188.3 184.5 0 201.2-356 429.3-356 429.3z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m心跳[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</td>[39m
+                          [36m</tr>[39m
+                        [36m</tbody>[39m
+                      [36m</table>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-row-key[39m=[32m"c-1"[39m
+                          [36m>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<a />[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [36m<button[39m
+                                  [33maria-describedby[39m=[32m"test-id"[39m
+                                  [33maria-label[39m=[32m"Copy"[39m
+                                  [33mclass[39m=[32m"ant-typography-copy ant-typography-copy-icon-only"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m>[39m
+                                  [36m<span[39m
+                                    [33maria-label[39m=[32m"copy"[39m
+                                    [33mclass[39m=[32m"anticon anticon-copy"[39m
+                                    [33mrole[39m=[32m"img"[39m
+                                  [36m>[39m
+                                    [36m<svg[39m
+                                      [33maria-hidden[39m=[32m"true"[39m
+                                      [33mdata-icon[39m=[32m"copy"[39m
+                                      [33mfill[39m=[32m"currentColor"[39m
+                                      [33mfocusable[39m=[32m"false"[39m
+                                      [33mheight[39m=[32m"1em"[39m
+                                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                      [33mwidth[39m=[32m"1em"[39m
+                                    [36m>[39m
+                                      [36m<path[39m
+                                        [33md[39m=[32m"M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"[39m
+                                      [36m/>[39m
+                                    [36m</svg>[39m
+                                  [36m</span>[39m
+                                [36m</button>[39m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0m活跃[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-default css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0mUNKNOWN[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m-[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m无记录[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"pause-circle"[39m
+                                        [33mclass[39m=[32m"anticon anticon-pause-circle"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"pause-circle"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-88-532h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8zm224 0h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m暂停[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"key"[39m
+                                        [33mclass[39m=[32m"anticon anticon-key"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"key"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M608 112c-167.9 0-304 136.1-304 304 0 70.3 23.9 135 63.9 186.5l-41.1 41.1-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-44.9 44.9-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-65.3 65.3a8.03 8.03 0 000 11.3l42.3 42.3c3.1 3.1 8.2 3.1 11.3 0l253.6-253.6A304.06 304.06 0 00608 720c167.9 0 304-136.1 304-304S775.9 112 608 112zm161.2 465.2C726.2 620.3 668.9 644 608 644c-60.9 0-118.2-23.7-161.2-66.8-43.1-43-66.8-100.3-66.8-161.2 0-60.9 23.7-118.2 66.8-161.2 43-43.1 100.3-66.8 161.2-66.8 60.9 0 118.2 23.7 161.2 66.8 43.1 43 66.8 100.3 66.8 161.2 0 60.9-23.7 118.2-66.8 161.2z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m轮换 Key[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"heart"[39m
+                                        [33mclass[39m=[32m"anticon anticon-heart"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"heart"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9zM512 814.8S156 586.7 156 385.5C156 283.6 240.3 201 344.3 201c73.1 0 136.5 40.8 167.7 100.4C543.2 241.8 606.6 201 679.7 201c104 0 188.3 82.6 188.3 184.5 0 201.2-356 429.3-356 429.3z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m心跳[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</td>[39m
+                          [36m</tr>[39m
+                        [36m</tbody>[39m
+                      [36m</table>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Connectors/__tests__/index.test.tsx:87:18
+     85|     mockConnectorPages({ first: { items: [row('1')], total: null, __ne…
+     86|     renderWithProviders(<ConnectorsPage />);
+     87|     await screen.findByText('CONN-1');
+       |                  ^
+     88|     expect(await screen.findByTestId('connectors-truncated-warning')).…
+     89|     expect(screen.queryByTestId('connectors-load-more')).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/20]⎯
+
+ FAIL  src/pages/Connectors/__tests__/index.test.tsx > 连接器列表 — 截断必须可达或披露（A313） > 全量取回（total 为数字且无游标）→ 不渲染任何截断控件/警示
+TestingLibraryElementError: Unable to find an element with the text: CONN-2. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-ro...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-ro...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Connectors/__tests__/index.test.tsx:95:18
+     93|     mockConnectorPages({ first: { items: [row('1'), row('2')], total: …
+     94|     renderWithProviders(<ConnectorsPage />);
+     95|     await screen.findByText('CONN-2');
+       |                  ^
+     96|     expect(screen.queryByTestId('connectors-truncated-warning')).toBeN…
+     97|     expect(screen.queryByTestId('connectors-load-more')).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/20]⎯
+
+ FAIL  src/pages/Connectors/__tests__/index.test.tsx > 心跳面板 — 不许把后端的常量 0 当实测延迟（A318） > 心跳弹窗渲染，但不出现「延迟」测量行（后端 latency_ms 恒 0，非实测）
+TestingLibraryElementError: Unable to find an element with the text: CONN-1. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-row-key[39m=[32m"c-1"[39m
+                          [36m>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<a />[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [36m<button[39m
+                                  [33maria-describedby[39m=[32m"test-id"[39m
+                                  [33maria-label[39m=[32m"Copy"[39m
+                                  [33mclass[39m=[32m"ant-typography-copy ant-typography-copy-icon-only"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m>[39m
+                                  [36m<span[39m
+                                    [33maria-label[39m=[32m"copy"[39m
+                                    [33mclass[39m=[32m"anticon anticon-copy"[39m
+                                    [33mrole[39m=[32m"img"[39m
+                                  [36m>[39m
+                                    [36m<svg[39m
+                                      [33maria-hidden[39m=[32m"true"[39m
+                                      [33mdata-icon[39m=[32m"copy"[39m
+                                      [33mfill[39m=[32m"currentColor"[39m
+                                      [33mfocusable[39m=[32m"false"[39m
+                                      [33mheight[39m=[32m"1em"[39m
+                                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                      [33mwidth[39m=[32m"1em"[39m
+                                    [36m>[39m
+                                      [36m<path[39m
+                                        [33md[39m=[32m"M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"[39m
+                                      [36m/>[39m
+                                    [36m</svg>[39m
+                                  [36m</span>[39m
+                                [36m</button>[39m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0m活跃[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-default css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0mUNKNOWN[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m-[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m无记录[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"pause-circle"[39m
+                                        [33mclass[39m=[32m"anticon anticon-pause-circle"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"pause-circle"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-88-532h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8zm224 0h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m暂停[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"key"[39m
+                                        [33mclass[39m=[32m"anticon anticon-key"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"key"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M608 112c-167.9 0-304 136.1-304 304 0 70.3 23.9 135 63.9 186.5l-41.1 41.1-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-44.9 44.9-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-65.3 65.3a8.03 8.03 0 000 11.3l42.3 42.3c3.1 3.1 8.2 3.1 11.3 0l253.6-253.6A304.06 304.06 0 00608 720c167.9 0 304-136.1 304-304S775.9 112 608 112zm161.2 465.2C726.2 620.3 668.9 644 608 644c-60.9 0-118.2-23.7-161.2-66.8-43.1-43-66.8-100.3-66.8-161.2 0-60.9 23.7-118.2 66.8-161.2 43-43.1 100.3-66.8 161.2-66.8 60.9 0 118.2 23.7 161.2 66.8 43.1 43 66.8 100.3 66.8 161.2 0 60.9-23.7 118.2-66.8 161.2z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m轮换 Key[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"heart"[39m
+                                        [33mclass[39m=[32m"anticon anticon-heart"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"heart"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9zM512 814.8S156 586.7 156 385.5C156 283.6 240.3 201 344.3 201c73.1 0 136.5 40.8 167.7 100.4C543.2 241.8 606.6 201 679.7 201c104 0 188.3 82.6 188.3 184.5 0 201.2-356 429.3-356 429.3z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m心跳[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</td>[39m
+                          [36m</tr>[39m
+                        [36m</tbody>[39m
+                      [36m</table>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m连接器管理[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-head"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-title"[39m
+            [36m>[39m
+              [0m连接器列表[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-extra"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-btn-icon"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"plus"[39m
+                    [33mclass[39m=[32m"anticon anticon-plus"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"plus"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M192 474h672q8 0 8 8v60q0 8-8 8H160q-8 0-8-8v-60q0-8 8-8z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m注册连接器[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-table-wrapper css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-spin-nested-loading css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-spin-container"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-table css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-table-container"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-table-content"[39m
+                    [36m>[39m
+                      [36m<table[39m
+                        [33mstyle[39m=[32m"table-layout: fixed;"[39m
+                      [36m>[39m
+                        [36m<colgroup>[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col />[39m
+                          [36m<col[39m
+                            [33mstyle[39m=[32m"width: 280px;"[39m
+                          [36m/>[39m
+                        [36m</colgroup>[39m
+                        [36m<thead[39m
+                          [33mclass[39m=[32m"ant-table-thead"[39m
+                        [36m>[39m
+                          [36m<tr>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m名称[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                              [33mscope[39m=[32m"col"[39m
+                              [33mtitle[39m=[32m"端点地址"[39m
+                            [36m>[39m
+                              [0m端点地址[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m状态[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m信任等级[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m创建时间[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m最后心跳[0m
+                            [36m</th>[39m
+                            [36m<th[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                              [33mscope[39m=[32m"col"[39m
+                            [36m>[39m
+                              [0m操作[0m
+                            [36m</th>[39m
+                          [36m</tr>[39m
+                        [36m</thead>[39m
+                        [36m<tbody[39m
+                          [33mclass[39m=[32m"ant-table-tbody"[39m
+                        [36m>[39m
+                          [36m<tr[39m
+                            [33mclass[39m=[32m"ant-table-row ant-table-row-level-0"[39m
+                            [33mdata-row-key[39m=[32m"c-1"[39m
+                          [36m>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<a />[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell ant-table-cell-ellipsis"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [36m<button[39m
+                                  [33maria-describedby[39m=[32m"test-id"[39m
+                                  [33maria-label[39m=[32m"Copy"[39m
+                                  [33mclass[39m=[32m"ant-typography-copy ant-typography-copy-icon-only"[39m
+                                  [33mtype[39m=[32m"button"[39m
+                                [36m>[39m
+                                  [36m<span[39m
+                                    [33maria-label[39m=[32m"copy"[39m
+                                    [33mclass[39m=[32m"anticon anticon-copy"[39m
+                                    [33mrole[39m=[32m"img"[39m
+                                  [36m>[39m
+                                    [36m<svg[39m
+                                      [33maria-hidden[39m=[32m"true"[39m
+                                      [33mdata-icon[39m=[32m"copy"[39m
+                                      [33mfill[39m=[32m"currentColor"[39m
+                                      [33mfocusable[39m=[32m"false"[39m
+                                      [33mheight[39m=[32m"1em"[39m
+                                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                      [33mwidth[39m=[32m"1em"[39m
+                                    [36m>[39m
+                                      [36m<path[39m
+                                        [33md[39m=[32m"M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"[39m
+                                      [36m/>[39m
+                                    [36m</svg>[39m
+                                  [36m</span>[39m
+                                [36m</button>[39m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0m活跃[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-tag ant-tag-default css-dev-only-do-not-override-mncuj7"[39m
+                              [36m>[39m
+                                [0mUNKNOWN[0m
+                              [36m</span>[39m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m-[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [0m无记录[0m
+                            [36m</td>[39m
+                            [36m<td[39m
+                              [33mclass[39m=[32m"ant-table-cell"[39m
+                            [36m>[39m
+                              [36m<div[39m
+                                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+                              [36m>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"pause-circle"[39m
+                                        [33mclass[39m=[32m"anticon anticon-pause-circle"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"pause-circle"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-88-532h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8zm224 0h-48c-4.4 0-8 3.6-8 8v304c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m暂停[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"key"[39m
+                                        [33mclass[39m=[32m"anticon anticon-key"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"key"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M608 112c-167.9 0-304 136.1-304 304 0 70.3 23.9 135 63.9 186.5l-41.1 41.1-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-44.9 44.9-62.3-62.3a8.15 8.15 0 00-11.4 0l-39.8 39.8a8.15 8.15 0 000 11.4l62.3 62.3-65.3 65.3a8.03 8.03 0 000 11.3l42.3 42.3c3.1 3.1 8.2 3.1 11.3 0l253.6-253.6A304.06 304.06 0 00608 720c167.9 0 304-136.1 304-304S775.9 112 608 112zm161.2 465.2C726.2 620.3 668.9 644 608 644c-60.9 0-118.2-23.7-161.2-66.8-43.1-43-66.8-100.3-66.8-161.2 0-60.9 23.7-118.2 66.8-161.2 43-43.1 100.3-66.8 161.2-66.8 60.9 0 118.2 23.7 161.2 66.8 43.1 43 66.8 100.3 66.8 161.2 0 60.9-23.7 118.2-66.8 161.2z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m轮换 Key[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                                [36m<div[39m
+                                  [33mclass[39m=[32m"ant-space-item"[39m
+                                [36m>[39m
+                                  [36m<button[39m
+                                    [33maria-describedby[39m=[32m"test-id"[39m
+                                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+                                    [33mtype[39m=[32m"button"[39m
+                                  [36m>[39m
+                                    [36m<span[39m
+                                      [33mclass[39m=[32m"ant-btn-icon"[39m
+                                    [36m>[39m
+                                      [36m<span[39m
+                                        [33maria-label[39m=[32m"heart"[39m
+                                        [33mclass[39m=[32m"anticon anticon-heart"[39m
+                                        [33mrole[39m=[32m"img"[39m
+                                      [36m>[39m
+                                        [36m<svg[39m
+                                          [33maria-hidden[39m=[32m"true"[39m
+                                          [33mdata-icon[39m=[32m"heart"[39m
+                                          [33mfill[39m=[32m"currentColor"[39m
+                                          [33mfocusable[39m=[32m"false"[39m
+                                          [33mheight[39m=[32m"1em"[39m
+                                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                                          [33mwidth[39m=[32m"1em"[39m
+                                        [36m>[39m
+                                          [36m<path[39m
+                                            [33md[39m=[32m"M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9zM512 814.8S156 586.7 156 385.5C156 283.6 240.3 201 344.3 201c73.1 0 136.5 40.8 167.7 100.4C543.2 241.8 606.6 201 679.7 201c104 0 188.3 82.6 188.3 184.5 0 201.2-356 429.3-356 429.3z"[39m
+                                          [36m/>[39m
+                                        [36m</svg>[39m
+                                      [36m</span>[39m
+                                    [36m</span>[39m
+                                    [36m<span>[39m
+                                      [0m心跳[0m
+                                    [36m</span>[39m
+                                  [36m</button>[39m
+                                [36m</div>[39m
+                              [36m</div>[39m
+                            [36m</td>[39m
+                          [36m</tr>[39m
+                        [36m</tbody>[39m
+                      [36m</table>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Connectors/__tests__/index.test.tsx:105:18
+    103|     mockConnectorPages({ first: { items: [row('1')], total: 1, __next_…
+    104|     renderWithProviders(<ConnectorsPage />);
+    105|     await screen.findByText('CONN-1');
+       |                  ^
+    106|
+    107|     const heartbeatButton = await screen.findByRole('button', { name: …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/20]⎯
+
+ FAIL  src/pages/Contracts/__tests__/ContractCreate.test.tsx > 创建合约 — 提交载荷（A314/A315） > 守卫：默认勾选原样上行（allowed_operations 是显式非空串），purpose 留空不带上
+AssertionError: expected "vi.fn()" to be called with arguments: [ '/contracts', Anything ]
+
+Number of calls: 0
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div>[39m
+        [36m<h4[39m
+          [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [0m创建合约[0m
+        [36m</h4>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<label[39m
+                      [33mclass[39m=[32m"ant-form-item-required"[39m
+                      [33mfor[39m=[32m"title"[39m
+                      [33mtitle[39m=[32m"合约标题"[39m
+                    [36m>[39m
+                      [0m合约标题[0m
+                    [36m</label>[39m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<input[39m
+                          [33maria-required[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-mncuj7 ant-input-outlined ant-input-status-success"[39m
+                          [33mid[39m=[32m"title"[39m
+                          [33mplaceholder[39m=[32m"合约标题"[39m
+                          [33mtype[39m=[32m"text"[39m
+                          [33mvalue[39m=[32m"零售合作合约"[39m
+                        [36m/>[39m
+                      [36m</div>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<label[39m
+                      [33mclass[39m=[32m"ant-form-item-required"[39m
+                      [33mfor[39m=[32m"contract_type"[39m
+                      [33mtitle[39m=[32m"合约类型"[39m
+                    [36m>[39m
+                      [0m合约类型[0m
+                    [36m</label>[39m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                          [33maria-required[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"ant-select ant-select-outlined ant-select-in-form-item css-dev-only-do-not-override-mncuj7 ant-select-single ant-select-show-arrow"[39m
+                        [36m>[39m
+                          [36m<div[39m
+                            [33mclass[39m=[32m"ant-select-selector"[39m
+                          [36m>[39m
+                            [36m<span[39m
+                              [33mclass[39m=[32m"ant-select-selection-wrap"[39m
+                            [36m>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-select-selection-search"[39m
+                              [36m>[39m
+                                [36m<input[39m
+                                  [33maria-autocomplete[39m=[32m"list"[39m
+                                  [33maria-controls[39m=[32m"contract_type_list"[39m
+                                  [33maria-expanded[39m=[32m"false"[39m
+                                  [33maria-haspopup[39m=[32m"listbox"[39m
+                                  [33maria-owns[39m=[32m"contract_type_list"[39m
+                                  [33maria-required[39m=[32m"true"[39m
+                                  [33mautocomplete[39m=[32m"off"[39m
+                                  [33mclass[39m=[32m"ant-select-selection-search-input"[39m
+                                  [33mid[39m=[32m"contract_type"[39m
+                                  [33mreadonly[39m=[32m""[39m
+                                  [33mrole[39m=[32m"combobox"[39m
+                                  [33mstyle[39m=[32m"opacity: 0;"[39m
+                                  [33mtype[39m=[32m"search"[39m
+                                  [33munselectable[39m=[32m"on"[39m
+                                  [33mvalue[39m=[32m""[39m
+                                [36m/>[39m
+                              [36m</span>[39m
+                              [36m<span[39m
+                                [33mclass[39m=[32m"ant-select-selection-item"[39m
+                                [33mtitle[39m=[32m"数据查询"[39m
+                              [36m>[39m
+                                [0m数据查询[0m
+                              [36m</span>[39m
+                            [36m</span>[39m
+                          [36m</div>[39m
+                          [36m<span[39m
+                            [33maria-hidden[39m=[32m"true"[39m
+                            [33mclass[39m=[32m"ant-select-arrow"[39m
+                            [33mstyle[39m=[32m"user-select: none; -webkit-user-select: none;"[39m
+                            [33munselectable[39m=[32m"on"[...
+ ❯ src/pages/Contracts/__tests__/ContractCreate.test.tsx:135:38
+    133|     fireEvent.click(findButton('创建合约'));
+    134|
+    135|     await waitFor(() => expect(post).toHaveBeenCalledWith('/contracts'…
+       |                                      ^
+    136|     const body = submittedBody();
+    137|     expect(body.allowed_operations).toBe('read,analyze');
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/20]⎯
+
+ FAIL  src/pages/Contracts/__tests__/ContractCreate.test.tsx > 创建合约 — 提交载荷（A314/A315） > A314：数据用途与用途白名单随创建请求上行（Gap A4 目的门对 UI 建的合约可达）
+TestingLibraryElementError: Unable to find an element with the placeholder text of: 如：零售客单价建模
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<h4[39m
+        [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [0m创建合约[0m
+      [36m</h4>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card-body"[39m
+        [36m>[39m
+          [36m<form[39m
+            [33mclass[39m=[32m"ant-form ant-form-vertical css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"ant-form-item-required"[39m
+                    [33mfor[39m=[32m"title"[39m
+                    [33mtitle[39m=[32m"合约标题"[39m
+                  [36m>[39m
+                    [0m合约标题[0m
+                  [36m</label>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                    [36m>[39m
+                      [36m<input[39m
+                        [33maria-required[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-mncuj7 ant-input-outlined ant-input-status-success"[39m
+                        [33mid[39m=[32m"title"[39m
+                        [33mplaceholder[39m=[32m"合约标题"[39m
+                        [33mtype[39m=[32m"text"[39m
+                        [33mvalue[39m=[32m"零售合作合约"[39m
+                      [36m/>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-vertical"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-col ant-form-item-label css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"ant-form-item-required"[39m
+                    [33mfor[39m=[32m"contract_type"[39m
+                    [33mtitle[39m=[32m"合约类型"[39m
+                  [36m>[39m
+                    [0m合约类型[0m
+                  [36m</label>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33maria-required[39m=[32m"true"[39m
+                        [33mclass[39m=[32m"ant-select ant-select-outlined ant-select-in-form-item css-dev-only-do-not-override-mncuj7 ant-select-single ant-select-show-arrow"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-select-selector"[39m
+                        [36m>[39m
+                          [36m<span[39m
+                            [33mclass[39m=[32m"ant-select-selection-wrap"[39m
+                          [36m>[39m
+                            [36m<span[39m
+                              [33mclass[39m=[32m"ant-select-selection-search"[39m
+                            [36m>[39m
+                              [36m<input[39m
+                                [33maria-autocomplete[39m=[32m"list"[39m
+                                [33maria-controls[39m=[32m"contract_type_list"[39m
+                                [33maria-expanded[39m=[32m"false"[39m
+                                [33maria-haspopup[39m=[32m"listbox"[39m
+                                [33maria-owns[39m=[32m"contract_type_list"[39m
+                                [33maria-required[39m=[32m"true"[39m
+                                [33mautocomplete[39m=[32m"off"[39m
+                                [33mclass[39m=[32m"ant-select-selection-search-input"[39m
+                                [33mid[39m=[32m"contract_type"[39m
+                                [33mreadonly[39m=[32m""[39m
+                                [33mrole[39m=[32m"combobox"[39m
+                                [33mstyle[39m=[32m"opacity: 0;"[39m
+                                [33mtype[39m=[32m"search"[39m
+                                [33munselectable[39m=[32m"on"[39m
+                                [33mvalue[39m=[32m""[39m
+                              [36m/>[39m
+                            [36m</span>[39m
+                            [36m<span[39m
+                              [33mclass[39m=[32m"ant-select-selection-item"[39m
+                              [33mtitle[39m=[32m"数据查询"[39m
+                            [36m>[39m
+                              [0m数据查询[0m
+                            [36m</span>[39m
+                          [36m</span>[39m
+                        [36m</div>[39m
+                        [36m<span[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"ant-select-arrow"[39m
+                          [33mstyle[39m=[32m"user-select: none; -webkit-user-select: none;"[39m
+                          [33munselectable[39m=[32m"on"[39m
+                        [36m>[39m
+                          [36m<span[39m
+                            [33maria-label[39m=[32m"down"[39m
+                            [33mclass[39m=[32m"anticon anticon-down ant-select-suffix"[39m
+                            [33mrole[39m=[32...
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/pages/Contracts/__tests__/ContractCreate.test.tsx:147:29
+    145|     await fillBasics();
+    146|
+    147|     fireEvent.change(screen.getByPlaceholderText('如：零售客单价建模'), { targe…
+       |                             ^
+    148|     // rc-select 的 tags 输入没有 placeholder 属性，只能从占位 div 回定位内部 input；
+    149|     // tokenSeparators 使带逗号的 change 事件直接成词（比模拟高亮+Enter 稳）。
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/20]⎯
+
+ FAIL  src/pages/Contracts/__tests__/ContractDetail.test.tsx > 激活/终止失败 — 透传后端 W2 原因（A316） > 激活失败：提示里带出后端 message，而不是干巴巴的「激活失败」
+AssertionError: expected '激活失败' to contain 'Cannot activate contract in draft sta…'
+
+Expected: "Cannot activate contract in draft status"
+Received: "激活失败"
+
+ ❯ src/pages/Contracts/__tests__/ContractDetail.test.tsx:140:19
+    138|     await waitFor(() => expect(message.error).toHaveBeenCalled());
+    139|     const shown = vi.mocked(message.error).mock.calls[0][0] as string;
+    140|     expect(shown).toContain('Cannot activate contract in draft status'…
+       |                   ^
+    141|   });
+    142|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/20]⎯
+
+ FAIL  src/pages/Contracts/__tests__/ContractDetail.test.tsx > 激活/终止失败 — 透传后端 W2 原因（A316） > 终止失败：提示里带出后端 message
+AssertionError: expected '终止失败' to contain 'Contract already terminated by provid…'
+
+Expected: "Contract already terminated by provider"
+Received: "终止失败"
+
+ ❯ src/pages/Contracts/__tests__/ContractDetail.test.tsx:156:19
+    154|     await waitFor(() => expect(message.error).toHaveBeenCalled());
+    155|     const shown = vi.mocked(message.error).mock.calls[0][0] as string;
+    156|     expect(shown).toContain(reason);
+       |                   ^
+    157|   });
+    158| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/20]⎯
+
+ FAIL  src/pages/Contracts/__tests__/ContractDetail.test.tsx > DP 消费流水 — 满页截断必须披露（A317） > entries 满 20 条（后端 ledger[:20] 上限）→ 渲染截断披露，且不把 20 行当全量
+TestingLibraryElementError: Unable to find an element by: [data-testid="dp-budget-truncated"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<h4[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+              [33mstyle[39m=[32m"margin: 0px;"[39m
+            [36m>[39m
+              [0m零售合作合约[0m
+            [36m</h4>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-lime css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mactive[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-dangerous ant-btn-color-dangerous ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m终止合约[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m返回列表[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-descriptions ant-descriptions-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-descriptions-view"[39m
+        [36m>[39m
+          [36m<table>[39m
+            [36m<tbody>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"ant-descriptions-row"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m合约编号[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mCT-0001[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m合约类型[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m数据查询[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+              [36m</tr>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"ant-descriptions-row"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m状态[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-tag ant-tag-lime css-dev-only-do-not-override-mncuj7"[39m
+                    [36m>[39m
+                      [0mactive[0m
+                    [36m</span>[39m
+                  [36m</span>[39m
+                [36m</td>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m数据产品数[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m1[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+              [36m</tr>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"ant-descriptions-row"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m允许沙箱级别[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0ml2c[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m允许沙箱模式[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<h4[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+              [33mstyle[39m=[32m"margin: 0px;"[39m
+            [36m>[39m
+              [0m零售合作合约[0m
+            [36m</h4>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-lime css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mactive[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-dangerous ant-btn-color-dangerous ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m终止合约[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-mncuj7 ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m返回列表[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-descriptions ant-descriptions-bordered css-dev-only-do-not-override-mncuj7"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-descriptions-view"[39m
+        [36m>[39m
+          [36m<table>[39m
+            [36m<tbody>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"ant-descriptions-row"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m合约编号[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mCT-0001[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m合约类型[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m数据查询[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+              [36m</tr>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"ant-descriptions-row"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m状态[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-tag ant-tag-lime css-dev-only-do-not-override-mncuj7"[39m
+                    [36m>[39m
+                      [0mactive[0m
+                    [36m</span>[39m
+                  [36m</span>[39m
+                [36m</td>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m数据产品数[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m1[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+              [36m</tr>[39m
+              [36m<tr[39m
+                [33mclass[39m=[32m"ant-descriptions-row"[39m
+              [36m>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m允许沙箱级别[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-content"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0ml2c[0m
+                  [36m</span>[39m
+                [36m</td>[39m
+                [36m<th[39m
+                  [33mclass[39m=[32m"ant-descriptions-item-label"[39m
+                  [33mcolspan[39m=[32m"1"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0m允许沙箱模式[0m
+                  [36m</span>[39m
+                [36m</th>[39m
+                [36m<td[39m
+                  [33mclass[...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Contracts/__tests__/ContractDetail.test.tsx:172:34
+    170|
+    171|     renderDetail();
+    172|     const caption = await screen.findByTestId('dp-budget-truncated');
+       |                                  ^
+    173|     expect(caption).toBeInTheDocument();
+    174|     await waitFor(() => expect(document.querySelectorAll('.ant-table-t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/20]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  20 failed | 2 passed (22)
+   Start at  22:58:21
+   Duration  19.96s (transform 599ms, setup 1.31s, import 33.69s, tests 11.84s, environment 8.46s)
+

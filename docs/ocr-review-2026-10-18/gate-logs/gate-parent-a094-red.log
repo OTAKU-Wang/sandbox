@@ -1,0 +1,39 @@
+F..F..                                                                   [100%]
+================================== FAILURES ===================================
+________ test_a094_unreadable_settings_must_not_open_the_fallback_gate ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C16F8955E0>
+
+    def test_a094_unreadable_settings_must_not_open_the_fallback_gate(monkeypatch):
+        def boom():
+            raise RuntimeError("settings unavailable")
+    
+        monkeypatch.setattr(hsm, "get_settings", boom, raising=False)
+        monkeypatch.setattr("app.core.config.get_settings", boom)
+>       with pytest.raises(RuntimeError, match="HSM_SOFTWARE_FALLBACK_ALLOWED"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'RuntimeError'>
+
+tests\test_ocr_a094_a153.py:32: Failed
+______________ test_a153_failure_count_decays_outside_the_window ______________
+
+    def test_a153_failure_count_decays_outside_the_window():
+        breaker = TaskCircuitBreaker(CircuitConfig(failure_threshold=5, failure_window_seconds=60))
+        breaker.record_failure("sess-a")
+        stats = breaker.get_stats("sess-a")
+        stats.last_failure_time = time.time() - 3600
+        stats.failure_count = 4
+        state = breaker.record_failure("sess-a")
+        after = breaker.get_stats("sess-a")
+>       assert after.failure_count == 1
+E       AssertionError: assert 5 == 1
+E        +  where 5 = CircuitStats(state=<CircuitState.OPEN: 'open'>, failure_count=5, last_failure_time=1792335745.4546301, last_success_time=0, total_failures=2, total_successes=0, circuit_opened_count=1).failure_count
+
+tests\test_ocr_a094_a153.py:58: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.task_circuit_breaker:task_circuit_breaker.py:117 Circuit opened for session sess-a: 5 failures (threshold: 5)
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a094_a153.py::test_a094_unreadable_settings_must_not_open_the_fallback_gate
+FAILED tests/test_ocr_a094_a153.py::test_a153_failure_count_decays_outside_the_window
+2 failed, 4 passed in 2.90s
+A094_RED_RC=1

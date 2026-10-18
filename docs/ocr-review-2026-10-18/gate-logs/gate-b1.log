@@ -1,0 +1,24 @@
+...........................                                              [100%]
+27 passed in 10.99s
+
+==================== VERIFICATION RECORD (local, this machine) ====================
+Command (authoritative for this fix's scope):
+  .venv-gate/Scripts/python.exe -m pytest tests/test_mpc_service.py tests/test_mpc_persistence.py tests/test_mpc_capabilities.py -q
+
+HUNK 1  GET /keys/{key_id}/shares -> require_roles(ADMIN)
+HUNK 2  GET /keys                -> require_roles(ADMIN, OPERATOR)
+  BEFORE (both hunks reverted to get_current_user, one run):
+    RC=1  -> 2 failed, 16 deselected
+    test_api_list_shares_is_admin_only          FAILED (200 + share_value for non-admin)
+    test_api_key_inventory_denies_non_ops_roles FAILED at :292
+      "data_provider must not list keys: [{\"key_id\":\"159698eb\",...}]"
+HUNK 3  GET /keys/{key_id}        -> require_roles(ADMIN, OPERATOR)
+  BEFORE (only this gate reverted; hunks 1+2 left in place):
+    RC=1  -> 1 failed, 17 deselected
+    test_api_key_inventory_denies_non_ops_roles FAILED at :296
+      "data_provider must not read key detail: {\"key_id\":\"8900b4cd\",...}"
+
+AFTER (all three hunks in place):
+  HUNK 3 targeted re-run : RC=0 -> 1 passed, 17 deselected
+  FULL scoped gate        : RC=0 -> 27 passed in 10.99s
+====================================================================================================

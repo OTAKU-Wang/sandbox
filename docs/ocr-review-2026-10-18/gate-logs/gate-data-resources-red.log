@@ -1,0 +1,260 @@
+FFFFF.FFFF                                                               [100%]
+================================== FAILURES ===================================
+___________ test_desensitize_does_not_claim_masking_for_non_pii_csv ___________
+
+client = <httpx.AsyncClient object at 0x000001F713EB89E0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4YTFiMTBkYS1iNjk4LTQ2OTYtYWVkMy03Y2NhZTZmZmF...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4NSwidHlwZSI6ImFjY2VzcyJ9.y3eduLylCIU1qQeU7dOvpjuBHD_Mdaf1_C5xstGNaAs'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001F715AAAF90>
+
+    @pytest.mark.asyncio
+    async def test_desensitize_does_not_claim_masking_for_non_pii_csv(
+        client: AsyncClient, auth_headers: dict, db_session,
+    ):
+        """\u666e\u901a CSV\uff08\u63a8\u65ad schema \u5168\u662f unknown\uff09\u6ca1\u6709\u4efb\u4f55\u5b57\u6bb5\u88ab\u63a9\u7801 \u21d2 \u4e0d\u5f97\u58f0\u79f0\u5df2\u8131\u654f\u3002"""
+        resource = await _upload(
+            client, auth_headers, "orders.csv",
+            b"order_id,amount\nA1,10\nA2,20\n", "text/csv", "No PII",
+        )
+    
+        response = await client.post(
+            f"/api/v1/data-resources/{resource['id']}/desensitize", headers=auth_headers,
+        )
+    
+        assert response.status_code == 200, response.text
+        payload = response.json()
+>       assert payload["masking_applied"] is False
+E       assert True is False
+
+tests\test_data_resources_masking.py:58: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.kms_service:kms_service.py:117 [KMS] DEK dek-storage-data-resources/1a928985-d0b3-4949-8e25-f47c3c55c75b/orders.csv-42f76d47 lives only in process memory: callers that persist ciphertext under this key_id must write export_wrapped() into KeyMetadata.wrapped_payload in the same transaction and call mark_persisted(), or a restart makes that data permanently undecryptable (OCR-A161)
+WARNING  app.services.storage_service:storage_service.py:95 [storage] MinIO 不可用（No module named 'minio'），对象存储降级为本地目录 \tmp\cds-storage：该目录未入卷时容器重建会丢上传原件（库里仍为 ready），生产部署请安装 minio 客户端包并配置 CDS_MINIO_ENDPOINT
+___________ test_desensitize_reports_the_columns_it_actually_masked ___________
+
+client = <httpx.AsyncClient object at 0x000001F716081DF0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMzI1ODQxMC1iYjI5LTQ0ZjYtOTYxOS1kYjZjM2Y4ZmU...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4NiwidHlwZSI6ImFjY2VzcyJ9.z6I3gEzZZC1mUiUjRuhSyQ_DvVvpcPtXf5LBu1FnVl8'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001F716081C40>
+
+    @pytest.mark.asyncio
+    async def test_desensitize_reports_the_columns_it_actually_masked(
+        client: AsyncClient, auth_headers: dict, db_session,
+    ):
+        """PII \u5217\uff08\u63a8\u65ad\u4e3a pii\uff09\u786e\u5b9e\u88ab\u63a9\u7801 \u21d2 true\uff0c\u4e14\u9010\u5217\u70b9\u540d\u3002"""
+        resource = await _upload(
+            client, auth_headers, "people.csv",
+            "name,phone,email\n张三,13800138000,zhangsan@example.com\n李四,13900139000,lisi@example.com\n".encode("utf-8"),
+            "text/csv", "PII",
+        )
+    
+        response = await client.post(
+            f"/api/v1/data-resources/{resource['id']}/desensitize", headers=auth_headers,
+        )
+    
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["masking_applied"] is True
+>       assert payload["masked_columns"] == ["phone", "email"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'masked_columns'
+
+tests\test_data_resources_masking.py:82: KeyError
+_______ test_desensitize_ignores_sensitive_columns_absent_from_the_data _______
+
+client = <httpx.AsyncClient object at 0x000001F715CFB410>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzZWIzOWQ0ZS0xYzcwLTQwYTYtYjU5Yy05YzY2MGUxYWF...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4NywidHlwZSI6ImFjY2VzcyJ9.20xFCOFbYMF6gtVq0Q6KM88noxV1KyYrKND9sez4-EI'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001F715F48CB0>
+
+    @pytest.mark.asyncio
+    async def test_desensitize_ignores_sensitive_columns_absent_from_the_data(
+        client: AsyncClient, auth_headers: dict, db_session,
+    ):
+        """schema \u58f0\u660e\u7684\u654f\u611f\u5217\u4e0d\u5728\u6570\u636e\u91cc \u21d2 \u4ec0\u4e48\u90fd\u6ca1\u63a9\u7801\uff0c\u58f0\u660e\u5fc5\u987b\u56de\u5230 false\u3002"""
+        resource = await _upload(
+            client, auth_headers, "orders2.csv",
+            b"order_id,amount\nA1,10\n", "text/csv", "Ghost PII column",
+        )
+        await _set_schema_fields(
+            db_session, resource["id"],
+            [{"name": "order_id", "type": "string", "sensitivity": "unknown", "mask_pattern": "none"},
+             {"name": "id_card", "type": "id_card", "sensitivity": "pii", "mask_pattern": "none"}],
+        )
+    
+        response = await client.post(
+            f"/api/v1/data-resources/{resource['id']}/desensitize", headers=auth_headers,
+        )
+    
+        assert response.status_code == 200, response.text
+>       assert response.json()["masking_applied"] is False
+E       assert True is False
+
+tests\test_data_resources_masking.py:109: AssertionError
+____________ test_desensitize_json_resource_reports_masked_columns ____________
+
+client = <httpx.AsyncClient object at 0x000001F715CFB3E0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYmNiM2QxOS01YjEwLTQzNTctOTRiZi1mNDE1MjYyMzU...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4NywidHlwZSI6ImFjY2VzcyJ9.CFmJI8uv6lTY5cM-N-W7aJy8S-uwC8CzfQ4qB3YJR_A'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001F7161E8A10>
+
+    @pytest.mark.asyncio
+    async def test_desensitize_json_resource_reports_masked_columns(
+        client: AsyncClient, auth_headers: dict, db_session,
+    ):
+        """JSON 资源走另一条掩码分支，声明同样要如实。"""
+        resource = await _upload(
+            client, auth_headers, "people.json",
+            b'[{"city": "BEIJING", "email": "someone@example.com"}]', "application/json", "JSON PII",
+        )
+    
+        response = await client.post(
+            f"/api/v1/data-resources/{resource['id']}/desensitize", headers=auth_headers,
+        )
+    
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["masking_applied"] is True
+>       assert payload["masked_columns"] == ["email"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'masked_columns'
+
+tests\test_data_resources_masking.py:130: KeyError
+_____________ test_generator_desensitize_keeps_its_str_signature ______________
+
+    def test_generator_desensitize_keeps_its_str_signature():
+        """`desensitize()` 的返回类型是既有契约（data_products.py 直接当字符串用）。"""
+        from app.services.test_data_generator import test_data_generator
+    
+        schema = [{"name": "email", "type": "email", "sensitivity": "pii"}]
+        out = test_data_generator.desensitize(b"email\nsomeone@example.com\n", "csv", schema)
+        assert isinstance(out, str)
+        assert "someone@example.com" not in out
+    
+>       csv_text, masked = test_data_generator.desensitize_with_report(b"email\nsomeone@example.com\n", "csv", schema)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'TestDataGenerator' object has no attribute 'desensitize_with_report'
+
+tests\test_data_resources_masking.py:143: AttributeError
+_____ test_list_paginated_returns_envelope_without_downloading_everything _____
+
+client = <httpx.AsyncClient object at 0x000001F7160E39E0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBhZjdhZi1hN2U2LTQ0YmItOTdjYy01NmFkNmI4M2Q...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4OCwidHlwZSI6ImFjY2VzcyJ9.jjcJl1iUTDmOAyJUsfcCM1SYngbHYlyRNpvDDmbcVPE'}
+
+    @pytest.mark.asyncio
+    async def test_list_paginated_returns_envelope_without_downloading_everything(
+        client: AsyncClient, auth_headers: dict,
+    ):
+        """`paginated=true` \u21d2 {items,total,page,page_size}\uff0c\u4e14\u53ea\u56de\u8fd9\u4e00\u9875\u3002"""
+        for i in range(3):
+            await _upload(client, auth_headers, f"p{i}.csv", b"a,b\n1,2\n", "text/csv", f"Page {i}")
+    
+        first = await client.get(
+            "/api/v1/data-resources/", params={"paginated": "true", "page": 1, "page_size": 2},
+            headers=auth_headers,
+        )
+        second = await client.get(
+            "/api/v1/data-resources/", params={"paginated": "true", "page": 2, "page_size": 2},
+            headers=auth_headers,
+        )
+    
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        page1, page2 = first.json(), second.json()
+    
+>       assert page1["total"] >= 3
+               ^^^^^^^^^^^^^^
+E       TypeError: list indices must be integers or slices, not str
+
+tests\test_data_resources_masking.py:192: TypeError
+_____________ test_list_paginated_rejects_out_of_range_page_size ______________
+
+client = <httpx.AsyncClient object at 0x000001F7161E7E30>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwYWI5MjQ5Yi04NTI2LTRkODktYjFhMC1lZjI5OTNkMTZ...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4OSwidHlwZSI6ImFjY2VzcyJ9.yvc1WMhu5ykemNz59G2qPqfrzj_7WLZsiJd-h6UcI7A'}
+
+    @pytest.mark.asyncio
+    async def test_list_paginated_rejects_out_of_range_page_size(
+        client: AsyncClient, auth_headers: dict,
+    ):
+        response = await client.get(
+            "/api/v1/data-resources/", params={"paginated": "true", "page_size": 100000},
+            headers=auth_headers,
+        )
+>       assert response.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_data_resources_masking.py:209: AssertionError
+__________ test_delete_reports_undestroyed_storage_and_key_honestly ___________
+
+client = <httpx.AsyncClient object at 0x000001F7161E8CB0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YzIxZjZjOC00ODRjLTQxZWQtYjAxOC1mNDQ2YjBkYjY...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU4OSwidHlwZSI6ImFjY2VzcyJ9.ElJRfyN5F12IeBRhoD-cWWmBxJIxA3F7JJGQCzJCTog'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001F7160E0950>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F7161E9520>
+
+    @pytest.mark.asyncio
+    async def test_delete_reports_undestroyed_storage_and_key_honestly(
+        client: AsyncClient, auth_headers: dict, db_session, monkeypatch,
+    ):
+        """\u8bb0\u5f55\u5220\u4e86\u4f46\u5bc6\u6587\u5bf9\u8c61/DEK \u6ca1\u9500\u6bc1 \u21d2 \u54cd\u5e94\u5fc5\u987b\u9010\u5b57\u6bb5\u5982\u5b9e\uff0cUI \u624d\u6709\u636e\u53ef\u4f9d\u3002"""
+        from app.services.kms_service import kms_service
+        from app.services.storage_service import storage_service
+    
+        resource = await _upload(client, auth_headers, "del.csv", b"a,b\n1,2\n", "text/csv", "Delete Partial")
+        stored = await db_session.get(DataResource, uuid.UUID(resource["id"]))
+        stored.encryption_key_id = "key-under-test"
+        await db_session.flush()
+    
+        monkeypatch.setattr(storage_service, "delete", lambda path: False, raising=True)
+    
+        def _boom(_key_id: str) -> bool:
+            raise RuntimeError("kms unavailable")
+    
+        monkeypatch.setattr(kms_service, "destroy_key", _boom, raising=True)
+    
+        response = await client.delete(f"/api/v1/data-resources/{resource['id']}", headers=auth_headers)
+    
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["deleted"] is True
+        assert payload["storage_deleted"] is False
+>       assert payload["key_destroyed"] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'key_destroyed'
+
+tests\test_data_resources_masking.py:241: KeyError
+______________________ test_delete_reports_full_cleanup _______________________
+
+client = <httpx.AsyncClient object at 0x000001F7160E13A0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjZDM4MTAwNS02OGQyLTQxMWItOTQwMS1mYWFmNzNmM2Z...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMTU5MCwidHlwZSI6ImFjY2VzcyJ9.6gv2nLfsPFytXsCeUvZXYfy1YNL1jqW6QYqclxfmP74'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001F716232D80>
+
+    @pytest.mark.asyncio
+    async def test_delete_reports_full_cleanup(
+        client: AsyncClient, auth_headers: dict, db_session,
+    ):
+        """反面：都真删掉了才是 storage_deleted/key_destroyed 双 true。"""
+        resource = await _upload(client, auth_headers, "del2.csv", b"a,b\n1,2\n", "text/csv", "Delete Full")
+        stored = await db_session.get(DataResource, uuid.UUID(resource["id"]))
+        stored.encryption_key_id = "missing-key-is-not-destroyed"
+        await db_session.flush()
+    
+        response = await client.delete(f"/api/v1/data-resources/{resource['id']}", headers=auth_headers)
+    
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["deleted"] is True
+        assert payload["storage_deleted"] is True
+        # destroy_key \u627e\u4e0d\u5230\u8fd9\u4e2a key \u21d2 found=False\uff0c\u4e0d\u80fd\u62a5\u6210\u5df2\u9500\u6bc1
+>       assert payload["key_destroyed"] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'key_destroyed'
+
+tests\test_data_resources_masking.py:262: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_data_resources_masking.py::test_desensitize_does_not_claim_masking_for_non_pii_csv
+FAILED tests/test_data_resources_masking.py::test_desensitize_reports_the_columns_it_actually_masked
+FAILED tests/test_data_resources_masking.py::test_desensitize_ignores_sensitive_columns_absent_from_the_data
+FAILED tests/test_data_resources_masking.py::test_desensitize_json_resource_reports_masked_columns
+FAILED tests/test_data_resources_masking.py::test_generator_desensitize_keeps_its_str_signature
+FAILED tests/test_data_resources_masking.py::test_list_paginated_returns_envelope_without_downloading_everything
+FAILED tests/test_data_resources_masking.py::test_list_paginated_rejects_out_of_range_page_size
+FAILED tests/test_data_resources_masking.py::test_delete_reports_undestroyed_storage_and_key_honestly
+FAILED tests/test_data_resources_masking.py::test_delete_reports_full_cleanup
+9 failed, 1 passed in 5.60s

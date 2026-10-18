@@ -115,13 +115,35 @@ class TestDataGenerator:
         Returns:
             CSV string with PII masked
         """
+        return self.desensitize_with_report(data, format, schema)[0]
+
+    def desensitize_with_report(self, data: bytes, format: str,
+                                schema: list[dict] | None = None) -> tuple[str, list[str]]:
+        """Apply PII masking and report which columns were ACTUALLY masked.
+
+        Returns (csv, masked_columns). A309 (禁伪造铁律): masked_columns only names
+        columns that were both marked sensitive by the schema AND really present in
+        the produced output — a schema annotation alone is not masking, so callers
+        can surface it to data consumers as a factual claim instead of a boast.
+        Unsupported/failed paths return ("", []) — never a claimed-but-empty mask.
+        """
         if format == "csv":
             return self._desensitize_csv(data, schema)
         elif format == "json":
             return self._desensitize_json(data, schema)
         else:
             logger.warning(f"Unsupported format for desensitization: {format}")
-            return ""
+            return "", []
+
+    @staticmethod
+    def _sensitive_map(schema: list[dict] | None) -> dict[str, str]:
+        """Schema -> {column: type} for the columns this masker will touch."""
+        sensitive_fields: dict[str, str] = {}
+        if schema:
+            for field_def in schema:
+                if field_def.get("sensitivity") in ("pii", "sensitive", "high"):
+                    sensitive_fields[field_def["name"]] = field_def.get("type", "string")
+        return sensitive_fields
 
     def _sample_csv(self, data: bytes, sample_size: int, method: str) -> str:
         """Sample rows from CSV data."""
@@ -186,22 +208,18 @@ class TestDataGenerator:
             logger.error(f"JSON sampling failed: {e}")
             return ""
 
-    def _desensitize_csv(self, data: bytes, schema: list[dict] | None) -> str:
-        """Apply PII masking to CSV data."""
+    def _desensitize_csv(self, data: bytes, schema: list[dict] | None) -> tuple[str, list[str]]:
+        """Apply PII masking to CSV data. Returns (csv, masked_columns)."""
         try:
             text = data.decode("utf-8", errors="ignore")
             reader = csv.DictReader(io.StringIO(text))
             rows = list(reader)
 
             if not rows:
-                return ""
+                return "", []
 
             # Build sensitivity map from schema
-            sensitive_fields = {}
-            if schema:
-                for field_def in schema:
-                    if field_def.get("sensitivity") in ("pii", "sensitive", "high"):
-                        sensitive_fields[field_def["name"]] = field_def.get("type", "string")
+            sensitive_fields = self._sensitive_map(schema)
 
             output = io.StringIO()
             fieldnames = list(rows[0].keys())
@@ -217,22 +235,19 @@ class TestDataGenerator:
                         masked_row[key] = value
                 writer.writerow(masked_row)
 
-            return output.getvalue()
+            masked_columns = [name for name in sensitive_fields if name in fieldnames]
+            return output.getvalue(), masked_columns
         except Exception as e:
             logger.error(f"CSV desensitization failed: {e}")
-            return ""
+            return "", []
 
-    def _desensitize_json(self, data: bytes, schema: list[dict] | None) -> str:
-        """Apply PII masking to JSON data."""
+    def _desensitize_json(self, data: bytes, schema: list[dict] | None) -> tuple[str, list[str]]:
+        """Apply PII masking to JSON data. Returns (csv, masked_columns)."""
         try:
             parsed = json.loads(data)
             items = parsed if isinstance(parsed, list) else parsed.get("data", [])
 
-            sensitive_fields = {}
-            if schema:
-                for field_def in schema:
-                    if field_def.get("sensitivity") in ("pii", "sensitive", "high"):
-                        sensitive_fields[field_def["name"]] = field_def.get("type", "string")
+            sensitive_fields = self._sensitive_map(schema)
 
             masked_items = []
             for item in items:
@@ -249,17 +264,19 @@ class TestDataGenerator:
 
             # Convert to CSV
             if not masked_items:
-                return ""
+                return "", []
             if isinstance(masked_items[0], dict):
                 output = io.StringIO()
-                writer = csv.DictWriter(output, fieldnames=list(masked_items[0].keys()))
+                fieldnames = list(masked_items[0].keys())
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(masked_items)
-                return output.getvalue()
-            return ""
+                masked_columns = [name for name in sensitive_fields if name in fieldnames]
+                return output.getvalue(), masked_columns
+            return "", []
         except Exception as e:
             logger.error(f"JSON desensitization failed: {e}")
-            return ""
+            return "", []
 
     def _mask_value(self, value: str, field_type: str) -> str:
         """Mask a single value based on its type."""

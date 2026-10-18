@@ -116,6 +116,10 @@ class AttestationResult:
     # the built-in local static root (_LOCAL_ATTESTATION_ROOT), i.e. software
     # attestation that can be reproduced without TEE hardware.
     trust_root: str = "external"
+    # A183: True when this result was produced against the local simulated
+    # trust root — honest disclosure that "verified" here (only possible with
+    # ALLOW_SIMULATION) never means hardware attestation.
+    is_simulation: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: int = 0
 
@@ -500,24 +504,20 @@ class AttestationService:
     """
 
     def __init__(self, policy: AttestationPolicy | None = None):
+        operator_measurements = self._load_operator_measurements()
         if policy is None:
             policy = AttestationPolicy()
             # PZ-05 (MR-B1): the measurement whitelist is operator-managed via
             # CDS_ATTESTATION_ALLOWED_MEASUREMENTS (csv); empty = allow all
             # (dev default — production requires it non-empty, enforced by
             # validate_security_config).
-            measurements: list[str] = []
-            try:
-                from app.core.config import get_settings
-                measurements = [
-                    m.strip()
-                    for m in get_settings().ATTESTATION_ALLOWED_MEASUREMENTS.split(",")
-                    if m.strip()
-                ]
-            except Exception as e:
-                logger.warning("Could not load ATTESTATION_ALLOWED_MEASUREMENTS from settings: %s", e)
-            policy.allowed_measurements = set(measurements)
+            policy.allowed_measurements = set(operator_measurements)
         self._policy = policy
+        # A183: the operator whitelist binds on EVERY verification path — a
+        # caller-constructed AttestationPolicy (the KMS key-distribution path
+        # builds one with empty measurements) must never widen past
+        # CDS_ATTESTATION_ALLOWED_MEASUREMENTS.
+        self._operator_measurements: set[str] = set(operator_measurements)
         self._providers: dict[TEEType, AttestationProvider] = {
             TEEType.SGX: SGXProvider(),
             TEEType.SEV_SNP: SEVProvider(),
@@ -530,6 +530,20 @@ class AttestationService:
             TEEType.SGX, TEEType.SEV_SNP, TEEType.FIRECRACKER,
         }
         self._verification_log: list[AttestationResult] = []
+
+    @staticmethod
+    def _load_operator_measurements() -> set[str]:
+        measurements: set[str] = set()
+        try:
+            from app.core.config import get_settings
+            measurements = {
+                m.strip()
+                for m in get_settings().ATTESTATION_ALLOWED_MEASUREMENTS.split(",")
+                if m.strip()
+            }
+        except Exception as e:
+            logger.warning("Could not load ATTESTATION_ALLOWED_MEASUREMENTS from settings: %s", e)
+        return measurements
 
     def register_provider(self, provider: AttestationProvider) -> None:
         """Register a custom TEE attestation provider."""
@@ -597,7 +611,7 @@ class AttestationService:
                 self._verification_log.append(result)
                 return result
 
-        # Policy check: measurement whitelist
+        # Policy check: measurement whitelist (call-site policy)
         if self._policy.allowed_measurements:
             if quote.measurement not in self._policy.allowed_measurements:
                 result = AttestationResult(
@@ -610,6 +624,22 @@ class AttestationService:
                 )
                 self._verification_log.append(result)
                 return result
+
+        # A183: operator whitelist (CDS_ATTESTATION_ALLOWED_MEASUREMENTS) binds
+        # independently of the call-site policy — closes the KMS path where the
+        # gate constructed its own empty-whitelist AttestationService and the
+        # prod-required whitelist was silently inert.
+        if self._operator_measurements and quote.measurement not in self._operator_measurements:
+            result = AttestationResult(
+                quote_id=quote.quote_id,
+                status=AttestationStatus.INVALID_MEASUREMENT,
+                tee_type=quote.tee_type,
+                measurement=quote.measurement,
+                error_message="Measurement not in operator whitelist (CDS_ATTESTATION_ALLOWED_MEASUREMENTS)",
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+            self._verification_log.append(result)
+            return result
 
         # Delegate to provider for signature/integrity verification
         provider = self._providers.get(quote.tee_type)
@@ -631,6 +661,30 @@ class AttestationService:
         # root — label the trust root explicitly (additive field).
         if quote.tee_type in self._local_root_types:
             result.trust_root = "local-simulated"
+            result.policy_checks["hardware_signature"] = False
+            if result.verified:
+                # A183: the local root signature is derived from a constant in
+                # this source tree — anyone can reproduce it offline, so it is
+                # software attestation by construction. Disclose it, and in a
+                # no-simulation posture (CDS_ALLOW_SIMULATION=false) downgrade
+                # the verdict to verified=False with an explicit reason: only a
+                # hardware/vendor trust root may ever stand behind "verified".
+                result.is_simulation = True
+                from app.core.config import get_settings
+                if not get_settings().ALLOW_SIMULATION:
+                    result.verified = False
+                    result.status = AttestationStatus.POLICY_VIOLATION
+                    result.error_message = (
+                        "Quote chains only to the local simulated attestation root "
+                        "(no hardware/vendor trust-root verification available); "
+                        "rejected because CDS_ALLOW_SIMULATION=false"
+                    )
+                    result.policy_checks["simulation_accepted"] = False
+                    logger.warning(
+                        "Attestation %s: local-simulated trust root rejected — "
+                        "not treated as hardware verification (ALLOW_SIMULATION=false)",
+                        quote.quote_id,
+                    )
 
         # Enrich with policy check results
         result.policy_checks["tee_type_allowed"] = True

@@ -1,0 +1,7 @@
+A185 numpy  : success=True  weights_changed=False
+A185 verify : passed=False match_ratio=0.531  (nobody knows nothing was written)
+A185 nested : first leaf still 0.125? True (write landed at the wrong leaf)
+A187 dup layers: success=True claims 8 bits
+A187 empty bits: embed success=True verify passed=True match_ratio=1.000
+A187 num_bits=0 -> [] bits, embeddable=True
+RC=0

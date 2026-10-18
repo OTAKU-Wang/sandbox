@@ -5,11 +5,15 @@ issues with Python 3.14+.
 """
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pathlib import Path
 
 _template_dir = Path(__file__).parent.parent / "templates"
-_env = Environment(loader=FileSystemLoader(str(_template_dir)))
+# A114 defense-in-depth: templates are HTML only, autoescape every render.
+_env = Environment(
+    loader=FileSystemLoader(str(_template_dir)),
+    autoescape=select_autoescape(("html", "htm", "xml")),
+)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 

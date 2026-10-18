@@ -1,0 +1,141 @@
+     1	import { lazy, Suspense } from 'react';
+     2	import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+     3	import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+     4	import { ConfigProvider, Spin } from 'antd';
+     5	import { zhCN } from './antdLocale';
+     6	import ProtectedRoute from './components/Auth/ProtectedRoute';
+     7	import RoleRoute from './components/Auth/RoleRoute';
+     8	import MainLayout from './components/Layout/MainLayout';
+     9	import WorkspaceHome from './components/Layout/WorkspaceHome';
+    10	import WorkspaceRoute from './components/Layout/WorkspaceRoute';
+    11	import { ROLE_GROUPS } from './utils/roles';
+    12	import { ADMIN_WORKSPACE_ROLES } from './utils/workspace';
+    13	import { UserRole } from './types/enums';
+    14	
+    15	// Route-level lazy loading — each page becomes a separate chunk
+    16	const Login = lazy(() => import('./pages/Auth/Login'));
+    17	const Register = lazy(() => import('./pages/Auth/Register'));
+    18	// 首页按工台分派（原型 A-1）：两张首页都改由 WorkspaceHome 懒加载，App.tsx 不再直接挂。
+    19	const ProductList = lazy(() => import('./pages/DataProducts/ProductList'));
+    20	const ProductCreate = lazy(() => import('./pages/DataProducts/ProductCreate'));
+    21	const ProductDetail = lazy(() => import('./pages/DataProducts/ProductDetail'));
+    22	const ContractList = lazy(() => import('./pages/Contracts/ContractList'));
+    23	const ContractCreate = lazy(() => import('./pages/Contracts/ContractCreate'));
+    24	const ContractDetail = lazy(() => import('./pages/Contracts/ContractDetail'));
+    25	const SessionList = lazy(() => import('./pages/Sandbox/SessionList'));
+    26	const SessionDetail = lazy(() => import('./pages/Sandbox/SessionDetail'));
+    27	const DataProductDev = lazy(() => import('./pages/Sandbox/DataProductDev'));
+    28	const NotebookWorkbench = lazy(() => import('./pages/Flow/NotebookWorkbench'));
+    29	const NotFound = lazy(() => import('./pages/NotFound'));
+    30	const WorkloadCenter = lazy(() => import('./pages/Flow/WorkloadCenter'));
+    31	const ComputeSchedule = lazy(() => import('./pages/Flow/ComputeSchedule'));
+    32	const DeliveryCenter = lazy(() => import('./pages/Flow/DeliveryCenter'));
+    33	const FlowGuide = lazy(() => import('./pages/Flow/Guide'));
+    34	const FlowDevTasks = lazy(() => import('./pages/Flow/DevTasks'));
+    35	const FlowDevTaskCreate = lazy(() => import('./pages/Flow/DevTaskCreatePage'));
+    36	const FlowTaskDetail = lazy(() => import('./pages/Flow/TaskDetail'));
+    37	const FlowQuota = lazy(() => import('./pages/Flow/Quota'));
+    38	const AuditLog = lazy(() => import('./pages/Audit/AuditLog'));
+    39	const InspectionPipeline = lazy(() => import('./pages/OutputControl/InspectionPipeline'));
+    40	const MonitoringDashboard = lazy(() => import('./pages/Monitoring'));
+    41	const CatalogPage = lazy(() => import('./pages/Catalog'));
+    42	const ResourceList = lazy(() => import('./pages/DataResources/ResourceList'));
+    43	const CrossSpaceDashboard = lazy(() => import('./pages/Federation/CrossSpaceDashboard'));
+    44	const TrainingDashboard = lazy(() => import('./pages/Training/TrainingDashboard'));
+    45	const Connectors = lazy(() => import('./pages/Connectors'));
+    46	const KeyManagement = lazy(() => import('./pages/Identity/KeyManagement'));
+    47	const Certificates = lazy(() => import('./pages/Identity/Certificates'));
+    48	const K8sDeployments = lazy(() => import('./pages/K8sOps/Deployments'));
+    49	const K8sNetworkPolicies = lazy(() => import('./pages/K8sOps/NetworkPolicies'));
+    50	const K8sPvcs = lazy(() => import('./pages/K8sOps/Pvcs'));
+    51	const K8sLogs = lazy(() => import('./pages/K8sOps/Logs'));
+    52	const CapabilityMatrix = lazy(() => import('./pages/CapabilityMatrix'));
+    53	const ComplianceDisclosure = lazy(() => import('./pages/ComplianceDisclosure'));
+    54	const MpcPage = lazy(() => import('./pages/MPC'));
+    55	const DataPipeline = lazy(() => import('./pages/DataPipeline'));
+    56	const SystemStatus = lazy(() => import('./pages/SystemStatus'));
+    57	const UserManagement = lazy(() => import('./pages/UserManagement'));
+    58	const ApiKeys = lazy(() => import('./pages/ApiKeys'));
+    59	
+    60	const PageSpinner = () => <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
+    61	
+    62	const queryClient = new QueryClient({
+    63	  defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
+    64	});
+    65	
+    66	export default function App() {
+    67	  return (
+    68	    <QueryClientProvider client={queryClient}>
+    69	      <ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#1b6ef3', colorLink: '#1b6ef3' } }}>
+    70	        <BrowserRouter>
+    71	          <Suspense fallback={<PageSpinner />}>
+    72	            <Routes>
+    73	              <Route path="/login" element={<Login />} />
+    74	              <Route path="/register" element={<Register />} />
+    75	              <Route
+    76	                path="/*"
+    77	                element={
+    78	                  <ProtectedRoute>
+    79	                    <MainLayout />
+    80	                  </ProtectedRoute>
+    81	                }
+    82	              >
+    83	                {/* 工作台口径门（D-16）：RoleRoute 管角色，内层 WorkspaceRoute 管工作台 ——
+    84	                    developer = 两个工作台都在（含两端共用的详情子页与沙箱会话），admin = 管理态专属页。
+    85	                    /federation /training /data-pipeline 不标 admin：它们的角色门放行了业务角色，
+    86	                    而业务角色切不到管理员工台，标了等于把这些页面从数商/买方手里拿走（超出 D-16 范围）。 */}
+    87	                {/* 原型 A-1：index = 当前工台的首页（开发者工台落开发者首页，管理员工台落运营概览）。 */}
+    88	                <Route index element={<WorkspaceHome />} />
+    89	                <Route path="data-products" element={<RoleRoute allowedRoles={ROLE_GROUPS.productReaders}><WorkspaceRoute workspace="developer"><ProductList /></WorkspaceRoute></RoleRoute>} />
+    90	                <Route path="data-resources" element={<RoleRoute allowedRoles={ROLE_GROUPS.dataResourceManagers}><WorkspaceRoute workspace="developer"><ResourceList /></WorkspaceRoute></RoleRoute>} />
+    91	                <Route path="data-products/create" element={<RoleRoute allowedRoles={ROLE_GROUPS.productWriters}><WorkspaceRoute workspace="developer"><ProductCreate /></WorkspaceRoute></RoleRoute>} />
+    92	                <Route path="data-products/:id" element={<RoleRoute allowedRoles={ROLE_GROUPS.productReaders}><WorkspaceRoute workspace="developer"><ProductDetail /></WorkspaceRoute></RoleRoute>} />
+    93	                <Route path="contracts" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><ContractList /></WorkspaceRoute></RoleRoute>} />
+    94	                <Route path="contracts/create" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractWriters}><WorkspaceRoute workspace="developer"><ContractCreate /></WorkspaceRoute></RoleRoute>} />
+    95	                <Route path="contracts/:id" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><ContractDetail /></WorkspaceRoute></RoleRoute>} />
+    96	                <Route path="sandbox-sessions" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><WorkspaceRoute workspace="developer"><SessionList /></WorkspaceRoute></RoleRoute>} />
+    97	                <Route path="sandbox-sessions/:id" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><WorkspaceRoute workspace="developer"><SessionDetail /></WorkspaceRoute></RoleRoute>} />
+    98	                <Route path="dev-sandbox" element={<RoleRoute allowedRoles={ROLE_GROUPS.devSandboxUsers}><WorkspaceRoute workspace="developer"><DataProductDev /></WorkspaceRoute></RoleRoute>} />
+    99	                <Route path="notebooks" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><NotebookWorkbench /></WorkspaceRoute></RoleRoute>} />
+   100	                <Route path="workloads" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><WorkloadCenter /></WorkspaceRoute></RoleRoute>} />
+   101	                <Route path="compute" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><WorkspaceRoute workspace="developer"><ComputeSchedule /></WorkspaceRoute></RoleRoute>} />
+   102	                <Route path="deliveries" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><DeliveryCenter /></WorkspaceRoute></RoleRoute>} />
+   103	                <Route path="deliveries/dataset" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><DeliveryCenter /></WorkspaceRoute></RoleRoute>} />
+   104	                <Route path="deliveries/push" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><DeliveryCenter /></WorkspaceRoute></RoleRoute>} />
+   105	                {/* 旧开发者首页 /home：SS-18 把开发者首页提到 index 路由（原型 A-1 的「首页」），
+   106	                    旧链接与旧收藏一律 replace 到 '/'，由 WorkspaceHome 按工台分派。 */}
+   107	                <Route path="home" element={<Navigate to="/" replace />} />
+   108	                <Route path="flow/tasks" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowDevTasks /></WorkspaceRoute></RoleRoute>} />
+   109	        <Route path="flow/tasks/new" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowDevTaskCreate /></WorkspaceRoute></RoleRoute>} />
+   110	        <Route path="flow/tasks/:taskId" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowTaskDetail /></WorkspaceRoute></RoleRoute>} />
+   111	                <Route path="flow/guide" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowGuide /></WorkspaceRoute></RoleRoute>} />
+   112	                <Route path="flow/quota" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><WorkspaceRoute workspace="developer"><FlowQuota /></WorkspaceRoute></RoleRoute>} />
+   113	                <Route path="audit" element={<RoleRoute allowedRoles={ROLE_GROUPS.auditReaders}><WorkspaceRoute workspace="developer"><AuditLog /></WorkspaceRoute></RoleRoute>} />
+   114	                <Route path="output-control" element={<RoleRoute allowedRoles={ROLE_GROUPS.outputControlReaders}><WorkspaceRoute workspace="admin"><InspectionPipeline /></WorkspaceRoute></RoleRoute>} />
+   115	                <Route path="catalog" element={<RoleRoute allowedRoles={ROLE_GROUPS.catalogReaders}><CatalogPage /></RoleRoute>} />
+   116	                <Route path="monitoring" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><WorkspaceRoute workspace="admin"><MonitoringDashboard /></WorkspaceRoute></RoleRoute>} />
+   117	                <Route path="federation" element={<RoleRoute allowedRoles={ROLE_GROUPS.federationUsers}><CrossSpaceDashboard /></RoleRoute>} />
+   118	                <Route path="training" element={<RoleRoute allowedRoles={ROLE_GROUPS.trainingUsers}><TrainingDashboard /></RoleRoute>} />
+   119	                <Route path="connectors" element={<RoleRoute allowedRoles={ROLE_GROUPS.connectorManagers}><WorkspaceRoute workspace="admin"><Connectors /></WorkspaceRoute></RoleRoute>} />
+   120	                <Route path="identity/keys" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><WorkspaceRoute workspace="admin"><KeyManagement /></WorkspaceRoute></RoleRoute>} />
+   121	                <Route path="certificates" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><WorkspaceRoute workspace="admin"><Certificates /></WorkspaceRoute></RoleRoute>} />
+   122	                <Route path="ops/deployments" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sDeployments /></WorkspaceRoute></RoleRoute>} />
+   123	                <Route path="ops/network-policies" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sNetworkPolicies /></WorkspaceRoute></RoleRoute>} />
+   124	                <Route path="ops/pvcs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sPvcs /></WorkspaceRoute></RoleRoute>} />
+   125	                <Route path="ops/logs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sLogs /></WorkspaceRoute></RoleRoute>} />
+   126	                <Route path="capability-matrix" element={<RoleRoute allowedRoles={ADMIN_WORKSPACE_ROLES}><WorkspaceRoute workspace="admin"><CapabilityMatrix /></WorkspaceRoute></RoleRoute>} />
+   127	                <Route path="data-pipeline" element={<DataPipeline />} />
+   128	                <Route path="compliance-disclosure" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><WorkspaceRoute workspace="developer"><ComplianceDisclosure /></WorkspaceRoute></RoleRoute>} />
+   129	                <Route path="mpc" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><WorkspaceRoute workspace="admin"><MpcPage /></WorkspaceRoute></RoleRoute>} />
+   130	                <Route path="system-status" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><WorkspaceRoute workspace="admin"><SystemStatus /></WorkspaceRoute></RoleRoute>} />
+   131	                <Route path="users" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><WorkspaceRoute workspace="admin"><UserManagement /></WorkspaceRoute></RoleRoute>} />
+   132	                <Route path="api-keys" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><WorkspaceRoute workspace="admin"><ApiKeys /></WorkspaceRoute></RoleRoute>} />
+   133	                <Route path="*" element={<NotFound />} />
+   134	              </Route>
+   135	            </Routes>
+   136	          </Suspense>
+   137	        </BrowserRouter>
+   138	      </ConfigProvider>
+   139	    </QueryClientProvider>
+   140	  );
+   141	}

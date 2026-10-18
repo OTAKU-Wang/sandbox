@@ -1,0 +1,9 @@
+...........................................F............................ [ 56%]
+........................................................                 [100%]
+================================== FAILURES ===================================
+E   ModuleNotFoundError: No module named 'resource'
+D:\workspace\sandbox\app\services\sandbox_security.py:18: ModuleNotFoundError: No module named 'resource'
+=========================== short test summary info ===========================
+FAILED tests/test_secure_duckdb.py::test_cleanup_expired_engines_wipes_tmpfs_file
+1 failed, 127 passed in 57.32s
+WIDE_RC=1

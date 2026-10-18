@@ -51,9 +51,9 @@ async function loadAnchors() {
             const detail = a.detail || {};
             if (detail.merkle_root || detail.tx_hash) verified++;
             return `<tr>
-                <td><code>${truncate(detail.merkle_root || a.resource_id || '-', 24)}</code></td>
-                <td><code>${truncate(detail.tx_hash || '-', 24)}</code></td>
-                <td>${detail.block_height || '-'}</td>
+                <td><code>${esc(truncate(detail.merkle_root || a.resource_id || '-', 24))}</code></td>
+                <td><code>${esc(truncate(detail.tx_hash || '-', 24))}</code></td>
+                <td>${esc(detail.block_height || '-')}</td>
                 <td>${statusBadge(detail.tx_hash ? 'verified' : 'pending')}</td>
                 <td>${formatDate(a.created_at)}</td>
             </tr>`;
@@ -61,7 +61,7 @@ async function loadAnchors() {
         $('#total-anchors').textContent = displayList.length;
         $('#verified-anchors').textContent = verified;
     } catch (e) {
-        $('#anchors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${e.message}</td></tr>`;
+        $('#anchors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${esc(e.message)}</td></tr>`;
     }
 }
 
@@ -70,10 +70,11 @@ async function verifyTx() {
     if (!recordId) { alert('请输入 record_id 或 tx_hash'); return; }
     try {
         const result = await API.get(`/api/v1/audit/verify/${recordId}`);
+        const verdict = result.valid ? badge('通过', 'success') : badge('失败', 'danger');
         $('#verify-result').innerHTML = `<div class="card" style="background:var(--bg);margin-top:12px;">
-            <p><strong>验证结果:</strong> ${result.valid ? badge('通过', 'success') : badge('失败', 'danger')}</p>
-            <p><strong>Record ID:</strong> <code>${result.record_id || recordId}</code></p>
-            <p><strong>Merkle Root:</strong> <code>${result.merkle_root || '-'}</code></p>
+            <p><strong>验证结果:</strong> ${verdict}</p>
+            <p><strong>Record ID:</strong> <code>${esc(result.record_id || recordId)}</code></p>
+            <p><strong>Merkle Root:</strong> <code>${esc(result.merkle_root || '-')}</code></p>
         </div>`;
     } catch (e) { alert('验证失败: ' + e.message); }
 }

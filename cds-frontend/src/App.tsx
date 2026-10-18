@@ -6,6 +6,7 @@ import { zhCN } from './antdLocale';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import RoleRoute from './components/Auth/RoleRoute';
 import MainLayout from './components/Layout/MainLayout';
+import ErrorBoundary from './components/Feedback/ErrorBoundary';
 import WorkspaceHome from './components/Layout/WorkspaceHome';
 import WorkspaceRoute from './components/Layout/WorkspaceRoute';
 import { ROLE_GROUPS } from './utils/roles';
@@ -68,8 +69,13 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#1b6ef3', colorLink: '#1b6ef3' } }}>
         <BrowserRouter>
-          <Suspense fallback={<PageSpinner />}>
-            <Routes>
+          {/* 全站唯一一处渲染错误兜底，挂在 BrowserRouter 之内、Suspense+Routes 之外：
+              41 条懒加载路由与 MainLayout 的渲染期异常都在这里落地，而 /login、/* 子树的崩溃也不会再把整棵树炸没。
+              兜不住的是它外层的 QueryClientProvider / ConfigProvider / BrowserRouter 自身启动失败，
+              以及事件回调与 Promise 里的异步错误（React 语义上不经渲染错误边界），那些仍走各自的错误口径。 */}
+          <ErrorBoundary>
+            <Suspense fallback={<PageSpinner />}>
+              <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route
@@ -132,8 +138,9 @@ export default function App() {
                 <Route path="api-keys" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><WorkspaceRoute workspace="admin"><ApiKeys /></WorkspaceRoute></RoleRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Route>
-            </Routes>
-          </Suspense>
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </BrowserRouter>
       </ConfigProvider>
     </QueryClientProvider>

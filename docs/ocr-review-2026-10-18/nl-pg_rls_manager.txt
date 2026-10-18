@@ -1,0 +1,473 @@
+     1	"""PostgreSQL RLS Manager -- degraded mode for TEE isolation.
+     2	
+     3	When SGX is not available, provides session-level isolation using
+     4	PostgreSQL Row Level Security (RLS) policies instead of TEE-based
+     5	database isolation.
+     6	
+     7	Degraded mode security model:
+     8	- Each sandbox session gets a dedicated PostgreSQL role
+     9	- RLS policies filter rows by session_id column
+    10	- Roles have minimal privileges (no DDL, no cross-session access)
+    11	- All session roles are dropped on session termination
+    12	- Graceful fallback to application-level filtering if RLS unavailable
+    13	"""
+    14	import logging
+    15	import re
+    16	from dataclasses import dataclass, field
+    17	
+    18	from sqlalchemy import text
+    19	from sqlalchemy.ext.asyncio import AsyncSession
+    20	
+    21	logger = logging.getLogger(__name__)
+    22	
+    23	
+    24	@dataclass
+    25	class SessionRoleInfo:
+    26	    """Metadata for a session-scoped PostgreSQL role."""
+    27	    role_name: str
+    28	    session_id: str
+    29	    created_at: str = ""
+    30	    tables_granted: list[str] = field(default_factory=list)
+    31	    active: bool = True
+    32	
+    33	
+    34	@dataclass
+    35	class RLSStatus:
+    36	    """Status of RLS degraded mode for a session."""
+    37	    session_id: str
+    38	    role_created: bool = False
+    39	    rls_enabled: bool = False
+    40	    policies_applied: list[str] = field(default_factory=list)
+    41	    fallback_mode: bool = False
+    42	    error: str | None = None
+    43	
+    44	
+    45	class PGRLSManager:
+    46	    """PostgreSQL RLS manager for degraded-mode session isolation.
+    47	
+    48	    When TEE/SGX is unavailable, this manager creates per-session
+    49	    PostgreSQL roles with RLS policies to enforce row-level data
+    50	    isolation at the database layer.
+    51	
+    52	    Usage:
+    53	        manager = PGRLSManager()
+    54	        role = await manager.create_session_role(session_id, db)
+    55	        await manager.setup_rls_policy("my_table", session_id, db)
+    56	        conn_str = manager.get_connection_string(session_id, base_dsn)
+    57	    """
+    58	
+    59	    # Role name prefix and max length for PG identifiers
+    60	    _ROLE_PREFIX = "sandbox"
+    61	    _MAX_ROLE_LEN = 63  # PostgreSQL NAMEDATALEN - 1
+    62	
+    63	    # Default permissions granted to session roles
+    64	    _SAFE_PERMISSIONS = {"SELECT", "INSERT", "UPDATE"}
+    65	
+    66	    def __init__(self, admin_dsn: str | None = None):
+    67	        """Initialize the PG RLS Manager.
+    68	
+    69	        Args:
+    70	            admin_dsn: Admin DSN for creating roles. If None, uses the
+    71	                       session's own connection (requires SUPERUSER or
+    72	                       CREATEROLE privilege on the app role).
+    73	        """
+    74	        self._admin_dsn = admin_dsn
+    75	        self._active_roles: dict[str, SessionRoleInfo] = {}
+    76	        self._rls_available: bool | None = None  # Lazy-checked
+    77	
+    78	    def _sanitize_session_id(self, session_id: str) -> str:
+    79	        """Sanitize session_id for use as a PG role name component."""
+    80	        # Keep only alphanumeric and underscore, truncate to 8 chars
+    81	        clean = re.sub(r"[^a-zA-Z0-9_]", "", session_id)
+    82	        return clean[:8] if clean else "default"
+    83	
+    84	    def _build_role_name(self, session_id: str) -> str:
+    85	        """Build a PostgreSQL role name from session_id."""
+    86	        suffix = self._sanitize_session_id(session_id)
+    87	        role = f"{self._ROLE_PREFIX}_{suffix}"
+    88	        # Truncate to PG limit
+    89	        return role[: self._MAX_ROLE_LEN]
+    90	
+    91	    async def _check_rls_support(self, db: AsyncSession) -> bool:
+    92	        """Check if the PostgreSQL server supports RLS.
+    93	
+    94	        Returns True if RLS is available, False otherwise.
+    95	        Caches the result after first check.
+    96	        """
+    97	        if self._rls_available is not None:
+    98	            return self._rls_available
+    99	
+   100	        try:
+   101	            result = await db.execute(
+   102	                text("SELECT current_setting('row_security') AS rls")
+   103	            )
+   104	            row = result.first()
+   105	            self._rls_available = row is not None and row[0] == "on"
+   106	        except Exception as e:
+   107	            logger.warning(f"RLS support check failed: {e}")
+   108	            self._rls_available = False
+   109	
+   110	        if not self._rls_available:
+   111	            logger.warning(
+   112	                "PostgreSQL RLS is not available. "
+   113	                "Falling back to application-level session isolation."
+   114	            )
+   115	        return self._rls_available
+   116	
+   117	    async def create_session_role(
+   118	        self, session_id: str, db: AsyncSession
+   119	    ) -> str:
+   120	        """Create a PostgreSQL role for a sandbox session.
+   121	
+   122	        Creates a LOGIN role with limited permissions. The role name
+   123	        follows the pattern: sandbox_{session_id[:8]}
+   124	
+   125	        Args:
+   126	            session_id: The sandbox session identifier.
+   127	            db: AsyncSession for executing SQL.
+   128	
+   129	        Returns:
+   130	            The created role name.
+   131	
+   132	        Raises:
+   133	            RuntimeError: If role creation fails.
+   134	        """
+   135	        role_name = self._build_role_name(session_id)
+   136	
+   137	        # Check if role already exists
+   138	        try:
+   139	            result = await db.execute(
+   140	                text("SELECT 1 FROM pg_roles WHERE rolname = :role"),
+   141	                {"role": role_name},
+   142	            )
+   143	            if result.first():
+   144	                logger.info(f"Session role already exists: {role_name}")
+   145	                self._active_roles[session_id] = SessionRoleInfo(
+   146	                    role_name=role_name, session_id=session_id, active=True
+   147	                )
+   148	                return role_name
+   149	        except Exception as e:
+   150	            logger.warning(f"Role existence check failed: {e}")
+   151	
+   152	        # Create the role
+   153	        try:
+   154	            # Use quoted identifier to prevent injection
+   155	            safe_role = role_name.replace('"', '""')
+   156	            await db.execute(
+   157	                text(
+   158	                    f'CREATE ROLE "{safe_role}" WITH LOGIN '
+   159	                    f"NOSUPERUSER NOCREATEDB NOCREATEROLE "
+   160	                    f"NOINHERIT NOREPLICATION "
+   161	                    f"CONNECTION LIMIT 5 "
+   162	                    f"VALID UNTIL 'infinity'"
+   163	                )
+   164	            )
+   165	            await db.flush()
+   166	
+   167	            self._active_roles[session_id] = SessionRoleInfo(
+   168	                role_name=role_name, session_id=session_id, active=True
+   169	            )
+   170	            logger.info(f"Created session role: {role_name}")
+   171	            return role_name
+   172	
+   173	        except Exception as e:
+   174	            logger.error(f"Failed to create session role {role_name}: {e}")
+   175	            raise RuntimeError(
+   176	                f"Role creation failed for session {session_id}: {e}"
+   177	            ) from e
+   178	
+   179	    async def setup_rls_policy(
+   180	        self, table_name: str, session_id: str, db: AsyncSession
+   181	    ) -> bool:
+   182	        """Create an RLS policy that filters rows by session_id.
+   183	
+   184	        Enables RLS on the table and creates a policy that restricts
+   185	        access to rows where session_id matches the current session's role.
+   186	
+   187	        The policy uses current_setting('cds.session_id') to identify the
+   188	        session at query time.
+   189	
+   190	        Args:
+   191	            table_name: The table to apply RLS on.
+   192	            session_id: The sandbox session identifier.
+   193	            db: AsyncSession for executing SQL.
+   194	
+   195	        Returns:
+   196	            True if RLS policy was applied, False if fallback mode.
+   197	        """
+   198	        rls_ok = await self._check_rls_support(db)
+   199	        if not rls_ok:
+   200	            logger.warning(
+   201	                f"RLS not available, skipping policy for {table_name}. "
+   202	                "Using application-level filtering."
+   203	            )
+   204	            return False
+   205	
+   206	        role_name = self._build_role_name(session_id)
+   207	        policy_name = f"rls_{role_name}_{table_name}"
+   208	
+   209	        # Sanitize identifiers
+   210	        safe_table = table_name.replace('"', '""')
+   211	        safe_policy = policy_name.replace('"', '""')
+   212	        safe_role = role_name.replace('"', '""')
+   213	
+   214	        try:
+   215	            # Enable RLS on the table (requires table owner)
+   216	            await db.execute(
+   217	                text(f'ALTER TABLE "{safe_table}" ENABLE ROW LEVEL SECURITY')
+   218	            )
+   219	
+   220	            # Force RLS even for table owner
+   221	            await db.execute(
+   222	                text(
+   223	                    f'ALTER TABLE "{safe_table}" FORCE ROW LEVEL SECURITY'
+   224	                )
+   225	            )
+   226	
+   227	            # Create permissive policy for the session role
+   228	            # Uses current_setting to get session context at runtime
+   229	            await db.execute(
+   230	                text(
+   231	                    f'CREATE POLICY "{safe_policy}" ON "{safe_table}" '
+   232	                    f"FOR ALL "
+   233	                    f'TO "{safe_role}" '
+   234	                    f"USING (session_id = current_setting('cds.session_id')::text) "
+   235	                    f"WITH CHECK (session_id = current_setting('cds.session_id')::text)"
+   236	                )
+   237	            )
+   238	            await db.flush()
+   239	
+   240	            # Track applied policy
+   241	            info = self._active_roles.get(session_id)
+   242	            if info:
+   243	                info.tables_granted.append(table_name)
+   244	
+   245	            logger.info(
+   246	                f"RLS policy '{safe_policy}' applied on '{safe_table}' "
+   247	                f"for role '{safe_role}'"
+   248	            )
+   249	            return True
+   250	
+   251	        except Exception as e:
+   252	            logger.warning(
+   253	                f"RLS policy setup failed for {table_name}: {e}. "
+   254	                "Falling back to application-level filtering."
+   255	            )
+   256	            return False
+   257	
+   258	    async def grant_table_access(
+   259	        self,
+   260	        role: str,
+   261	        table_name: str,
+   262	        permissions: list[str],
+   263	        db: AsyncSession,
+   264	    ) -> bool:
+   265	        """Grant specific permissions on a table to a session role.
+   266	
+   267	        Args:
+   268	            role: The PostgreSQL role name.
+   269	            table_name: The table to grant access to.
+   270	            permissions: List of permissions (e.g., ['SELECT', 'INSERT']).
+   271	            db: AsyncSession for executing SQL.
+   272	
+   273	        Returns:
+   274	            True if grants succeeded.
+   275	
+   276	        Raises:
+   277	            ValueError: If an unsafe permission is requested.
+   278	        """
+   279	        # Validate permissions - only allow safe DML operations
+   280	        unsafe = {"CREATE", "DROP", "ALTER", "TRUNCATE", "GRANT", "ALL"}
+   281	        requested = {p.upper().strip() for p in permissions}
+   282	        dangerous = requested & unsafe
+   283	        if dangerous:
+   284	            raise ValueError(
+   285	                f"Unsafe permissions requested for session role: {dangerous}. "
+   286	                f"Allowed: {self._SAFE_PERMISSIONS}"
+   287	            )
+   288	
+   289	        safe_role = role.replace('"', '""')
+   290	        safe_table = table_name.replace('"', '""')
+   291	
+   292	        granted = []
+   293	        for perm in requested:
+   294	            perm_upper = perm.upper()
+   295	            if perm_upper not in self._SAFE_PERMISSIONS:
+   296	                logger.warning(
+   297	                    f"Skipping unsupported permission '{perm}' for role {role}"
+   298	                )
+   299	                continue
+   300	            try:
+   301	                await db.execute(
+   302	                    text(
+   303	                        f'GRANT {perm_upper} ON "{safe_table}" '
+   304	                        f'TO "{safe_role}"'
+   305	                    )
+   306	                )
+   307	                granted.append(perm_upper)
+   308	            except Exception as e:
+   309	                logger.error(
+   310	                    f"Failed to grant {perm} on {table_name} to {role}: {e}"
+   311	                )
+   312	                raise
+   313	
+   314	        await db.flush()
+   315	        logger.info(f"Granted {granted} on {table_name} to {role}")
+   316	        return True
+   317	
+   318	    async def drop_session_role(
+   319	        self, session_id: str, db: AsyncSession
+   320	    ) -> bool:
+   321	        """Drop the session role and revoke all associated policies.
+   322	
+   323	        Cleans up all RLS policies and table grants created for this
+   324	        session, then drops the role.
+   325	
+   326	        Args:
+   327	            session_id: The sandbox session identifier.
+   328	            db: AsyncSession for executing SQL.
+   329	
+   330	        Returns:
+   331	            True if cleanup succeeded (best-effort).
+   332	        """
+   333	        role_name = self._build_role_name(session_id)
+   334	        safe_role = role_name.replace('"', '""')
+   335	        errors: list[str] = []
+   336	
+   337	        info = self._active_roles.get(session_id)
+   338	
+   339	        # Step 1: Drop RLS policies on granted tables
+   340	        if info and info.tables_granted:
+   341	            for table_name in info.tables_granted:
+   342	                policy_name = f"rls_{role_name}_{table_name}"
+   343	                safe_policy = policy_name.replace('"', '""')
+   344	                safe_table = table_name.replace('"', '""')
+   345	                try:
+   346	                    await db.execute(
+   347	                        text(
+   348	                            f'DROP POLICY IF EXISTS "{safe_policy}" '
+   349	                            f'ON "{safe_table}"'
+   350	                        )
+   351	                    )
+   352	                except Exception as e:
+   353	                    errors.append(
+   354	                        f"Failed to drop policy {policy_name}: {e}"
+   355	                    )
+   356	                    logger.warning(
+   357	                        f"Policy cleanup failed for {policy_name}: {e}"
+   358	                    )
+   359	
+   360	        # Step 2: Revoke all privileges
+   361	        try:
+   362	            await db.execute(
+   363	                text(f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM \"{safe_role}\"")
+   364	            )
+   365	        except Exception as e:
+   366	            errors.append(f"REVOKE ALL failed: {e}")
+   367	            logger.warning(f"Privilege revocation failed: {e}")
+   368	
+   369	        # Step 3: Drop the role
+   370	        try:
+   371	            await db.execute(text(f'DROP ROLE IF EXISTS "{safe_role}"'))
+   372	        except Exception as e:
+   373	            errors.append(f"DROP ROLE failed: {e}")
+   374	            logger.error(f"Failed to drop role {role_name}: {e}")
+   375	
+   376	        # Step 4: Clean up tracking
+   377	        if session_id in self._active_roles:
+   378	            self._active_roles[session_id].active = False
+   379	            del self._active_roles[session_id]
+   380	
+   381	        await db.flush()
+   382	
+   383	        if errors:
+   384	            logger.warning(
+   385	                f"Session role cleanup for {session_id} had {len(errors)} errors"
+   386	            )
+   387	            return False
+   388	
+   389	        logger.info(f"Session role {role_name} dropped for session {session_id}")
+   390	        return True
+   391	
+   392	    def get_connection_string(
+   393	        self, session_id: str, base_dsn: str
+   394	    ) -> str:
+   395	        """Return a DSN with the session-specific role.
+   396	
+   397	        Replaces the username in the base DSN with the session role name
+   398	        and adds cds.session_id as a runtime parameter.
+   399	
+   400	        Args:
+   401	            session_id: The sandbox session identifier.
+   402	            base_dsn: The base PostgreSQL DSN
+   403	                      (e.g., postgresql+asyncpg://user:pass@host:5432/db).
+   404	
+   405	        Returns:
+   406	            Modified DSN string with session role and session context.
+   407	        """
+   408	        role_name = self._build_role_name(session_id)
+   409	
+   410	        # Parse and replace the username in the DSN
+   411	        # Pattern: postgresql[+driver]://[user[:pass]@]host[:port][/db][?params]
+   412	        dsn = base_dsn
+   413	
+   414	        # Replace username portion
+   415	        # Match: ://user@ or ://user:pass@
+   416	        dsn = re.sub(
+   417	            r"://([^:@]+)(:[^@]*)?@",
+   418	            f"://{role_name}:\\2@",
+   419	            dsn,
+   420	            count=1,
+   421	        )
+   422	
+   423	        # Add session context as a runtime parameter
+   424	        separator = "&" if "?" in dsn else "?"
+   425	        dsn += f"{separator}options=-c%20cds.session_id%3D{session_id}"
+   426	
+   427	        return dsn
+   428	
+   429	    def get_status(self, session_id: str) -> RLSStatus:
+   430	        """Get the RLS status for a session."""
+   431	        info = self._active_roles.get(session_id)
+   432	        if not info:
+   433	            return RLSStatus(
+   434	                session_id=session_id,
+   435	                fallback_mode=self._rls_available is False,
+   436	            )
+   437	        return RLSStatus(
+   438	            session_id=session_id,
+   439	            role_created=True,
+   440	            rls_enabled=bool(info.tables_granted),
+   441	            policies_applied=list(info.tables_granted),
+   442	            fallback_mode=self._rls_available is False,
+   443	        )
+   444	
+   445	    async def set_session_context(
+   446	        self, session_id: str, db: AsyncSession
+   447	    ) -> None:
+   448	        """Set the session context for RLS policy evaluation.
+   449	
+   450	        Sets the cds.session_id PostgreSQL configuration parameter
+   451	        on the current connection so RLS policies can use it.
+   452	
+   453	        Args:
+   454	            session_id: The sandbox session identifier.
+   455	            db: AsyncSession for executing SQL.
+   456	        """
+   457	        safe_id = session_id.replace("'", "''")
+   458	        await db.execute(
+   459	            text(f"SET LOCAL cds.session_id = '{safe_id}'")
+   460	        )
+   461	
+   462	    @property
+   463	    def active_sessions(self) -> list[str]:
+   464	        """List session IDs with active roles."""
+   465	        return [
+   466	            sid
+   467	            for sid, info in self._active_roles.items()
+   468	            if info.active
+   469	        ]
+   470	
+   471	
+   472	# Singleton (no admin_dsn -- uses app connection by default)
+   473	pg_rls_manager = PGRLSManager()

@@ -1,0 +1,126 @@
+H alembic.ini :: 这里的注释「Database URL is loaded from app config in env.py」给出的安全保证并不成立：`alembic/env.py:35` 执行的是 `config.set_main_option("sqlalchemy.ur
+H alembic.ini :: 这里声明“URL 由 env.py 从 app config 加载”，但整条链路上没有任何 fail-closed 校验：`alembic/env.py` 无条件执行 `config.set_main_option("sqlalchemy.url", sett
+C app/static/js/admin.js :: **XSS / HTML 注入风险（高）**：`badge()` 把 `text` 与 `type` 直接拼进 HTML 字符串。该函数（及 `statusBadge()`、调用方拼接的表格行）最终会被写入 `innerHTML`，一旦 `text` 来自服务
+H app/static/js/admin.js :: **空响应体解析会误报失败（高）**：DELETE 接口按 REST 惯例常返回 `204 No Content` 或空 body，此处无条件调用 `res.json()` 会抛出 `SyntaxError: Unexpected end of JSON in
+H app/static/js/admin.js :: **`_headers()` 三个问题**：① token 存 `localStorage` 会被任何 XSS 直接窃取，且无过期时间/刷新/失效清除逻辑，401 后仍需手工清理；若后端支持，建议改用 `httpOnly` Cookie 或至少 `sessio
+H app/static/js/admin.js :: **错误信息直接写入 innerHTML + 空引用风险**：`e.message` 由 `${res.status}: ${await res.text()}` 拼接而来，包含服务端原始响应体；此处再插入 `innerHTML`，任何回显用户输入的接口错误都
+H app/static/js/admin.js :: get/post/del 三个方法重复了 `res.ok` 校验 + `res.json()` 解析逻辑，且存在两个隐患：
+C app/static/js/admin.js :: `badge()` 把 text/type 原样拼进 HTML 字符串，而调用方几乎都通过 `innerHTML` 渲染表格。`text` 通常来自后端数据（用户名、状态、备注等），一旦包含 `<img src=x onerror=...>` 就会造成存储型 
+H app/static/js/admin.js :: `statusBadge` 直接把后端返回的 status 透传给 `badge()` 拼 HTML，未做转义（同 badge 的 XSS 问题）；同时 `map[status]` 在 status 为 `constructor`/`toString` 等原型
+H app/static/js/admin.js :: 三个问题：
+C app/templates/alerts.html :: 存储型 XSS：行模板把接口返回的 alert_type / type / severity / status / message 直接插值进 innerHTML，而 admin.js 中的 badge()/statusBadge()/truncate() 都
+H app/templates/alerts.html :: catch 分支把 e.message 直接写入 innerHTML。API.get 抛出的 Error 文本是 `${res.status}: ${await res.text()}`（admin.js:7），即整段 HTTP 响应体会被渲染进 DOM：一是
+H app/templates/alerts.html :: 状态枚举与后端不一致，统计必然错误。AlertStatus 只有 open / acknowledged / resolved（app/models/alert.py:12-15），而这里用 'active' / 'firing' 判定活跃告警，永远不会命中，
+C app/templates/alerts.html :: **XSS 风险（严重）**：`a.alert_type / a.type`、`a.message / a.description` 均来自后端 API，未经 HTML 转义直接拼进模板字符串并写入 `innerHTML`。告警消息通常由外部输入（连接器名、任
+H app/templates/alerts.html :: **XSS 风险**：`badge()` / `statusBadge()` 内部同样是模板字符串拼接（`<span class="badge badge-${type}">${text}</span>`），传入的 `a.severity`、`status` 
+H app/templates/alerts.html :: **异常信息直接渲染，存在 HTML 注入与信息泄露**：`API.get` 抛出的 Error 消息形如 `${res.status}: ${await res.text()}`，其中包含服务端原始响应体（可能含 SQL 片段、堆栈、内部路径等）。这里既把敏
+H app/templates/alerts.html :: **响应结构兼容与类型校验不足**：`data.items || data.alerts || data || []` 的“链式兜底”只在字段恰好缺失时生效——若接口返回 `{code, msg, data:{list:[]}}` 这类包装结构，`list` 
+H app/templates/base.html :: **安全问题：scripts block 是未加固的任意内联 JS 注入点，且整条渲染链路没有转义保障。**
+C app/templates/blockchain.html :: 存储型 XSS 风险：`detail.merkle_root`/`detail.tx_hash`/`a.resource_id` 全部来自后端 `audit_logs.detail`（JSONB，写入方包含各类业务动作与外部上报，例如 egress taile
+H app/templates/blockchain.html :: 反射型 XSS：`API.get` 在 `admin.js` 中抛出的 `Error.message` 形如 `${res.status}: ${await res.text()}`，即把**完整响应体**塞进了 message。这里又把它直接写入 `inne
+C app/templates/blockchain.html :: 字段名与后端契约不符，验证结果永远显示“失败”。`app/api/audit.py` 的 `/api/v1/audit/verify/{record_id}` 返回的是 `{"verified": bool, "reason"|"verification_no
+C app/templates/blockchain.html :: 同样的 XSS 面：`recordId` 是**直接来自输入框的原始用户输入**，被回显进 `innerHTML`（反射型 XSS 入口，`<img src=x onerror=...>` 即可触发）；`result.record_id` / `result.
+H app/templates/blockchain.html :: 路径注入：`recordId` 仅 `trim()` 后直接插入 URL 路径，未做 `encodeURIComponent`，也未做 UUID 格式校验。输入含 `?`/`#`/`../` 时会改变实际请求（例如追加查询串、截断 fragment，或配合其它
+H app/templates/blockchain.html :: 输入语义与后端能力不一致：`/api/v1/audit/verify/{record_id}` 内部执行 `uuid.UUID(record_id)`，只接受审计记录 UUID，传 tx_hash 必然得到 400 "Invalid record ID"；而这
+H app/templates/blockchain.html :: 统计口径误报（关键逻辑缺陷）：当本页没有任何 anchor/blockchain 动作记录时，直接回退展示“最近 20 条普通审计记录”，但它们仍会被计入 `#total-anchors`（“锚定记录”）并在 `detail` 含相关字段时计入“已验证”。结果
+H app/templates/blockchain.html :: 两处问题：1) 在 `.map()` 的渲染回调里累加 `verified` 是渲染与统计耦合，一旦后续对行做过滤/分页/排序，统计就会静默失真，应独立用 `filter`/`reduce` 计算。2) “已验证”的判定仅是 `detail.merkle_ro
+C app/templates/blockchain.html :: 存储型 XSS：merkle_root / tx_hash / resource_id / block_height 均来自 /api/v1/audit/records 的审计数据（可被上游写入方影响），直接经 innerHTML 插值渲染。已确认 admin
+H app/templates/blockchain.html :: 反射型 XSS：`recordId` 是用户在 #tx-hash 输入框里输入的原始字符串，当接口未返回 record_id 时会被直接 innerHTML 注入；`result.merkle_root` 同样来自服务端响应未转义。攻击者只需诱导管理员粘贴一段
+H app/templates/blockchain.html :: URL 注入 / 路径穿越：用户输入未经 encodeURIComponent 直接拼进请求路径。输入中的 `?`、`#`、`/`、`..`、空格等会改变实际请求的 path 与 query（例如 `xxx?admin=1` 或 `../../other-en
+H app/templates/blockchain.html :: 响应结构假设不健壮 + 状态未复位：1) `data` 若是既无 items 也无 records 的分页对象（如 `{total, data: [...]}`）或字符串，`list` 就成了非数组，后续 `list.filter(...)` 直接抛 Type
+C app/templates/certificates.html :: 存储型 XSS：`subject`（对应后端 CertGenerateRequest.subject，最长 200 字符的用户可控 DN）、`cert_type`、`cert_id` 都被直接拼进 innerHTML 模板字符串，而 `truncate()`（
+C app/templates/certificates.html :: 内联事件中的 JS 字符串注入：`c.cert_id` 未经 JS 转义就嵌入单引号包裹的 `onclick` 属性。一旦 id 中含有 `'` 或 `</button><script>` 等内容（后端 cert_id 为字符串字段，且列表数据完全来自外部），
+H app/templates/certificates.html :: 证书类型映射与后端契约、用户意图不一致：后端 `CertGenerateRequest.cert_type` 只接受 `signing|encryption`（见 app/api/certificates.py），根本没有 Root CA / Intermed
+H app/templates/certificates.html :: 吊销请求必然失败：后端 `DELETE /api/v1/certificates/{cert_id}` 声明了 `body: HighRiskOperationRequest = Body(...)`（reason 必填且 min_length=8，可选 ti
+H app/templates/certificates.html :: 字段契约不匹配导致状态列永远失真：后端 `GET /api/v1/certificates/list` 返回的是 `CertResponse` 列表，该模型只有 cert_id/subject/issuer/serial_number/cert_type/no
+C app/templates/certificates.html :: 存储型 XSS：表格行用 innerHTML 拼接，`subject`/`cert_type`/`cert_id` 全部未转义直接插入 HTML。已确认 `admin.js` 中 `truncate()` 与 `badge()/statusBadge()` 都
+C app/templates/certificates.html :: 内联事件属性注入：服务端返回的 `cert_id` 被原样插入 `onclick="...('...')"` 的 JS 字符串字面量中，单引号/反斜杠/`</` 等字符会破坏属性语法甚至闭合标签执行脚本（无需转义函数缺失即可注入）。同时当 `cert_id` 
+H app/templates/certificates.html :: 错误信息反射型 XSS：`API.get` 在 `admin.js` 中通过 `new Error(\`${res.status}: ${await res.text()}\`)` 把**响应体原文**塞进 message，这里又用 innerHTML 渲染，
+H app/templates/certificates.html :: 证书类型信息被丢失：下拉框提供 root/intermediate/endpoint 三种，但三元表达式把 `root` 与 `intermediate` 都映射成 `signing`，后端无法区分自签根 CA 与中间 CA（两者在 `CA` basicCon
+H app/templates/certificates.html :: 签发结果同样存在多处问题：1) `result.cert_id`/`result.subject`/PEM 全部未转义写入 innerHTML（`truncate()` 不转义），后端回显的 Subject 可闭合 `<pre>`/`</p>` 注入脚本；2)
+C app/templates/connectors.html :: **XSS 风险（存储型）**：`c.space_name / c.name / c.space_type / c.connector_type` 以及 `statusBadge(c.status)` 的返回值都被直接拼进 `innerHTML`。连接器名称、
+C app/templates/connectors.html :: **内联事件 + 字符串拼接导致 JS 注入**：`c.id` 被直接插入 `onclick="...('${c.id}')"`。若 id 含单引号（如 `a');fetch(...);//`）即可闭合字符串/属性，执行任意代码；即使 id 合法，这种拼接方式
+H app/templates/connectors.html :: **空态/统计处理不正确**：
+H app/templates/connectors.html :: **异常信息直接写入 innerHTML**：`API.get` 抛出的 `e.message` 由 `${res.status}: ${await res.text()}` 拼成，即服务端响应体原文。若后端回显了用户输入或返回 `text/html`，这里就
+H app/templates/connectors.html :: **“恢复”操作复用了 suspend 接口**：按钮文案按状态在“暂停/恢复”间切换，但调用的始终是 `/api/v1/connectors/{id}/suspend`。若后端 suspend 非幂等切换（通常如此），点“恢复”只会再次挂起，UI 永远无法恢
+C app/templates/identities.html :: 存储型 XSS：列表行通过 `innerHTML` + 模板字符串直接拼接服务端返回字段，而 `admin.js` 中的 `truncate/statusBadge/badge` 全部是原始字符串拼接，项目里**没有任何 HTML 转义函数**。`key_id
+C app/templates/identities.html :: 内联事件属性注入：`k.key_id` 未经转义直接嵌入 `onclick="..."` 属性中的 JS 字符串字面量。只要 key_id 含单引号即可闭合字符串并注入任意 JS（例如 `a');alert(1);//`），若含 `'` 与 `"` 还可闭合属
+H app/templates/identities.html :: 多处逻辑缺陷：
+H app/templates/identities.html :: URL 路径未编码：`keyId` 直接拼进请求路径，没有 `encodeURIComponent`。若 key_id 含 `/`、`?`、`#` 或 `..`（前端列表数据可被注入/脏数据影响），会改变实际请求的目标路径，导致误销毁其他密钥或路径越界（如 `
+C app/templates/identities.html :: 存储型/反射型 XSS：`truncate()`、`statusBadge()`（见 admin.js）都只是字符串拼接，不做任何 HTML 转义，`key_id`、`product_id`、`algorithm`、`status` 全部原样插入 `inner
+C app/templates/identities.html :: `e.message` 直接写入 innerHTML 构成 XSS 注入点：admin.js 中 `throw new Error(`${res.status}: ${await res.text()}`)` 会把后端响应体原文（FastAPI 422 会原样
+H app/templates/identities.html :: 把 `key_id` 内插进 HTML 事件属性是注入点：若 key_id 含单引号（或 `'-alert(1)-'`）即可闭合属性注入任意 JS，无法用 HTML 实体转义规避（属性内先解码再作为 JS 解析）。且 `truncate(k.key_id, 3
+C app/templates/identities.html :: 与后端契约不符，销毁操作必然失败：`DELETE /api/v1/kms/keys/{key_id}`（app/api/kms.py:194）声明了 `body: HighRiskOperationRequest = Body(...)`，必须提交 `reas
+C app/templates/identities.html :: 调用方式与后端不匹配，生成密钥必然 422：后端 `create_dek(product_id: uuid.UUID, ...)` 是必填 query 参数（FastAPI 对非 Body 标量默认按 query 解析），不接收 JSON body；且类型是 
+H app/templates/identities.html :: 两个问题：1) `result.key_id` 未转义即插入 innerHTML（同 XSS 面）；2) 该模板预留了把 `key_bytes` 明文渲染到 DOM 的位置——后端当前只返回 `{key_id, status, algorithm}`，所以这行
+H cds-frontend/eslint.config.js :: `reactHooks.configs.flat.recommended` 与声明的依赖版本存在兼容风险：`package.json` 锁的是 `eslint-plugin-react-hooks: ^7.1.1`，而该插件从 v6 起已将 flat conf
+H cds-frontend/package.json :: `test:coverage` 脚本执行 `vitest run --coverage`，而 `vite.config.ts` 中已配置 `coverage.provider: 'v8'`，但 devDependencies 中缺少 `@vitest/cove
+H cds-frontend/package.json :: 需在 devDependencies 中补充 `@vitest/coverage-v8`（provider 需与 vitest 4.x 对齐），否则 `npm run test:coverage` / CI 覆盖率阶段必然失败。若还需要 json/junit 
+H antdLocale.ts :: `unwrapLocale` 只脱一层壳，无法覆盖注释里描述的互操作场景：当打包器产出多层包装（如 `{ default: { default: { locale, Pagination, … } } }` 或 `{ __esModule: true, def
+H antdLocale.ts :: 模块加载期直接消费 `unwrapLocale` 的结果且没有任何校验/兜底：由于 `unwrapLocale` 的兜底分支会把 `mod` 原样 `as Locale` 返回，一旦 `zhCNModule` 为 `undefined`/`null`（解析失败
+H antdReact19Patch.ts :: root 缓存未清理：`host.cdsReactRoot` 只在创建时写入，cleanup 里调用 `root.unmount()` 后从未删除该属性。antd 静态方法（message/notification/Modal.confirm）在 `destr
+H antdReact19Patch.ts :: 延迟卸载竞态：cleanup 先 `await setTimeout(0)` 再 `root.unmount()`，而 antd 的 promise / onClose 并不保证等待这个异步回调。典型场景 `message.destroy()` 后紧接着 `m
+H components/Audit/AuditVerifyModal.tsx :: 验真结论存在“过早成功”竞态：`proofError` 只在 `proofQuery.isError` 时非空，而 proofQuery 是在 verifyQuery 返回后（`anchored` 才为 true）才被启用，因此首次打开弹窗必然经历「verif
+H components/Feedback/errorHints.ts :: `ERROR_HINTS` 是普通对象字面量，`ERROR_HINTS[code]` 会沿原型链命中 `Object.prototype` 上的属性：当后端（或攻击者可控的错误响应）返回 `code="toString"`、`"constructor"`、`"
+H components/Feedback/SimulationBadge.tsx :: 两处启发式缺陷：1) 子串匹配过宽且顺序不对——`includes('sim')` 先于否定判断执行，`'not_simulated'`、`'sim_disabled'`、`'disable_sim'` 会被误判为 `simulated`；`'simple'`
+C components/Layout/DataplaneBanner.tsx :: 横幅实际上永远不会渲染：`services/api.ts` 的响应拦截器已经做了 `(response) => response.data`（api.ts:38），所以这里 `resp` 就是后端 body `{matrix, levels, dataplan
+H components/Layout/MainLayout.tsx :: 折叠状态可用性风险：`trigger={null}` 已移除 antd 自带触发器，而 `Header.tsx` / `Sidebar.tsx` 中都没有展开入口，`onCollapse` 又把断点触发的自动收窄（type='responsive'）与用户主动
+H components/Layout/routeCrumb.ts :: `startsWith` 没有做「路径段边界」校验，会误命中同前缀的兄弟路径：`/deliveries-draft`、`/audit-log`、`/catalogs`、`/contracts-legacy`、`/home-page`、`/flow/tasksn
+H components/Layout/routeCrumb.ts :: FALLBACK 的语义会掩盖路由缺配。核对 `App.tsx` 后，一批**真实存在的页面**并不在真值表里，全部落到「运营概览 / 仪表盘」：`/ops/deployments`、`/ops/network-policies`、`/ops/pvcs`、`/
+H components/Layout/useCrumbSegments.ts :: 用 `'|'` 作为分隔符做「序列化—反序列化」往返会破坏面包屑数据：
+H components/Layout/useCrumbSegments.ts :: 清理函数写在依赖 `[key, setStack]` 的 effect 里，会有两类状态竞争/抖动问题：
+H components/Sandbox/ExecStreamTerminal.tsx :: 并发竞态：`socketRef.current` 只在 ticket 请求返回之后才被赋值，而 guard 只检查它。`handleRun` 里 Input 在 `state === 'connecting'` 时未禁用（`onPressEnter` 仍可触发
+H components/Sandbox/ExecStreamTerminal.tsx :: 卸载/异步取消未处理：await 期间组件可能已卸载（或 `disabled` 变 true 导致 host 节点被卸载），但此处仍会创建 WebSocket 并赋给 `socketRef.current`。卸载时 cleanup 已经执行完 `closeSo
+H components/Sandbox/ExecStreamTerminal.tsx :: `disabled` 分支提前 return 时，终端宿主 div 被卸载，但初始化 effect 依赖 `[closeSocket]`（稳定引用）不会重跑，因此不会 `closeSocket()` / `term.dispose()`：连接继续在后台流式执行
+H pages/Audit/auditDisplay.ts :: ① 空值安全：`record.action` 若在运行时为 undefined/null（详情接口/历史数据缺字段），`record.action.endsWith` 直接抛 TypeError，而 `auditActionLabel` 走的是索引访问不会抛，
+H pages/Auth/Register.tsx :: 注册成功后未校验响应字段就直接写入登录态：`authApi.register` 声明返回 `LoginResponse`，但运行时若后端返回 200 而字段缺失/为 null（如版本不一致、代理返回 HTML、网关改写），`login(resp.user, u
+H pages/Auth/Register.tsx :: 错误处理存在三处问题：1) `detail || '注册失败'` 分支未做类型收窄，当后端把 `detail` 返回为对象（FastAPI 允许 dict）或数字时，`message.error(msg)` 收到 ReactNode 非字符串值会抛 “Obje
+C pages/CapabilityMatrix.tsx :: 此处对 `data.matrix` 的假设过强：`Object.keys(data.matrix)` 在接口返回 `matrix: null`（或整体响应缺字段、被 axios 解包成 `undefined` 之外的空壳对象）时会直接抛 TypeError，导
+H pages/Flow/contractDataModel.ts :: `fulfilled` 分支直接透传 `entry.value`，没有校验其有效性。`PromiseSettledResult<T>` 的 `value` 类型是 TS 假设，运行时完全可能是 `undefined`/`null`（例如取数函数用 `res.d
+H pages/Flow/devTasksModel.ts :: **「已发布生产」阶段判定与生产执行口径不一致**：`publishedNotebookIds` 只看 `status === published`，没有过滤 `env`，而 `publishedProductionByTask`（生产执行目标）要求 `env
+H pages/Flow/display.ts :: `/open/v1/${slug}` 既没校验也没编码：slug 含 `/`、`#`、`?` 或 `..` 时会改变实际请求路径（越权打到其他端点/路径穿越）。更重要的是这个函数与服务层 `openApiCallPathForSlug`（已 `encodeUR
+H pages/Flow/homeModel.ts :: `opsLogSubtext` 直接把 `ops.failures` 插进模板串，缺数时会被渲染成字面量「失败 undefined」/「失败 null」，直接违反本文件头部第 1 条不变式（缺数一律 UNKNOWN_TEXT，绝不折算成 0 或输出脏字符串）。
+H pages/Flow/homeModel.ts :: `taskFilterTabs` 对 `overview.task_filters` 做无保护的多级解引用：`useHomeOverview()` 在 loading/error 阶段返回 `undefined`，或后端把 `task_filters` 整个块
+H pages/Flow/notebookWorkbenchModel.ts :: 缺失 `exit_code` 时按 0 处理 → 显示「执行成功」且不计入问题；而 `lastExecutionFromLogs` 里 `ok = exit === 0`（缺失时为 `false`）会显示「执行失败」。同一条 `sandbox.execute`
+H pages/Flow/notebookWorkbenchModel.ts :: 这里把 `detail` 的任意标量键值原样拼进 UI 文本，而 `NOISY_DETAIL_KEYS` 只是「噪音字段」而非敏感字段清单。审计 detail 常带 `command`（可能含内联凭证）、`sql`/`query`、`path`、`user_i
+H pages/Flow/notebookWorkbenchModel.ts :: 两处问题：1) 没有过滤 `created_at` 为空的记录，`String(undefined)` 得到 `"undefined"`，在降序 `localeCompare` 中排在所有 ISO 串之前，于是这条「时间未知的记录」被当成最近一次执行（`at:
+H pages/Flow/useContractOptions.ts :: `enabled` 只挡了 `null`，没有挡空字符串（以及运行时可能传入的 `undefined` / 纯空白）。当上游把「未选择合约」表示成 `''`（表单初值、`row.contract_id ?? ''`、URL query 缺省等常见写法都会这样）
+H pages/Sandbox/sessionWorkbench.ts :: `supportsWsStreaming` 的回退条件与注释语义不一致，存在“误开流式执行”的功能/安全风险：
+H pages/Sandbox/sessionWorkbench.ts :: `rowReviewStatus` 的两个问题：
+H services/api.ts :: 401 刷新队列中的请求在重放前未设置 `_retry` 标记。若刷新得到的新 token 仍返回 401（例如后端权限数据异常或 token 未生效），排队请求被重放后会再次进入 401 分支：此时 `isRefreshing` 已在 finally 中被重
+H services/api.ts :: 刷新请求直接使用原生 `axios.post`，绕过了 `api` 实例的 `timeout: 30000`（默认无超时）。一旦 `/auth/refresh` 因网关挂起、半开连接等原因长时间不返回，`finally` 永远不会执行，`isRefreshin
+H services/api.ts :: 直接对 `response.data` 解构而未做空值/字段校验。若刷新接口返回 200 但响应体结构不符（网关返回 HTML、字段名变更、后端返回 `{detail:...}`），`access_token` 会是 `undefined`，随后 `setTo
+C services/authApi.ts :: **安全风险（私钥外泄，critical）**：`generateSM2Keys` 把 `private_key` 直接返回给浏览器端。SM2 私钥属于长期凭据，一旦下发到前端，就必然进入 JS 堆内存、Redux/Zustand store、React De
+C services/authApi.ts :: **安全风险（私钥随请求体上行，critical）**：`signData` 要求调用方把 `private_key` 作为参数并放进请求体。问题有三：1）私钥每次签名都要走一次网络，任何反向代理 access log、网关审计、浏览器 DevTools、错误
+H services/authApi.ts :: **安全风险（refresh_token 传递与会话劫持）**：`refresh` 把 `refresh_token` 作为普通 JSON 字段由前端持有并提交。结合 `api.ts` 中 `useAuthStore` 取 token 的实现（若 store 
+H services/complianceApi.ts :: 类型契约与后端不一致：后端 `AnchoringDisclosure` 是 `| None = None`（可空），此处声明为必填非空。消费方 `ComplianceDisclosure.tsx:145-151` 直接 `report.anchoring.ba
+H services/computeApi.ts :: 这里把 900s 超时用在一个**非幂等的 POST** 上，与共享实例的重试语义叠加会产生重复执行风险：`api.ts` 的响应拦截器在 401 时会静默 refresh 后 `return api(originalRequest)` 重发原请求（408 只
+H services/computeApi.ts :: 该 mutation 存在三个缺陷：1）没有任何错误反馈路径——`api.ts` 错误分支 `reject(error.response?.data || error)` 抛出的往往是普通对象而非 `Error`，调用方若写 `err.message` 会拿到
+H services/federationApi.ts :: `created_at` 缺失时用「当前时间」兜底会伪造审计时间。后端 `_trust_payload()` 里 `created_at` 一定是 `trust.created_at.isoformat()`，一旦后端字段改名/返回结构变化（例如返回 `{it
+H services/fieldExposureApi.ts :: 路径参数未做 URL 编码：`productId` 直接插值进 URL。若上游传入的 id 含有 `/`、`?`、`#`、`..` 或空格等字符（例如从 URL query/路由参数透传而来的脏数据），会导致请求打到错误路由，甚至构成路径穿越/参数走私风险。建
+C services/fieldExposureApi.ts :: 空数组会“反向提权”：后端 `review_exposure_request` 的判断是 `approved = body.approved_fields if body.approved_fields else request.requested_field
+H services/identityApi.ts :: 证书状态推导存在安全逻辑缺陷：`Number.isNaN(expiresAt.getTime()) || expiresAt >= new Date()` 把**日期解析失败（非法/缺失的 not_after）也判为 active**，即异常数据被当作有效证书
+H services/identityApi.ts :: 服务层把 `key_pem`（私钥）原样透传到前端类型与返回对象中，属于敏感信息暴露风险：私钥一旦进入前端 state/localStorage/日志（或 Redux DevTools、错误上报快照）即不可控。请确认后端是否真的返回私钥；若无需在前端展示，应在
+H services/identityApi.ts :: `normalizeKmsKey` 把 `key_type` 硬编码为 `'dek'`、算法缺失时硬编码为 `'SM4'`，会丢失后端真实密钥类型/算法：`listKeys({ key_type: 'session' | 'kek' })` 过滤后 UI 仍全
+C services/identityApi.ts :: 证书链校验存在 fail-open 的安全误判：1) `data.valid !== false && !data.error` 在后端响应缺少 `valid`/`error` 字段（如返回 `{}`、`{result:...}` 或结构变更）时会判定为**校
+H services/k8sOpsApi.ts :: **路径参数未编码，存在路径注入/错路由风险（安全 + 正确性）**
+H services/mpcApi.ts :: 安全（密钥材料泄露面）：`MpcShare.share_value` 是完整的 Shamir 分片密文，直接把分片值返回给浏览器意味着密钥材料会进入前端内存、react-query 缓存（可能被 devtools 读取），并会在任何 `console.log(
+H services/mpcApi.ts :: 敏感信息处理：`secret_hex` 是原始密钥材料，这里既没有做任何前置校验（hex 合法性/长度、`threshold >= 1`、`threshold <= total_shares`、`total_shares` 与 `holders.length`
+H services/mpcApi.ts :: Bug/安全 + 契约语义不清：(1) `keyId` 同样缺少 `encodeURIComponent`，销毁是不可逆的高危操作，路径被畸形输入改写风险最高，必须编码；(2) 返回值里 `persisted` 语义未注释（是"销毁前存在持久化副本"还是"销毁
+H services/outputControlApi.ts :: 两处安全敏感参数直接做模板字符串拼接，未做任何编码/校验：
+H types/models.ts :: `security_level` 用裸 `string | null` 表达，但 `./enums` 里已经定义了 `SensitivityLevel`（core/sensitive/restricted/public）且未被本文件引用。安全等级是访问控制/脱
+H types/models.ts :: 同一业务语义在两个模型里类型不一致：`DataProduct.allowed_operations: string[] | null`，而 `Contract.allowed_operations: string | null`（`allowed_sandbo
+H types/models.ts :: `allowed_output_formats: string` 同样存在“字符串集合 + null 语义不明”的问题；更关键的是与它相邻的三个硬限制字段空值语义不统一：`max_duration_hours`、`max_output_rows` 为非空 `n
+H types/security.ts :: `stage`/`severity`/`type` 使用裸 `string`，等于放弃了编译期约束：后端若返回 `"High"`、`"hight"`、`"block"` 等值，前端所有 `severity === 'high'` 之类的判断都会静默失效（严重级
+H types/security.ts :: `passed`、`blocked` 同为可选布尔，语义存在 4 种组合（true/false × 缺失），消费端无法区分“扫描通过”“扫描未执行/结果缺失”“被阻断”三种截然不同的安全结论。安全场景下应遵循 fail-closed：缺失即视为不通过。建议把结
+H types/security.ts :: 这组字段直接决定“原始输出能否展示给用户”，但全部可选且缺失语义未定义：`dp_applied` 缺失（undefined）时无法判断是否已做差分隐私处理；`signature` 缺失时无法区分“未签名”与“验签失败”；`redacted_output` 为 
+H utils/crypto.ts :: 签名原文采用 `|` 直接拼接且不做任何转义/长度约束,存在**字段边界歧义**:被签字段(contractNo、purpose、purposeScope 元素)本身可能包含 `|` 或 `,`,不同字段组合可拼出完全相同的原文。例如 contractNo 取
+H utils/crypto.ts :: SM2 私钥以明文写入 localStorage 属于敏感凭据不安全存储:localStorage 无任何隔离机制,一旦发生 XSS 即可被一行 `Object.entries(localStorage)` 全量拖库,且数据持久化(不像 sessionStor
+H utils/csvPreview.ts :: `splitCsvLine` 只处理单行，而这里先把整段文本按 `\n` 切行，等于放弃了对 RFC 4180 “双引号内换行”字段的支持：形如 `a,"line1\nline2",b` 的数据会被拆成两条记录，第二段的列数/列序全部错位，且 `totalRo
+H utils/csvPreview.ts :: 用表头文本直接作为 Record 的 key 有两个隐患：1) 表头重复（CSV 导出中很常见，如两列都叫 `name`）时后一列会静默覆盖前一列，数据丢失且列数显示正常，排查困难；2) 表头来自后端/用户数据，若出现 `__proto__` 这样的 key，
+H utils/workspace.ts :: deny-by-default 存在破口：命中白名单的节点会被**原样返回、不再递归裁剪 children**。只要某个白名单 key 是分组/父项（当前 `'/deliveries'`、`'/contracts'`、`'/flow/*'` 这类前缀族就是典型
+C specs/prototype-v3.html :: 这段示例代码位于 renderDevIdePage() 返回的 JS 模板字符串（反引号）内，`f"{DATA_DIR}/train_dataset.csv"` 中的 `{DATA_DIR}` 会被模板插值求值（注意前面的 `f` 只是普通字符，不是 Pyth
+H specs/prototype-v3.html :: 该 HTML 位于 JS 模板字符串内，模板字面量会把源码里的 `\n` 先解析成真实换行符，因此写入 DOM 后 onclick 属性值变成跨行的 JS 字符串字面量 —— 属性/字符串被换行截断，点击时抛 "Unexpected end of input"
+H specs/prototype-v3.html :: 路由只传了 pageKey/sub 两个层级，未携带任务 ID：首页与任务列表中“用户行为分析模型 / 信用评分模型训练 / 数据质量校验脚本”等每一行的「调试」「执行」「详情」都调用完全相同的参数，最终渲染的都是同一份硬编码的 TASK-20260812-0
+H specs/prototype-v3.html :: 所有 renderXxxPage() 都采用「字符串拼接 → innerHTML」渲染，并大量使用内联 onclick/onchange；当前是静态字面量尚可，但一旦接入后端返回的任务名、结果集文件名、来源 IP、日志原文、alert 文案等字段，任何包含 `
+H specs/prototype-v3.html :: 所有 render* 函数都把“数据”直接拼进模板字符串后交给 `v.innerHTML`，并同时拼进内联 `onclick` 属性（如任务名、结果集文件名、API URL、IP、预览文本、日志编号等）。当前数据是硬编码所以不炸，但一旦接上真实接口，任务名/I

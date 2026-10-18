@@ -5,7 +5,8 @@ Covers docs/cubesandbox-parity-plan.md W3 test matrix:
 - distinct IPs count independently
 - login endpoint uses the dedicated (stricter) auth bucket per IP
 - Redis outage degrades to the in-process window (fail-open) with a WARNING
-- authenticated requests land in per-user buckets keyed by the (unverified) JWT sub
+- authenticated requests land in per-user buckets keyed by the (unverified) JWT sub,
+  and (A45) the per-IP bucket is enforced alongside it rather than bypassed
 """
 import base64
 import json
@@ -36,11 +37,7 @@ def _bearer(sub: str) -> str:
     return f"Bearer {b64({'alg': 'none'})}.{b64({'sub': sub})}.sig"
 
 
-@pytest_asyncio.fixture
-async def limited_app(monkeypatch, ip="10.0.0.1"):
-    """Minimal app with the rate-limit middleware active (tests run with
-    TESTING=1 so the real app does not attach it)."""
-    _make_fake_redis(monkeypatch)
+def _mkapp() -> FastAPI:
     test_app = FastAPI()
 
     @test_app.get("/ping")
@@ -53,6 +50,36 @@ async def limited_app(monkeypatch, ip="10.0.0.1"):
 
     test_app.add_middleware(RateLimitMiddleware)
     return test_app
+
+
+@pytest_asyncio.fixture
+async def limited_app(monkeypatch):
+    """Minimal app with the rate-limit middleware active (tests run with
+    TESTING=1 so the real app does not attach it)."""
+    _make_fake_redis(monkeypatch)
+    return _mkapp()
+
+
+@pytest_asyncio.fixture
+async def wide_ip_app(monkeypatch):
+    """Same app with the per-IP ceiling lifted, to isolate the user dimension.
+
+    Since A45 a JWT-sub request is counted in the ``user`` *and* the ``ip``
+    bucket, so the per-user 600/min assertion needs an IP limit above it.
+    """
+    _make_fake_redis(monkeypatch)
+    import app.core.security as security
+
+    real = security.get_settings()
+
+    class _Wide:
+        RATE_LIMIT_ENABLED = True
+        RATE_LIMIT_AUTH_PER_MINUTE = real.RATE_LIMIT_AUTH_PER_MINUTE
+        RATE_LIMIT_PER_MINUTE_USER = real.RATE_LIMIT_PER_MINUTE_USER
+        RATE_LIMIT_PER_MINUTE_IP = 100000
+
+    monkeypatch.setattr(security, "get_settings", lambda: _Wide())
+    return _mkapp()
 
 
 def _client(app: FastAPI, ip: str = "10.0.0.1") -> AsyncClient:
@@ -95,8 +122,8 @@ async def test_login_endpoint_uses_stricter_auth_bucket(limited_app):
 
 
 @pytest.mark.asyncio
-async def test_user_scope_keyed_by_jwt_sub(limited_app):
-    async with _client(limited_app) as ac:
+async def test_user_scope_keyed_by_jwt_sub(wide_ip_app):
+    async with _client(wide_ip_app) as ac:
         headers_a = {"Authorization": _bearer("11111111-1111-1111-1111-111111111111")}
         headers_b = {"Authorization": _bearer("22222222-2222-2222-2222-222222222222")}
         for _ in range(600):

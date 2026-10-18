@@ -42,8 +42,15 @@ export function QueryErrorAlert({
   );
 }
 
+// antd v5 的 Spin 在 nested/fullscreen 模式下才渲染 tip，独立 <Spin tip> 的 tip 被静默忽略
+// （antd 开发态直接告警 `tip` only work in nest or fullscreen pattern）——文案在组件里自己渲染。
 export function CenteredLoading({ tip = '加载中' }: { tip?: string }) {
-  return <Spin tip={tip} size="large" style={{ display: 'block', margin: '100px auto' }} />;
+  return (
+    <div style={{ margin: '100px auto', textAlign: 'center' }}>
+      <Spin size="large" />
+      <div style={{ marginTop: 8 }}>{tip}</div>
+    </div>
+  );
 }
 
 export function EmptyState({

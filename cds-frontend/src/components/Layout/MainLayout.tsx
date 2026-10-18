@@ -1,9 +1,11 @@
+import { useEffect } from 'react';
 import { Layout } from 'antd';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import AppHeader from './Header';
 import DataplaneBanner from './DataplaneBanner';
 import PageCrumb from './PageCrumb';
+import { documentTitleFor } from './routeCrumb';
 import { useUIStore } from '../../stores/uiStore';
 
 const { Sider, Content } = Layout;
@@ -21,6 +23,13 @@ export default function MainLayout() {
   const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed);
   const { pathname } = useLocation();
   const detailScope = DETAIL_SCOPE_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+
+  // 标签页标题的唯一设置点：与面包屑同源（routeCrumb 解析结果）。
+  // 本轮之前全站 `grep -rn document.title src` = 0 命中，标签页永远停在 index.html 的静态标题。
+  const docTitle = documentTitleFor(pathname);
+  useEffect(() => {
+    document.title = docTitle;
+  }, [docTitle]);
 
   return (
     <Layout className="cds-app">

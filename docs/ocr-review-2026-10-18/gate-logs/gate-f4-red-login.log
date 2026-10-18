@@ -1,0 +1,1240 @@
+(node:29308) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11340) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9904) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9904) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:20808) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/pages/Auth/__tests__/Login.test.tsx > Login 页面 > 登录失败：提示里是后端 message + code，不含 detail 内部字段
+Warning: [antd: compatible] antd v5 support React is 16 ~ 18. see https://u.ant.design/v5-for-19 for compatible.
+
+ ❯ src/pages/Auth/__tests__/Login.test.tsx (10 tests | 9 failed) 4911ms
+     × detail 是结构化对象时：透出后端 message 与 code，detail 里的内部字段一个都不露 4ms
+     × 作用域拒绝类信封：detail 的 group/verb/path 与 request_id 不外泄 1ms
+     × detail 为数组且元素不含用户可读文案时：绝不回落到 JSON.stringify 1ms
+     × 422 校验明细的 msg 是后端写给用户看的文案，保留并可拼接 0ms
+     × 非信封错误回落到共用 getErrorMessage（字符串直出，其余中文兜底） 0ms
+     × 登录失败：提示里是后端 message + code，不含 detail 内部字段 1577ms
+     × 登录失败（数组型 detail）：toast 不得出现 JSON 化的内部字段 1087ms
+     × 空密码提交提示「请输入密码」，长度不足才提示「密码至少8位」 1084ms
+     × /health 没有 capability.levels 时 UI 静默，但留一条 console.warn（诚实降级留痕） 1069ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > describeLoginError（W2 信封 → 访客可见文案） > detail 是结构化对象时：透出后端 message 与 code，detail 里的内部字段一个都不露
+TypeError: describeLoginError is not a function
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:76:18
+     74|     });
+     75|
+     76|     const text = describeLoginError(err);
+       |                  ^
+     77|
+     78|     expect(text).toContain('该账户已启用二次验证');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > describeLoginError（W2 信封 → 访客可见文案） > 作用域拒绝类信封：detail 的 group/verb/path 与 request_id 不外泄
+TypeError: describeLoginError is not a function
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:89:18
+     87|   it('作用域拒绝类信封：detail 的 group/verb/path 与 request_id 不外泄', () => {
+     88|     // app/core/scopes.py L309-315 的 API_KEY_SCOPE_DENIED detail 形态
+     89|     const text = describeLoginError(envelope({
+       |                  ^
+     90|       code: 'API_KEY_SCOPE_DENIED',
+     91|       message: '当前凭证无权访问该资源',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > describeLoginError（W2 信封 → 访客可见文案） > detail 为数组且元素不含用户可读文案时：绝不回落到 JSON.stringify
+TypeError: describeLoginError is not a function
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:103:18
+    101|
+    102|   it('detail 为数组且元素不含用户可读文案时：绝不回落到 JSON.stringify', () => {
+    103|     const text = describeLoginError(envelope({
+       |                  ^
+    104|       code: 'VALIDATION_ERROR',
+    105|       message: 'Request validation failed',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > describeLoginError（W2 信封 → 访客可见文案） > 422 校验明细的 msg 是后端写给用户看的文案，保留并可拼接
+TypeError: describeLoginError is not a function
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:117:18
+    115|
+    116|   it('422 校验明细的 msg 是后端写给用户看的文案，保留并可拼接', () => {
+    117|     const text = describeLoginError(envelope({
+       |                  ^
+    118|       code: 'VALIDATION_ERROR',
+    119|       message: 'Request validation failed',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > describeLoginError（W2 信封 → 访客可见文案） > 非信封错误回落到共用 getErrorMessage（字符串直出，其余中文兜底）
+TypeError: describeLoginError is not a function
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:132:12
+    130|
+    131|   it('非信封错误回落到共用 getErrorMessage（字符串直出，其余中文兜底）', () => {
+    132|     expect(describeLoginError('登录已过期，请重新登录')).toBe('登录已过期，请重新登录');
+       |            ^
+    133|     expect(describeLoginError(undefined)).toBe('登录失败');
+    134|     expect(describeLoginError({})).toBe('登录失败');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > Login 页面 > 登录失败：提示里是后端 message + code，不含 detail 内部字段
+TestingLibraryElementError: Unable to find an element with the text: /该账户已启用二次验证/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"cds-auth-shell"[39m
+    [36m>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"cds-auth-info"[39m
+      [36m>[39m
+        [36m<img[39m
+          [33malt[39m=[32m"密态沙箱系统"[39m
+          [33mclass[39m=[32m"cds-auth-logo"[39m
+          [33msrc[39m=[32m"/logo.svg"[39m
+        [36m/>[39m
+        [36m<div>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0m密态沙箱系统[0m
+          [36m</h1>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0mConfidential Data Sandbox[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+          [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mTEE[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDLP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mSM2[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"cds-auth-status"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m安全域[0m
+          [36m</span>[39m
+          [36m<strong>[39m
+            [0ml0 / tee / L2'[0m
+          [36m</strong>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"cds-auth-main"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+              [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"safety-certificate"[39m
+                  [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"safety-certificate"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<h3[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                  [33mstyle[39m=[32m"margin: 0px;"[39m
+                [36m>[39m
+                  [0m账户登录[0m
+                [36m</h3>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [0m进入密态沙箱工作台[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"ant-input-affix-wrappe...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"cds-auth-shell"[39m
+    [36m>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"cds-auth-info"[39m
+      [36m>[39m
+        [36m<img[39m
+          [33malt[39m=[32m"密态沙箱系统"[39m
+          [33mclass[39m=[32m"cds-auth-logo"[39m
+          [33msrc[39m=[32m"/logo.svg"[39m
+        [36m/>[39m
+        [36m<div>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0m密态沙箱系统[0m
+          [36m</h1>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0mConfidential Data Sandbox[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+          [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mTEE[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDLP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mSM2[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"cds-auth-status"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m安全域[0m
+          [36m</span>[39m
+          [36m<strong>[39m
+            [0ml0 / tee / L2'[0m
+          [36m</strong>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"cds-auth-main"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+              [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"safety-certificate"[39m
+                  [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"safety-certificate"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<h3[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                  [33mstyle[39m=[32m"margin: 0px;"[39m
+                [36m>[39m
+                  [0m账户登录[0m
+                [36m</h3>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [0m进入密态沙箱工作台[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"ant-input-affix-wrappe...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:149:32
+    147|     submitLogin('zhangsan', 'Passw0rd!23');
+    148|
+    149|     const toast = await screen.findByText(/该账户已启用二次验证/);
+       |                                ^
+    150|     expect(toast.textContent).toContain('AUTH_MFA_REQUIRED');
+    151|     expect(document.body.textContent).not.toContain('mfa_method');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > Login 页面 > 登录失败（数组型 detail）：toast 不得出现 JSON 化的内部字段
+TestingLibraryElementError: Unable to find an element with the text: /VALIDATION_ERROR/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"cds-auth-shell"[39m
+    [36m>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"cds-auth-info"[39m
+      [36m>[39m
+        [36m<img[39m
+          [33malt[39m=[32m"密态沙箱系统"[39m
+          [33mclass[39m=[32m"cds-auth-logo"[39m
+          [33msrc[39m=[32m"/logo.svg"[39m
+        [36m/>[39m
+        [36m<div>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0m密态沙箱系统[0m
+          [36m</h1>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0mConfidential Data Sandbox[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+          [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mTEE[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDLP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mSM2[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"cds-auth-status"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m安全域[0m
+          [36m</span>[39m
+          [36m<strong>[39m
+            [0ml0 / tee / L2'[0m
+          [36m</strong>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"cds-auth-main"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+              [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"safety-certificate"[39m
+                  [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"safety-certificate"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<h3[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                  [33mstyle[39m=[32m"margin: 0px;"[39m
+                [36m>[39m
+                  [0m账户登录[0m
+                [36m</h3>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [0m进入密态沙箱工作台[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"ant-input-affix-wrappe...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"cds-auth-shell"[39m
+    [36m>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"cds-auth-info"[39m
+      [36m>[39m
+        [36m<img[39m
+          [33malt[39m=[32m"密态沙箱系统"[39m
+          [33mclass[39m=[32m"cds-auth-logo"[39m
+          [33msrc[39m=[32m"/logo.svg"[39m
+        [36m/>[39m
+        [36m<div>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0m密态沙箱系统[0m
+          [36m</h1>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0mConfidential Data Sandbox[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+          [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mTEE[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDLP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mSM2[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"cds-auth-status"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m安全域[0m
+          [36m</span>[39m
+          [36m<strong>[39m
+            [0ml0 / tee / L2'[0m
+          [36m</strong>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"cds-auth-main"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+              [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"safety-certificate"[39m
+                  [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"safety-certificate"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<h3[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                  [33mstyle[39m=[32m"margin: 0px;"[39m
+                [36m>[39m
+                  [0m账户登录[0m
+                [36m</h3>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [0m进入密态沙箱工作台[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"ant-input-affix-wrappe...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:164:32
+    162|     submitLogin('zhangsan', 'abc12345');
+    163|
+    164|     const toast = await screen.findByText(/VALIDATION_ERROR/);
+       |                                ^
+    165|     expect(toast.textContent).not.toMatch(/[{}[\]]/);
+    166|     expect(toast.textContent).not.toContain('raw-request-bytes');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > Login 页面 > 空密码提交提示「请输入密码」，长度不足才提示「密码至少8位」
+TestingLibraryElementError: Unable to find an element with the text: 请输入密码. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"cds-auth-shell"[39m
+    [36m>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"cds-auth-info"[39m
+      [36m>[39m
+        [36m<img[39m
+          [33malt[39m=[32m"密态沙箱系统"[39m
+          [33mclass[39m=[32m"cds-auth-logo"[39m
+          [33msrc[39m=[32m"/logo.svg"[39m
+        [36m/>[39m
+        [36m<div>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0m密态沙箱系统[0m
+          [36m</h1>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0mConfidential Data Sandbox[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+          [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mTEE[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDLP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mSM2[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"cds-auth-status"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m安全域[0m
+          [36m</span>[39m
+          [36m<strong>[39m
+            [0ml0 / tee / L2'[0m
+          [36m</strong>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"cds-auth-main"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+              [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"safety-certificate"[39m
+                  [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"safety-certificate"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<h3[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                  [33mstyle[39m=[32m"margin: 0px;"[39m
+                [36m>[39m
+                  [0m账户登录[0m
+                [36m</h3>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [0m进入密态沙箱工作台[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"ant-input-affix-wrappe...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"cds-auth-shell"[39m
+    [36m>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"cds-auth-info"[39m
+      [36m>[39m
+        [36m<img[39m
+          [33malt[39m=[32m"密态沙箱系统"[39m
+          [33mclass[39m=[32m"cds-auth-logo"[39m
+          [33msrc[39m=[32m"/logo.svg"[39m
+        [36m/>[39m
+        [36m<div>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0m密态沙箱系统[0m
+          [36m</h1>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [0mConfidential Data Sandbox[0m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+          [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mTEE[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDLP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mDP[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space-item"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mSM2[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"cds-auth-status"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m安全域[0m
+          [36m</span>[39m
+          [36m<strong>[39m
+            [0ml0 / tee / L2'[0m
+          [36m</strong>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"cds-auth-main"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+              [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"safety-certificate"[39m
+                  [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"safety-certificate"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<h3[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                  [33mstyle[39m=[32m"margin: 0px;"[39m
+                [36m>[39m
+                  [0m账户登录[0m
+                [36m</h3>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [0m进入密态沙箱工作台[0m
+                [36m</span>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<form[39m
+              [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input-content"[39m
+                      [36m>[39m
+                        [36m<span[39m
+                          [33mclass[39m=[32m"ant-input-affix-wrappe...
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:174:18
+    172|
+    173|     submitLogin('zhangsan', '');
+    174|     await screen.findByText('请输入密码');
+       |                  ^
+    175|     expect(screen.queryByText('密码至少8位')).toBeNull();
+    176|     expect(authApi.login).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  src/pages/Auth/__tests__/Login.test.tsx > Login 页面 > /health 没有 capability.levels 时 UI 静默，但留一条 console.warn（诚实降级留痕）
+AssertionError: expected [] to have a length of 1 but got +0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"cds-auth-shell"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"cds-auth-info"[39m
+        [36m>[39m
+          [36m<img[39m
+            [33malt[39m=[32m"密态沙箱系统"[39m
+            [33mclass[39m=[32m"cds-auth-logo"[39m
+            [33msrc[39m=[32m"/logo.svg"[39m
+          [36m/>[39m
+          [36m<div>[39m
+            [36m<h1[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0m密态沙箱系统[0m
+            [36m</h1>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+            [36m>[39m
+              [0mConfidential Data Sandbox[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small cds-auth-tags"[39m
+            [33mstyle[39m=[32m"flex-wrap: wrap;"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space-item"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-tag ant-tag-cyan css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [0mTEE[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space-item"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-tag ant-tag-blue css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [0mDLP[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space-item"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-tag ant-tag-green css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [0mDP[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space-item"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-tag ant-tag-gold css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [0mSM2[0m
+              [36m</span>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"cds-auth-status"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m安全域[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+        [36m<main[39m
+          [33mclass[39m=[32m"cds-auth-main"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card ant-card-bordered cds-auth-card css-dev-only-do-not-override-mncuj7"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-body"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-mncuj7 ant-space-vertical"[39m
+                [33mstyle[39m=[32m"column-gap: 4px; row-gap: 4px; width: 100%; margin-bottom: 24px;"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"safety-certificate"[39m
+                    [33mclass[39m=[32m"anticon anticon-safety-certificate cds-auth-icon"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"safety-certificate"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M866.9 169.9L527.1 54.1C523 52.7 517.5 52 512 52s-11 .7-15.1 2.1L157.1 169.9c-8.3 2.8-15.1 12.4-15.1 21.2v482.4c0 8.8 5.7 20.4 12.6 25.9L499.3 968c3.5 2.7 8 4.1 12.6 4.1s9.2-1.4 12.6-4.1l344.7-268.6c6.9-5.4 12.6-17 12.6-25.9V191.1c.2-8.8-6.6-18.3-14.9-21.2zM810 654.3L512 886.5 214 654.3V226.7l298-101.6 298 101.6v427.6zm-405.8-201c-3-4.1-7.8-6.6-13-6.6H336c-6.5 0-10.3 7.4-6.5 12.7l126.4 174a16.1 16.1 0 0026 0l212.6-292.7c3.8-5.3 0-12.7-6.5-12.7h-55.2c-5.1 0-10 2.5-13 6.6L468.9 542.4l-64.7-89.1z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<h3[39m
+                    [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-mncuj7"[39m
+                    [33mstyle[39m=[32m"margin: 0px;"[39m
+                  [36m>[39m
+                    [0m账户登录[0m
+                  [36m</h3>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-item"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [0m进入密态沙箱工作台[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<form[39m
+                [33mclass[39m=[32m"ant-form ant-form-vertical ant-form-large css-dev-only-do-not-override-mncuj7"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-vertical"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-form-item-control-input"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                      ...
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/pages/Auth/__tests__/Login.test.tsx:191:20
+    189|     await waitFor(() => {
+    190|       const ours = warnSpy.mock.calls.filter((call) => String(call[0])…
+    191|       expect(ours).toHaveLength(1);
+       |                    ^
+    192|     });
+    193|     // chip 区仍不渲染（UI 静默），字段补齐后才有内容
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 1 passed (10)
+   Start at  21:44:14
+   Duration  16.06s (transform 130ms, setup 201ms, import 9.07s, tests 4.91s, environment 1.56s)
+

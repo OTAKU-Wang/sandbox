@@ -1,0 +1,173 @@
+[0m
+[4mD:\workspace\sandbox\cds-frontend\src\components\Feedback\QueryFeedback.tsx[24m
+   [2m5:17[22m  [31merror[39m  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  [2mreact-refresh/only-export-components[22m
+  [2m70:17[22m  [31merror[39m  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  [2mreact-refresh/only-export-components[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\components\Sandbox\ExecStreamTerminal.tsx[24m
+  [2m149:16[22m  [31merror[39m  Error: Cannot access variable before it is declared
+
+`connectAndRun` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+D:\workspace\sandbox\cds-frontend\src\components\Sandbox\ExecStreamTerminal.tsx:149:16
+  147 |           reconnectRef.current = false;
+  148 |           writeLine('[终端] ticket 失效，自动重连一次…', '33');
+> 149 |           void connectAndRun(cmd);
+      |                ^^^^^^^^^^^^^ `connectAndRun` accessed before it is declared
+  150 |           return;
+  151 |         }
+  152 |         setState('closed');
+
+D:\workspace\sandbox\cds-frontend\src\components\Sandbox\ExecStreamTerminal.tsx:80:3
+   78 |   }, []);
+   79 |
+>  80 |   const connectAndRun = useCallback(
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  81 |     async (cmd: string) => {
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  82 |       if (socketRef.current) {
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 159 |     [sessionId, writeLine],
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 160 |   );
+      | ^^^^^ `connectAndRun` is declared here
+  161 |
+  162 |   useEffect(() => {
+  163 |     if (!hostRef.current || termRef.current) return;  [2mreact-hooks/immutability[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Audit\AuditLog.test.tsx[24m
+  [2m127:16[22m  [31merror[39m  'openSelectByText' is defined but never used  [2m@typescript-eslint/no-unused-vars[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Auth\Login.tsx[24m
+  [2m21:17[22m  [31merror[39m  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  [2mreact-refresh/only-export-components[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Auth\Register.tsx[24m
+  [2m22:19[22m  [31merror[39m  Unexpected any. Specify a different type  [2m@typescript-eslint/no-explicit-any[22m
+  [2m25:26[22m  [31merror[39m  Unexpected any. Specify a different type  [2m@typescript-eslint/no-explicit-any[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Catalog\index.tsx[24m
+  [2m64:53[22m  [31merror[39m  Unexpected any. Specify a different type  [2m@typescript-eslint/no-explicit-any[22m
+  [2m84:22[22m  [31merror[39m  Unexpected any. Specify a different type  [2m@typescript-eslint/no-explicit-any[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Contracts\ContractList.tsx[24m
+  [2m2:37[22m  [31merror[39m  'Input' is defined but never used           [2m@typescript-eslint/no-unused-vars[22m
+  [2m3:24[22m  [31merror[39m  'SearchOutlined' is defined but never used  [2m@typescript-eslint/no-unused-vars[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\DataProducts\ProductDetail.tsx[24m
+  [2m180:5[22m   [31merror[39m  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\workspace\sandbox\cds-frontend\src\pages\DataProducts\ProductDetail.tsx:180:5
+  178 |   useEffect(() => {
+  179 |     if (!visibilityConfig) return;
+> 180 |     setFieldRules(visibilityConfig.field_rules || {});
+      |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  181 |     setDefaultSensitivity(visibilityConfig.default_sensitivity);
+  182 |   }, [visibilityConfig]);
+  183 |  [2mreact-hooks/set-state-in-effect[22m
+  [2m243:22[22m  [31merror[39m  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   [2m@typescript-eslint/no-explicit-any[22m
+  [2m249:24[22m  [31merror[39m  Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. This value was memoized in source but not in compilation output.
+
+D:\workspace\sandbox\cds-frontend\src\pages\DataProducts\ProductDetail.tsx:249:24
+  247 |   });
+  248 |
+> 249 |   const schemaFields = useMemo<SchemaFieldRow[]>(() => {
+      |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 250 |     const fields = product?.data_schema?.fields;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 251 |     if (!Array.isArray(fields)) return [];
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 261 |     });
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 262 |   }, [product?.data_schema]);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Could not preserve existing memoization
+  263 |
+  264 |   if (isError) return <QueryErrorAlert error={error} message="产品详情加载失败" onRetry={() => { void refetch(); }} />;
+  265 |   if (isLoading) return <CenteredLoading tip="加载产品详情" />;    [2mreact-hooks/preserve-manual-memoization[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Flow\ComputeSchedule.tsx[24m
+  [2m497:5[22m  [31merror[39m  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\workspace\sandbox\cds-frontend\src\pages\Flow\ComputeSchedule.tsx:497:5
+  495 |     const row = (scheduleQuery.data?.items ?? []).find((item) => item.contract_id === preset.contractId);
+  496 |     if (!row) return;
+> 497 |     setExecuteTarget({ row, workloadId: preset.workloadId });
+      |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  498 |     setPreset(null);
+  499 |   }, [preset, scheduleQuery.data]);
+  500 |  [2mreact-hooks/set-state-in-effect[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Flow\NotebookWorkbench.tsx[24m
+  [2m468:3[22m  [31merror[39m  Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\workspace\sandbox\cds-frontend\src\pages\Flow\NotebookWorkbench.tsx:468:3
+  466 |   // 自动保存与手动保存同价：每次都是新版本（代价写在卡头 tooltip，不假装免费）。
+  467 |   const autoSaveBridge = useRef(saveContent);
+> 468 |   autoSaveBridge.current = saveContent;
+      |   ^^^^^^^^^^^^^^^^^^^^^^ Cannot update ref during render
+  469 |   // CR B-1：服务端已被别人改过时，自动保存不得盲 PUT 掉别人的版本——
+  470 |   // 冲突横幅（reloadFromServer）必须活到用户亲手处置；手动保存是用户
+  471 |   // 知情决策，仍照走。ref 而非闭包：2s 窗口内后端回流也要被看见。  [2mreact-hooks/refs[22m
+  [2m473:3[22m  [31merror[39m  Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\workspace\sandbox\cds-frontend\src\pages\Flow\NotebookWorkbench.tsx:473:3
+  471 |   // 知情决策，仍照走。ref 而非闭包：2s 窗口内后端回流也要被看见。
+  472 |   const serverChangedRef = useRef(false);
+> 473 |   serverChangedRef.current = serverChanged;
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^ Cannot update ref during render
+  474 |   useEffect(() => {
+  475 |     if (!dirty) return undefined;
+  476 |     const timer = window.setTimeout(() => {                                        [2mreact-hooks/refs[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Flow\Quota.tsx[24m
+    [2m4:10[22m  [31merror[39m  'quotaApi' is defined but never used                [2m@typescript-eslint/no-unused-vars[22m
+  [2m109:53[22m  [31merror[39m  'dataUpdatedAt' is assigned a value but never used  [2m@typescript-eslint/no-unused-vars[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Flow\TaskDetail.tsx[24m
+   [2m19:3[22m   [31merror[39m  'Col' is defined but never used                  [2m@typescript-eslint/no-unused-vars[22m
+   [2m23:3[22m   [31merror[39m  'Row' is defined but never used                  [2m@typescript-eslint/no-unused-vars[22m
+   [2m36:3[22m   [31merror[39m  'ClockCircleOutlined' is defined but never used  [2m@typescript-eslint/no-unused-vars[22m
+   [2m96:15[22m  [31merror[39m  'Title' is assigned a value but never used       [2m@typescript-eslint/no-unused-vars[22m
+  [2m111:10[22m  [31merror[39m  'TintedIcon' is defined but never used           [2m@typescript-eslint/no-unused-vars[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Flow\__tests__\TaskDetail.test.tsx[24m
+  [2m5:10[22m  [31merror[39m  'MemoryRouter' is defined but never used  [2m@typescript-eslint/no-unused-vars[22m
+
+[4mD:\workspace\sandbox\cds-frontend\src\pages\Sandbox\SessionList.tsx[24m
+  [2m128:5[22m  [31merror[39m  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\workspace\sandbox\cds-frontend\src\pages\Sandbox\SessionList.tsx:128:5
+  126 |   useEffect(() => {
+  127 |     if (!canCreateSession || !requestedCreate) return;
+> 128 |     setCreateOpen(true);
+      |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  129 |     if (requestedProductId) {
+  130 |       form.setFieldsValue({ data_product_id: requestedProductId });
+  131 |     }  [2mreact-hooks/set-state-in-effect[22m
+
+[31m[1m✖ 26 problems (26 errors, 0 warnings)[22m[39m
+[0m

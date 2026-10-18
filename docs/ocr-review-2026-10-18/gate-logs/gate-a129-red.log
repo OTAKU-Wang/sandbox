@@ -1,0 +1,89 @@
+..........FFFFFFssss                                                     [100%]
+================================== FAILURES ===================================
+_____ test_transformers_engine_reports_the_model_dimension_for_empty_text _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023F5B658B90>
+
+    def test_transformers_engine_reports_the_model_dimension_for_empty_text(monkeypatch):
+        """空文本不得回一个写死 512 的零向量：引擎真实维度是 384/768 时索引 dim 会错。"""
+>       embedder = _patch_transformers_model(monkeypatch, hidden_size=32)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_rag_embedding.py:103: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023F5B658B90>
+hidden_size = 32
+
+    def _patch_transformers_model(monkeypatch, hidden_size=32):
+        class _Cfg:
+            pass
+    
+        cfg = _Cfg()
+        cfg.hidden_size = hidden_size
+        model = _Cfg()
+        model.config = cfg
+        monkeypatch.setattr(RAGEmbedder, "_load_transformers", lambda self: (object(), model))
+>       return RAGEmbedder(embedding_backend="transformers", transformers_model_name="fake/model")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: RAGEmbedder.__init__() got an unexpected keyword argument 'embedding_backend'
+
+tests\test_rag_embedding.py:98: TypeError
+___ test_transformers_engine_fails_closed_when_the_model_cannot_be_resolved ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023F5B658E00>
+
+    def test_transformers_engine_fails_closed_when_the_model_cannot_be_resolved(monkeypatch):
+        """\u6a21\u578b\u52a0\u8f7d\u4e0d\u4e86 \u21d2 \u5982\u5b9e\u4e0d\u53ef\u7528\uff0c\u4e0d\u80fd\u4ea4\u4e00\u4e2a\u53ef\u80fd\u9519\u8bef\u7684 dim \u8ba9\u7d22\u5f15\u843d\u76d8\u3002"""
+        def _no_model(self):
+            raise EngineUnavailable("embedding model unavailable (test)")
+    
+        monkeypatch.setattr(RAGEmbedder, "_load_transformers", _no_model)
+>       embedder = RAGEmbedder(embedding_backend="transformers", transformers_model_name="fake/model")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: RAGEmbedder.__init__() got an unexpected keyword argument 'embedding_backend'
+
+tests\test_rag_embedding.py:119: TypeError
+______ test_engine_dimension_agrees_with_the_vectors_the_engine_produces ______
+
+    def test_engine_dimension_agrees_with_the_vectors_the_engine_produces():
+        for backend in (RAGEmbeddingEngine.TF, RAGEmbeddingEngine.REGEX):
+>           embedder = RAGEmbedder(embedding_backend=backend)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: RAGEmbedder.__init__() got an unexpected keyword argument 'embedding_backend'
+
+tests\test_rag_embedding.py:130: TypeError
+_______ test_cosine_rejects_dimension_mismatch_instead_of_scoring_zero ________
+
+    def test_cosine_rejects_dimension_mismatch_instead_of_scoring_zero():
+        """返回 0 把「索引与模型维度不一致」伪装成「这条不相关」。"""
+>       embedder = RAGEmbedder(embedding_backend="tf")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: RAGEmbedder.__init__() got an unexpected keyword argument 'embedding_backend'
+
+tests\test_rag_embedding.py:138: TypeError
+______________________ test_cosine_rejects_empty_vectors ______________________
+
+    def test_cosine_rejects_empty_vectors():
+>       embedder = RAGEmbedder(embedding_backend="tf")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: RAGEmbedder.__init__() got an unexpected keyword argument 'embedding_backend'
+
+tests\test_rag_embedding.py:144: TypeError
+____________ test_embedding_result_dimension_must_match_its_vector ____________
+
+    def test_embedding_result_dimension_must_match_its_vector():
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\test_rag_embedding.py:150: Failed
+=========================== short test summary info ===========================
+FAILED tests/test_rag_embedding.py::test_transformers_engine_reports_the_model_dimension_for_empty_text
+FAILED tests/test_rag_embedding.py::test_transformers_engine_fails_closed_when_the_model_cannot_be_resolved
+FAILED tests/test_rag_embedding.py::test_engine_dimension_agrees_with_the_vectors_the_engine_produces
+FAILED tests/test_rag_embedding.py::test_cosine_rejects_dimension_mismatch_instead_of_scoring_zero
+FAILED tests/test_rag_embedding.py::test_cosine_rejects_empty_vectors - TypeE...
+FAILED tests/test_rag_embedding.py::test_embedding_result_dimension_must_match_its_vector
+6 failed, 10 passed, 4 skipped in 5.11s
+RC=1

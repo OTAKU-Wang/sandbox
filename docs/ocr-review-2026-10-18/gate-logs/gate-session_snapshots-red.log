@@ -1,0 +1,85 @@
+......FF.                                                                [100%]
+================================== FAILURES ===================================
+__________________ test_max_snapshots_zero_disables_creation __________________
+
+ws = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-81/test_max_snapshots_zero_disabl0/bwrap-abcd1234')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D7BCA3BD40>
+
+    def test_max_snapshots_zero_disables_creation(ws, monkeypatch):
+        """CDS_SESSION_MAX_SNAPSHOTS=0 is an explicit operator decision: the
+        service must refuse with SnapshotError (the route maps it to HTTP 400),
+        never crash with IndexError inside the eviction loop."""
+        from app.core.config import get_settings
+    
+        monkeypatch.setattr(get_settings(), "SESSION_MAX_SNAPSHOTS", 0)
+    
+        with pytest.raises(ss.SnapshotError, match="disabled"):
+>           ss.create_snapshot(ws, session_id="s")
+
+tests\test_session_snapshots.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+workspace = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-81/test_max_snapshots_zero_disabl0/bwrap-abcd1234')
+session_id = 's'
+
+    def create_snapshot(workspace: Path, session_id: str) -> dict:
+        """Snapshot the workspace; returns the manifest dict."""
+        settings = get_settings()
+        workspace = Path(workspace)
+        if not workspace.exists():
+            raise SnapshotError("workspace does not exist")
+    
+        sdir = snapshots_dir(workspace)
+        sdir.mkdir(parents=True, exist_ok=True)
+    
+        # Retention: evict oldest beyond the cap (before adding a new one).
+        existing = sorted(sdir.glob(f"*{_SNAPSHOT_SUFFIX}"), key=lambda p: p.stat().st_mtime)
+        max_n = settings.SESSION_MAX_SNAPSHOTS
+        while len(existing) >= max_n:
+>           oldest = existing.pop(0)
+                     ^^^^^^^^^^^^^^^
+E           IndexError: pop from empty list
+
+app\services\session_snapshots.py:81: IndexError
+________________ test_max_snapshots_negative_disables_creation ________________
+
+ws = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-81/test_max_snapshots_negative_di0/bwrap-abcd1234')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D7BCA3B020>
+
+    def test_max_snapshots_negative_disables_creation(ws, monkeypatch):
+        from app.core.config import get_settings
+    
+        monkeypatch.setattr(get_settings(), "SESSION_MAX_SNAPSHOTS", -1)
+    
+        with pytest.raises(ss.SnapshotError, match="disabled"):
+>           ss.create_snapshot(ws, session_id="s")
+
+tests\test_session_snapshots.py:121: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+workspace = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-81/test_max_snapshots_negative_di0/bwrap-abcd1234')
+session_id = 's'
+
+    def create_snapshot(workspace: Path, session_id: str) -> dict:
+        """Snapshot the workspace; returns the manifest dict."""
+        settings = get_settings()
+        workspace = Path(workspace)
+        if not workspace.exists():
+            raise SnapshotError("workspace does not exist")
+    
+        sdir = snapshots_dir(workspace)
+        sdir.mkdir(parents=True, exist_ok=True)
+    
+        # Retention: evict oldest beyond the cap (before adding a new one).
+        existing = sorted(sdir.glob(f"*{_SNAPSHOT_SUFFIX}"), key=lambda p: p.stat().st_mtime)
+        max_n = settings.SESSION_MAX_SNAPSHOTS
+        while len(existing) >= max_n:
+>           oldest = existing.pop(0)
+                     ^^^^^^^^^^^^^^^
+E           IndexError: pop from empty list
+
+app\services\session_snapshots.py:81: IndexError
+=========================== short test summary info ===========================
+FAILED tests/test_session_snapshots.py::test_max_snapshots_zero_disables_creation
+FAILED tests/test_session_snapshots.py::test_max_snapshots_negative_disables_creation
+2 failed, 7 passed in 3.01s

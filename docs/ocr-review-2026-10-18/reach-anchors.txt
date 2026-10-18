@@ -1,0 +1,390 @@
+##### merkle_service
+app/api/audit.py
+26: from app.services.merkle_service import merkle_service
+121: # SS-17 deterministic Merkle ordering. merkle_service builds the tree from the
+362:     merkle_root = merkle_service.get_root(record_hashes)
+423:     merkle_root = merkle_service.get_root(record_hashes)
+500:     proof = merkle_service.generate_proof(all_hashes, target_index) if target_index >= 0 else None
+
+app/core/config.py
+151:     # merkle_service anchoring. Enable only for evaluation; when enabled the
+387:     # merkle_service anchoring. Enable only for evaluation; when enabled the
+
+app/main.py
+163:     # merkle_service. Enable only for evaluation.
+
+app/services/cube_egress_audit.py
+8: batch through the synchronous Merkle path (SM3 leaf hashes → merkle_service
+220:     → merkle_service.get_root → blockchain_adapter.anchor → tx_hash stamp."""
+223:     from app.services.merkle_service import merkle_service
+233:     merkle_root = merkle_service.get_root(record_hashes)
+
+app/services/merkle_pipeline.py
+99:         from app.services.merkle_service import merkle_service
+109:                 batch_result = await self._process_batch(events, merkle_service, blockchain_adapter)
+160:                               merkle_service, blockchain_adapter) -> BatchResult | None:
+169:         batch = merkle_service.build_batch(event_data)
+175:             proof = merkle_service.generate_proof(leaves, i)
+
+app/services/merkle_service.py
+220: merkle_service = MerkleService()
+
+tests/test_audit_service.py
+3: from app.services.merkle_service import merkle_service
+8:     return [merkle_service.hash_leaf(s.encode()) for s in items]
+13:     root = merkle_service.get_root(hashes)
+20:     root = merkle_service.get_root(hashes)
+26:     root = merkle_service.get_root([])
+32:     root = merkle_service.get_root(hashes)
+39:     root = merkle_service.get_root(hashes)
+46:     r1 = merkle_service.get_root(hashes)
+47:     r2 = merkle_service.get_root(hashes)
+52:     r1 = merkle_service.get_root(_hex_hashes("a", "b"))
+53:     r2 = merkle_service.get_root(_hex_hashes("b", "a"))
+59:     root = merkle_service.get_root(hashes)
+
+tests/test_merkle_pipeline.py
+64:         from app.services.merkle_service import MerkleService
+103:         from app.services.merkle_service import MerkleService
+152:     async def test_full_batch_with_real_merkle_service(self):
+154:         from app.services.merkle_service import MerkleService
+188:         from app.services.merkle_service import MerkleService
+
+tests/test_merkle_service.py
+4: from app.services.merkle_service import MerkleService, MerkleProof, MerkleBatch
+
+tests/test_p0_security_gaps.py
+293:                         glob.glob("app/services/merkle_service.py")
+
+tests/test_pz04_honesty_gates.py
+4: - sm3 SHA-256 fallback gate + one-shot warning (crypto.sm3_hash, merkle_service._hash)
+63:     import app.services.merkle_service as ms
+97:     import app.services.merkle_service as ms
+104:     with caplog.at_level(logging.WARNING, logger="app.services.merkle_service"):
+
+tests/test_sprint8_integration.py
+217:     def test_merkle_service_exists(self):
+218:         from app.services.merkle_service import MerkleService
+224:         from app.services.merkle_service import MerkleService
+238:         from app.services.merkle_service import MerkleService
+253:         from app.services.merkle_service import MerkleService
+261:         from app.services.merkle_service import MerkleService
+
+tests/test_ss17_audit_verify_ordering.py
+4: merkle_service builds the tree from the *positional* order of the leaf list, so the
+31: from app.services.merkle_service import merkle_service
+52:     return merkle_service.get_root([_leaf(r) for r in rows])
+201:                 current = merkle_service.hash_internal(current, step["hash"])
+203:                 current = merkle_service.hash_internal(step["hash"], current)
+
+[grep: matches=52 files=13 searched=547 elapsedMs=9993 engine=rg nextSkip=none]
+
+##### dp_budget
+alembic/versions/0000_baseline_all_tables.py
+87:     op.create_table('dp_budget_allocations',
+93:     op.create_table('dp_budget_entries',
+102:     op.create_index('ix_dp_budget_contract', 'dp_budget_entries', ['contract_id'], unique=False)
+103:     op.create_index('ix_dp_budget_session', 'dp_budget_entries', ['session_id'], unique=False)
+104:     op.create_table('dp_budget_status',
+768:     op.drop_table('dp_budget_status')
+769:     op.drop_index('ix_dp_budget_session', table_name='dp_budget_entries')
+770:     op.drop_index('ix_dp_budget_contract', table_name='dp_budget_entries')
+771:     op.drop_table('dp_budget_entries')
+772:     op.drop_table('dp_budget_allocations')
+
+app/api/contracts.py
+19: from app.services.dp_budget import dp_budget_ledger
+209:         await dp_budget_ledger.allocate(db, str(contract.id), float(contract.dp_epsilon_budget))
+274: async def get_dp_budget_status(
+286:     status = await dp_budget_ledger.get_status(db, str(contract_id))
+287:     ledger = await dp_budget_ledger.get_ledger(db, str(contract_id))
+
+app/api/dev_sandbox.py
+73: def _dev_dp_budget(body: "CreateDevSessionRequest", contract: Contract | None) -> float | None:
+140:     effective_dp_budget = body.dp_epsilon_budget
+154:         effective_dp_budget = _dev_dp_budget(body, contract)
+181:         dp_epsilon_budget=effective_dp_budget,
+204:             "dp_epsilon_budget": effective_dp_budget,
+
+app/api/monitoring.py
+172:         ["dlp=true", "dp_budget=true", "watermark=true", "signature=true"],
+343:         "dp_budget_exceeded",
+
+app/api/output_control.py
+17: _dp_budget_owners: dict[str, str] = {}
+25: async def _authorize_dp_budget_session(
+36:         owner_store=_dp_budget_owners,
+193: async def init_dp_budget(
+200:     await _authorize_dp_budget_session(db, session_id, current_user, create_if_missing=True)
+206: async def get_dp_budget(
+212:     await _authorize_dp_budget_session(db, session_id, current_user)
+
+app/api/sandbox_tasks.py
+16: from app.services.dp_budget import dp_budget_ledger
+451:             deducted = await dp_budget_ledger.consume(
+
+app/main.py
+33: from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model, rag_generative_model  # Ensure tables are created
+
+app/models/dp_budget.py
+14:     __tablename__ = "dp_budget_entries"
+16:         Index("ix_dp_budget_contract", "contract_id"),
+17:         Index("ix_dp_budget_session", "session_id"),
+30:     __tablename__ = "dp_budget_allocations"
+40:     Specs call for a PostgreSQL materialized view named ``dp_budget_status``.
+44:     __tablename__ = "dp_budget_status"
+
+app/schemas/compliance.py
+31:     dp_budget_charges: int
+
+app/schemas/contract.py
+101:     def valid_dp_budget(cls, v: float | None) -> float | None:
+
+app/services/alert_engine.py
+27:     DP_BUDGET_EXHAUSTION = "dp_budget_exhaustion"
+77:         self._dp_budget_snapshots: dict[str, tuple[datetime, float, float, str | None]] = {}
+92:     def record_dp_budget(
+100:         self._dp_budget_snapshots[session_id] = (
+169:         Uses the latest snapshots recorded with ``record_dp_budget``.
+172:         for session_id, (_, remaining, total, user_id) in self._dp_budget_snapshots.items():
+173:             alert = self._build_dp_budget_alert(session_id, remaining, total, config, user_id=user_id)
+178:     def check_dp_budget(self, session_id: str, remaining_epsilon: float, total_epsilon: float) -> Alert | None:
+193:         return self._build_dp_budget_alert(session_id, remaining_epsilon, total_epsilon, config)
+195:     def _build_dp_budget_alert(
+288:         self._dp_budget_snapshots.clear()
+
+app/services/compliance_report.py
+237:             "dp_budget_charges": dp_charges,
+267:         status["dp_budget_tracking"] = "pass" if data_protection["dp_budget_charges"] >= 0 else "warn"
+
+app/services/contract_service.py
+14: from app.services.dp_budget import dp_budget_ledger
+171:                 await dp_budget_ledger.allocate(db, str(contract.id), float(contract.dp_epsilon_budget))
+
+app/services/cross_space_policy.py
+33:     DP_BUDGET_EXHAUSTED = "dp_budget_exhausted"
+55:     require_dp_budget: bool = False
+121:         dp_budget_remaining: float | None = None,
+129:             dp_budget_remaining: Remaining DP budget (None = skip check).
+178:         if dp_budget_remaining is not None and dp_budget_remaining <= 0:
+
+app/services/dp_budget.py
+3: Budgets are persisted in dp_budget_allocations, dp_budget_entries, and a
+4: portable materialized status snapshot named dp_budget_status. The snapshot
+14: from app.models.dp_budget import DPBudgetAllocation, DPBudgetEntry, DPBudgetStatus
+369: dp_budget_ledger = DPBudgetLedger()
+
+app/services/output_inspection.py
+12: from app.services.dp_budget import dp_budget_ledger
+65:     # dp_budget_remaining: remaining budget after this call's consumption;
+69:     dp_budget_remaining: float | None = None
+219:         #     dp_budget_ledger (single source of truth — M-03 双预算 unification);
+225:         dp_budget_remaining: float | None = None
+230:                 if dp_budget_ledger.has_budget_sync(session_id):
+234:                         dp_budget_remaining = dp_engine.get_remaining(session_id)
+236:                             InspectionStage.DP.value, "high", "dp_budget_exhausted",
+238:                             f"{dp_budget_remaining:.4f}, requested={dp_epsilon:.4f})",
+245:                         dp_budget_remaining = dp_engine.get_remaining(session_id)
+248:                             session_id, dp_epsilon, dp_budget_remaining,
+259:                     dp_budget_remaining = None
+327:             dp_budget_remaining=dp_budget_remaining,
+540:     used to live here is deleted — the persistent ``dp_budget_ledger`` is
+549:         return dp_budget_ledger.allocate_sync(session_id, epsilon)
+552:         return dp_budget_ledger.get_remaining_sync(session_id)
+558:         return dp_budget_ledger.consume_sync(session_id, epsilon)
+
+app/services/policy_evaluator.py
+97:             budget_check = await self._check_dp_budget(request, db)
+200:     async def _check_dp_budget(self, request: AccessRequest, db: AsyncSession) -> bool:
+203:         from app.services.dp_budget import dp_budget_ledger
+223:         remaining = await dp_budget_ledger.get_remaining(db, str(request.contract_id))
+232:         consumed = await dp_budget_ledger.consume(
+
+app/services/training_audit.py
+30:     DP_BUDGET_CONSUMED = "dp_budget_consumed"
+
+tests/test_alert_engine.py
+64:         alert = engine.check_dp_budget("sess-1", remaining_epsilon=5.0, total_epsilon=10.0)
+68:         alert = engine.check_dp_budget("sess-1", remaining_epsilon=0.5, total_epsilon=10.0)
+74:         alert = engine.check_dp_budget("sess-1", remaining_epsilon=0.01, total_epsilon=10.0)
+79:         alert = engine.check_dp_budget("sess-1", remaining_epsilon=0.0, total_epsilon=0.0)
+84:         alert = engine.check_dp_budget("sess-1", remaining_epsilon=0.0, total_epsilon=10.0)
+88:         alert = engine.check_dp_budget("sess-1", remaining_epsilon=0.05, total_epsilon=10.0)
+94:         engine.record_dp_budget("sess-1", remaining_epsilon=0.5, total_epsilon=10.0, user_id="user-1")
+
+tests/test_compliance_report.py
+75:                        "data_protection", "policy_enforcement", "output_review", "dp_budget_tracking"]
+
+[grep: matches=95 files=20 searched=354 elapsedMs=11848 engine=rg nextSkip=20]
+
+##### quota_manager
+app/api/connectors.py
+32: from app.services.quota_manager import QuotaType, quota_manager
+433:     await quota_manager.reset(session.id)
+463:     await quota_manager.set_limits(session.id, {
+
+app/api/flow_runtime.py
+201:     # 导入期会拉起 sandbox_manager、quota_manager 等重依赖，不把它们拽进本模块的导入环。
+
+app/api/gateway.py
+24: from app.services.quota_manager import quota_manager
+381:     redis_usage = await quota_manager.get_gateway_usage(cred.app_id)
+
+app/api/quota.py
+5: （app/api/sandbox_sessions.py 的 quota_manager.reset/set_limits）与合约限额预填。
+11:    重启即失，用户看不到这一点就会误读数字。判据取 ``quota_manager._redis``，
+36: from app.services.quota_manager import QuotaType, quota_manager
+56: # （见 quota_manager.reset：``epsilon * 10000`` 取整），按「ε」直接展示会夸大 1e4 倍。
+72:             "quota_manager 的 gwquota:* 计数器按 app_id（网关凭证）分片，"
+98:     if getattr(quota_manager, "_redis", None) is not None:
+112:             "Redis 未连接，quota_manager 退化为本进程内存计数：进程重启即归零，"
+148:     返回分三块：沙箱会话（并发数 + 逐会话 quota_manager 计数）、租户资源
+181:     # 逐会话 quota_manager 计数（活跃会话数量受 MAX_ACTIVE_SESSIONS 约束，读取成本有界）
+188:                 usage = await quota_manager.get_usage(sess.id, qt)
+189:                 limit = await quota_manager.get_limit(sess.id, qt)
+199:                     # quota_manager 语义：limit 0 == 未设限（check_and_increment 里
+
+app/api/sandbox_sessions.py
+39: from app.services.quota_manager import quota_manager, QuotaType
+368:     await quota_manager.reset(session.id)
+372:         await quota_manager.set_limits(session.id, {
+
+app/core/scopes.py
+14: - per-key rate limiting: fixed per-minute window mirroring the quota_manager
+201: # --- per-key rate limiting (fixed per-minute window, quota_manager pattern) --
+215:     quota_manager Redis client is wired, in-process fallback otherwise —
+216:     the same fail-open/availability posture as quota_manager.
+222:     from app.services.quota_manager import quota_manager
+223:     redis = getattr(quota_manager, "_redis", None)
+
+app/main.py
+56:         # Wire Redis into quota_manager
+57:         from app.services.quota_manager import quota_manager
+58:         quota_manager._redis = redis_client
+
+app/services/contract_fulfillment.py
+34: from app.services.quota_manager import quota_manager
+122:         await quota_manager.reset(session.id)
+
+app/services/gateway_service.py
+37: from app.services.quota_manager import quota_manager
+185:         usage = await quota_manager.get_gateway_usage(cred.app_id)
+202:         return await quota_manager.check_gateway_quota(
+
+app/services/quota_manager.py
+409: quota_manager = QuotaManager()
+
+tests/test_quota_manager.py
+5: from app.services.quota_manager import (
+
+tests/test_ss17_quota_readonly.py
+21: from app.services.quota_manager import QuotaType, quota_manager
+135:         monkeypatch.setattr(quota_manager, "_redis", None)
+147:         monkeypatch.setattr(quota_manager, "_redis", fake)
+190:         monkeypatch.setattr(quota_manager, "_redis", None)
+194:         await quota_manager.set_limits(session.id, {QuotaType.ROWS: 10000})
+195:         await quota_manager.check_and_increment(session.id, QuotaType.ROWS, 500)
+204:         # 未设限（quota_manager 里 limit 0 == 不限）⇒ null，不能显示成「额度 0」
+267:         monkeypatch.setattr(quota_manager, "_redis", None)
+270:         await quota_manager.set_limits(session.id, {QuotaType.API_CALLS: 100})
+271:         await quota_manager.check_and_increment(session.id, QuotaType.API_CALLS, 5)
+
+[grep: matches=47 files=12 searched=547 elapsedMs=10243 engine=rg nextSkip=none]
+
+##### field_mask
+app/services/encrypted_db.py
+19: from app.services.field_mask import FieldMasker, MaskRule, MaskMode, field_masker
+61:         self._masker = masker or field_masker
+
+app/services/field_mask.py
+210: field_masker = FieldMasker()
+
+app/services/output_gateway.py
+178:                     security_report["field_masking_applied"] = True
+
+app/services/policy_evaluator.py
+47:     field_masks: dict[str, str] = field(default_factory=dict)  # field → mask_pattern
+141:                 allowed_fields, denied_fields, field_masks = self._evaluate_field_acl(
+149:                     field_masks=field_masks,
+180:         allowed_fields, denied_fields, field_masks = self._evaluate_field_acl(
+196:             field_masks=field_masks,
+249:         Returns: (allowed_fields, denied_fields, field_masks)
+
+tests/test_e2e_flows.py
+935: def test_e2e_field_masking_hash():
+937:     from app.services.field_mask import FieldMasker, MaskMode, MaskRule
+950: def test_e2e_field_masking_redact():
+952:     from app.services.field_mask import FieldMasker, MaskMode, MaskRule
+960: def test_e2e_field_masking_generalize():
+962:     from app.services.field_mask import FieldMasker, MaskMode, MaskRule
+1008:     from app.services.field_mask import MaskRule, MaskMode
+
+tests/test_encrypted_db.py
+4: from app.services.field_mask import MaskRule, MaskMode
+
+tests/test_field_mask.py
+3: from app.services.field_mask import (
+
+tests/test_policy_evaluator.py
+109:             assert decision.field_masks["name"] == "***"
+110:             assert decision.field_masks["ssn"] == "prefix:3"
+
+[grep: matches=21 files=8 searched=547 elapsedMs=8678 engine=rg nextSkip=none]
+
+##### alert_engine
+app/services/alert_center.py
+17: from app.services.alert_engine import Alert
+
+app/services/alert_engine.py
+292: alert_engine = AlertRuleEngine()
+
+tests/test_alert_center.py
+5: from app.services.alert_engine import Alert, AlertSeverity, AlertType
+
+tests/test_alert_engine.py
+5: from app.services.alert_engine import (
+
+tests/test_e2e_flows.py
+974: def test_e2e_alert_engine_consecutive_denies():
+976:     from app.services.alert_engine import AlertRuleEngine, AlertType
+
+[grep: matches=6 files=5 searched=547 elapsedMs=7646 engine=rg nextSkip=none]
+
+##### cross_space_policy
+app/services/cross_space_policy.py
+228: cross_space_policy = CrossSpacePolicyEngine()
+
+tests/test_cross_space_policy.py
+4: from app.services.cross_space_policy import (
+6:     CrossSpacePolicyRule, cross_space_policy,
+168:         assert cross_space_policy is not None
+169:         assert isinstance(cross_space_policy, CrossSpacePolicyEngine)
+
+[grep: matches=5 files=2 searched=547 elapsedMs=6744 engine=rg nextSkip=none]
+
+##### contract_fulfillment
+app/api/contracts.py
+18: from app.services.contract_fulfillment import contract_fulfillment
+215:         fulfillment_result = await contract_fulfillment.fulfill_contract(db, contract.id)
+245:     terminated_count = await contract_fulfillment.terminate_contract_sessions(db, contract_id)
+
+app/services/contract_fulfillment.py
+271: contract_fulfillment = ContractFulfillmentService()
+
+app/services/contract_service.py
+213:             from app.services.contract_fulfillment import contract_fulfillment
+214:             terminated_sessions = await contract_fulfillment.terminate_contract_sessions(db, contract_id)
+
+tests/test_contract_fulfillment.py
+10: from app.services.contract_fulfillment import contract_fulfillment
+76:     result = await contract_fulfillment.check_contract_constraints(db_session, session.id, "query")
+111:     result = await contract_fulfillment.check_contract_constraints(db_session, session.id, "query")
+146:     result = await contract_fulfillment.check_contract_constraints(db_session, session.id, "query")
+152: async def test_contract_fulfillment_fails_closed_when_runtime_provision_fails(db_session, make_user, monkeypatch):
+153:     import app.services.contract_fulfillment as fulfillment_module
+178:     result = await contract_fulfillment.fulfill_contract(db_session, contract.id)
+196: async def test_contract_fulfillment_fails_closed_when_key_distribution_fails(db_session, make_user, monkeypatch):
+197:     import app.services.contract_fulfillment as fulfillment_module
+226:     result = await contract_fulfillment.fulfill_contract(db_session, contract.id)
+
+[grep: matches=16 files=4 searched=547 elapsedMs=7018 engine=rg nextSkip=none]

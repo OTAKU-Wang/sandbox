@@ -7,6 +7,16 @@
 #                                   diff stat) are printed for human review
 #                                   against spec §二; pin is NOT auto-pushed
 #   exit 2 = non-contract drift  -> notice only (info, non-fatal)
+#   exit 3 = check errored       -> job fails with exit 3 handling notes below:
+#                                   most often the pinned sha is no longer
+#                                   reachable in a fresh clone (upstream
+#                                   force-push / gc) or a watched contract path
+#                                   vanished (scripts/cube-upstream-check.sh
+#                                   die(), L69-70 area).
+#
+# A RED SCHEDULE IS THE MONITOR WORKING. Clone/check failures fail the run
+# (fail-closed, 2026-10 ops review): a silently "skipped" week is how drift
+# watch quietly stops watching. Investigate vars/network, then rerun manually.
 #
 # No upstream mirror exists in this org's CI (spec §5.1's /opt/cds/cube-mirror.git
 # is a CI/prod-host concern), so the "periodic fetch of the remote ref" is a
@@ -15,14 +25,14 @@ name: cube-upstream-watch
 
 on:
   schedule:
-    # 周一 09:00 UTC（spec §5.3: weekly）
-    - cron: "0 9 * * 1"
+    - cron: "0 9 * * 1"  # Monday 09:00 UTC
   workflow_dispatch: {}
 
 concurrency:
   group: cube-upstream-watch
   cancel-in-progress: true
 
+# 本 workflow 只读取仓库内容；绝不继承仓库默认宽权限
 permissions:
   contents: read
 
@@ -38,28 +48,38 @@ jobs:
         env:
           CUBE_UPSTREAM_REPO: ${{ vars.CUBE_UPSTREAM_REPO }}
         run: |
+          set -euo pipefail
+          # 仓库变量直接进入 git argv（且可被有写权限的人改）：钉死传输协议为
+          # https，白名单校验拒绝 '-开头的选项注入 / ext:: / --upload-pack= 等
+          # transport 值，URL 一律放在 `--` 之后。
           REPO="${CUBE_UPSTREAM_REPO:-https://github.com/tencentcloud/CubeSandbox.git}"
-          if git clone --quiet "$REPO" "$RUNNER_TEMP/cubesandbox"; then
-            echo "clone-ok"
-          else
-            echo "::warning::upstream clone failed — drift check will be skipped (non-fatal; rerun via workflow_dispatch)"
-            echo "clone-failed" > "$RUNNER_TEMP/clone-failed"
+          case "$REPO" in
+            https://[a-zA-Z0-9]*) : ;;
+            *) echo "::error::CUBE_UPSTREAM_REPO must be a plain https:// URL (got '${REPO:0:40}…')"; exit 1 ;;
+          esac
+          export GIT_ALLOW_PROTOCOL=https
+          if ! git clone --quiet -- "$REPO" "$RUNNER_TEMP/cubesandbox"; then
+            # fail-closed：本 workflow 唯一职责是发现漂移；连克隆都失败的 run
+            # 绝不能绿（见文件头 A RED SCHEDULE IS THE MONITOR WORKING）。
+            echo "::error::upstream clone failed — the drift check did not RUN (fail-closed by design). Check vars.CUBE_UPSTREAM_REPO / upstream rate-limiting, then rerun via workflow_dispatch."
+            exit 1
           fi
+          echo "clone-ok"
 
       - name: Upstream contract drift check
         id: check
         run: |
-          if [ -f "$RUNNER_TEMP/clone-failed" ]; then
-            echo "code=skipped" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           set +e
           CUBE_UPSTREAM_DIR="$RUNNER_TEMP/cubesandbox" scripts/cube-upstream-check.sh
-          echo "code=$?" >> "$GITHUB_OUTPUT"
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
       - name: Gate on contract drift
+        env:
+          # step output 属不可信上下文：只经 env 传入 shell，不插值进脚本体
+          CHECK_CODE: ${{ steps.check.outputs.code }}
         run: |
-          case "${{ steps.check.outputs.code }}" in
+          case "${CHECK_CODE:-}" in
             0)
               echo "no contract drift since the pinned sha — auto-follow safe (spec §5.3)"
               ;;
@@ -70,11 +90,16 @@ jobs:
             2)
               echo "::notice::non-contract upstream drift only — no action required"
               ;;
-            skipped)
-              echo "check skipped (upstream clone failed)"
+            3)
+              echo "::error::upstream check errored (exit 3): most often the pinned sha is unreachable in a fresh clone (upstream force-push / gc) or a watched contract path vanished — re-verify the pin (scripts/cube-bundle-manifest.json + app/_stubs/cube/_VERSION.json) against spec §5.3 before anything else."
+              exit 1
+              ;;
+            "")
+              echo "::error::check step produced no exit code (runner aborted before the check wrote its output?) — treat as infrastructure failure and rerun"
+              exit 1
               ;;
             *)
-              echo "::error::upstream check errored (exit code ${{ steps.check.outputs.code }})"
+              echo "::error::upstream check errored (exit code ${CHECK_CODE})"
               exit 1
               ;;
           esac

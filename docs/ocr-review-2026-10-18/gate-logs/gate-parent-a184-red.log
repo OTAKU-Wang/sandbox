@@ -1,0 +1,48 @@
+F..F.F                                                                   [100%]
+================================== FAILURES ===================================
+_________________ test_a184_cert_with_empty_space_id_verifies _________________
+
+    def test_a184_cert_with_empty_space_id_verifies():
+        ca = _ca()
+        root = ca.generate_ca_certificate()
+        cert = ca.issue_certificate(space_id="", public_key="peer-pub", subject="node-a")
+>       assert ca.verify_certificate(cert, root) is True
+E       AssertionError: assert False is True
+E        +  where False = verify_certificate(CertificateInfo(subject='node-a', issuer='CDS Federation CA', serial_number='b73481013d024131', not_before=datetime.da...key='peer-pub', signature='8cbf2d8025c80c81f4506390b21e2e93cf75213bb88141fc3140c6eefb1bb463', is_ca=False, space_id=''), CertificateInfo(subject='CDS Federation CA', issuer='CDS Federation CA', serial_number='173b74e8c8934346', not_before=...ublic_key='pub', signature='43a165a87f2c4a72f5a9f9d29c8de80da1388485517b9477ebc6b47dc262bd2a', is_ca=True, space_id=''))
+E        +    where verify_certificate = <app.services.mutual_tls.SM2CertificateAuthority object at 0x00000195A8D84CB0>.verify_certificate
+
+tests\test_ocr_a184_a027.py:47: AssertionError
+_____________ test_a027_cache_set_raises_on_unserializable_value ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000195A9009970>
+
+    async def test_a027_cache_set_raises_on_unserializable_value(monkeypatch):
+        await _fake_redis(monkeypatch, {})
+>       with pytest.raises(TypeError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'TypeError'>
+
+tests\test_ocr_a184_a027.py:85: Failed
+------------------------------ Captured log call ------------------------------
+ERROR    app.core.cache:cache.py:38 cache_set failed for k: Object of type object is not JSON serializable
+________________ test_a027_cache_clear_escapes_glob_metachars _________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000195A900B320>
+
+    async def test_a027_cache_clear_escapes_glob_metachars(monkeypatch):
+        recorder = {}
+        await _fake_redis(monkeypatch, recorder)
+        await cache.cache_clear("orders:v1*")
+        pattern = recorder["match"][0]
+        assert pattern.startswith("cache:")
+        assert pattern.endswith("*")
+>       assert "\\?" in pattern
+E       AssertionError: assert '\\?' in 'cache:orders:v1**'
+
+tests\test_ocr_a184_a027.py:108: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a184_a027.py::test_a184_cert_with_empty_space_id_verifies
+FAILED tests/test_ocr_a184_a027.py::test_a027_cache_set_raises_on_unserializable_value
+FAILED tests/test_ocr_a184_a027.py::test_a027_cache_clear_escapes_glob_metachars
+3 failed, 3 passed in 2.05s
+A184_RED_RC=1

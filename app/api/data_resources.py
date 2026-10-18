@@ -3,6 +3,7 @@ import io
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -18,6 +19,18 @@ from app.services.storage_service import storage_service
 router = APIRouter()
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+
+# A310: opt-in list envelope (repo convention {items,total,page,page_size}).
+MAX_PAGE_SIZE = 200
+
+
+class DataResourcePage(BaseModel):
+    """Paginated view of the resource list (only returned when paginated=true)."""
+    items: list[DataResourceResponse]
+    total: int
+    page: int
+    page_size: int
+
 
 FORMAT_MAP = {
     "text/csv": ResourceFormat.CSV,
@@ -219,16 +232,42 @@ async def upload_data_resource(
     return DataResourceResponse.model_validate(resource)
 
 
-@router.get("/", response_model=list[DataResourceResponse])
+@router.get("/", response_model=list[DataResourceResponse] | DataResourcePage)
 async def list_data_resources(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE),
+    paginated: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_business_user),
 ):
-    """List data resources owned by the current user."""
+    """List data resources owned by the current user.
+
+    A310: 不带分页参数时返回的仍是**裸数组**，与旧行为逐字节一致 ——
+    `sdk/cds_sdk/client.py::list_data_resources` 与既有测试都按数组消费。
+    显式传 `paginated=true` 的调用方拿到仓库惯例的 `{items,total,page,page_size}`
+    信封，分页在 SQL 侧真做 LIMIT/OFFSET（旧形态只能让前端全量下载再 slice）。
+    """
+    ownership = DataResource.provider_id == current_user.id
+    if not paginated:
+        result = await db.execute(
+            select(DataResource).where(ownership).order_by(DataResource.created_at.desc())
+        )
+        return [DataResourceResponse.model_validate(r) for r in result.scalars().all()]
+
+    total = (await db.execute(
+        select(func.count()).select_from(DataResource).where(ownership)
+    )).scalar() or 0
     result = await db.execute(
-        select(DataResource).where(DataResource.provider_id == current_user.id).order_by(DataResource.created_at.desc())
+        select(DataResource).where(ownership)
+        .order_by(DataResource.created_at.desc())
+        .offset((page - 1) * page_size).limit(page_size)
     )
-    return [DataResourceResponse.model_validate(r) for r in result.scalars().all()]
+    return {
+        "items": [DataResourceResponse.model_validate(r) for r in result.scalars().all()],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.get("/{resource_id}", response_model=DataResourceResponse)
@@ -278,20 +317,29 @@ async def delete_data_resource(
             storage_deleted = storage_service.delete(resource.storage_path)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to delete stored resource: {e}")
+    # A312: DEK 销毁失败过去被 `except: pass` 吞掉，调用方看到的永远是成功。
+    # key_destroyed 如实记录：本就没有密钥可销毁 = True（没有留下可解密的材料）；
+    # destroy_key 抛错或没找到这把 key = False，由调用方（UI）如实转达。
+    key_destroyed = True
     if resource.encryption_key_id:
         try:
             from app.services.kms_service import kms_service
-            kms_service.destroy_key(resource.encryption_key_id)
+            key_destroyed = bool(kms_service.destroy_key(resource.encryption_key_id))
         except Exception:
-            pass
+            key_destroyed = False
 
     await db.delete(resource)
     await audit_service.log(
         db, action="data_resource.delete", resource_type="data_resource",
         user_id=current_user.id, resource_id=str(resource_id),
-        detail={"storage_deleted": storage_deleted},
+        detail={"storage_deleted": storage_deleted, "key_destroyed": key_destroyed},
     )
-    return {"deleted": True, "resource_id": str(resource_id), "storage_deleted": storage_deleted}
+    return {
+        "deleted": True,
+        "resource_id": str(resource_id),
+        "storage_deleted": storage_deleted,
+        "key_destroyed": key_destroyed,
+    }
 
 
 @router.post("/{resource_id}/sample")
@@ -363,14 +411,20 @@ async def desensitize_data_resource(
         raise HTTPException(status_code=500, detail=f"Failed to read data: {e}")
 
     from app.services.test_data_generator import test_data_generator
-    desensitized = test_data_generator.desensitize(data, resource.format, resource.schema_fields)
+    # A309: masking_applied 必须是**算出来的**，不是写死的。_infer_schema_from_csv
+    # 对上传文件的每一列都填 sensitivity="unknown"，普通 CSV 一个字段都不会被掩码；
+    # 此时返回 true 就是在对数商谎称"PII 已按策略掩码"（禁伪造铁律）。
+    desensitized, masked_columns = test_data_generator.desensitize_with_report(
+        data, resource.format, resource.schema_fields
+    )
 
     return {
         "resource_id": str(resource_id),
         "format": "csv",
         "data": desensitized,
         "row_count": max(0, desensitized.count("\n") - 1) if desensitized else 0,
-        "masking_applied": True,
+        "masking_applied": bool(masked_columns),
+        "masked_columns": masked_columns,
     }
 
 

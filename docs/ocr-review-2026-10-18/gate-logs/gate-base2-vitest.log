@@ -1,0 +1,589 @@
+
+ RUN  v4.1.8 D:/workspace/ocr-base/cds-frontend
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 44 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/DevTaskCreatePage.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/DeliveryCenterOpenApi.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/TaskDetail.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/NotebookWorkbenchFrame.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Audit/AuditLog.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/DevHome.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/JupyterDevEnv.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/devTaskExecution.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/devHomeOverview.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/OpenApiMonitor.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/DevTaskDataPicker.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/__tests__/ApiKeys.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/DevTasks.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/devTaskHomeA1.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/App.routes.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Dashboard/__tests__/Dashboard.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/Sidebar.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/NotebookWorkbench.taskParam.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/TaskRunRecords.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/directoryContract.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/Header.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/WorkspaceHome.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/ContractDataBoard.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Feedback/__tests__/ErrorCard.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/WorkspaceRoute.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/MainLayout.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/utils/__tests__/crypto.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/components/Layout/__tests__/PageCrumb.test.tsx.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/services/__tests__/flow.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/homeModel.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/display.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/devTaskForm.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Audit/__tests__/auditDisplay.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/utils/__tests__/csvPreview.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/services/__tests__/api.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/devTaskCards.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/services/__tests__/k8sOpsApi.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/utils/__tests__/workspace.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/stores/__tests__/authStore.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/taskDetailSpec.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/pages/Flow/__tests__/devTasksModel.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/services/__tests__/uploadBoundary.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start threads worker for test files D:/workspace/ocr-base/cds-frontend/src/__tests__/antdLocale.test.ts.
+ ❯ ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ Pool.schedule ../../sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../../sandbox/cds-frontend/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  44 errors
+   Start at  21:37:48
+   Duration  2.80s (transform 0ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
+VITEST_RC=1

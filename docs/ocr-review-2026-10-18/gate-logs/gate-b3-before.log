@@ -1,0 +1,148 @@
+...............................................................FFFFFF..F [ 94%]
+F..F                                                                     [100%]
+================================== FAILURES ===================================
+_________________ test_preimage_equals_legacy_fstring_literal _________________
+
+    def test_preimage_equals_legacy_fstring_literal():
+>       from app.services.merkle_service import merkle_leaf_preimage
+E       ImportError: cannot import name 'merkle_leaf_preimage' from 'app.services.merkle_service' (D:\workspace\sandbox\app\services\merkle_service.py)
+
+tests\test_merkle_leaf_preimage.py:93: ImportError
+___________ test_preimage_is_bytes_and_matches_legacy_for_many_rows ___________
+
+    def test_preimage_is_bytes_and_matches_legacy_for_many_rows():
+>       from app.services.merkle_service import merkle_leaf_preimage
+E       ImportError: cannot import name 'merkle_leaf_preimage' from 'app.services.merkle_service' (D:\workspace\sandbox\app\services\merkle_service.py)
+
+tests\test_merkle_leaf_preimage.py:112: ImportError
+____________ test_preimage_keeps_null_resource_id_as_literal_none _____________
+
+    def test_preimage_keeps_null_resource_id_as_literal_none():
+        """f"{None}" == "None": a null resource_id must still render as the text
+        "None" ¡ª rendering "" instead would change every already-anchored leaf."""
+>       from app.services.merkle_service import merkle_leaf_preimage
+E       ImportError: cannot import name 'merkle_leaf_preimage' from 'app.services.merkle_service' (D:\workspace\sandbox\app\services\merkle_service.py)
+
+tests\test_merkle_leaf_preimage.py:133: ImportError
+___________ test_raw_join_ambiguity_is_real_without_the_write_guard ___________
+
+    def test_raw_join_ambiguity_is_real_without_the_write_guard():
+        """Documents the defect the guard closes: two different tuples, one
+        preimage, one anchored root."""
+>       from app.services.merkle_service import merkle_leaf_preimage
+E       ImportError: cannot import name 'merkle_leaf_preimage' from 'app.services.merkle_service' (D:\workspace\sandbox\app\services\merkle_service.py)
+
+tests\test_merkle_leaf_preimage.py:143: ImportError
+___________________ test_log_escapes_pipe_and_discloses_it ____________________
+
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x0000015591165A30>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x00000155910A5D00>
+
+    @pytest.mark.asyncio
+    async def test_log_escapes_pipe_and_discloses_it(db_session: AsyncSession, caplog):
+        with caplog.at_level(logging.WARNING, logger="app.services.audit_service"):
+            entry = await audit_service.log(
+                db_session,
+                action="weird|action",
+                resource_type="rt|x",
+                resource_id="rid|1",
+            )
+        # "\\" -> "\\\\" first, then "|" -> "\\|" (injective: nothing is lost).
+>       assert entry.action == "weird\\|action"
+E       AssertionError: assert 'weird|action' == 'weird\\|action'
+E         
+E         - weird\|action
+E         ?      -
+E         + weird|action
+
+tests\test_merkle_leaf_preimage.py:165: AssertionError
+______________________ test_escaped_rows_cannot_collide _______________________
+
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x0000015591165100>
+
+    @pytest.mark.asyncio
+    async def test_escaped_rows_cannot_collide(db_session: AsyncSession):
+        """The end-to-end point of the guard: the ambiguous pair from
+        test_raw_join_ambiguity_is_real_without_the_write_guard must land as two
+        different leaves once both went through the write funnel."""
+>       from app.services.merkle_service import merkle_leaf_preimage
+E       ImportError: cannot import name 'merkle_leaf_preimage' from 'app.services.merkle_service' (D:\workspace\sandbox\app\services\merkle_service.py)
+
+tests\test_merkle_leaf_preimage.py:179: ImportError
+__________________________ test_escape_is_injective ___________________________
+
+    @pytest.mark.asyncio
+    async def test_escape_is_injective():
+>       from app.services.merkle_service import escape_leaf_field
+E       ImportError: cannot import name 'escape_leaf_field' from 'app.services.merkle_service' (D:\workspace\sandbox\app\services\merkle_service.py)
+
+tests\test_merkle_leaf_preimage.py:223: ImportError
+_______________ test_signature_covers_the_stored_escaped_values _______________
+
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x00000155910BEAE0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000015591166C60>
+
+    @pytest.mark.asyncio
+    async def test_signature_covers_the_stored_escaped_values(
+        db_session: AsyncSession, monkeypatch
+    ):
+        """The SM2 event string is pipe-joined too (audit_service.py:93); it must be
+        computed from what is actually stored, or later verification fails."""
+        from app.services.crypto_service import crypto_service
+    
+        signed: list[bytes] = []
+        real_sign = crypto_service.sign
+    
+        def _spy(data: bytes, *args, **kwargs):
+            signed.append(data)
+            return real_sign(data, *args, **kwargs)
+    
+        monkeypatch.setattr(crypto_service, "sign", _spy)
+        entry = await audit_service.log(
+            db_session, action="a|b", resource_type="c", resource_id="d"
+        )
+>       assert signed == [b"a\\|b|c|d|"]
+E       AssertionError: assert [b'a|b|c|d|'] == [b'a\\|b|c|d|']
+E         
+E         At index 0 diff: b'a|b|c|d|' != b'a\\|b|c|d|'
+E         Use -v to get more diff
+
+tests\test_merkle_leaf_preimage.py:263: AssertionError
+_____________________ test_leaf_format_is_single_sourced ______________________
+
+    
+        assert captured["merkle_root"] == _legacy_root(rows)
+        assert all(r.blockchain_tx_hash == "0xdeadbeef" for r in rows)
+    
+    
+    # ©¤©¤©¤ 4. The leaf format lives in exactly one module ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+    
+    def test_leaf_format_is_single_sourced():
+        api_src = (REPO / "app/api/audit.py").read_text(encoding="utf-8")
+        egress_src = (
+>           REPO / "app/services/cube_egress_audit.py"
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ).read_text(encoding="utf-8")
+E       assert 'resource_type}|{' not in '"""Audit AP...)),\n    }\n'
+E         
+E         'resource_type}|{' is contained here:
+E           tion}|{r.resource_type}|{r.resource_id}|{r.created_at}"
+E         ?          ++++++++++++++++
+E                   record_hashes.append(crypto_service.sm3_hash(data.encode()))
+E           
+E               # Build Merkle tree and get root...
+E         
+E         ...Full output truncated (319 lines hidden), use '-vv' to show
+
+tests\test_merkle_leaf_preimage.py:398: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_merkle_leaf_preimage.py::test_preimage_equals_legacy_fstring_literal
+FAILED tests/test_merkle_leaf_preimage.py::test_preimage_is_bytes_and_matches_legacy_for_many_rows
+FAILED tests/test_merkle_leaf_preimage.py::test_preimage_keeps_null_resource_id_as_literal_none
+FAILED tests/test_merkle_leaf_preimage.py::test_raw_join_ambiguity_is_real_without_the_write_guard
+FAILED tests/test_merkle_leaf_preimage.py::test_log_escapes_pipe_and_discloses_it
+FAILED tests/test_merkle_leaf_preimage.py::test_escaped_rows_cannot_collide
+FAILED tests/test_merkle_leaf_preimage.py::test_escape_is_injective - ImportE...
+FAILED tests/test_merkle_leaf_preimage.py::test_signature_covers_the_stored_escaped_values
+FAILED tests/test_merkle_leaf_preimage.py::test_leaf_format_is_single_sourced
+9 failed, 67 passed in 106.30s (0:01:46)

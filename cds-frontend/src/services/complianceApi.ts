@@ -22,7 +22,9 @@ export interface ComplianceReport {
   data_protection: Record<string, unknown>;
   compliance_status: Record<string, unknown>;
   recommendations: unknown[];
-  anchoring: AnchoringDisclosure;
+  // 后端 app/schemas/compliance.py L60：`anchoring: AnchoringDisclosure | None = None`——
+  // 链锚定未配置时就是 null，前端类型必须同步可空（裸解引用会把整页炸成白屏）。
+  anchoring: AnchoringDisclosure | null;
   // PZ-06: 实时状态披露字段
   signing_backend?: string;
   aead_algorithm?: string;

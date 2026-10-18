@@ -1,7 +1,20 @@
 # W7: CI pipeline (docs/cubesandbox-parity-plan.md).
 # Tiered gates: new/changed platform tests must be green; the full suite runs
-# informational with a "known failures must not grow" soft gate
-# (ci/known-failures.md).
+# informational with a "known failures must not grow" budget gate — enforced
+# mechanically by ci/check_full_suite_budget.py against ci/full-suite-baseline.json
+# (history + method: ci/known-failures.md).
+#
+# Supply-chain posture — locked by tests/test_ci_workflow_policy.py, do not
+# loosen without review:
+#   * workflow-level `permissions: contents: read`: no job may inherit the
+#     repository default GITHUB_TOKEN (write-all on classic repos) and no
+#     scope is ever granted write anywhere in this workflow (every job is
+#     read-only);
+#   * third-party actions carry full commit SHAs, never mutable tags
+#     (mutable refs can be retagged by an upstream takeover);
+#   * no `${{ secrets.* }}` reaches any step: the leak scan runs the
+#     version+sha256-pinned gitleaks binary directly, so no token is ever
+#     handed to third-party code (replaces gitleaks-action@v2, 2026-10 review).
 name: CI
 
 on:
@@ -12,6 +25,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -33,6 +49,17 @@ jobs:
           pip install -r requirements.txt
           pip install -e ./sdk
 
+      - name: Re-assert CPU torch (deterministic final state)
+        run: |
+          # requirements.txt bounds torch only with ">=2.0.0": if the resolver
+          # decides to (re)install torch it is free to pull the ~2GB CUDA wheel
+          # from PyPI during the step above. Force the same version back from
+          # the CPU index and prove the final state (no CUDA build).
+          TORCH_VER=$(python -c "import importlib.metadata as m; print(m.version('torch').split('+')[0])")
+          pip install --index-url https://download.pytorch.org/whl/cpu \
+            --force-reinstall --no-deps "torch==${TORCH_VER}"
+          python -c "import torch, sys; sys.exit(0 if torch.version.cuda is None else 1)"
+
       - name: Compile check
         run: python -m compileall -q app tests alembic
 
@@ -41,7 +68,8 @@ jobs:
           export CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db"
           alembic upgrade head
           # SQLite maps UUID columns to NUMERIC affinity; type comparison is a
-          # PG-only gate (see alembic/env.py ALEMBIC_COMPARE_TYPES note).
+          # PG-only gate (see alembic/env.py ALEMBIC_COMPARE_TYPES note). The
+          # type-aware check runs in the migration-pg job against postgres:16.
           ALEMBIC_COMPARE_TYPES=0 alembic check
           rm -f ci.db
 
@@ -64,6 +92,7 @@ jobs:
             tests/test_security_config_matrix.py \
             tests/test_training_fail_closed.py \
             tests/test_field_classification_policy.py \
+            tests/test_sandbox_db_policy_gate.py \
             tests/test_dp_guardrails.py \
             tests/test_kms_dek_wrapped.py \
             tests/test_pii_ner_engine.py \
@@ -88,14 +117,71 @@ jobs:
             tests/test_jupyter_gateway_isolation.py \
             tests/test_storage_envelope_fail_closed.py \
             tests/test_frontend_api_contract.py \
-            tests/test_e2e_data_loop.py
+            tests/test_e2e_data_loop.py \
+            tests/test_ci_workflow_policy.py
 
       - name: Full suite (informational)
-        if: always()
+        continue-on-error: true
         run: |
           python -m pytest tests/ -q \
             --ignore=tests/test_e2e_full_lifecycle.py \
-            --junitxml=report.xml || true
+            --junitxml=report.xml
+
+      - name: Full-suite failure budget gate
+        run: python ci/check_full_suite_budget.py report.xml
+
+      - name: Upload full-suite report
+        if: ${{ !cancelled() && hashFiles('report.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-suite-junit
+          path: report.xml
+          if-no-files-found: ignore
+
+  migration-pg:
+    # Type-aware alembic check. The SQLite lane above must run with
+    # ALEMBIC_COMPARE_TYPES=0 (NUMERIC affinity = mass false positives,
+    # alembic/env.py), so UUID/JSONB/Numeric drift was only ever observable on
+    # production PG. This job closes that blind spot against postgres:16.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: cds-ci-pg
+          POSTGRES_DB: cds
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cds"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CDS_DATABASE_URL: postgresql+asyncpg://postgres:cds-ci-pg@localhost:5432/cds
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install CPU torch (keep this lane off the CUDA wheel too)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e ./sdk
+
+      - name: Alembic upgrade head (real PostgreSQL 16)
+        run: alembic upgrade head
+
+      - name: Alembic check with type comparison (PG-only gate)
+        run: alembic check
 
   frontend:
     runs-on: ubuntu-latest
@@ -109,11 +195,23 @@ jobs:
           cache: npm
           cache-dependency-path: cds-frontend/package-lock.json
 
+      - name: Install dependencies
+        working-directory: cds-frontend
+        run: npm ci
+
+      - name: Unit tests (vitest; remote FE lane evidence node:20 green 125 passed)
+        working-directory: cds-frontend
+        run: npm test
+
       - name: Build frontend
         working-directory: cds-frontend
+        run: npm run build
+
+      - name: Lint (informational baseline — 13 known errors, must not grow)
+        working-directory: cds-frontend
+        continue-on-error: true
         run: |
-          npm ci
-          npm run build
+          npm run lint || echo "::warning::eslint failures — informational baseline (2026-10-16 FE lane: 13 errors, files byte-identical to HEAD); lint errors introduced by this PR still belong to that PR (see ci/known-failures.md)"
 
   secrets:
     runs-on: ubuntu-latest
@@ -123,6 +221,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: gitleaks leak scan (pinned binary + sha256; no token involved)
+        run: |
+          set -euo pipefail
+          # gitleaks 8.30.1 linux_x64; sha256 from the official release
+          # checksums file. Full-history scan with allowlist ci/gitleaks.toml.
+          # Replaces gitleaks/gitleaks-action@v2 (mutable major tag + explicit
+          # GITHUB_TOKEN hand-off to third-party code — both flagged by the
+          # 2026-10 ops review; the binary path needs no token at all).
+          VERSION=8.30.1
+          SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl -sSLo gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks detect --redact --no-banner --source . --config ci/gitleaks.toml

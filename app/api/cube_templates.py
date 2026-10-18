@@ -98,6 +98,12 @@ async def create_cube_template(
         created_by=str(current_user.id),
         probe_config=body.probe_config,
     )
+    # A69: build_and_distribute opens its OWN async_session(); a flushed-but-
+    # uncommitted row is invisible to that connection, so the inline (default,
+    # ``?async=false``) branch must commit the template first — exactly what
+    # submit_operation already does before dispatching a background task. Without
+    # this commit every synchronous build died on "template vanished during build".
+    await db.commit()
 
     async def _run(op):
         op.progress = 0.1
@@ -120,6 +126,13 @@ async def create_cube_template(
 
     if async_mode:
         return JSONResponse(status_code=202, content=ops.operation_payload(op))
+    # A69, second wall on the inline path: the build ran on its OWN session, so
+    # this session's copies are stale (tpl still says BUILDING) and ``op``'s
+    # server-default created_at/updated_at were never loaded — reading them from
+    # the SYNC payload builder raises MissingGreenlet (submit_operation refreshes
+    # the background branch only). Re-read both rows before serialising.
+    await db.refresh(tpl)
+    await db.refresh(op)
     if op.status == "failed":
         await db.commit()
         raise CDSError(op.error or "template build failed", code="INTERNAL_ERROR", http_status=500)

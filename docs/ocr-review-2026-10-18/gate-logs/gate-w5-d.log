@@ -1,0 +1,44 @@
+....FF                                                                   [100%]
+================================== FAILURES ===================================
+_______________________ test_tee_probe_stream_contract ________________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-121/test_tee_probe_stream_contract0')
+
+    def test_tee_probe_stream_contract(tmp_path: Path) -> None:
+        """T3：文档承诺必须与实现一致——--json 时 stdout 恒为单行 tee=...，
+        JSON 走 stderr（改文档不改行为：preflight 抓的就是 stdout 单行）。"""
+        caps = tmp_path / "caps.json"
+        r = subprocess.run(
+            [sys.executable, str(PROBE_PY), "--json", "--capabilities-file", str(caps)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+>       assert r.returncode == 0
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['D:\\\\workspace\\\\sandbox\\\\.venv-gate\\\\Scripts\\\\python.exe', 'D:\\\\workspace\\\\sandbox\\\\deploy\\\\cub...be\\n    raise ValueError(f"device_root \ufffd\ufffd\ufffd\ufffd\u03aa\ufffd\ufffd\ufffd\ufffd\xb7\ufffd\ufffd: {device_root!r}")\\nValueError: device_root \ufffd\ufffd\ufffd\ufffd\u03aa\ufffd\ufffd\ufffd\ufffd\xb7\ufffd\ufffd: \\'/\\'\\n').returncode
+
+tests\test_cube_node_scripts.py:697: AssertionError
+________________ test_tee_probe_device_root_isolates_commands _________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-121/test_tee_probe_device_root_iso0')
+
+    def test_tee_probe_device_root_isolates_commands(tmp_path: Path) -> None:
+        """T4：device_root != "/" 时命令探测也必须落在 <root>/bin，
+        否则宿主机真实 tdx-attest/snpguest 会让 fixture 场景假阳性。"""
+        mod = load_script(PROBE_PY)
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        hit = fake_bin / "snpguest"
+        hit.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        hit.chmod(0o755)
+        res = mod.probe(device_root=tmp_path)
+>       assert res["tee"] == "sev_snp", f"命令探测必须限定在 device_root/bin: {res}"
+E       AssertionError: 命令探测必须限定在 device_root/bin: {'tee': 'none', 'providers': {'tdx': [], 'sev_snp': []}}
+E       assert 'none' == 'sev_snp'
+E         
+E         - sev_snp
+E         + none
+
+tests\test_cube_node_scripts.py:722: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_cube_node_scripts.py::test_tee_probe_stream_contract - asse...
+FAILED tests/test_cube_node_scripts.py::test_tee_probe_device_root_isolates_commands
+2 failed, 4 passed, 29 deselected in 11.10s

@@ -39,6 +39,29 @@ def step(name, status, status_code=None, note="", excerpt=""):
     return status == "PASS"
 
 
+def _as_items(payload):
+    """Pure extractor for list-or-{items|nodes:[...]} envelopes.
+
+    The old inline chain (`rows if isinstance(rows, list) else
+    rows.get("items", [])`) raised AttributeError whenever the gateway
+    returned an error envelope, None, or {"items": null} — i.e. exactly on the
+    branches where FAIL evidence was needed.
+    """
+    if isinstance(payload, dict):
+        payload = payload.get("items", payload.get("nodes", []))
+    if not isinstance(payload, list):
+        return []
+    return [x for x in payload if isinstance(x, dict)]
+
+
+def _access_token(resp):
+    try:
+        body = resp.json()
+    except Exception:
+        return ""
+    return body.get("access_token", "") if isinstance(body, dict) else ""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("base_url")
@@ -46,7 +69,12 @@ def main():
     ap.add_argument("--admin-user", default="cdsadmin")
     args = ap.parse_args()
     base = args.base_url.rstrip("/")
-    admin_pass = os.environ.get("CDS_E2E_ADMIN_PASS", "CdsE2e!Admin123")
+    # No committed default credential: a lane booted with the wrong password
+    # must fail here, not silently probe a stack that was never ours.
+    admin_pass = os.environ.get("CDS_E2E_ADMIN_PASS")
+    if not admin_pass:
+        step("admin.login", "FAIL", note="CDS_E2E_ADMIN_PASS is required (no default)")
+        return finish(args.out)
 
     http = httpx.Client(base_url=base, timeout=120)
 
@@ -59,7 +87,10 @@ def main():
     s2 = http.post(f"{base}/api/v1/auth/login",
                    json={"username": args.admin_user, "password": admin_pass})
     if s2.status_code == 200:
-        token = s2.json()["access_token"]
+        token = _access_token(s2)
+        if not token:
+            step("admin.login", "FAIL", 200, note="200 login without access_token")
+            return finish(args.out)
         step("admin.login", "PASS", 200, "existing admin")
     else:
         s2 = http.post(f"{base}/api/v1/auth/register",
@@ -69,7 +100,11 @@ def main():
         if s2.status_code not in (200, 201):
             step("admin.register", "FAIL", s2.status_code, note=s2.text[:300])
             return finish(args.out)
-        token = s2.json()["access_token"]
+        token = _access_token(s2)
+        if not token:
+            step("admin.register", "FAIL", s2.status_code,
+                 note=f"{s2.status_code} register without access_token")
+            return finish(args.out)
         step("admin.register", "PASS", s2.status_code, "bootstrap admin (role=admin)")
     ah = {"Authorization": f"Bearer {token}"}
 
@@ -79,16 +114,24 @@ def main():
     if s3.status_code != 201:
         step("apikey.create.full", "FAIL", s3.status_code, note=s3.text[:300])
         return finish(args.out)
-    full_key = s3.json()["key"]
+    full_key = s3.json().get("key", "")
+    if not full_key:
+        step("apikey.create.full", "FAIL", 201, note="201 without key material")
+        return finish(args.out)
     step("apikey.create.full", "PASS", 201,
          note=f"prefix={s3.json().get('key_prefix')} len={len(full_key)}")
 
     s4 = http.post(f"{base}/api/v1/api-keys", headers=ah,
                    json={"name": "e2e-readonly", "preset": "readonly",
                          "expires_in_days": 30})
-    ro_key = s4.json().get("key", "")
-    step("apikey.create.readonly", "PASS" if s4.status_code == 201 else "FAIL",
-         s4.status_code)
+    # The readonly leg feeds the scope-negative probes: continuing with an
+    # empty key turned a 401 into a fake "denied" PASS and poisoned three
+    # unrelated steps — fail the leg at its source instead.
+    ro_key = s4.json().get("key", "") if s4.status_code == 201 else ""
+    if not ro_key:
+        step("apikey.create.readonly", "FAIL", s4.status_code, note=s4.text[:200])
+        return finish(args.out)
+    step("apikey.create.readonly", "PASS", 201)
 
     kh = {"Authorization": f"Bearer {full_key}"}
     r = http.get(f"{base}/api/v1/meta/capability-matrix", headers=kh)
@@ -147,14 +190,17 @@ def main():
     # Node-less remote: honest fail-closed 400 RUNTIME_UNAVAILABLE is PASS.
     r = http.post(f"{base}/api/v1/sandbox-sessions", headers=kh,
                   json={"data_product_id": product_id, "sandbox_level": "l2c"})
+    session_id = None
     session_live = False
     if r.status_code == 201:
-        sess = r.json()
-        sid = sess["id"]
+        body = r.json()
+        sess = body if isinstance(body, dict) else {}
+        sid = sess.get("id") or ""
         status0 = sess.get("status")
-        step("loop.session.create", "PASS", 201,
-             note=f"level=l2c status={status0}")
-        session_live = status0 in ("ready", "running")
+        session_id = sid or None
+        step("loop.session.create", "PASS" if sid else "FAIL", 201,
+             note=f"level=l2c status={status0}" + ("" if sid else " — 201 WITHOUT session id"))
+        session_live = bool(sid) and status0 in ("ready", "running")
         if session_live:
             payload = b"name,Alice\nname,Bob\nname,Carol\n"
             r = http.post(f"{base}/api/v1/sandbox-sessions/{sid}/files",
@@ -197,12 +243,6 @@ def main():
             step("loop.proof_bundle", "PASS" if (ev_ok and meta_ok) else "FAIL",
                  r.status_code,
                  note=f"evidence_hash={ev_ok} bundle_meta={meta_ok}")
-
-            r = http.post(f"{base}/api/v1/sandbox-sessions/{sid}/terminate",
-                          headers=kh)
-            step("loop.session.terminate",
-                 "PASS" if r.status_code in (200, 202) else "FAIL", r.status_code,
-                 excerpt=r.text[:150])
     else:
         # Node-less remote (no KVM/nested virt): SS-13 fail-closed contract —
         # session creation MUST return 400 RUNTIME_UNAVAILABLE, not a fake
@@ -219,6 +259,16 @@ def main():
              else f"expected 201 or honest 400, got {r.status_code}",
              excerpt=r.text[:300])
 
+    # Terminate is NOT gated on session_live: a session created but stuck in
+    # provisioning used to leak (no terminate call, no evidence step) while the
+    # harness still printed its green summary.
+    if session_id:
+        r = http.post(f"{base}/api/v1/sandbox-sessions/{session_id}/terminate",
+                      headers=kh)
+        step("loop.session.terminate",
+             "PASS" if r.status_code in (200, 202) else "FAIL", r.status_code,
+             excerpt=r.text[:150])
+
     r = http.get(f"{base}/api/v1/audit/records", headers=ah,
                  params={"action": "api_key.created", "limit": 10})
     ok = r.status_code == 200 and "e2e-full" in r.text
@@ -226,12 +276,28 @@ def main():
          note="admin audit trail carries api_key.created")
 
     r = http.get(f"{base}/api/v1/api-keys", headers=ah)
-    rows = r.json()
-    rows = rows if isinstance(rows, list) else rows.get("items", [])
-    field_leak = any(isinstance(row, dict) and row.get("key") for row in rows)
+    rows = _as_items(r.json() if r.status_code == 200 else None)
+    field_leak = any(row.get("key") for row in rows)
     ok = r.status_code == 200 and not field_leak and full_key not in r.text
     step("apikey.list.no_bare_key", "PASS" if ok else "FAIL", r.status_code,
          note="list exposes key_prefix only (no bare key, no key field)")
+
+    # Credential hygiene: both keys this run issued (the full preset key is
+    # non-expiring) used to survive the lane forever — a finished e2e must not
+    # leave live full-scope credentials on the target.
+    by_name = {row.get("name"): row.get("id", "") for row in rows}
+    cleanup = []
+    for label, key_name in (("full", "e2e-full"), ("readonly", "e2e-readonly")):
+        kid = by_name.get(key_name, "")
+        if not kid:
+            cleanup.append(f"{label}:no-id")
+            continue
+        d = http.patch(f"{base}/api/v1/api-keys/{kid}", headers=ah,
+                       json={"status": "disabled"})
+        cleanup.append(f"{label}:{d.status_code}")
+    ok = all(c.endswith(":200") for c in cleanup) and len(cleanup) == 2
+    step("apikey.cleanup.disabled", "PASS" if ok else "FAIL", None,
+         note=" ".join(cleanup))
 
     return finish(args.out)
 
@@ -246,7 +312,7 @@ def finish(out):
         "failed": len(fails),
         "evidence": EVIDENCE,
     }
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
     print(f"\n== {report['passed']}/{report['total']} passed, "
           f"{report['failed']} failed -> {out}")

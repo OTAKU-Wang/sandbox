@@ -4,6 +4,12 @@ The ``DataEncryptionKey.encrypted_key`` column must persist the KEK-wrapped
 envelope blob (useless without the KEK in HSM/Vault), never the plaintext key
 hex. The column is write-only (no reader decrypts from it), so the change is
 purely a storage-format hardening.
+
+OCR-A13 changed the CALLER: the DEK lifecycle routes are no longer "any logged-in
+account" — they require a platform role (operator/admin, same guard as the shipped
+console's key-management page), so these tests run as ``operator_headers`` instead of
+``auth_headers`` (a self-registered data_provider). ``test_ocr_a13_kms_dek_governance``
+pins the refusal side; this file keeps pinning the at-rest format side.
 """
 import uuid
 
@@ -15,10 +21,10 @@ from app.services.kms_service import kms_service
 
 
 @pytest.mark.asyncio
-async def test_create_dek_persists_wrapped_blob_not_plaintext(client, auth_headers, db_session):
+async def test_create_dek_persists_wrapped_blob_not_plaintext(client, operator_headers, db_session):
     product_id = uuid.uuid4()
     resp = await client.post(
-        "/api/v1/kms/keys", params={"product_id": str(product_id)}, headers=auth_headers
+        "/api/v1/kms/keys", params={"product_id": str(product_id)}, headers=operator_headers
     )
     assert resp.status_code == 201
     key_id = resp.json()["key_id"]
@@ -46,15 +52,15 @@ async def test_create_dek_persists_wrapped_blob_not_plaintext(client, auth_heade
 
 
 @pytest.mark.asyncio
-async def test_rotate_dek_persists_wrapped_blob(client, auth_headers, db_session):
+async def test_rotate_dek_persists_wrapped_blob(client, operator_headers, db_session):
     product_id = uuid.uuid4()
     resp = await client.post(
-        "/api/v1/kms/keys", params={"product_id": str(product_id)}, headers=auth_headers
+        "/api/v1/kms/keys", params={"product_id": str(product_id)}, headers=operator_headers
     )
     assert resp.status_code == 201
     key_id = resp.json()["key_id"]
 
-    rot = await client.post(f"/api/v1/kms/keys/{key_id}/rotate", headers=auth_headers)
+    rot = await client.post(f"/api/v1/kms/keys/{key_id}/rotate", headers=operator_headers)
     assert rot.status_code == 200
     new_key_id = rot.json()["new_key_id"]
 
@@ -70,16 +76,16 @@ async def test_rotate_dek_persists_wrapped_blob(client, auth_headers, db_session
 
 
 @pytest.mark.asyncio
-async def test_dek_list_and_get_do_not_expose_key_material(client, auth_headers):
+async def test_dek_list_and_get_do_not_expose_key_material(client, operator_headers):
     """List/get endpoints must keep returning metadata only (no encrypted blob)."""
     product_id = uuid.uuid4()
     resp = await client.post(
-        "/api/v1/kms/keys", params={"product_id": str(product_id)}, headers=auth_headers
+        "/api/v1/kms/keys", params={"product_id": str(product_id)}, headers=operator_headers
     )
     assert resp.status_code == 201
     key_id = resp.json()["key_id"]
 
-    detail = await client.get(f"/api/v1/kms/keys/{key_id}", headers=auth_headers)
+    detail = await client.get(f"/api/v1/kms/keys/{key_id}", headers=operator_headers)
     assert detail.status_code == 200
     body = detail.json()
     assert "encrypted_key" not in body

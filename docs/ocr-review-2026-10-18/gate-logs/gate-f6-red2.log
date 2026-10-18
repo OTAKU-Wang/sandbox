@@ -1,0 +1,135 @@
+(node:13876) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38500) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29896) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29896) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:24452) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > App.tsx 每条路由都命中表条目：没有一条落「运营概览」兜底
+[routeCrumb] 未命中/冒充运营概览: ["/login","/register","/flow/guide","/flow/quota","/ops/deployments","/ops/network-policies","/ops/pvcs","/ops/logs","/capability-matrix","/data-pipeline","/compliance-disclosure","/mpc","/system-status","/users","/api-keys"]
+
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts (9 tests | 5 failed) 27ms
+     × App.tsx 每条路由都命中表条目：没有一条落「运营概览」兜底 9ms
+     × 命中不到时诚实报「未知页面」，不再冒充运营概览/仪表盘 3ms
+     × 前缀按段边界命中：/data-products 不能把 /data-products-archive 也算进来 1ms
+     × 补上的映射逐字（段名取左栏菜单文案，不新造词） 2ms
+     × 登录/注册在 MainLayout 之外：style=none、无段（不画面包屑带） 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > App.tsx 每条路由都命中表条目：没有一条落「运营概览」兜底
+AssertionError: expected [ '/login', '/register', …(13) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "/login",
++   "/register",
++   "/flow/guide",
++   "/flow/quota",
++   "/ops/deployments",
++   "/ops/network-policies",
++   "/ops/pvcs",
++   "/ops/logs",
++   "/capability-matrix",
++   "/data-pipeline",
++   "/compliance-disclosure",
++   "/mpc",
++   "/system-status",
++   "/users",
++   "/api-keys",
++ ]
+
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts:73:23
+     71|     });
+     72|     console.log(`[routeCrumb] 未命中/冒充运营概览: ${JSON.stringify(unmatched)}…
+     73|     expect(unmatched).toEqual([]);
+       |                       ^
+     74|   });
+     75|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 命中不到时诚实报「未知页面」，不再冒充运营概览/仪表盘
+AssertionError: /nope: expected '运营概览' to be '未知页面' // Object.is equality
+
+Expected: "未知页面"
+Received: "运营概览"
+
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts:89:26
+     87|     for (const p of ['/nope', '/ops', '/flow', '/data-products-archive…
+     88|       const c = getRouteCrumb(p);
+     89|       expect(c.title, p).toBe('未知页面');
+       |                          ^
+     90|       expect(c.segs, p).toEqual(['未知页面']);
+     91|       // 合成条目没有前缀 = 绝不参与前缀匹配（旧实现是 prefix:'' → startsWith('') 命中全站）
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 前缀按段边界命中：/data-products 不能把 /data-products-archive 也算进来
+AssertionError: expected '数据产品' to be '未知页面' // Object.is equality
+
+Expected: "未知页面"
+Received: "数据产品"
+
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts:99:59
+     97|     expect(getRouteCrumb('/data-products').segs).toEqual(['数据产品']);
+     98|     expect(getRouteCrumb(`/data-products/${PARAM}`).segs).toEqual(['数据…
+     99|     expect(getRouteCrumb('/data-products-archive').title).toBe('未知页面');
+       |                                                           ^
+    100|     expect(getRouteCrumb('/contracts-history').title).toBe('未知页面');
+    101|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 补上的映射逐字（段名取左栏菜单文案，不新造词）
+AssertionError: /flow/guide: expected [ '仪表盘' ] to deeply equal [ '开发指引' ]
+
+- Expected
++ Received
+
+  [
+-   "开发指引",
++   "仪表盘",
+  ]
+
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts:128:46
+    126|     };
+    127|     for (const [path, segs] of Object.entries(want)) {
+    128|       expect(getRouteCrumb(path).segs, path).toEqual(segs);
+       |                                              ^
+    129|     }
+    130|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 登录/注册在 MainLayout 之外：style=none、无段（不画面包屑带）
+AssertionError: expected 'slash' to be 'none' // Object.is equality
+
+Expected: "none"
+Received: "slash"
+
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts:133:43
+    131|
+    132|   it('登录/注册在 MainLayout 之外：style=none、无段（不画面包屑带）', () => {
+    133|     expect(getRouteCrumb('/login').style).toBe('none');
+       |                                           ^
+    134|     expect(getRouteCrumb('/register').style).toBe('none');
+    135|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 4 passed (9)
+   Start at  21:57:55
+   Duration  2.67s (transform 82ms, setup 279ms, import 70ms, tests 27ms, environment 1.90s)
+

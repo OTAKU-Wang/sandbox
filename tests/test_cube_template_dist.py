@@ -384,7 +384,7 @@ async def test_w11_async_build_returns_202_and_polls(client, operator_headers, d
                                      "size_bytes": SIZE, "probe_config": {"type": "http"}},
     )
     monkeypatch.setattr("app.services.cube_template_service.upload_artifact",
-                        lambda path: "cube-templates/synthetic.ext4")
+                        lambda path, artifact_id="synthetic": f"cube-templates/{artifact_id}.ext4")
 
     async def _no_snapshot(template_id):
         return {"node_id": "none", "rootfs_size_bytes": 0, "template_id": "", "snapshot_path": ""}
@@ -439,3 +439,189 @@ async def test_w11_async_build_returns_202_and_polls(client, operator_headers, d
     assert tpl_resp.status_code == 200
     items = tpl_resp.json()["items"]
     assert any(t["name"] == "w11-scene" and t["status"] == CubeTemplateStatus.READY.value for t in items)
+
+
+# ── A69: 默认（同步）分支的跨 session 可见性 ───────────────────────────────────
+# 背景：build_and_distribute 自开 async_session()，请求事务里尚未 commit 的模板行
+# 两道独立的坑：
+# 坑一 可见性：请求事务里尚未 commit 的模板行对 builder 自己的连接不可见 ⇒ 同步
+#   分支在 _execute 之前不 commit 就必然 "template vanished during build"。异步
+#   分支自己早就为此先 commit 了（session_operations.submit_operation），内联漏了。
+# 坑二 陈旧/未加载的行：过了坑一仍不算通——内联执行后请求 session 里的 tpl 仍是
+#   构建前的旧值（响应谎报 BUILDING），op 的 server-default created_at/updated_at
+#   从未回读，而 operation_payload() 是同步函数，碰它就招 MissingGreenlet ⇒ 同样
+#   500。异步分支靠 submit_operation 里的 await db.refresh(op) 护住了。
+# 本地能证到的上限：套件级 StaticPool 让两个 session 共用同一条 DBAPI 连接，「新
+# 连接看不到未提交行」在本地根本不发生（台账已警告 SQLite 会掩盖它）；所以坑一靠
+# 「commit 先于内联 executor」断言钉，坑二端到端终态钉。
+
+
+def _stub_build_world(monkeypatch):
+    """只替外部世界：构建机 docker/mkfs、MinIO、节点 gRPC、AppSnapshot。
+
+    请求事务、submit_operation 内联执行、服务自己 session 的读写全部走真路径。
+    """
+    monkeypatch.setattr(
+        "app.services.cube_template_service.convert_rootfs",
+        lambda image_ref, out_dir: {"artifact_path": "/tmp/synthetic.ext4", "sha256": SHA,
+                                    "size_bytes": SIZE, "probe_config": {"type": "http"}},
+    )
+    monkeypatch.setattr("app.services.cube_template_service.upload_artifact",
+                        lambda path, artifact_id="sync": f"cube-templates/{artifact_id}.ext4")
+
+    async def _no_snapshot(template_id):
+        return {"node_id": "none", "rootfs_size_bytes": 0, "template_id": "", "snapshot_path": ""}
+
+    monkeypatch.setattr(cube_template_service, "_snapshot_check", _no_snapshot)
+    monkeypatch.setattr("app.services.cube_template_service.presign_artifact_url",
+                        lambda aid, ttl: f"https://minio.test/{aid}?sig=1")
+    monkeypatch.setattr(get_settings(), "CUBE_TEMPLATE_SIGNING_KEY", "k")
+
+    def images_factory(client):
+        return FakeImages({
+            "create": [],
+            "list": [lambda aid: _list_with_image(aid, SIZE, SHA)],
+            "destroy": [],
+        })
+
+    monkeypatch.setattr(cube_template_service, "_images_factory", lambda client: images_factory(client))
+    monkeypatch.setattr(cube_template_service, "_client_factory",
+                        lambda node: type("N", (), {"node_id": node.node_id})())
+
+
+@pytest.mark.asyncio
+async def test_sync_build_commits_template_row_before_the_inline_operation(
+    client, operator_headers, db_session, monkeypatch
+):
+    """A69 坑一：内联 executor 开跑前，请求事务必须已经 commit 过。"""
+    commits = {"n": 0}
+    real_commit = db_session.commit
+
+    async def _counting_commit():
+        commits["n"] += 1
+        await real_commit()
+
+    monkeypatch.setattr(db_session, "commit", _counting_commit)
+
+    seen: dict = {}
+    real_build = cube_template_service.build_and_distribute
+
+    async def _spy_build(template_id):
+        # 只记录，不接管：内联 build（含它自己 session 的读写）真的跑一遍
+        seen["commits_before_executor"] = commits["n"]
+        return await real_build(template_id)
+
+    monkeypatch.setattr(cube_template_service, "build_and_distribute", _spy_build)
+    _stub_build_world(monkeypatch)
+    _add_node(db_session, "n1")
+    await db_session.commit()
+    baseline = commits["n"]  # 请求开始前的基准
+
+    resp = await client.post(
+        "/api/v1/cube-templates",  # 不带 ?async —— 就是出问题的默认同步路径
+        json={"name": "sync-visible", "image_ref": "reg.local/cds/sync:1"},
+        headers=operator_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert seen["commits_before_executor"] > baseline, (
+        "A69 坑一：内联 operation 在请求事务 commit 之前就开跑 —— builder 自己的 "
+        "session 在真连接（PG）上看不到未提交的模板行，必然 500 'template vanished "
+        "during build'"
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_build_default_path_reaches_ready(
+    client, operator_headers, db_session, monkeypatch
+):
+    """A69 坑二：默认（同步）路径端到端可用：201 + operation succeeded + 模板 READY。
+
+    只替外部世界（构建机 docker/mkfs、MinIO、节点 gRPC、AppSnapshot）；请求事务、
+    operation 内联执行、服务自己 session 的读写全部走真路径。
+    """
+    _stub_build_world(monkeypatch)
+    _add_node(db_session, "n1")
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/v1/cube-templates",
+        json={"name": "sync-scene", "image_ref": "reg.local/cds/sync:2"},
+        headers=operator_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["operation"]["status"] == "succeeded", body["operation"]
+    assert body["operation"]["result_ref"]["nodes"] == {"n1": "READY"}
+    assert body["status"] == CubeTemplateStatus.READY.value
+    assert body["sha256"] == SHA
+    # 坑二的两个可观测面：未回读 operation 行→同步 payload 碰 server-default 列
+    # 就 MissingGreenlet；未回读模板行→body.status 谎报 BUILDING。
+    assert body["operation"]["created_at"]
+
+
+# ── A91: 上传对象名与预签名对象名必须是同一个 ─────────────────────────────────
+# 只替 MinIO 客户端这个传输边界；upload_artifact / presign_artifact_url /
+# minio_object_name 的 key 计算一个都不替（两侧都被替身掉包就是这个 bug 长期
+# 没人发现的原因 —— 台账 A91）。
+
+
+class _FakeMinIO:
+    """Records the object keys both sides actually used."""
+
+    def __init__(self):
+        self.put_keys: list[str] = []
+        self.get_keys: list[str] = []
+
+    def fput_object(self, bucket, object_name, file_path):
+        self.put_keys.append(object_name)
+
+    def presigned_get_object(self, bucket, object_name, expires=None):
+        self.get_keys.append(object_name)
+        return f"https://minio.test/{bucket}/{object_name}?sig=x"
+
+
+def _fake_minio(monkeypatch):
+    import app.services.cube_template_service as cts
+
+    fake = _FakeMinIO()
+    monkeypatch.setattr(cts, "_minio_client_or_none", lambda: fake)
+    monkeypatch.setattr(get_settings(), "MINIO_BUCKET", "cds-bucket")
+    return fake
+
+
+def test_upload_and_presign_use_the_same_object_key(tmp_path, monkeypatch):
+    """A91: 节点按预签名 URL 下载 —— 上传 key 与预签名 key 不同 ⇒ 永远 NoSuchKey。"""
+    import app.services.cube_template_service as cts
+
+    fake = _fake_minio(monkeypatch)
+    # 构建脚本永远输出 artifact.ext4（scripts/cube-rootfs-convert.sh:104）
+    artifact = tmp_path / "artifact.ext4"
+    artifact.write_bytes(b"rootfs-bytes")
+    artifact_id = "rfs-0123456789ab"
+
+    key = cts.upload_artifact(str(artifact), artifact_id)
+    url = cts.presign_artifact_url(artifact_id, 60)
+
+    assert url, "presign must return a URL when MinIO is reachable"
+    assert fake.put_keys == [cts.minio_object_name(artifact_id)], fake.put_keys
+    assert fake.get_keys == [cts.minio_object_name(artifact_id)], fake.get_keys
+    assert key == cts.minio_object_name(artifact_id)
+    assert url.endswith(f"{cts.minio_object_name(artifact_id)}?sig=x")
+
+
+def test_two_templates_do_not_share_one_object_key(tmp_path, monkeypatch):
+    """A91: 按文件名取 key 会让所有模板写同一个 key（互相覆盖 + sha mismatch）。"""
+    import app.services.cube_template_service as cts
+
+    fake = _fake_minio(monkeypatch)
+    paths, ids = [], ["rfs-aaaaaaaaaaaa", "rfs-bbbbbbbbbbbb"]
+    for i in ids:
+        path = tmp_path / i / "artifact.ext4"   # 同一文件名，不同目录
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"rootfs")
+        paths.append(str(path))
+
+    keys = [cts.upload_artifact(p, aid) for p, aid in zip(paths, ids)]
+    assert keys == [cts.minio_object_name(aid) for aid in ids]
+    assert len(set(keys)) == 2, f"A91: artifact key collision: {keys}"
+

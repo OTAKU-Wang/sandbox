@@ -112,7 +112,7 @@ async def create_data_product(
         industry=body.industry,
         # Inherit schema and row_count from resource if not provided
         data_schema=body.data_schema or ({"fields": resource.schema_fields} if resource and resource.schema_fields else None),
-        row_count=body.row_count or resource.row_count if resource else None,
+        row_count=body.row_count if body.row_count is not None else (resource.row_count if resource else None),
         security_level=body.security_level,
         allowed_operations=body.allowed_operations,
         output_constraints=body.output_constraints,

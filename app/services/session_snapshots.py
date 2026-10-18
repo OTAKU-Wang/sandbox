@@ -11,6 +11,10 @@ Design notes:
 - Integrity: each archive ships a manifest (file count, byte size, sha256 of
   the tar); rollback refuses archives whose checksum does not match.
 - Retention: oldest snapshots are evicted beyond CDS_SESSION_MAX_SNAPSHOTS.
+  Semantics (ocr A116): unset keeps the default (10); ``0`` or a negative
+  limit is an explicit operator decision to DISABLE snapshot creation —
+  create_snapshot refuses with SnapshotError (the API maps it to HTTP 400),
+  it never 500s and never evicts everything in a loop.
 - Lifecycle: archives survive an accidental terminate (sibling dir), which
   makes "restore after terminate" possible for operators; the cleanup loop
   does not manage them in this round.
@@ -71,12 +75,22 @@ def create_snapshot(workspace: Path, session_id: str) -> dict:
     if not workspace.exists():
         raise SnapshotError("workspace does not exist")
 
+    # A116: a non-positive limit means snapshots are disabled by configuration
+    # (unset keeps the field default of 10). Refuse honestly instead of running
+    # the eviction loop with max_n <= 0, which popped from an empty list and
+    # turned POST .../snapshots into a 500.
+    max_n = int(settings.SESSION_MAX_SNAPSHOTS)
+    if max_n <= 0:
+        raise SnapshotError(
+            f"snapshots are disabled by configuration (CDS_SESSION_MAX_SNAPSHOTS={settings.SESSION_MAX_SNAPSHOTS}); "
+            "set a positive limit to enable snapshot creation"
+        )
+
     sdir = snapshots_dir(workspace)
     sdir.mkdir(parents=True, exist_ok=True)
 
     # Retention: evict oldest beyond the cap (before adding a new one).
     existing = sorted(sdir.glob(f"*{_SNAPSHOT_SUFFIX}"), key=lambda p: p.stat().st_mtime)
-    max_n = settings.SESSION_MAX_SNAPSHOTS
     while len(existing) >= max_n:
         oldest = existing.pop(0)
         oldest.unlink(missing_ok=True)

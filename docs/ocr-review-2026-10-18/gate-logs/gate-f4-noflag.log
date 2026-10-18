@@ -1,0 +1,44 @@
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 2 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start forks worker for test files D:/workspace/sandbox/cds-frontend/src/pages/Auth/__tests__/Login.test.tsx.
+ ❯ node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ processTicksAndRejections node:internal/process/task_queues:95:5
+ ❯ Pool.schedule node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Failed to start forks worker for test files D:/workspace/sandbox/cds-frontend/src/pages/__tests__/ComplianceDisclosure.test.tsx.
+ ❯ node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:94
+ ❯ processTicksAndRejections node:internal/process/task_queues:95:5
+ ❯ Pool.schedule node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:3449:5
+
+Caused by: Error: require() of ES Module D:\workspace\sandbox\cds-frontend\node_modules\@exodus\bytes\encoding-lite.js from D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in D:\workspace\sandbox\cds-frontend\node_modules\html-encoding-sniffer\lib\html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  2 errors
+   Start at  21:52:26
+   Duration  305ms (transform 0ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+

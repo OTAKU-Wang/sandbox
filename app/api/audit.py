@@ -23,7 +23,7 @@ from app.services.blockchain_adapter import (
     ChainBackend,
     chain_anchoring_state,
 )
-from app.services.merkle_service import merkle_service
+from app.services.merkle_service import merkle_leaf_preimage, merkle_service
 
 router = APIRouter()
 
@@ -352,11 +352,11 @@ async def anchor_audit_records(
     if not records:
         raise HTTPException(status_code=404, detail="No records found")
 
-    # Compute hashes and build Merkle tree
+    # Compute hashes and build Merkle tree (leaf bytes: merkle_service helper,
+    # the one place this frozen format lives).
     record_hashes = []
     for r in records:
-        data = f"{r.id}|{r.action}|{r.resource_type}|{r.resource_id}|{r.created_at}"
-        record_hashes.append(crypto_service.sm3_hash(data.encode()))
+        record_hashes.append(crypto_service.sm3_hash(merkle_leaf_preimage(r)))
 
     # Build Merkle tree and get root
     merkle_root = merkle_service.get_root(record_hashes)
@@ -418,8 +418,7 @@ async def verify_audit_record(
     sibling_records = list(result.scalars().all())
     record_hashes = []
     for r in sibling_records:
-        data = f"{r.id}|{r.action}|{r.resource_type}|{r.resource_id}|{r.created_at}"
-        record_hashes.append(crypto_service.sm3_hash(data.encode()))
+        record_hashes.append(crypto_service.sm3_hash(merkle_leaf_preimage(r)))
     merkle_root = merkle_service.get_root(record_hashes)
 
     # Verify via blockchain adapter (find anchor by tx_hash).
@@ -473,8 +472,7 @@ async def get_merkle_proof(
         raise HTTPException(status_code=400, detail="Record not anchored — no Merkle proof available")
 
     # Compute this record's hash
-    data = f"{log.id}|{log.action}|{log.resource_type}|{log.resource_id}|{log.created_at}"
-    record_hash = crypto_service.sm3_hash(data.encode())
+    record_hash = crypto_service.sm3_hash(merkle_leaf_preimage(log))
 
     # Reconstruct Merkle tree from all records sharing the same tx_hash, in the
     # canonical leaf order the anchoring side used (see _MERKLE_ORDER_BY).
@@ -489,9 +487,7 @@ async def get_merkle_proof(
     all_hashes = []
     target_index = -1
     for i, r in enumerate(sibling_records):
-        h = crypto_service.sm3_hash(
-            f"{r.id}|{r.action}|{r.resource_type}|{r.resource_id}|{r.created_at}".encode()
-        )
+        h = crypto_service.sm3_hash(merkle_leaf_preimage(r))
         all_hashes.append(h)
         if r.id == log.id:
             target_index = i

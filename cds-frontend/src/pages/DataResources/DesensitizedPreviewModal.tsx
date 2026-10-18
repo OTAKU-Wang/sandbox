@@ -1,4 +1,4 @@
-import { Alert, Button, Modal, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Modal, Space, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { dataResourceApi } from '../../services/dataResourceApi';
 import { CenteredLoading, QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
@@ -22,6 +22,8 @@ export default function DesensitizedPreviewModal({ resourceId, resourceName, onC
 
   const payload = previewQuery.data;
   const preview = parseCsvPreview(payload?.data);
+  // A309：掩码声明来自后端算出的 masked_columns，不再是弹窗自己相信的一个 bool。
+  const maskedColumns = payload?.masked_columns ?? [];
   const columns = preview.columns.map((c) => ({
     title: c === '_extra' ? '未命名列' : c,
     dataIndex: c,
@@ -55,12 +57,22 @@ export default function DesensitizedPreviewModal({ resourceId, resourceName, onC
             message={
               payload.masking_applied
                 ? '以下为脱敏后的样例数据：PII 字段已按策略掩码，不是原始明文，仅用于确认结构与作用域。'
-                : '后端未标记本次结果已脱敏，请谨慎对待其中内容。'
+                : '后端本次未对任何字段做掩码，以下就是原样内容，请谨慎对待。'
             }
             description={
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                本次返回 {payload.row_count ?? preview.totalRows} 行 · 格式 {payload.format ?? 'csv'}
-              </Text>
+              <Space direction="vertical" size={2}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  本次返回 {payload.row_count ?? preview.totalRows} 行 · 格式 {payload.format ?? 'csv'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  实际掩码列：
+                  {maskedColumns.length
+                    ? maskedColumns.map((name) => (
+                      <Tag key={name} color="volcano" style={{ marginInlineEnd: 4 }}>{name}</Tag>
+                    ))
+                    : <Tag style={{ marginInlineEnd: 4 }}>无</Tag>}
+                </Text>
+              </Space>
             }
           />
           {preview.reason ? (

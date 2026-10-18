@@ -1,0 +1,107 @@
+..........s............................................................. [ 21%]
+........................................................................ [ 42%]
+.................................................................s...... [ 63%]
+...................ss....ssss........ssssssssssss....................... [ 84%]
+...............................................FFFF...                   [100%]
+================================== FAILURES ===================================
+___________________ test_firecracker_seccomp_retry_allowed ____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000297762B1D60>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-85/test_firecracker_seccomp_retry0')
+
+    def test_firecracker_seccomp_retry_allowed(monkeypatch, tmp_path):
+        from app.services import firecracker_runtime as fr
+    
+        settings = get_settings()
+        monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", True)
+        runtime = _runtime()
+        vm = _mk_vm(tmp_path)
+        _patch_bwrap(monkeypatch, runtime)
+        calls: list = []
+        monkeypatch.setattr(fr.subprocess, "run", lambda *a, **kw: (calls.append(list(a[0] if a else kw.get("cmd"))), SimpleNamespace(returncode=1, stdout="", stderr="bwrap: --seccomp: EINVAL"))[1])
+    
+        result = runtime._simulate_execute(vm, "print(1)", "python")
+>       assert len(calls) == 2  # retried once, without seccomp
+        ^^^^^^^^^^^^^^^^^^^^^^
+E       assert 0 == 2
+E        +  where 0 = len([])
+
+tests\test_pz04_honesty_gates.py:248: AssertionError
+____________ test_firecracker_seccomp_retry_denied_fails_honestly _____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029776318E90>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-85/test_firecracker_seccomp_retry1')
+
+    def test_firecracker_seccomp_retry_denied_fails_honestly(monkeypatch, tmp_path):
+        from app.services import firecracker_runtime as fr
+    
+        settings = get_settings()
+        monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", False)
+        runtime = _runtime()
+        vm = _mk_vm(tmp_path)
+        _patch_bwrap(monkeypatch, runtime)
+        calls: list = []
+        monkeypatch.setattr(fr.subprocess, "run", lambda *a, **kw: (calls.append(list(a[0] if a else kw.get("cmd"))), SimpleNamespace(returncode=1, stdout="", stderr="bwrap: --seccomp: EINVAL"))[1])
+    
+        result = runtime._simulate_execute(vm, "print(1)", "python")
+>       assert len(calls) == 1  # NO seccomp-less retry
+        ^^^^^^^^^^^^^^^^^^^^^^
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_pz04_honesty_gates.py:264: AssertionError
+______________ test_firecracker_qemu_serial_seccomp_retry_denied ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000297762734A0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-85/test_firecracker_qemu_serial_s0')
+
+    def test_firecracker_qemu_serial_seccomp_retry_denied(monkeypatch, tmp_path):
+        from app.services import firecracker_runtime as fr
+    
+        settings = get_settings()
+        monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", False)
+        runtime = _runtime()
+        vm = _mk_vm(tmp_path)
+        _patch_bwrap(monkeypatch, runtime)
+        calls: list = []
+        monkeypatch.setattr(fr.subprocess, "run", lambda *a, **kw: (calls.append(list(a[0] if a else kw.get("cmd"))), SimpleNamespace(returncode=1, stdout="", stderr="bwrap: --seccomp: EINVAL"))[1])
+    
+        result = runtime._execute_via_qemu_serial(vm, "print(1)", "python")
+>       assert len(calls) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_pz04_honesty_gates.py:282: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-886aca5d
+_____________ test_firecracker_qemu_serial_seccomp_retry_allowed ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029776273F50>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-85/test_firecracker_qemu_serial_s1')
+
+    def test_firecracker_qemu_serial_seccomp_retry_allowed(monkeypatch, tmp_path):
+        from app.services import firecracker_runtime as fr
+    
+        settings = get_settings()
+        monkeypatch.setattr(settings, "SECCOMP_FALLBACK_ALLOWED", True)
+        runtime = _runtime()
+        vm = _mk_vm(tmp_path)
+        _patch_bwrap(monkeypatch, runtime)
+        calls: list = []
+        monkeypatch.setattr(fr.subprocess, "run", lambda *a, **kw: (calls.append(list(a[0] if a else kw.get("cmd"))), SimpleNamespace(returncode=1, stdout="", stderr="bwrap: --seccomp: EINVAL"))[1])
+    
+        result = runtime._execute_via_qemu_serial(vm, "print(1)", "python")
+>       assert len(calls) == 2
+E       assert 0 == 2
+E        +  where 0 = len([])
+
+tests\test_pz04_honesty_gates.py:299: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-12ebd864
+=========================== short test summary info ===========================
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_allowed
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_denied_fails_honestly
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_denied
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_allowed
+4 failed, 318 passed, 20 skipped in 88.21s (0:01:28)
+RC=1

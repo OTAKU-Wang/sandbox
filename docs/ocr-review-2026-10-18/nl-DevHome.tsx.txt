@@ -1,0 +1,685 @@
+     1	// 首页（原型 1、首页-平台总览.png = A-1 转录）—— 开发者工台的根路由首页。
+     2	//
+     3	// 版式按原型逐区块 1:1：页面标题带 → 欢迎带（两按钮）→ 4 张 KPI → 左「开发任务总览」/
+     4	// 右「沙箱内存使用」→ 「近 7 天调试与执行趋势」→ 「最新结果集」。文案逐字取原型，
+     5	// 数字一律取 GET /api/v1/flow/dashboard/home（口径与列表页同源，见 app/api/flow_runtime.py）。
+     6	//
+     7	// 与原型有意为之的两处偏差（都写在页面上，不藏在注释里）：
+     8	// · 内存卡副标题：原型写「实时占用」，后端只有「会话已分配的配额扣减」，没有任何实测内存来源
+     9	//   （响应 not_collected: memory.measured），所以副标题按真实口径写，并把后端 reason 挂在悬浮层；
+    10	// · 执行档分母：原型是 16 G，配置里不存在这一档（not_collected: memory.exec.quota），沿用租户配额。
+    11	// 缺数一律渲染「未记录」（homeModel 的不变式），示例值（张伟 / 12 / 1,204 次…）一个都不硬编码。
+    12	import { useState } from 'react';
+    13	import type { CSSProperties, ReactNode } from 'react';
+    14	import { Link, useNavigate } from 'react-router-dom';
+    15	import {
+    16	  Button,
+    17	  Card,
+    18	  Col,
+    19	  Progress,
+    20	  Row,
+    21	  Select,
+    22	  Space,
+    23	  Table,
+    24	  Tooltip,
+    25	  Typography,
+    26	} from 'antd';
+    27	import {
+    28	  ApiOutlined,
+    29	  CheckCircleFilled,
+    30	  ExclamationCircleFilled,
+    31	  FileTextOutlined,
+    32	  InfoCircleOutlined,
+    33	  PlayCircleFilled,
+    34	  PlusOutlined,
+    35	  ProjectOutlined,
+    36	  RightOutlined,
+    37	  SwapOutlined,
+    38	  UnorderedListOutlined,
+    39	} from '@ant-design/icons';
+    40	import type { ColumnsType } from 'antd/es/table';
+    41	import {
+    42	  HOME_RECENT_ROWS,
+    43	  HOME_TREND_DAYS,
+    44	  UNKNOWN_TEXT,
+    45	  TASK_DEBUG_METHOD_OPTIONS,
+    46	  taskEnumLabel,
+    47	  useHomeOverview,
+    48	} from '../../services/flow';
+    49	import type { HomeMemoryPanel, HomeOverview, HomeOverviewTaskRow, HomeResultSetRow } from '../../services/flow';
+    50	import { CenteredLoading, QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+    51	import { useAuthStore } from '../../stores/authStore';
+    52	import { formatDevTaskTime } from './devTasksModel';
+    53	import {
+    54	  formatCallCount,
+    55	  formatGibFromMb,
+    56	  lastCallText,
+    57	  memoryPercent,
+    58	  memoryStatePill,
+    59	  memoryTicks,
+    60	  notCollectedReason,
+    61	  opsLogScopeText,
+    62	  opsLogSubtext,
+    63	  resultSetName,
+    64	  resultSetStatePill,
+    65	  taskFilterTabs,
+    66	  taskStatePill,
+    67	  trendAxisLabel,
+    68	  trendBarHeight,
+    69	  trendScale,
+    70	  type StatePill,
+    71	} from './homeModel';
+    72	
+    73	const { Text, Title } = Typography;
+    74	
+    75	/** 原型实测色（strict-1-home.md §4 色板）走 index.css 令牌，中性色只在这里补一份。 */
+    76	const ink = '#1d2129'; // 主文本
+    77	const muted = '#86909c'; // 三级文本（提示小字）
+    78	const footnoteInk = '#5d6877'; // 卡片脚注实测墨色
+    79	const quotaInk = '#8f98a4'; // 配额小字
+    80	const tickInk = '#abb2bc'; // 进度条刻度
+    81	const axisInk = '#a0aec3'; // X 轴标签
+    82	const barSoft = '#9cc4fb'; // 图表第二系列（浅蓝柱）
+    83	const dangerInk = '#e34d59'; // 异常圆标 + 异常文字
+    84	const tileTone: Record<string, { fg: string; bg: string }> = {
+    85	  // 图 1 KPI 芯片配色逐字取像素读数（strict-1-home.md §3/§4）：蓝 #e8f1ff/#1b6ef3、绿 #e8f7ee/#00a870、
+    86	  // 紫 #f1ecff/#7a5af8、橙 #fff3e8/#f77335；主题变量与后三档对不上（绿实测偏成 #e2f6ee/#00b070），所以写字面值。
+    87	  blue: { fg: 'var(--cds-primary)', bg: 'var(--cds-primary-soft)' },
+    88	  green: { fg: '#00a870', bg: '#e8f7ee' },
+    89	  purple: { fg: '#7a5af8', bg: '#f1ecff' },
+    90	  orange: { fg: '#f77335', bg: '#fff3e8' },
+    91	};
+    92	/** 卡头副标题/提示小字：12px #86909c（§4）。 */
+    93	const hint: CSSProperties = { fontSize: 12, color: muted };
+    94	/** 卡内正文脚注：12px 实测 #5d6877（§4）。 */
+    95	const footnote: CSSProperties = { fontSize: 12, color: footnoteInk };
+    96	
+    97	/** 筛选标签：真值 strict-1-home.md §5/§6 h26 全圆角 r≈13；选中底 #e8f1ff 字 #1b6ef3；
+    98	    未选底 #f2f3f5 字 #4e5969（旧值 r6 / 底 #f2f4f7 / 字 #6b7280、高≈24）。 */
+    99	const tabStyle = (active: boolean): CSSProperties => ({
+   100	  fontSize: 12,
+   101	  lineHeight: '20px',
+   102	  padding: '3px 10px',
+   103	  borderRadius: 13,
+   104	  border: 'none',
+   105	  background: active ? 'var(--cds-primary-soft)' : '#f2f3f5',
+   106	  color: active ? 'var(--cds-primary)' : '#4e5969',
+   107	});
+   108	
+   109	const TREND_RANGE_OPTIONS = [
+   110	  { value: 7, label: '近 7 天' },
+   111	  { value: 14, label: '近 14 天' },
+   112	  { value: 30, label: '近 30 天' },
+   113	];
+   114	
+   115	function SectionLink({ to, children }: { to: string; children: ReactNode }) {
+   116	  return (
+   117	    <Link to={to} style={{ fontSize: 13 }}>
+   118	      {children} <RightOutlined style={{ fontSize: 10 }} />
+   119	    </Link>
+   120	  );
+   121	}
+   122	
+   123	/**
+   124	 * 表内状态（strict-1-home.md §3#19-23 / #28-31、§8-10）：12×12 实心圆图标 + **无底色**文字，
+   125	 * 首页没有 #f2f3f5 药丸底 ⇒ 不再是 antd Tag。进行中=播放圆 #00a870，已结束/正常=对勾圆
+   126	 * （灰 #a6adb8 / 绿 #00a870），异常=感叹号圆 #e34d59；文字取 §4 正文 13px #1d2129。
+   127	 */
+   128	function StateText({ pill, icon }: { pill: StatePill; icon?: 'play' | 'check' | 'alert' }) {
+   129	  const toneColor =
+   130	    pill.tone === 'success'
+   131	      ? 'var(--cds-success)'
+   132	      : pill.tone === 'danger'
+   133	        ? dangerInk
+   134	        : pill.tone === 'warning'
+   135	          ? 'var(--cds-orange)'
+   136	          : '#a6adb8';
+   137	  const glyph = icon ?? (pill.tone === 'danger' || pill.tone === 'warning' ? 'alert' : 'check');
+   138	  const Icon = glyph === 'play' ? PlayCircleFilled : glyph === 'alert' ? ExclamationCircleFilled : CheckCircleFilled;
+   139	  return (
+   140	    <Text style={{ fontSize: 13, color: ink }}>
+   141	      <Icon style={{ fontSize: 12, color: toneColor, marginRight: 8 }} />
+   142	      {pill.label}
+   143	    </Text>
+   144	  );
+   145	}
+   146	
+   147	/**
+   148	 * 内存卡的档位徽标（§8-14）：纯文字小药丸，无图标无圆点，h16 全圆角；
+   149	 * 占用中 底 #e8f7ee 字 #00a870，待执行/空闲 底 #f2f3f5 字 #86909c。
+   150	 */
+   151	function StateChip({ pill }: { pill: StatePill }) {
+   152	  const on = pill.tone === 'success';
+   153	  return (
+   154	    <span
+   155	      style={{
+   156	        flex: 'none',
+   157	        display: 'inline-block',
+   158	        padding: '0 8px',
+   159	        borderRadius: 999,
+   160	        fontSize: 12,
+   161	        lineHeight: '16px',
+   162	        background: on ? 'var(--cds-success-soft)' : '#f2f3f5',
+   163	        color: on ? 'var(--cds-success)' : muted,
+   164	      }}
+   165	    >
+   166	      {pill.label}
+   167	    </span>
+   168	  );
+   169	}
+   170	
+   171	function KpiCard({
+   172	  testId,
+   173	  title,
+   174	  caliber,
+   175	  value,
+   176	  sub,
+   177	  tone,
+   178	  icon,
+   179	}: {
+   180	  testId: string;
+   181	  title: string;
+   182	  caliber: string;
+   183	  value: number;
+   184	  sub: ReactNode;
+   185	  tone: keyof typeof tileTone;
+   186	  icon: ReactNode;
+   187	}) {
+   188	  const palette = tileTone[tone];
+   189	  return (
+   190	    <div className="cds-kpi-cell" data-testid={testId}>
+   191	      {/* 图 1：芯片在左（40×40 圆角 8，浅底 + 同色系图标），标题/值/副行在右 */}
+   192	      <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+   193	        <span
+   194	          style={{
+   195	            width: 40,
+   196	            height: 40,
+   197	            flex: '0 0 auto',
+   198	            borderRadius: 8,
+   199	            display: 'grid',
+   200	            placeItems: 'center',
+   201	            fontSize: 16,
+   202	            color: palette.fg,
+   203	            background: palette.bg,
+   204	          }}
+   205	        >
+   206	          {icon}
+   207	        </span>
+   208	        <div style={{ minWidth: 0 }}>
+   209	          <Tooltip title={caliber}>
+   210	            <Text type="secondary" style={{ fontSize: 12, color: '#86909c' }}>
+   211	              {title}
+   212	            </Text>
+   213	          </Tooltip>
+   214	          <div style={{ fontSize: 24, lineHeight: '32px', fontWeight: 700, color: '#1d2129' }}>{value}</div>
+   215	          <Text type="secondary" style={{ fontSize: 12, color: '#86909c' }}>
+   216	            {sub}
+   217	          </Text>
+   218	        </div>
+   219	      </div>
+   220	    </div>
+   221	  );
+   222	}
+   223	
+   224	/** 内存子卡：分子=已分配（会话按档位扣减），分母=租户配额；实测占用后端给不出，卡上不出现「实测」字样。 */
+   225	/**
+   226	 * 内存子卡：分子=已分配（会话按档位扣减），分母=租户配额；实测占用后端给不出，卡上不出现「实测」字样。
+   227	 * 真值 strict-1-home.md §5 这一段只有 标题/徽标/大数字/配额/进度条/刻度，且直接坐在卡体白底上
+   228	 * （§8：无内嵌盒描边与底色）⇒ 去掉 .cds-home-mem 外壳；执行档多出的「运行中·排队」与
+   229	 * 「16 G 独立配额未记录」不再占版面，收进配额数字的 Tooltip（quotaNote），信息一字不丢。
+   230	 */
+   231	function MemoryPanelCard({
+   232	  testId,
+   233	  title,
+   234	  panel,
+   235	  quotaMb,
+   236	  measuredReason,
+   237	  quotaNote,
+   238	}: {
+   239	  testId: string;
+   240	  title: string;
+   241	  panel: HomeMemoryPanel;
+   242	  quotaMb: number | null;
+   243	  measuredReason: string | null;
+   244	  quotaNote?: string;
+   245	}) {
+   246	  const pill = memoryStatePill(panel);
+   247	  const ticks = memoryTicks(quotaMb);
+   248	  const quotaTip = [measuredReason, quotaNote].filter(Boolean).join('；') || null;
+   249	  return (
+   250	    <div data-testid={testId}>
+   251	      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+   252	        <Text style={{ fontSize: 13 }}>{title}</Text>
+   253	        <StateChip pill={pill} />
+   254	      </div>
+   255	      <div style={{ margin: '6px 0 2px' }}>
+   256	        {/* 图上大号占用值是品牌蓝（非近黑），字号 24 */}
+   257	        <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--cds-primary)' }}>{formatGibFromMb(panel.reserved_mb)}</span>
+   258	        {/* 配额小字：真值 12px #8f98a4（§5） */}
+   259	        <Text style={{ fontSize: 12, color: quotaInk }}>
+   260	          <Tooltip title={quotaTip ?? undefined}>
+   261	            <span>{` / ${quotaMb === null ? `${UNKNOWN_TEXT} 配额` : `${formatGibFromMb(quotaMb)} 配额`}`}</span>
+   262	          </Tooltip>
+   263	        </Text>
+   264	      </div>
+   265	      <Progress
+   266	        percent={memoryPercent(panel.reserved_mb, quotaMb)}
+   267	        showInfo={false}
+   268	        strokeColor="var(--cds-primary)"
+   269	        trailColor="#e3edfb"
+   270	        size="small"
+   271	      />
+   272	      {ticks.length ? (
+   273	        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: tickInk }}>
+   274	          {ticks.map((tick) => (
+   275	            <span key={tick}>{tick}</span>
+   276	          ))}
+   277	        </div>
+   278	      ) : (
+   279	        <div style={{ fontSize: 12, color: tickInk }}>配额刻度{UNKNOWN_TEXT}</div>
+   280	      )}
+   281	    </div>
+   282	  );
+   283	}
+   284	
+   285	/** 分组柱状图：两组（调试/执行）共用一个 scaling，与原型一致——无 y 轴刻度、柱上无数字标注。
+   286	 *  柱几何取 strict-1-home.md §5：柱宽 28、组内间隔 12（旧值 38% 宽 + 3px 间隔）；
+   287	 *  卡底那段后端 note 真值图上没有 ⇒ 收进卡头标题的 Tooltip，不再占版面。 */
+   288	function TrendChart({ overview, maxHeight = 92 }: { overview: HomeOverview; maxHeight?: number }) {
+   289	  const points = overview.trend.days;
+   290	  const scale = trendScale(points);
+   291	  return (
+   292	    <div data-testid="trend-chart">
+   293	      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, paddingTop: 6 }}>
+   294	        {points.map((point) => (
+   295	          <div key={point.date} style={{ flex: 1, minWidth: 0 }}>
+   296	            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 12, height: maxHeight }}>
+   297	              <span
+   298	                data-bar="debug"
+   299	                title={`${trendAxisLabel(point.date)} 调试 ${point.debug} 次`}
+   300	                style={{
+   301	                  width: 28,
+   302	                  height: trendBarHeight(point.debug, scale, maxHeight),
+   303	                  borderRadius: '3px 3px 0 0',
+   304	                  background: point.debug > 0 ? 'var(--cds-primary)' : '#eef2f7',
+   305	                }}
+   306	              />
+   307	              <span
+   308	                data-bar="exec"
+   309	                title={`${trendAxisLabel(point.date)} 执行 ${point.exec} 次`}
+   310	                style={{
+   311	                  width: 28,
+   312	                  height: trendBarHeight(point.exec, scale, maxHeight),
+   313	                  borderRadius: '3px 3px 0 0',
+   314	                  background: point.exec > 0 ? barSoft : '#eef2f7',
+   315	                }}
+   316	              />
+   317	            </div>
+   318	            <div data-testid="trend-x-label" style={{ fontSize: 12, color: axisInk, marginTop: 4, textAlign: 'center' }}>
+   319	              {trendAxisLabel(point.date)}
+   320	            </div>
+   321	          </div>
+   322	        ))}
+   323	      </div>
+   324	    </div>
+   325	  );
+   326	}
+   327	
+   328	export default function FlowDevHome() {
+   329	  const navigate = useNavigate();
+   330	  const user = useAuthStore((state) => state.user);
+   331	  const [days, setDays] = useState<number>(HOME_TREND_DAYS);
+   332	  const [taskTab, setTaskTab] = useState<'all' | 'active' | 'ended'>('all');
+   333	  const overviewQuery = useHomeOverview(days, HOME_RECENT_ROWS);
+   334	
+   335	  if (overviewQuery.isPending) return <CenteredLoading tip="加载首页" />;
+   336	  if (overviewQuery.isError || !overviewQuery.data) {
+   337	    return (
+   338	      <QueryErrorAlert
+   339	        error={overviewQuery.error}
+   340	        message="首页数据加载失败"
+   341	        onRetry={() => {
+   342	          void overviewQuery.refetch();
+   343	        }}
+   344	      />
+   345	    );
+   346	  }
+   347	
+   348	  const overview = overviewQuery.data;
+   349	  const measuredReason = notCollectedReason(overview, 'memory.measured');
+   350	  const execQuotaReason = notCollectedReason(overview, 'memory.exec.quota');
+   351	  const recentTasks = overview.recent_tasks.filter((task) => {
+   352	    if (taskTab === 'active') return task.status !== 'archived';
+   353	    if (taskTab === 'ended') return task.status === 'archived';
+   354	    return true;
+   355	  });
+   356	
+   357	  const taskColumns: ColumnsType<HomeOverviewTaskRow> = [
+   358	    {
+   359	      title: '任务名称',
+   360	      dataIndex: 'title',
+   361	      ellipsis: true,
+   362	      render: (title: string, row) => (
+   363	        <Tooltip title={`任务编号 ${row.task_no ?? UNKNOWN_TEXT}`}>
+   364	          <Text strong>{title}</Text>
+   365	        </Tooltip>
+   366	      ),
+   367	    },
+   368	    {
+   369	      title: '状态',
+   370	      key: 'state',
+   371	      width: 96,
+   372	      render: (_, row) => <StateText pill={taskStatePill(row.status)} icon={row.status === 'archived' ? 'check' : 'play'} />,
+   373	    },
+   374	    {
+   375	      title: '调试方法',
+   376	      key: 'debug_method',
+   377	      width: 110,
+   378	      render: (_, row) => taskEnumLabel(TASK_DEBUG_METHOD_OPTIONS, row.debug_method),
+   379	    },
+   380	    {
+   381	      title: '创建时间',
+   382	      dataIndex: 'created_at',
+   383	      width: 150,
+   384	      render: (value: string | null) => formatDevTaskTime(value) ?? <Text type="secondary">{UNKNOWN_TEXT}</Text>,
+   385	    },
+   386	    {
+   387	      title: '操作',
+   388	      key: 'actions',
+   389	      width: 150,
+   390	      render: (_, row) => (
+   391	        <Space size={10}>
+   392	          <Link to={`/notebooks?task=${encodeURIComponent(row.id)}`}>调试</Link>
+   393	          <Link to="/compute">执行</Link>
+   394	          <Link to={`/flow/tasks/${encodeURIComponent(row.id)}`}>详情</Link>
+   395	        </Space>
+   396	      ),
+   397	    },
+   398	  ];
+   399	
+   400	  const resultSetColumns: ColumnsType<HomeResultSetRow> = [
+   401	    {
+   402	      title: '结果集名称',
+   403	      key: 'file_name',
+   404	      ellipsis: true,
+   405	      render: (_, row) => <Text>{resultSetName(row)}</Text>,
+   406	    },
+   407	    {
+   408	      title: '生成时间',
+   409	      dataIndex: 'created_at',
+   410	      width: 160,
+   411	      render: (value: string | null) => formatDevTaskTime(value) ?? <Text type="secondary">{UNKNOWN_TEXT}</Text>,
+   412	    },
+   413	    {
+   414	      title: '调用次数',
+   415	      key: 'call_count',
+   416	      width: 110,
+   417	      render: (_, row) => (
+   418	        <Tooltip title={overview.call_count_caliber}>
+   419	          <span>{formatCallCount(row.call_count)}</span>
+   420	        </Tooltip>
+   421	      ),
+   422	    },
+   423	    {
+   424	      title: '状态',
+   425	      key: 'state',
+   426	      width: 96,
+   427	      render: (_, row) => {
+   428	        const pill = resultSetStatePill(row.state);
+   429	        return row.state_reason ? (
+   430	          <Tooltip title={row.state_reason}>
+   431	            <span>
+   432	              <StateText pill={pill} />
+   433	            </span>
+   434	          </Tooltip>
+   435	        ) : (
+   436	          <StateText pill={pill} />
+   437	        );
+   438	      },
+   439	    },
+   440	    {
+   441	      title: '操作',
+   442	      key: 'actions',
+   443	      width: 110,
+   444	      // 操作列文案真值「API详情」（strict-1-home.md §5 x1174–1238；group-A 的「查看结果集」是另一读法）
+   445	      render: (_, row) => <Link to={`/deliveries?contract=${encodeURIComponent(row.contract_id)}`}>API详情</Link>,
+   446	    },
+   447	  ];
+   448	
+   449	  return (
+   450	    <div className="cds-home">
+   451	      {/* 首页顶部不再自带 24px 大标题：strict-1-home.md §2 行 48 / §5 行 152 量到的是
+   452	          面包屑带（浮于底色，文字墨高 14），已由 PageCrumb 统一负麦。 */}
+   453	
+   454	      {/* C1 欢迎/操作卡：真值 strict-1-home.md §2 是一张卡（bbox 244,123,1172,78），不是坐在底色上的裸行；
+   455	          卡内一行标题 + 两按钮（标题 ink 268,153、次按钮 1077,142、主按钮 1241,143）。
+   456	          次按钮文字色取 §4 实测 #4e5969；描边真值只到 `[?]`（#e5e6eb）⇒ 不写 inline 描边色。 */}
+   457	      <Card size="small" data-testid="home-welcome" style={{ marginBottom: 16 }}>
+   458	        <Row justify="space-between" align="middle" gutter={[20, 16]}>
+   459	          <Col xs={24} md={12}>
+   460	            <Title level={4} style={{ margin: 0 }}>
+   461	              欢迎回来，{user?.username ?? UNKNOWN_TEXT}
+   462	            </Title>
+   463	          </Col>
+   464	          <Col>
+   465	            <Space size={12}>
+   466	              <Button size="large" style={{ color: '#4e5969' }} icon={<UnorderedListOutlined />} onClick={() => { void navigate('/flow/tasks'); }}>
+   467	                查看开发任务
+   468	              </Button>
+   469	              <Button size="large" type="primary" icon={<PlusOutlined />} onClick={() => { void navigate('/flow/tasks/new'); }}>
+   470	                创建开发任务
+   471	              </Button>
+   472	            </Space>
+   473	          </Col>
+   474	        </Row>
+   475	      </Card>
+   476	
+   477	      {/* §2：卡片纵向间距 16、同一行两卡横向间距 20 ⇒ gutter [20,16]（行负边距的溢出由 index.css 接手）。 */}
+   478	      {/* 图 1 §5 C2 = 一个 1172×136 面板内 4 列（芯片 x285/570/855/1140，面板内无分隔线；像素探针 c2probe3.py）。 */}
+   479	      <div className="cds-kpi-strip" data-testid="home-kpi">
+   480	      <KpiCard
+   481	        testId="kpi-tasks"
+   482	        title="开发任务总数"
+   483	        caliber={`口径：${overview.dev_tasks.status_caliber.active}；${overview.dev_tasks.status_caliber.ended}`}
+   484	        value={overview.dev_tasks.total}
+   485	        sub={`进行中 ${overview.dev_tasks.active} · 已结束 ${overview.dev_tasks.ended}`}
+   486	        tone="blue"
+   487	        icon={<ProjectOutlined />}
+   488	      />
+   489	      <KpiCard
+   490	        testId="kpi-interfaces"
+   491	        title="结果集导出接口"
+   492	        caliber={`口径：在线=${overview.export_interfaces.status_caliber.online}、离线=${overview.export_interfaces.status_caliber.offline}（按合约当事方统计）`}
+   493	        value={overview.export_interfaces.total}
+   494	        sub={`在线 ${overview.export_interfaces.online} · 离线 ${overview.export_interfaces.offline}`}
+   495	        tone="green"
+   496	        icon={<ApiOutlined />}
+   497	      />
+   498	      <KpiCard
+   499	        testId="kpi-calls"
+   500	        title="今日数据调用次数"
+   501	        caliber={`口径：今日（UTC 自然日）**全平台**审计行 ${overview.calls_today.actions.join(' / ')}——对外 HMAC 调用没有人的主体，归不到单账号，本卡不是仅当前主体的计数；来源 ${overview.calls_today.source}`}
+   502	        value={overview.calls_today.count}
+   503	        sub={lastCallText(overview.calls_today.last_called_at)}
+   504	        tone="purple"
+   505	        icon={<SwapOutlined />}
+   506	      />
+   507	      <KpiCard
+   508	        testId="kpi-ops"
+   509	        title="今日操作日志"
+   510	        caliber={`${overview.ops_log_today.note} ${opsLogScopeText(overview.ops_log_today)}`}
+   511	        value={overview.ops_log_today.count}
+   512	        // 真值副行只有「失败 3」（§5）；可见性口径一字不丢，收进卡名标题的 Tooltip。
+   513	        sub={opsLogSubtext(overview.ops_log_today)}
+   514	        tone="orange"
+   515	        icon={<FileTextOutlined />}
+   516	      />
+   517	      </div>
+   518	
+   519	      <Row gutter={[20, 16]} align="stretch" style={{ marginBottom: 16 }}>
+   520	        {/* 两栏宽度比取 A-1 bbox：左栏 x245–1030、右栏 x1060–1412 ⇒ 17 : 7 */}
+   521	        <Col xs={24} lg={17}>
+   522	          <Card
+   523	            size="small"
+   524	            data-testid="task-overview"
+   525	            style={{ height: '100%' }}
+   526	            title={
+   527	              <Space size={10} align="center" wrap>
+   528	                <span>开发任务总览</span>
+   529	                {/* ⓘ 真值 11×12 #86909c（§3#13），旧值 13px / #b6bec9 偏大偏浅 */}
+   530	                <InfoCircleOutlined style={{ color: muted, fontSize: 12 }} />
+   531	                <Text style={hint}>仅展示最近创建的 {HOME_RECENT_ROWS} 个任务</Text>
+   532	              </Space>
+   533	            }
+   534	            extra={<SectionLink to="/flow/tasks">查看全部任务</SectionLink>}
+   535	          >
+   536	            <Space size={8} wrap style={{ marginBottom: 12 }}>
+   537	              {taskFilterTabs(overview).map((tab) => (
+   538	                <button
+   539	                  key={tab.key}
+   540	                  type="button"
+   541	                  style={tabStyle(taskTab === tab.key)}
+   542	                  data-testid={`task-tab-${tab.key}`}
+   543	                  onClick={() => setTaskTab(tab.key as 'all' | 'active' | 'ended')}
+   544	                >
+   545	                  {tab.label} {tab.count}
+   546	                </button>
+   547	              ))}
+   548	            </Space>
+   549	            <Table<HomeOverviewTaskRow>
+   550	              rowKey="id"
+   551	              size="small"
+   552	              columns={taskColumns}
+   553	              dataSource={recentTasks}
+   554	              pagination={false}
+   555	              /* 自适应（specs/ss-18 §9 规则 2）：列最小可读宽合计 651（真机 max-content 实测）。
+   556	                 1440 档盒宽 762 不触发；≤1280 盒子不够时让卡内横滚，而不是把列压到 scrollWidth>clientWidth。 */
+   557	              scroll={{ x: 660 }}
+   558	              locale={tableEmpty(
+   559	                taskTab === 'all'
+   560	                  ? '还没有开发任务，点上方「创建开发任务」建第一个'
+   561	                  : `「${taskFilterTabs(overview).find((tab) => tab.key === taskTab)?.label ?? taskTab}」里暂时没有任务。`,
+   562	              )}
+   563	            />
+   564	          </Card>
+   565	        </Col>
+   566	
+   567	        <Col xs={24} lg={7}>
+   568	          <Card
+   569	            size="small"
+   570	            data-testid="memory-panel"
+   571	            style={{ height: '100%' }}
+   572	            title={
+   573	              <Space size={10} align="center" wrap>
+   574	                <span>沙箱内存使用</span>
+   575	                {/* 可见副标题按真值长度收成一句（§5「调试与执行环境内存实时占用」）；
+   576	                    「实时占用」后端给不出（not_collected: memory.measured）⇒ 真实口径全句与
+   577	                    后端 reason 一起进 Tooltip，不假装有实测。 */}
+   578	                <Tooltip title={`口径：会话已分配的配额，非进程实测占用${measuredReason ? `。后端原文：${measuredReason}` : ''}`}>
+   579	                  <Text style={hint}>调试与执行环境内存占用</Text>
+   580	                </Tooltip>
+   581	              </Space>
+   582	            }
+   583	          >
+   584	            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+   585	              <MemoryPanelCard
+   586	                testId="memory-debug"
+   587	                title="调试内存使用"
+   588	                panel={overview.memory.debug}
+   589	                quotaMb={overview.memory.quota_mb}
+   590	                measuredReason={measuredReason}
+   591	              />
+   592	              <div>
+   593	                <MemoryPanelCard
+   594	                  testId="memory-exec"
+   595	                  title="执行内存使用"
+   596	                  panel={overview.memory.exec}
+   597	                  quotaMb={overview.memory.quota_mb}
+   598	                  measuredReason={execQuotaReason ?? measuredReason}
+   599	                  quotaNote={`正式执行：运行中 ${overview.memory.exec.running_runs ?? 0} · 排队 ${overview.memory.exec.pending_runs ?? 0}；执行档沿用${overview.memory.quota_mb === null ? UNKNOWN_TEXT : formatGibFromMb(overview.memory.quota_mb)}租户配额（16 G 独立配额${UNKNOWN_TEXT}）`}
+   600	                />
+   601	              </div>
+   602	              <div style={{ ...footnote, lineHeight: 1.9 }}>
+   603	                <div>调试内存随调试会话占用，退出调试环境后自动释放</div>
+   604	                <div>执行内存在任务正式执行时占用，执行完成后自动释放</div>
+   605	              </div>
+   606	            </Space>
+   607	          </Card>
+   608	        </Col>
+   609	      </Row>
+   610	
+   611	      <Card
+   612	        size="small"
+   613	        data-testid="trend-panel"
+   614	        style={{ marginBottom: 16 }}
+   615	        title={
+   616	          <Space direction="vertical" size={2}>
+   617	            {/* 卡题真值「沙箱运行与执行次数趋势」（strict-1-home.md §5 ink 282,936,159,15；
+   618	                group-A 的「近 N 天…」是另一读法，strict 优先）；窗口天数由右侧下拉自己说。 */}
+   619	            <Tooltip title={overview.trend.note}>
+   620	              <span>沙箱运行与执行次数趋势</span>
+   621	            </Tooltip>
+   622	            <Text style={hint}>统计沙箱内在线调试运行与正式执行的次数，含失败重试</Text>
+   623	          </Space>
+   624	        }
+   625	        extra={
+   626	          <Space size={14} align="center">
+   627	            <Space size={6} align="center">
+   628	              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--cds-primary)', display: 'inline-block' }} />
+   629	              <Text style={{ fontSize: 12 }}>调试次数</Text>
+   630	            </Space>
+   631	            <Space size={6} align="center">
+   632	              <span style={{ width: 10, height: 10, borderRadius: 2, background: barSoft, display: 'inline-block' }} />
+   633	              <Text style={{ fontSize: 12 }}>执行次数</Text>
+   634	            </Space>
+   635	            {/* §8-7 明确否决日历图标：真值只有一个带边框的下拉（ink 1296,940,104,31）+ 右侧 8×5 箭头 */}
+   636	            <Select
+   637	              size="small"
+   638	              value={days}
+   639	              options={TREND_RANGE_OPTIONS}
+   640	              style={{ width: 104 }}
+   641	              onChange={(value) => setDays(value)}
+   642	              data-testid="trend-range"
+   643	            />
+   644	          </Space>
+   645	        }
+   646	      >
+   647	        <TrendChart overview={overview} />
+   648	      </Card>
+   649	
+   650	      <Card
+   651	        size="small"
+   652	        data-testid="result-sets"
+   653	        title={
+   654	          <Space size={10} align="center" wrap>
+   655	            {/* 真值卡头只有蓝竖条 + 标题 + 灰小字，无导出图标（§3 在 y1200 一带只量到竖条 ink）；
+   656	                卡底那句「调用次数口径…」真值图上没有（§6：卡底即表格）⇒ 整句收进标题 Tooltip。 */}
+   657	            <Tooltip
+   658	              title={
+   659	                <span>
+   660	                  调用次数口径：{overview.call_count_caliber}
+   661	                  {overview.ops_log_today.visibility === 'self' ? '；今日操作日志与本页所有数字均为当前账号口径。' : ''}
+   662	                </span>
+   663	              }
+   664	            >
+   665	              <span>最新结果集</span>
+   666	            </Tooltip>
+   667	            <Text style={hint}>按合约约定通过 OpenApi 导出的结果集</Text>
+   668	          </Space>
+   669	        }
+   670	        extra={<SectionLink to="/deliveries">前往我的结果集</SectionLink>}
+   671	      >
+   672	        <Table<HomeResultSetRow>
+   673	          rowKey="bundle_id"
+   674	          size="small"
+   675	          columns={resultSetColumns}
+   676	          dataSource={overview.latest_result_sets}
+   677	          pagination={false}
+   678	          /* 同上：列最小宽合计 838；1440 档盒宽 1109 不触发（真值 1:1 不变）。 */
+   679	          scroll={{ x: 840 }}
+   680	          locale={tableEmpty('还没有结果集：任务产物需在成果交付中心打包')}
+   681	        />
+   682	      </Card>
+   683	    </div>
+   684	  );
+   685	}

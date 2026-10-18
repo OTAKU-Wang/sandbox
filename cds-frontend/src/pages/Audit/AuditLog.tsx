@@ -67,7 +67,12 @@ const OUTCOME_OPTIONS = [
   { value: 'failure', label: '失败' },
 ];
 
-const EXPORT_RANGES = [7, 30, 90, 180];
+/**
+ * 导出窗口：图 4-1 页头右侧只有「导出日志 + 刷新」两颗钮，屏上没有窗口选择件，
+ * 后端 GET /audit/export 也只认 days+format。所以这里只留一个真值常量：
+ * 悬浮层承诺的天数与真正发出去的 days 取自同一处，不再有第二份「可选范围」摆着没人用。
+ */
+const EXPORT_WINDOW_DAYS = 30;
 
 interface Filters {
   action?: string;
@@ -113,13 +118,18 @@ function OperatorText({ record }: { record: AuditRecordDetail }) {
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    // 中途抛错（浏览器不吃 a[download]、扩展拦截、DOM 被卸载）也必须 revoke：
+    // Blob URL 挂在文档上不会自己回收，导出一次泄一份 CSV
+    URL.revokeObjectURL(url);
+  }
 }
 
 export default function AuditLog() {
@@ -131,9 +141,16 @@ export default function AuditLog() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [verifyTargetId, setVerifyTargetId] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
-  const [exportDays, setExportDays] = useState(30);
   const user = useAuthStore((s) => s.user);
-  const canExport = hasAnyRole(user?.role, ROLE_GROUPS.auditReaders);
+  /**
+   * 审计这一屏的唯一权限判定：后端 app/api/audit.py 对 /records、/records/{id}、
+   * /anchor、/verify/{id}、/merkle-proof/{id}、/export 写的是同一组
+   * require_roles(OPERATOR, REGULATOR, ADMIN)，与 ROLE_GROUPS.auditReaders 一字不差。
+   * 所以「能看列表」并不比「能锚定/能验真/能导出」更宽：这一屏要嘛整屏可用，要嘛整屏
+   * 置灰（路由级 RoleRoute 之外再摆一道，是为了角色被改掉而旧标签页还开着的那种时刻 —
+   * 点下去只会拿 403 的按钮不该亮着）。
+   */
+  const canAuditOps = hasAnyRole(user?.role, ROLE_GROUPS.auditReaders);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['audit-records', page, pageSize, applied],
@@ -157,18 +174,24 @@ export default function AuditLog() {
 
   const anchorMutation = useMutation({
     mutationFn: (ids: string[]) => auditApi.anchor(ids),
-    onSuccess: (r) => {
-      const height = r.block_number != null ? `, 区块高度: ${r.block_number}` : '';
-      message.success(`已锚定 ${r.anchored} 条记录, Merkle Root: ${r.merkle_root?.slice(0, 16)}...${height}`);
+    onSuccess: (result, ids) => {
+      // merkle_root 缺失或空串都当「没有根」：后端 merkle_service.get_root() 空树回 ""，
+      // 网关吃掉字段时更是直接缺键 —— 那种时候宁可写清「没给根」，不拼 undefined
+      const root = result.merkle_root?.trim();
+      const rootText = root ? `, Merkle Root: ${root.slice(0, 16)}...` : '（本次响应未带 Merkle root，请在详情里复核）';
+      const height = result.block_number != null ? `, 区块高度: ${result.block_number}` : '';
+      message.success(`已锚定 ${result.anchored} 条记录${rootText}${height}`);
       queryClient.invalidateQueries({ queryKey: ['audit-records'] });
-      queryClient.invalidateQueries({ queryKey: ['audit-record', detailId] });
+      // 失效的是「刚被锚定那几条」的详情缓存：id 取 mutation 入参，不读 detailId —
+      // 请求回来的时候弹窗可能已经被关掉，那时 detailId 是 null，等于谁都没失效
+      ids.forEach((id) => queryClient.invalidateQueries({ queryKey: ['audit-record', id] }));
     },
     onError: (err) => message.error(getErrorMessage(err, '锚定失败')),
   });
 
   const exportMutation = useMutation({
     // 后端 GET /audit/export 只接受 days+format；把列表筛选传过去只会让人以为导出跟随了筛选。
-    mutationFn: () => auditApi.export({ days: exportDays, format: 'csv' }),
+    mutationFn: () => auditApi.export({ days: EXPORT_WINDOW_DAYS, format: 'csv' }),
     onSuccess: ({ blob, filename }) => {
       saveBlob(blob, filename);
       message.success(`已导出 ${filename}`);
@@ -266,19 +289,19 @@ export default function AuditLog() {
             </div>
           </div>
           <Space size={12}>
-            {/* 图 4-1 页头右侧只有「导出日志 + 刷新」两颗钮；导出窗口不在图上，
-                固定 30 天窗口（/audit/export 只认 days+format），长披露进悬浮层。 */}
+            {/* 图 4-1 页头右侧只有「导出日志 + 刷新」两颗钮，屏上无窗口选择件：窗口是固定值。
+                悬浮层只说人话（范围 + 不跟随列表筛选），不把内部路由/内部符号印给用户看。 */}
             <Tooltip
-              title={canExport
-                ? `按所选时间窗口导出 CSV（GET /audit/export?days=${exportDays}&format=csv）`
-                : '导出需运营方 / 监管方 / 系统管理员角色（后端 require_roles），当前角色无权调用'}
+              title={canAuditOps
+                ? `导出近 ${EXPORT_WINDOW_DAYS} 天的全部操作日志（CSV）：只按天数取，不跟随列表筛选`
+                : '导出与锚定需运营方 / 监管方 / 系统管理员角色，当前角色无权调用'}
             >
               <span>
                 <Button
                   size="large"
                   className="cds-audit-btn-export"
                   icon={<DownloadOutlined />}
-                  disabled={!canExport}
+                  disabled={!canAuditOps}
                   loading={exportMutation.isPending}
                   onClick={() => exportMutation.mutate()}
                 >
@@ -405,14 +428,29 @@ export default function AuditLog() {
           <Space size={12}>
             {detail && (
               <>
-                <Button size="large" onClick={() => { setVerifyTargetId(detail.id); setVerifyOpen(true); }}>
-                  存证验真
-                </Button>
-                <Tooltip title={detail.blockchain_tx_hash ? '本条已锚定，重复锚定会被后端拒绝' : '把本条写入 Merkle 树并锚定到链上'}>
+                {/* 验真/锚定与导出共用 canAuditOps：后端这几个端点要的是同一组角色 */}
+                <Tooltip title={canAuditOps ? undefined : '存证验真需运营方 / 监管方 / 系统管理员角色，当前角色无权调用'}>
                   <span>
                     <Button
                       size="large"
-                      disabled={!!detail.blockchain_tx_hash}
+                      disabled={!canAuditOps}
+                      onClick={() => { setVerifyTargetId(detail.id); setVerifyOpen(true); }}
+                    >
+                      存证验真
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip
+                  title={!canAuditOps
+                    ? '锚定需运营方 / 监管方 / 系统管理员角色，当前角色无权调用'
+                    : detail.blockchain_tx_hash
+                      ? '本条已锚定，重复锚定会被后端拒绝'
+                      : '把本条写入 Merkle 树并锚定到链上'}
+                >
+                  <span>
+                    <Button
+                      size="large"
+                      disabled={!canAuditOps || !!detail.blockchain_tx_hash}
                       loading={anchorMutation.isPending}
                       onClick={() => anchorMutation.mutate([detail.id])}
                     >

@@ -1,0 +1,360 @@
+(node:25316) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38648) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13680) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13680) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:31076) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10788) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:20212) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/services/__tests__/identityApi.test.ts (20 tests | 8 failed) 26ms
+     × 无法识别的响应结构抛错，不静默当成「没有密钥」 6ms
+     × 裸数组载荷同样解出条目（旧实现静默返回空审计轨迹） 3ms
+     × 未识别载荷抛 ListShapeError，而不是空的 KMS 审计轨迹 1ms
+     × {items:[...]} 包装同样解出条目（旧实现抛 .map is not a function） 1ms
+     × 未识别载荷抛 ListShapeError 1ms
+     × not_after 缺失/不可解析 → unknown（旧实现报绿色「有效」） 2ms
+     × 缺少 valid 字段的未知响应 → null（无法确认），旧实现返回 true 绿灯 1ms
+     × 响应为 null/非对象 → null（无法确认） 0ms
+ ❯ src/services/__tests__/federationApi.test.ts (11 tests | 9 failed) 30ms
+     × 显式带上 limit=500（后端默认 100，不传就静默截断） 11ms
+     × 带 space_id 时同时带上 limit 5ms
+     × 返回 {items, limit, possiblyTruncated} 1ms
+     × 条目数正好等于 limit → possiblyTruncated=true（后端无 total/has_more） 1ms
+     × 后端返回多于 limit（防御性）→ 仍然报告可能截断 1ms
+     × 接受 {items} 包装；未识别载荷抛错而不是把对象当数组返回 4ms
+     × 后端缺 remote_space 时不再伪造空字符串联合键 1ms
+     × 未识别载荷抛 ListShapeError 1ms
+     × 未识别载荷抛 ListShapeError 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 17 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listSyncedEntries — 后端裸列表 + limit=Query(100,ge=1,le=500)（app/api/federation.py:261） > 显式带上 limit=500（后端默认 100，不传就静默截断）
+AssertionError: expected undefined to be 500 // Object.is equality
+
+- Expected:
+500
+
++ Received:
+undefined
+
+ ❯ src/services/__tests__/federationApi.test.ts:44:33
+     42|     await federationApi.listSyncedEntries();
+     43|     expect(get).toHaveBeenCalledWith('/federation/catalog/entries', { …
+     44|     expect(CATALOG_ENTRY_LIMIT).toBe(500);
+       |                                 ^
+     45|   });
+     46|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listSyncedEntries — 后端裸列表 + limit=Query(100,ge=1,le=500)（app/api/federation.py:261） > 带 space_id 时同时带上 limit
+AssertionError: expected "vi.fn()" to be called with arguments: [ '/federation/catalog/entries', …(1) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    "/federation/catalog/entries",
+    {
+      "params": {
+-       "limit": 500,
+        "space_id": "sp1",
+      },
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/services/__tests__/federationApi.test.ts:50:17
+     48|     get.mockResolvedValue([]);
+     49|     await federationApi.listSyncedEntries('sp1');
+     50|     expect(get).toHaveBeenCalledWith('/federation/catalog/entries', { …
+       |                 ^
+     51|   });
+     52|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listSyncedEntries — 后端裸列表 + limit=Query(100,ge=1,le=500)（app/api/federation.py:261） > 返回 {items, limit, possiblyTruncated}
+AssertionError: Target cannot be null or undefined.
+ ❯ src/services/__tests__/federationApi.test.ts:56:23
+     54|     get.mockResolvedValue([entry(1), entry(2), entry(3)]);
+     55|     const res = await federationApi.listSyncedEntries('sp1');
+     56|     expect(res.items).toHaveLength(3);
+       |                       ^
+     57|     expect(res.limit).toBe(500);
+     58|     expect(res.possiblyTruncated).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listSyncedEntries — 后端裸列表 + limit=Query(100,ge=1,le=500)（app/api/federation.py:261） > 条目数正好等于 limit → possiblyTruncated=true（后端无 total/has_more）
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/services/__tests__/federationApi.test.ts:64:35
+     62|     get.mockResolvedValue(Array.from({ length: 500 }, (_, i) => entry(…
+     63|     const res = await federationApi.listSyncedEntries();
+     64|     expect(res.possiblyTruncated).toBe(true);
+       |                                   ^
+     65|   });
+     66|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listSyncedEntries — 后端裸列表 + limit=Query(100,ge=1,le=500)（app/api/federation.py:261） > 后端返回多于 limit（防御性）→ 仍然报告可能截断
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ src/services/__tests__/federationApi.test.ts:70:35
+     68|     get.mockResolvedValue(Array.from({ length: 501 }, (_, i) => entry(…
+     69|     const res = await federationApi.listSyncedEntries();
+     70|     expect(res.possiblyTruncated).toBe(true);
+       |                                   ^
+     71|   });
+     72|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listSyncedEntries — 后端裸列表 + limit=Query(100,ge=1,le=500)（app/api/federation.py:261） > 接受 {items} 包装；未识别载荷抛错而不是把对象当数组返回
+AssertionError: promise resolved "{ entries: [ { id: 'p1', …(4) } ] }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "entries": [
++     {
++       "id": "p1",
++       "product_id": "remote-1",
++       "product_name": "[remote:sp1] 产品 1",
++       "remote_space_id": "sp1",
++       "synced_at": "2026-10-01T00:00:00",
++     },
++   ],
+  }
+
+ ❯ src/services/__tests__/federationApi.test.ts:77:51
+     75|     expect((await federationApi.listSyncedEntries()).items).toHaveLeng…
+     76|     get.mockResolvedValue({ entries: [entry(1)] });
+     77|     await expect(federationApi.listSyncedEntries()).rejects.toBeInstan…
+       |                                                   ^
+     78|   });
+     79| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listTrusts — 规范形态裸数组（app/api/federation.py:94） > 后端缺 remote_space 时不再伪造空字符串联合键
+AssertionError: expected '' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+""
+
+ ❯ src/services/__tests__/federationApi.test.ts:91:35
+     89|     get.mockResolvedValue([{ ...TRUST_ROW, remote_space: undefined, re…
+     90|     const [trust] = await federationApi.listTrusts();
+     91|     expect(trust.remote_space_id).toBeUndefined();
+       |                                   ^
+     92|   });
+     93|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.listTrusts — 规范形态裸数组（app/api/federation.py:94） > 未识别载荷抛 ListShapeError
+AssertionError: expected TypeError: res.map is not a function to be an instance of ListShapeError
+ ❯ src/services/__tests__/federationApi.test.ts:96:44
+     94|   it('未识别载荷抛 ListShapeError', async () => {
+     95|     get.mockResolvedValue({ trusts: [TRUST_ROW] });
+     96|     await expect(federationApi.listTrusts()).rejects.toBeInstanceOf(Li…
+       |                                            ^
+     97|   });
+     98| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/17]⎯
+
+ FAIL  src/services/__tests__/federationApi.test.ts > federationApi.getSyncStatus — 规范形态裸数组（app/api/federation.py:211） > 未识别载荷抛 ListShapeError
+AssertionError: promise resolved "{ status: [] }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "status": [],
+  }
+
+ ❯ src/services/__tests__/federationApi.test.ts:108:47
+    106|   it('未识别载荷抛 ListShapeError', async () => {
+    107|     get.mockResolvedValue({ status: [] });
+    108|     await expect(federationApi.getSyncStatus()).rejects.toBeInstanceOf…
+       |                                               ^
+    109|   });
+    110| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > kmsApi.listKeys — 规范形态 {items}（app/api/kms.py:104 list_deks） > 无法识别的响应结构抛错，不静默当成「没有密钥」
+AssertionError: promise resolved "[]" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+[]
+
+ ❯ src/services/__tests__/identityApi.test.ts:60:35
+     58|   it('无法识别的响应结构抛错，不静默当成「没有密钥」', async () => {
+     59|     get.mockResolvedValue({ keys: [] });
+     60|     await expect(kmsApi.listKeys()).rejects.toBeInstanceOf(ListShapeEr…
+       |                                   ^
+     61|   });
+     62| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > kmsApi.getKeyAudit — 与 listKeys 同一约定（app/api/kms.py:238 get_key_audit 返回 {items}） > 裸数组载荷同样解出条目（旧实现静默返回空审计轨迹）
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/services/__tests__/identityApi.test.ts:75:17
+     73|     get.mockResolvedValue([KMS_AUDIT_ROW]);
+     74|     const res = await kmsApi.getKeyAudit('dek-1');
+     75|     expect(res).toHaveLength(1);
+       |                 ^
+     76|     expect(res[0].key_id).toBe('dek-1');
+     77|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > kmsApi.getKeyAudit — 与 listKeys 同一约定（app/api/kms.py:238 get_key_audit 返回 {items}） > 未识别载荷抛 ListShapeError，而不是空的 KMS 审计轨迹
+AssertionError: promise resolved "[]" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+[]
+
+ ❯ src/services/__tests__/identityApi.test.ts:81:45
+     79|   it('未识别载荷抛 ListShapeError，而不是空的 KMS 审计轨迹', async () => {
+     80|     get.mockResolvedValue({ entries: [KMS_AUDIT_ROW] });
+     81|     await expect(kmsApi.getKeyAudit('dek-1')).rejects.toBeInstanceOf(L…
+       |                                             ^
+     82|     get.mockResolvedValue(null);
+     83|     await expect(kmsApi.getKeyAudit('dek-1')).rejects.toBeInstanceOf(L…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > certificateApi.listCertificates — 规范形态是裸数组（app/api/certificates.py:78） > {items:[...]} 包装同样解出条目（旧实现抛 .map is not a function）
+TypeError: res.map is not a function
+ ❯ src/services/identityApi.ts:173:103
+    171| export const certificateApi = {
+    172|   listCertificates: (params?: { status?: string }): Promise<Certificat…
+    173|     api.get('/certificates/list', { params }).then((res) => (res as un…
+       |                                                                                                       ^
+    174|
+    175|   getCertificate: (id: string): Promise<CertificateDetail> =>
+ ❯ src/services/__tests__/identityApi.test.ts:102:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > certificateApi.listCertificates — 规范形态是裸数组（app/api/certificates.py:78） > 未识别载荷抛 ListShapeError
+AssertionError: expected TypeError: res.map is not a function to be an instance of ListShapeError
+ ❯ src/services/__tests__/identityApi.test.ts:108:51
+    106|   it('未识别载荷抛 ListShapeError', async () => {
+    107|     get.mockResolvedValue({ certificates: [CERT_ROW] });
+    108|     await expect(certificateApi.listCertificates()).rejects.toBeInstan…
+       |                                                   ^
+    109|   });
+    110|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > 证书状态：过期时间不可判定 ≠ 有效（identityApi.ts:113 宽松默认值） > not_after 缺失/不可解析 → unknown（旧实现报绿色「有效」）
+AssertionError: expected 'active' to be 'unknown' // Object.is equality
+
+Expected: "unknown"
+Received: "active"
+
+ ❯ src/services/__tests__/identityApi.test.ts:132:45
+    130|
+    131|   it('not_after 缺失/不可解析 → unknown（旧实现报绿色「有效」）', async () => {
+    132|     expect((await withNotAfter('')).status).toBe('unknown');
+       |                                             ^
+    133|     expect((await withNotAfter(undefined)).status).toBe('unknown');
+    134|     expect((await withNotAfter('not-a-date')).status).toBe('unknown');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > certificateApi.verifyChain — 只认后端肯定结论（identityApi.ts:195 宽松默认值） > 缺少 valid 字段的未知响应 → null（无法确认），旧实现返回 true 绿灯
+AssertionError: expected true to be null
+
+- Expected:
+null
+
++ Received:
+true
+
+ ❯ src/services/__tests__/identityApi.test.ts:167:23
+    165|     post.mockResolvedValue({ is_valid: true });
+    166|     const res = await certificateApi.verifyChain('c1');
+    167|     expect(res.valid).toBeNull();
+       |                       ^
+    168|     expect(res.errors.join('')).toContain('无法确认');
+    169|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/17]⎯
+
+ FAIL  src/services/__tests__/identityApi.test.ts > certificateApi.verifyChain — 只认后端肯定结论（identityApi.ts:195 宽松默认值） > 响应为 null/非对象 → null（无法确认）
+TypeError: Cannot read properties of null (reading 'valid')
+ ❯ src/services/identityApi.ts:195:25
+    193|           const data = res as unknown as CertificateVerifyResponse;
+    194|           return ({
+    195|             valid: data.valid !== false && !data.error,
+       |                         ^
+    196|             chain: [{ subject: data.subject || cert.subject, issuer: d…
+    197|             errors: data.errors || (data.error ? [data.error] : []),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/17]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  17 failed | 33 passed (50)
+   Start at  21:42:24
+   Duration  2.61s (transform 151ms, setup 644ms, import 166ms, tests 68ms, environment 5.55s)
+

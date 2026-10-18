@@ -64,14 +64,14 @@ async function loadCerts() {
             if (status === 'valid' || status === 'active') valid++;
             if (status === 'revoked') revoked++;
             return `<tr>
-                <td><code>${truncate(c.cert_id || c.id, 20)}</code></td>
-                <td>${c.subject || c.subject_cn || '-'}</td>
-                <td>${c.cert_type || c.type || '-'}</td>
+                <td><code>${esc(truncate(c.cert_id || c.id, 20))}</code></td>
+                <td>${esc(c.subject || c.subject_cn || '-')}</td>
+                <td>${esc(c.cert_type || c.type || '-')}</td>
                 <td>${statusBadge(status)}</td>
                 <td>${formatDate(c.not_after || c.expires_at)}</td>
                 <td>
-                    <button class="btn btn-sm btn-primary" onclick="verifyCert('${c.cert_id || c.id}')">验证</button>
-                    <button class="btn btn-sm btn-danger" onclick="revokeCert('${c.cert_id || c.id}')">吊销</button>
+                    <button class="btn btn-sm btn-primary" onclick="verifyCert('${escAttr(c.cert_id || c.id)}')">验证</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeCert('${escAttr(c.cert_id || c.id)}')">吊销</button>
                 </td>
             </tr>`;
         }).join('');
@@ -79,7 +79,7 @@ async function loadCerts() {
         $('#valid-certs').textContent = valid;
         $('#revoked-certs').textContent = revoked;
     } catch (e) {
-        $('#certs-table').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${e.message}</td></tr>`;
+        $('#certs-table').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${esc(e.message)}</td></tr>`;
     }
 }
 
@@ -93,9 +93,9 @@ async function issueCert() {
     try {
         const result = await API.post('/api/v1/certificates/generate', body);
         $('#cert-result').innerHTML = `<div class="card" style="background:var(--bg);margin-top:12px;">
-            <p><strong>Cert ID:</strong> <code>${result.cert_id || result.id}</code></p>
-            <p><strong>Subject:</strong> ${result.subject || '-'}</p>
-            <p><strong>PEM:</strong><pre style="white-space:pre-wrap;font-size:12px;color:var(--text-muted);">${truncate(result.cert_pem || result.pem, 200)}</pre></p>
+            <p><strong>Cert ID:</strong> <code>${esc(result.cert_id || result.id)}</code></p>
+            <p><strong>Subject:</strong> ${esc(result.subject || '-')}</p>
+            <p><strong>PEM:</strong><pre style="white-space:pre-wrap;font-size:12px;color:var(--text-muted);">${esc(truncate(result.cert_pem || result.pem, 200))}</pre></p>
         </div>`;
         loadCerts();
     } catch (e) { alert('签发失败: ' + e.message); }

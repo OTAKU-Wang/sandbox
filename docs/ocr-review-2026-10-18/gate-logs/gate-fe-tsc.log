@@ -1,0 +1,5 @@
+src/pages/Connectors/index.tsx(278,11): error TS2322: Type 'never[] | NoInfer<ConnectorListResult>' is not assignable to type 'readonly Connector[] | undefined'.
+  Type 'ConnectorListResult' is missing the following properties from type 'readonly Connector[]': length, concat, join, slice, and 26 more.
+src/pages/Contracts/__tests__/__debug.test.tsx(2,31): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+src/pages/DataResources/__tests__/DesensitizedPreviewModal.test.tsx(41,84): error TS2322: Type '{ resourceId: string; resourceName: string; open: true; onClose: () => void; }' is not assignable to type 'IntrinsicAttributes & Props'.
+  Property 'open' does not exist on type 'IntrinsicAttributes & Props'.

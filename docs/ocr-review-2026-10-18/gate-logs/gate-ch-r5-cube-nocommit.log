@@ -1,0 +1,56 @@
+.......F...                                                              [100%]
+================================== FAILURES ===================================
+______ test_sync_build_commits_template_row_before_the_inline_operation _______
+
+client = <httpx.AsyncClient object at 0x00000126F4299C40>
+operator_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0Zjc2ZWJkMS1lNjYzLTQ0OWItOTM4NS0zMWQwNmQ2MjgxYzYiLCJyb2xlIjoib3BlcmF0b3IiLCJleHAiOjE3OTI0MjA1NjYsInR5cGUiOiJhY2Nlc3MifQ.AXlffZmGvFm8RW4BQaDCkjQvRXzb6qFbfDbD25d6Atw'}
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x00000126F429BA10>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000126F429AD80>
+
+    @pytest.mark.asyncio
+    async def test_sync_build_commits_template_row_before_the_inline_operation(
+        client, operator_headers, db_session, monkeypatch
+    ):
+        """A69 坑一：内联 executor 开跑前，请求事务必须已经 commit 过。"""
+        commits = {"n": 0}
+        real_commit = db_session.commit
+    
+        async def _counting_commit():
+            commits["n"] += 1
+            await real_commit()
+    
+        monkeypatch.setattr(db_session, "commit", _counting_commit)
+    
+        seen: dict = {}
+        real_build = cube_template_service.build_and_distribute
+    
+        async def _spy_build(template_id):
+            # 只记录，不接管：内联 build（含它自己 session 的读写）真的跑一遍
+            seen["commits_before_executor"] = commits["n"]
+            return await real_build(template_id)
+    
+        monkeypatch.setattr(cube_template_service, "build_and_distribute", _spy_build)
+        _stub_build_world(monkeypatch)
+        _add_node(db_session, "n1")
+        await db_session.commit()
+        baseline = commits["n"]  # 请求开始前的基准
+    
+        resp = await client.post(
+            "/api/v1/cube-templates",  # 不带 ?async —— 就是出问题的默认同步路径
+            json={"name": "sync-visible", "image_ref": "reg.local/cds/sync:1"},
+            headers=operator_headers,
+        )
+        assert resp.status_code == 201, resp.text
+>       assert seen["commits_before_executor"] > baseline, (
+            "A69 坑一：内联 operation 在请求事务 commit 之前就开跑 —— builder 自己的 "
+            "session 在真连接（PG）上看不到未提交的模板行，必然 500 'template vanished "
+            "during build'"
+        )
+E       AssertionError: A69 坑一：内联 operation 在请求事务 commit 之前就开跑 —— builder 自己的 session 在真连接（PG）上看不到未提交的模板行，必然 500 'template vanished during build'
+E       assert 1 > 1
+
+tests\test_cube_template_dist.py:526: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_cube_template_dist.py::test_sync_build_commits_template_row_before_the_inline_operation
+1 failed, 10 passed in 4.63s
+R5_NOCOMMIT_RC=1

@@ -1,0 +1,502 @@
+......FFFF.FF.FFFF.F.................................................... [ 84%]
+.............                                                            [100%]
+================================== FAILURES ===================================
+_______________________ test_create_session_structured ________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FB5E630>
+
+    def test_create_session_structured(sandbox):
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+______________________ test_create_session_unstructured _______________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FEB2450>
+
+    def test_create_session_unstructured(sandbox):
+        config = DevSandboxConfig(mode=DevMode.UNSTRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:50: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_____________________ test_create_session_semi_structured _____________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FEEBB00>
+
+    def test_create_session_semi_structured(sandbox):
+        config = DevSandboxConfig(mode=DevMode.SEMI_STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+______________________________ test_get_session _______________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FEB29C0>
+
+    @pytest.mark.asyncio
+    async def test_get_session(sandbox):
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:63: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_____________________________ test_list_sessions ______________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FB5F800>
+
+    @pytest.mark.asyncio
+    async def test_list_sessions(sandbox):
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       sandbox.create_session(config)
+
+tests\test_data_product_sandbox.py:77: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+___________________________ test_terminate_session ____________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FEEB5F0>
+
+    @pytest.mark.asyncio
+    async def test_terminate_session(sandbox):
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:86: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_________________________ test_upload_structured_csv __________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FB5E510>
+tmp_dir = 'C:\\Users\\Çåª\\AppData\\Local\\Temp\\tmplqc5ui_z'
+
+    @pytest.mark.asyncio
+    async def test_upload_structured_csv(sandbox, tmp_dir):
+        import csv
+        csv_path = Path(tmp_dir) / "test.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["name", "value"])
+            writer.writerow(["a", 1])
+            writer.writerow(["b", 2])
+    
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:111: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_______________________ test_upload_unstructured_image ________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FEEB380>
+tmp_dir = 'C:\\Users\\Çåª\\AppData\\Local\\Temp\\tmppr0qiqh5'
+
+    @pytest.mark.asyncio
+    async def test_upload_unstructured_image(sandbox, tmp_dir):
+        img_path = Path(tmp_dir) / "test.png"
+        import struct, zlib
+        sig = b'\x89PNG\r\n\x1a\n'
+        ihdr = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+        raw = zlib.compress(b'\x00\x00\x00\x00')
+    
+        def chunk(ctype, data):
+            c = ctype + data
+            return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+    
+        img_path.write_bytes(sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', raw) + chunk(b'IEND', b''))
+    
+        config = DevSandboxConfig(mode=DevMode.UNSTRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:132: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+______________________ test_upload_semi_structured_json _______________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B9005F5C0>
+tmp_dir = 'C:\\Users\\Çåª\\AppData\\Local\\Temp\\tmp9zho2f4b'
+
+    @pytest.mark.asyncio
+    async def test_upload_semi_structured_json(sandbox, tmp_dir):
+        import json
+        json_path = Path(tmp_dir) / "test.json"
+        json_path.write_text(json.dumps([{"a": 1}, {"a": 2}]))
+    
+        config = DevSandboxConfig(mode=DevMode.SEMI_STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+________________________ test_upload_nonexistent_file _________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FE65AC0>
+
+    @pytest.mark.asyncio
+    async def test_upload_nonexistent_file(sandbox):
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+___________________________ test_execute_in_session ___________________________
+
+sandbox = <app.services.data_product_sandbox.DataProductDevSandbox object at 0x0000021B8FFE22D0>
+
+    @pytest.mark.asyncio
+    async def test_execute_in_session(sandbox):
+        config = DevSandboxConfig(mode=DevMode.STRUCTURED)
+>       session = sandbox.create_session(config)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_data_product_sandbox.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\data_product_sandbox.py:145: in create_session
+    result = self.runtime.provision(
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+=========================== short test summary info ===========================
+FAILED tests/test_data_product_sandbox.py::test_create_session_structured - M...
+FAILED tests/test_data_product_sandbox.py::test_create_session_unstructured
+FAILED tests/test_data_product_sandbox.py::test_create_session_semi_structured
+FAILED tests/test_data_product_sandbox.py::test_get_session - ModuleNotFoundE...
+FAILED tests/test_data_product_sandbox.py::test_list_sessions - ModuleNotFoun...
+FAILED tests/test_data_product_sandbox.py::test_terminate_session - ModuleNot...
+FAILED tests/test_data_product_sandbox.py::test_upload_structured_csv - Modul...
+FAILED tests/test_data_product_sandbox.py::test_upload_unstructured_image - M...
+FAILED tests/test_data_product_sandbox.py::test_upload_semi_structured_json
+FAILED tests/test_data_product_sandbox.py::test_upload_nonexistent_file - Mod...
+FAILED tests/test_data_product_sandbox.py::test_execute_in_session - ModuleNo...
+11 failed, 74 passed in 92.35s (0:01:32)
+PARENT_GREEN_RC=1

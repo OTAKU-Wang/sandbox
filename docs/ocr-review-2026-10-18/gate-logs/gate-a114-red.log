@@ -1,0 +1,459 @@
+FFFFFFFFFFFFFFFFFFF..FFF                                                 [100%]
+================================== FAILURES ===================================
+_________ TestCentralEscaper.test_esc_defined_once_and_badge_uses_it __________
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F84673B0>
+
+    def test_esc_defined_once_and_badge_uses_it(self):
+        src = _read(ADMIN_JS)
+>       assert src.count("function esc(") == 1, "esc() 必须全仓唯一定义在 admin.js"
+E       AssertionError: esc() 必须全仓唯一定义在 admin.js
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of str object at 0x00000260F481D000>('function esc(')
+E        +    where <built-in method count of str object at 0x00000260F481D000> = '/**\n * CDS Admin — shared API client and utilities.\n */\nconst API = {\n    async get(url) {\n        const res = a...(data);\n    } catch (e) {\n        $(\'#app\').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;\n    }\n}\n'.count
+
+tests\test_admin_xss_escaping.py:174: AssertionError
+____________ TestCentralEscaper.test_api_error_message_body_capped ____________
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F82A5FA0>
+
+    def test_api_error_message_body_capped(self):
+        # 台账：`${res.status}: ${await res.text()}` 把整个响应体塞进 e.message
+        # 再进 innerHTML。至少要截断响应体。
+        src = _read(ADMIN_JS)
+>       assert re.search(r"await res\.text\(\)\)\.slice\(0,\s*\d+\)", src), \
+            "API 错误消息必须截断响应体（slice）"
+E       AssertionError: API 错误消息必须截断响应体（slice）
+E       assert None
+E        +  where None = <function search at 0x00000260EF50D120>('await res\\.text\\(\\)\\)\\.slice\\(0,\\s*\\d+\\)', '/**\n * CDS Admin — shared API client and utilities.\n */\nconst API = {\n    async get(url) {\n        const res = a...(data);\n    } catch (e) {\n        $(\'#app\').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;\n    }\n}\n')
+E        +    where <function search at 0x00000260EF50D120> = re.search
+
+tests\test_admin_xss_escaping.py:188: AssertionError
+_ TestCentralEscaper.test_no_unescaped_server_field_in_html_literals[alerts.html] _
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8466270>
+page = 'alerts.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_no_unescaped_server_field_in_html_literals(self, page):
+        offenders = _flagged_interpolations(_page_scripts(page))
+>       assert not offenders, f"{page}: innerHTML 插值未经转义 helper: {offenders}"
+E       AssertionError: alerts.html: innerHTML 插值未经转义 helper: ["a.alert_type || a.type || '-'", 'truncate(a.message || a.description, 60)', 'e.message']
+E       assert not ["a.alert_type || a.type || '-'", 'truncate(a.message || a.description, 60)', 'e.message']
+
+tests\test_admin_xss_escaping.py:194: AssertionError
+_ TestCentralEscaper.test_no_unescaped_server_field_in_html_literals[blockchain.html] _
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8466540>
+page = 'blockchain.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_no_unescaped_server_field_in_html_literals(self, page):
+        offenders = _flagged_interpolations(_page_scripts(page))
+>       assert not offenders, f"{page}: innerHTML 插值未经转义 helper: {offenders}"
+E       AssertionError: blockchain.html: innerHTML 插值未经转义 helper: ["truncate(detail.merkle_root || a.resource_id || '-', 24)", "truncate(detail.tx_hash || '-', 24)", "detail.block_height || '-'", 'e.message', "result.valid ? badge('通过', 'success') : badge('失败', 'danger')", 'result.record_id || recordId', "result.merkle_root || '-'"]
+E       assert not ["truncate(detail.merkle_root || a.resource_id || '-', 24)", "truncate(detail.tx_hash || '-', 24)", "detail.block_heig...-'", 'e.message', "result.valid ? badge('通过', 'success') : badge('失败', 'danger')", 'result.record_id || recordId', ...]
+
+tests\test_admin_xss_escaping.py:194: AssertionError
+_ TestCentralEscaper.test_no_unescaped_server_field_in_html_literals[certificates.html] _
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8465B80>
+page = 'certificates.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_no_unescaped_server_field_in_html_literals(self, page):
+        offenders = _flagged_interpolations(_page_scripts(page))
+>       assert not offenders, f"{page}: innerHTML 插值未经转义 helper: {offenders}"
+E       AssertionError: certificates.html: innerHTML 插值未经转义 helper: ['truncate(c.cert_id || c.id, 20)', "c.subject || c.subject_cn || '-'", "c.cert_type || c.type || '-'", 'c.cert_id || c.id', 'c.cert_id || c.id', 'e.message', 'result.cert_id || result.id', "result.subject || '-'", 'truncate(result.cert_pem || result.pem, 200)']
+E       assert not ['truncate(c.cert_id || c.id, 20)', "c.subject || c.subject_cn || '-'", "c.cert_type || c.type || '-'", 'c.cert_id || c.id', 'c.cert_id || c.id', 'e.message', ...]
+
+tests\test_admin_xss_escaping.py:194: AssertionError
+_ TestCentralEscaper.test_no_unescaped_server_field_in_html_literals[connectors.html] _
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8465B50>
+page = 'connectors.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_no_unescaped_server_field_in_html_literals(self, page):
+        offenders = _flagged_interpolations(_page_scripts(page))
+>       assert not offenders, f"{page}: innerHTML 插值未经转义 helper: {offenders}"
+E       AssertionError: connectors.html: innerHTML 插值未经转义 helper: ["c.space_name || c.name || '-'", "c.space_type || c.connector_type || '-'", 'c.id', "c.status === 'suspended' ? '恢复' : '暂停'", 'e.message']
+E       assert not ["c.space_name || c.name || '-'", "c.space_type || c.connector_type || '-'", 'c.id', "c.status === 'suspended' ? '恢复' : '暂停'", 'e.message']
+
+tests\test_admin_xss_escaping.py:194: AssertionError
+_ TestCentralEscaper.test_no_unescaped_server_field_in_html_literals[identities.html] _
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8465A60>
+page = 'identities.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_no_unescaped_server_field_in_html_literals(self, page):
+        offenders = _flagged_interpolations(_page_scripts(page))
+>       assert not offenders, f"{page}: innerHTML 插值未经转义 helper: {offenders}"
+E       AssertionError: identities.html: innerHTML 插值未经转义 helper: ['truncate(k.key_id, 30)', "k.product_id || '-'", "k.algorithm || 'SM4-GCM'", 'k.usage_count || 0', 'k.max_usage || 10000', 'k.key_id', 'e.message', 'result.key_id', "result.key_bytes || '(stored in KMS)'"]
+E       assert not ['truncate(k.key_id, 30)', "k.product_id || '-'", "k.algorithm || 'SM4-GCM'", 'k.usage_count || 0', 'k.max_usage || 10000', 'k.key_id', ...]
+
+tests\test_admin_xss_escaping.py:194: AssertionError
+_ TestCentralEscaper.test_admin_js_no_unescaped_server_field_in_html_literals _
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8465760>
+
+    def test_admin_js_no_unescaped_server_field_in_html_literals(self):
+>       assert not _flagged_interpolations(_read(ADMIN_JS))
+E       assert not ['e.message']
+E        +  where ['e.message'] = _flagged_interpolations('/**\n * CDS Admin — shared API client and utilities.\n */\nconst API = {\n    async get(url) {\n        const res = a...(data);\n    } catch (e) {\n        $(\'#app\').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;\n    }\n}\n')
+E        +    where '/**\n * CDS Admin — shared API client and utilities.\n */\nconst API = {\n    async get(url) {\n        const res = a...(data);\n    } catch (e) {\n        $(\'#app\').innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;\n    }\n}\n' = _read(WindowsPath('D:/workspace/sandbox/app/static/js/admin.js'))
+
+tests\test_admin_xss_escaping.py:197: AssertionError
+____________ TestCentralEscaper.test_render_env_autoescape_enabled ____________
+
+self = <tests.test_admin_xss_escaping.TestCentralEscaper object at 0x00000260F8467B00>
+
+    def test_render_env_autoescape_enabled(self):
+        from app.api.admin import _env
+    
+>       assert _env.autoescape, "admin 渲染辅助必须开 Jinja autoescape（防御纵深）"
+E       AssertionError: admin 渲染辅助必须开 Jinja autoescape（防御纵深）
+E       assert False
+E        +  where False = <jinja2.environment.Environment object at 0x00000260F629EF60>.autoescape
+
+tests\test_admin_xss_escaping.py:202: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[ok-alerts.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8467F50>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera0')
+page = 'alerts.html', mode = 'ok'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: alerts.html/ok: 注入串没有以字面文本渲染
+E         <tr>
+E                         <td>2026/10/18 08:00:00</td>
+E                         <td><span class="badge badge-info"><img src=x onerror=alert(1)></span></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><span class="badge badge-success">active</span></td>
+E                         <td>-</td>
+E                     </tr>
+E         
+E         
+E         
+E       assert '&lt;img src=x onerror=' in '<tr>\n                <td>2026/10/18 08:00:00</td>\n                <td><span class="badge badge-info"><img src=x one...         <td><span class="badge badge-success">active</span></td>\n                <td>-</td>\n            </tr>\n\n\n'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[ok-blockchain.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8485250>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera1')
+page = 'blockchain.html', mode = 'ok'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: blockchain.html/ok: 注入串没有以字面文本渲染
+E         
+E         <tr>
+E                         <td><code><img src=x onerror=alert...</code></td>
+E                         <td><code><img src=x onerror=alert...</code></td>
+E                         <td>7</td>
+E                         <td><span class="badge badge-success">verified</span></td>
+E                         <td>2026/10/18 08:00:00</td>
+E                     </tr>
+E         
+E         
+E         <div class="card" style="background:var(--bg);margin-top:12px;">
+E                     <p><strong>验证结果:</strong> <span class="badge badge-danger">失败</span></p>
+E                     <p><strong>Record ID:</strong> <code><img src=x onerror=alert(1)></code></p>
+E                     <p><strong>Merkle Root:</strong> <code><img src=x onerror=alert(1)></code></p>
+E                 </div>
+E       assert '&lt;img src=x onerror=' in '\n<tr>\n                <td><code><img src=x onerror=alert...</code></td>\n                <td><code><img src=x onerr.../code></p>\n            <p><strong>Merkle Root:</strong> <code><img src=x onerror=alert(1)></code></p>\n        </div>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[ok-certificates.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F84841A0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera2')
+page = 'certificates.html', mode = 'ok'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: certificates.html/ok: 注入串没有以字面文本渲染
+E         
+E         
+E         
+E         
+E         <tr>
+E                         <td><code>x');alert(1);//</code></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><span class="badge badge-danger">revoked</span></td>
+E                         <td>2027/1/1 00:00:00</td>
+E                         <td>
+E                             <button class="btn btn-sm btn-primary" onclick="verifyCert('x');alert(1);//')">验证</button>
+E                             <button class="btn btn-sm btn-danger" onclick="revokeCert('x');alert(1);//')">吊销</button>
+E                         </td>
+E                     </tr>
+E         
+E         
+E         
+E         <div class="card" style="background:var(--bg);margin-top:12px;">
+E                     <p><strong>Cert ID:</strong> <code>x');alert(1);//</code></p>
+E                     <p><strong>Subject:</strong> <img src=x onerror=alert(1)></p>
+E                     <p><strong>PEM:</strong><pre style="white-space:pre-wrap;font-size:12px;color:var(--text-muted);"><img src=x onerror=alert(1)></pre></p>
+E                 </div>
+E       assert '&lt;img src=x onerror=' in '\n\n\n\n<tr>\n                <td><code>x\');alert(1);//</code></td>\n                <td><img src=x onerror=alert(1)...="white-space:pre-wrap;font-size:12px;color:var(--text-muted);"><img src=x onerror=alert(1)></pre></p>\n        </div>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[ok-connectors.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8484230>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera3')
+page = 'connectors.html', mode = 'ok'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: connectors.html/ok: 注入串没有以字面文本渲染
+E         <tr>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><span class="badge badge-success">active</span></td>
+E                         <td>2026/10/18 08:00:00</td>
+E                         <td>
+E                             <button class="btn btn-sm btn-primary" onclick="suspendConnector('x" onmouseover="alert(1)')">暂停</button>
+E                         </td>
+E                     </tr>
+E         
+E         
+E       assert '&lt;img src=x onerror=' in '<tr>\n                <td><img src=x onerror=alert(1)></td>\n                <td><img src=x onerror=alert(1)></td>\n ...ry" onclick="suspendConnector(\'x" onmouseover="alert(1)\')">暂停</button>\n                </td>\n            </tr>\n\n'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[ok-identities.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F84842C0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera4')
+page = 'identities.html', mode = 'ok'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: identities.html/ok: 注入串没有以字面文本渲染
+E         
+E         <tr>
+E                         <td><code>x');alert(1);//</code></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><img src=x onerror=alert(1)></td>
+E                         <td><span class="badge badge-success">active</span></td>
+E                         <td>1/2</td>
+E                         <td>2026/10/18 08:00:00</td>
+E                         <td><button class="btn btn-danger btn-sm" onclick="destroyKey('x');alert(1);//')">销毁</button></td>
+E                     </tr>
+E         
+E         
+E         
+E         <div class="card" style="background:var(--bg);">
+E                     <p><strong>Key ID:</strong> <code>x');alert(1);//</code></p>
+E                     <p><strong>Key (hex):</strong> <code style="word-break:break-all;"><img src=x onerror=alert(1)></code></p>
+E                 </div>
+E       assert '&lt;img src=x onerror=' in '\n<tr>\n                <td><code>x\');alert(1);//</code></td>\n                <td><img src=x onerror=alert(1)></td>...strong>Key (hex):</strong> <code style="word-break:break-all;"><img src=x onerror=alert(1)></code></p>\n        </div>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[fail-alerts.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8484350>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera5')
+page = 'alerts.html', mode = 'fail'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: alerts.html/fail: 注入串没有以字面文本渲染
+E         <tr><td colspan="6" class="empty">加载失败: 500: {"items":[{"alert_type":"<img src=x onerror=alert(1)>","message":"<img src=x onerror=alert(1)>","severity":"<img src=x onerror=alert(1)>","status":"active","created_at":"2026-10-18T08:00:00"}]}</td></tr>
+E       assert '&lt;img src=x onerror=' in '<tr><td colspan="6" class="empty">加载失败: 500: {"items":[{"alert_type":"<img src=x onerror=alert(1)>","message":"<img s...alert(1)>","severity":"<img src=x onerror=alert(1)>","status":"active","created_at":"2026-10-18T08:00:00"}]}</td></tr>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[fail-blockchain.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F63C07D0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera6')
+page = 'blockchain.html', mode = 'fail'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: blockchain.html/fail: 注入串没有以字面文本渲染
+E         
+E         <tr><td colspan="5" class="empty">加载失败: 500: {"items":[{"action":"anchor.batch","resource_id":"<img src=x onerror=alert(1)>","created_at":"2026-10-18T08:00:00","detail":{"merkle_root":"<img src=x onerror=alert(1)>","tx_hash":"<img src=x onerror=alert(1)>","block_height":7}}],"record_id":"<img src=x onerror=alert(1)>","merkle_root":"<img src=x onerror=alert(1)>"}</td></tr>
+E       assert '&lt;img src=x onerror=' in '\n<tr><td colspan="5" class="empty">加载失败: 500: {"items":[{"action":"anchor.batch","resource_id":"<img src=x onerror=a..."block_height":7}}],"record_id":"<img src=x onerror=alert(1)>","merkle_root":"<img src=x onerror=alert(1)>"}</td></tr>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[fail-certificates.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8279520>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera7')
+page = 'certificates.html', mode = 'fail'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: certificates.html/fail: 注入串没有以字面文本渲染
+E         
+E         
+E         
+E         
+E         <tr><td colspan="6" class="empty">加载失败: 500: {"items":[{"cert_id":"x');alert(1);//","subject":"<img src=x onerror=alert(1)>","cert_type":"<img src=x onerror=alert(1)>","status":"revoked","not_after":"2027-01-01T00:00:00"}],"cert_id":"x');alert(1);//","subject":"<img src=x onerror=alert(1)>","cert_pem":"<img src=x onerror=alert(1)>"}</td></tr>
+E       assert '&lt;img src=x onerror=' in '\n\n\n\n<tr><td colspan="6" class="empty">加载失败: 500: {"items":[{"cert_id":"x\');alert(1);//","subject":"<img src=x on...t_id":"x\');alert(1);//","subject":"<img src=x onerror=alert(1)>","cert_pem":"<img src=x onerror=alert(1)>"}</td></tr>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[fail-connectors.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8467D10>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera8')
+page = 'connectors.html', mode = 'fail'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: connectors.html/fail: 注入串没有以字面文本渲染
+E         <tr><td colspan="5" class="empty">加载失败: 500: {"items":[{"space_name":"<img src=x onerror=alert(1)>","space_type":"<img src=x onerror=alert(1)>","status":"active","id":"x\" onmouseover=\"alert(1)","updated_at":"2026-10-18T08:00:00"}]}</td></tr>
+E       assert '&lt;img src=x onerror=' in '<tr><td colspan="5" class="empty">加载失败: 500: {"items":[{"space_name":"<img src=x onerror=alert(1)>","space_type":"<im...error=alert(1)>","status":"active","id":"x\\" onmouseover=\\"alert(1)","updated_at":"2026-10-18T08:00:00"}]}</td></tr>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_payload_renders_as_literal_text[fail-identities.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8467CE0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_payload_renders_as_litera9')
+page = 'identities.html', mode = 'fail'
+
+    @pytest.mark.parametrize("page", PAGES)
+    @pytest.mark.parametrize("mode", ["ok", "fail"])
+    def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
+        joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        # 注入串必须成为字面文本，且任何位置不得残留可执行标签
+>       assert "&lt;img src=x onerror=" in joined, \
+            f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"
+E       AssertionError: identities.html/fail: 注入串没有以字面文本渲染
+E         
+E         <tr><td colspan="7" class="empty">加载失败: 500: {"items":[{"key_id":"x');alert(1);//","product_id":"<img src=x onerror=alert(1)>","algorithm":"<img src=x onerror=alert(1)>","status":"active","usage_count":1,"max_usage":2,"created_at":"2026-10-18T08:00:00"}],"key_id":"x');alert(1);//","key_bytes":"<img src=x onerror=alert(1)>"}</td></tr>
+E       assert '&lt;img src=x onerror=' in '\n<tr><td colspan="7" class="empty">加载失败: 500: {"items":[{"key_id":"x\');alert(1);//","product_id":"<img src=x onerro..."created_at":"2026-10-18T08:00:00"}],"key_id":"x\');alert(1);//","key_bytes":"<img src=x onerror=alert(1)>"}</td></tr>'
+
+tests\test_admin_xss_escaping.py:239: AssertionError
+_ TestInjectionRendersInert.test_onclick_attrs_cannot_be_breakout[certificates.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8466DE0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_onclick_attrs_cannot_be_b2')
+page = 'certificates.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_onclick_attrs_cannot_be_breakout(self, tmp_path, page):
+        joined = self._run(tmp_path, page, fail=False)
+        attrs = re.findall(r'onclick="([^"]*)"', joined)
+        for body in attrs:
+>           assert body.count("'") == 2, \
+                f"{page}: onclick JS 字符串被引号逃逸: {body}"
+E           AssertionError: certificates.html: onclick JS 字符串被引号逃逸: verifyCert('x');alert(1);//')
+E           assert 3 == 2
+E            +  where 3 = <built-in method count of str object at 0x00000260F84A6830>("'")
+E            +    where <built-in method count of str object at 0x00000260F84A6830> = "verifyCert('x');alert(1);//')".count
+
+tests\test_admin_xss_escaping.py:248: AssertionError
+_ TestInjectionRendersInert.test_onclick_attrs_cannot_be_breakout[connectors.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8466F00>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_onclick_attrs_cannot_be_b3')
+page = 'connectors.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_onclick_attrs_cannot_be_breakout(self, tmp_path, page):
+        joined = self._run(tmp_path, page, fail=False)
+        attrs = re.findall(r'onclick="([^"]*)"', joined)
+        for body in attrs:
+>           assert body.count("'") == 2, \
+                f"{page}: onclick JS 字符串被引号逃逸: {body}"
+E           AssertionError: connectors.html: onclick JS 字符串被引号逃逸: suspendConnector('x
+E           assert 1 == 2
+E            +  where 1 = <built-in method count of str object at 0x00000260F870D1F0>("'")
+E            +    where <built-in method count of str object at 0x00000260F870D1F0> = "suspendConnector('x".count
+
+tests\test_admin_xss_escaping.py:248: AssertionError
+_ TestInjectionRendersInert.test_onclick_attrs_cannot_be_breakout[identities.html] _
+
+self = <tests.test_admin_xss_escaping.TestInjectionRendersInert object at 0x00000260F8484440>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-78/test_onclick_attrs_cannot_be_b4')
+page = 'identities.html'
+
+    @pytest.mark.parametrize("page", PAGES)
+    def test_onclick_attrs_cannot_be_breakout(self, tmp_path, page):
+        joined = self._run(tmp_path, page, fail=False)
+        attrs = re.findall(r'onclick="([^"]*)"', joined)
+        for body in attrs:
+>           assert body.count("'") == 2, \
+                f"{page}: onclick JS 字符串被引号逃逸: {body}"
+E           AssertionError: identities.html: onclick JS 字符串被引号逃逸: destroyKey('x');alert(1);//')
+E           assert 3 == 2
+E            +  where 3 = <built-in method count of str object at 0x00000260F855A600>("'")
+E            +    where <built-in method count of str object at 0x00000260F855A600> = "destroyKey('x');alert(1);//')".count
+
+tests\test_admin_xss_escaping.py:248: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_esc_defined_once_and_badge_uses_it
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_api_error_message_body_capped
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_no_unescaped_server_field_in_html_literals[alerts.html]
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_no_unescaped_server_field_in_html_literals[blockchain.html]
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_no_unescaped_server_field_in_html_literals[certificates.html]
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_no_unescaped_server_field_in_html_literals[connectors.html]
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_no_unescaped_server_field_in_html_literals[identities.html]
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_admin_js_no_unescaped_server_field_in_html_literals
+FAILED tests/test_admin_xss_escaping.py::TestCentralEscaper::test_render_env_autoescape_enabled
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[ok-alerts.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[ok-blockchain.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[ok-certificates.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[ok-connectors.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[ok-identities.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[fail-alerts.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[fail-blockchain.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[fail-certificates.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[fail-connectors.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_payload_renders_as_literal_text[fail-identities.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_onclick_attrs_cannot_be_breakout[certificates.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_onclick_attrs_cannot_be_breakout[connectors.html]
+FAILED tests/test_admin_xss_escaping.py::TestInjectionRendersInert::test_onclick_attrs_cannot_be_breakout[identities.html]
+22 failed, 2 passed in 7.82s

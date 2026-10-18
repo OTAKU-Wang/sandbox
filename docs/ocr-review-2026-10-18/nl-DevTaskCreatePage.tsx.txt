@@ -1,0 +1,338 @@
+     1	// 图 2-2「我的开发-新增开发任务」整页形态：基本信息 / 我的合约 / 资源配置 / 关联数据 四卡
+     2	// + 底部 取消·完成 条。取代原弹窗（勾选要真的进载荷，弹窗放不下已选面板）。
+     3	//
+     4	// 图上「配额使用建议」写的是「数据量超过 10 万行建议 16G」这类无后端依据的经验值，
+     5	// 这里换成合约真正下发的已批准内存上限（禁伪造铁律：不替平台编造建议阈值）。
+     6	import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Tooltip, Typography } from 'antd';
+     7	import type { InputNumberProps } from 'antd';
+     8	import { useMemo, useState } from 'react';
+     9	import { useNavigate, useSearchParams } from 'react-router-dom';
+    10	import { EnvironmentFilled, InfoCircleOutlined } from '@ant-design/icons';
+    11	import {
+    12	  TASK_DEBUG_METHOD_OPTIONS,
+    13	  TASK_EXPORT_MODE_OPTIONS,
+    14	  TASK_MEMORY_LIMITS,
+    15	  UNKNOWN_TEXT,
+    16	  buildDevTaskPayload,
+    17	  describeNotebookCreateIssues,
+    18	  formatMemoryGib,
+    19	  useCreateNotebook,
+    20	  validateDevTaskForm,
+    21	} from '../../services/flow';
+    22	import type { DevTaskFieldIssue, DevTaskFormValues } from '../../services/flow';
+    23	import DevTaskDataPicker from './DevTaskDataPicker';
+    24	import { useContractOptions } from './useContractOptions';
+    25	import './devTaskCreate.css';
+    26	
+    27	const { Text, Title } = Typography;
+    28	
+    29	/** 图 2-2 步进器盒（实测 y941 簇）：值居左、－ ＋ 在右端、G 块最右，整盒一圈描边 h40。
+    30	 *  Form.Item 注入的 value/onChange/id 直接透传：id 落在真 input 上，测试与 a11y 都认它。 */
+    31	type MemStepperProps = Omit<InputNumberProps, 'value' | 'onChange' | 'min' | 'max' | 'step'> & {
+    32	  value?: number | null;
+    33	  onChange?: (value: number | null) => void;
+    34	  min?: number;
+    35	  max: number;
+    36	  step?: number;
+    37	};
+    38	
+    39	function MemStepper({ min = 0, max, step = 1, value, onChange, disabled, ...rest }: MemStepperProps) {
+    40	  const bump = (delta: number) => {
+    41	    if (typeof value !== 'number') return;
+    42	    onChange?.(Math.min(max, Math.max(min, value + delta)));
+    43	  };
+    44	  const stepValue = (next: string | number | null) => {
+    45	    if (next === null || next === '') return onChange?.(null);
+    46	    const num = typeof next === 'number' ? next : Number(next);
+    47	    if (Number.isFinite(num)) onChange?.(num);
+    48	  };
+    49	  const stepperDisabled = disabled || typeof value !== 'number';
+    50	  return (
+    51	    <div className="cds-mem-stepper">
+    52	      <InputNumber
+    53	        className="cds-mem-input"
+    54	        min={min}
+    55	        max={max}
+    56	        step={step}
+    57	        value={value}
+    58	        onChange={stepValue}
+    59	        disabled={disabled}
+    60	        controls={false}
+    61	        variant="borderless"
+    62	        style={{ width: '100%' }}
+    63	        {...rest}
+    64	      />
+    65	      <button type="button" className="cds-mem-step" aria-label="减少" disabled={stepperDisabled} onClick={() => bump(-step)}>－</button>
+    66	      <button type="button" className="cds-mem-step" aria-label="增加" disabled={stepperDisabled} onClick={() => bump(step)}>＋</button>
+    67	      <span className="cds-mem-g">G</span>
+    68	    </div>
+    69	  );
+    70	}
+    71	
+    72	/** 任务编号只读位的口径文案（对外口径唯一源：flow.ts 任务编号注释）。 */
+    73	const TASK_NO_READ_ONLY_TEXT = '系统自动生成（TASK-YYYYMMDD-NNN）';
+    74	
+    75	const ISSUE_FIELD_TO_FORM: Record<string, string | null> = {
+    76	  title: 'title',
+    77	  path: 'path',
+    78	  contract_id: 'contract_id',
+    79	  debug_method: 'debug_method',
+    80	  export_mode: 'export_mode',
+    81	  debug_memory_mb: 'debug_memory_gib',
+    82	  exec_memory_mb: 'exec_memory_gib',
+    83	  data_resource_ids: null,
+    84	  task_no: null,
+    85	};
+    86	
+    87	export default function DevTaskCreatePage() {
+    88	  const [form] = Form.useForm<DevTaskFormValues>();
+    89	  const navigate = useNavigate();
+    90	  const [params] = useSearchParams();
+    91	  const [issues, setIssues] = useState<DevTaskFieldIssue[]>([]);
+    92	  const [selectedResourceIds, setSelectedResourceIds] = useState<string[] | null>(null);
+    93	  const { data: contractChoices, isPending: contractsPending } = useContractOptions();
+    94	  const createTask = useCreateNotebook();
+    95	
+    96	  const debugMemory = Form.useWatch('debug_memory_gib', form);
+    97	  const contractId = Form.useWatch('contract_id', form);
+    98	
+    99	  const usableContracts = useMemo(
+   100	    () => (contractChoices ?? []).filter((choice) => choice.status === 'active'),
+   101	    [contractChoices],
+   102	  );
+   103	  const contractOptions = useMemo(
+   104	    () => usableContracts.map((choice) => ({ label: `${choice.title}（${choice.contract_no}）`, value: choice.id })),
+   105	    [usableContracts],
+   106	  );
+   107	  const selectedContract = useMemo(
+   108	    () => usableContracts.find((choice) => choice.id === contractId) ?? null,
+   109	    [contractId, usableContracts],
+   110	  );
+   111	  const approvedMemoryText = useMemo(() => {
+   112	    if (!contractId) return '尚未选择合约';
+   113	    const spec = selectedContract?.sandbox_resource_spec;
+   114	    const approved = spec && typeof spec.memory_mb === 'number' ? spec.memory_mb : null;
+   115	    return approved === null
+   116	      ? `合约未下发已批准内存规格，上限按产品档位 ${TASK_MEMORY_LIMITS.debug.max_gib} GiB`
+   117	      : `合约已批准内存 ${formatMemoryGib(approved)}，任务内存不得超过它`;
+   118	  }, [contractId, selectedContract]);
+   119	
+   120	  const debugLimit = TASK_MEMORY_LIMITS.debug;
+   121	  const execLimit = TASK_MEMORY_LIMITS.exec;
+   122	  const debugKnown = typeof debugMemory === 'number';
+   123	
+   124	  const showIssues = (next: DevTaskFieldIssue[]) => {
+   125	    const fieldNames = [...new Set(Object.values(ISSUE_FIELD_TO_FORM).filter((name): name is string => !!name))];
+   126	    const cleared = fieldNames.map((name) => ({ name: name as keyof DevTaskFormValues, errors: [] as string[] }));
+   127	    const byField = new Map<keyof DevTaskFormValues, string[]>();
+   128	    for (const issue of next) {
+   129	      const name = issue.field ? ISSUE_FIELD_TO_FORM[issue.field] ?? null : null;
+   130	      if (!name) continue;
+   131	      const key = name as keyof DevTaskFormValues;
+   132	      byField.set(key, [...(byField.get(key) ?? []), issue.text]);
+   133	    }
+   134	    form.setFields([...cleared, ...[...byField.entries()].map(([name, errors]) => ({ name, errors }))]);
+   135	    setIssues(next);
+   136	  };
+   137	
+   138	  const submit = async () => {
+   139	    let values: DevTaskFormValues;
+   140	    try {
+   141	      values = await form.validateFields();
+   142	    } catch {
+   143	      return;
+   144	    }
+   145	    const withSelection: DevTaskFormValues = { ...values, data_resource_ids: selectedResourceIds };
+   146	    const local = validateDevTaskForm(withSelection);
+   147	    if (local.length) {
+   148	      showIssues(local);
+   149	      return;
+   150	    }
+   151	    try {
+   152	      const notebook = await createTask.mutateAsync(buildDevTaskPayload(withSelection));
+   153	      navigate(`/flow/tasks/${notebook.id}`);
+   154	    } catch (error) {
+   155	      showIssues(describeNotebookCreateIssues(error));
+   156	    }
+   157	  };
+   158	
+   159	  return (
+   160	    <div className="cds-dev-task-create">
+   161	      {/* 标题带与 2-1 同口径：共用 .cds-page-toolbar（零新 CSS），Title 同取 level={3}。 */}
+   162	      <div className="cds-page-toolbar">
+   163	        <div>
+   164	          <Title level={3} style={{ margin: 0 }}>新增开发任务</Title>
+   165	          <Text type="secondary">交付场景 / 数据沙箱开发 · 配置合约、资源与关联数据后即可启动调试</Text>
+   166	        </div>
+   167	        <Button onClick={() => navigate('/flow/tasks')}>← 返回列表</Button>
+   168	      </div>
+   169	
+   170	      {issues.length > 0 && (
+   171	        <Alert
+   172	          type="error"
+   173	          showIcon
+   174	          style={{ marginBottom: 16 }}
+   175	          message="创建未成功"
+   176	          description={
+   177	            <ul style={{ margin: 0, paddingLeft: 18 }}>
+   178	              {issues.map((issue, index) => <li key={`${issue.field ?? 'global'}-${index}`}>{issue.text}</li>)}
+   179	            </ul>
+   180	          }
+   181	        />
+   182	      )}
+   183	
+   184	      <Form<DevTaskFormValues>
+   185	        form={form}
+   186	        layout="vertical"
+   187	        initialValues={{
+   188	          separate_exec_memory: true,
+   189	          debug_memory_gib: null,
+   190	          exec_memory_gib: null,
+   191	          contract_id: params.get('contract_id') ?? null,
+   192	        }}
+   193	      >
+   194	        <Card
+   195	          size="small"
+   196	          title="基本信息"
+   197	          style={{ marginBottom: 16 }}
+   198	        >
+   199	          <div className="cds-trio">
+   200	            <div>
+   201	              <Form.Item name="title" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
+   202	                <Input placeholder="例如：用户行为分析模型" maxLength={255} />
+   203	              </Form.Item>
+   204	            </div>
+   205	            <div>
+   206	              <Form.Item label="任务编号">
+   207	                {/* 口径（服务端按当日序号生成、客户端不提交）写在 placeholder 与本注释；图上标签无 ? 图标，不另加。 */}
+   208	                <Input readOnly disabled defaultValue={TASK_NO_READ_ONLY_TEXT} aria-label="任务编号" />
+   209	              </Form.Item>
+   210	            </div>
+   211	            <div>
+   212	              <Form.Item label="所属节点">
+   213	                {/* 后端未按任务记录所属节点，也不下发节点名；如实显示未记录，不拿部署名冒充（图上这里是节点名示例值）。 */}
+   214	                <Input readOnly disabled value={UNKNOWN_TEXT} aria-label="所属节点" />
+   215	              </Form.Item>
+   216	            </div>
+   217	          </div>
+   218	          <Form.Item name="description" label="任务描述">
+   219	            <Input.TextArea rows={3} maxLength={4000} placeholder="说明本任务要解决的问题、输入口径与期望产出。" />
+   220	          </Form.Item>
+   221	        </Card>
+   222	
+   223	        <Card
+   224	          size="small"
+   225	          title={
+   226	            <span className="cds-card-head-inner">
+   227	              我的合约<InfoCircleOutlined className="cds-card-head-info" />
+   228	              <Text type="secondary" style={{ fontWeight: 400 }}>合约用于约束模型输出格式与导出通道</Text>
+   229	            </span>
+   230	          }
+   231	          style={{ marginBottom: 16 }}
+   232	        >
+   233	          <div className="cds-trio">
+   234	            <div>
+   235	              <Form.Item name="contract_id" label="合约名称" rules={[{ required: true, message: '请选择合约名称' }]}>
+   236	                <Select
+   237	                  allowClear
+   238	                  showSearch
+   239	                  optionFilterProp="label"
+   240	                  placeholder="选择我可使用的合约"
+   241	                  loading={contractsPending}
+   242	                  options={contractOptions}
+   243	                />
+   244	              </Form.Item>
+   245	            </div>
+   246	            <div>
+   247	              <Form.Item name="debug_method" label="模型调试方法" rules={[{ required: true, message: '请选择模型调试方法' }]}>
+   248	                <Select allowClear placeholder="选择调试方法" options={TASK_DEBUG_METHOD_OPTIONS.map(({ label, value, hint }) => ({ label, value, title: hint }))} />
+   249	              </Form.Item>
+   250	            </div>
+   251	            <div>
+   252	              <Form.Item name="export_mode" label="结果导出方式" rules={[{ required: true, message: '请选择结果导出方式' }]}>
+   253	                <Select allowClear placeholder="选择导出方式" options={TASK_EXPORT_MODE_OPTIONS.map(({ label, value, hint }) => ({ label, value, title: hint }))} />
+   254	              </Form.Item>
+   255	            </div>
+   256	          </div>
+   257	        </Card>
+   258	
+   259	        <Card
+   260	          size="small"
+   261	          title={
+   262	            <span className="cds-card-head-inner">
+   263	              资源配置<InfoCircleOutlined className="cds-card-head-info" />
+   264	              <Text type="secondary" style={{ fontWeight: 400 }}>内存配额将应用于调试与执行阶段</Text>
+   265	            </span>
+   266	          }
+   267	          style={{ marginBottom: 16 }}
+   268	        >
+   269	          <div className="cds-trio">
+   270	            <div>
+   271	              <Form.Item
+   272	                name="debug_memory_gib"
+   273	                className="cds-unit-item"
+   274	                label="调试环境内存(G)"
+   275	                rules={[{ required: true, message: '请输入调试环境内存' }]}
+   276	                extra={`范围 ${debugLimit.min_gib}G ~ ${debugLimit.max_gib}G，用于在线调试环境`}
+   277	              >
+   278	                {/* 单位 `G` 由 .cds-unit-item 的 CSS 画在框内右侧（图 A-3：「后缀 G」）；
+   279	                    不写 InputNumber 的 suffix：antd 5.29 只有类型、运行时不渲染；也不能包一层 div：会打断 Form 绑定。 */}
+   280	                <MemStepper min={debugLimit.min_gib} max={debugLimit.max_gib} step={debugLimit.step} precision={debugLimit.precision} placeholder="如 8" />
+   281	              </Form.Item>
+   282	            </div>
+   283	            <div>
+   284	              <Form.Item
+   285	                name="exec_memory_gib"
+   286	                className="cds-unit-item"
+   287	                label="执行环境内存(G)"
+   288	                dependencies={['debug_memory_gib']}
+   289	                rules={[{ required: true, message: '请输入执行环境内存' }]}
+   290	                extra={`范围 ${execLimit.min_gib}G ~ ${execLimit.max_gib}G，用于任务正式执行环境`}
+   291	              >
+   292	                <MemStepper
+   293	                  min={Math.max(execLimit.min_gib, debugKnown ? debugMemory : 0)}
+   294	                  max={execLimit.max_gib}
+   295	                  step={execLimit.step}
+   296	                  precision={execLimit.precision}
+   297	                  placeholder={debugKnown ? `不低于 ${debugMemory}` : '如 16'}
+   298	                />
+   299	              </Form.Item>
+   300	            </div>
+   301	            <div>
+   302	              {/* 图上是浅蓝 alert 卡（💡 标题蓝）；内容不照抄图里无依据的经验值，写合约真实下发的口径。 */}
+   303	              <div className="cds-quota-advice">
+   304	                <div className="cds-quota-advice-title"><EnvironmentFilled /> 配额使用建议</div>
+   305	                <div className="cds-quota-advice-body">{approvedMemoryText}。沙箱按任务内存硬上限拒绝超限请求，不会静默降档。</div>
+   306	              </div>
+   307	            </div>
+   308	          </div>
+   309	        </Card>
+   310	
+   311	        <Card
+   312	          size="small"
+   313	          title={
+   314	            <span className="cds-card-head-inner">
+   315	              关联数据<InfoCircleOutlined className="cds-card-head-info" />
+   316	              <Text type="secondary" style={{ fontWeight: 400 }}>选择需要授权到沙箱的数据产品</Text>
+   317	            </span>
+   318	          }
+   319	          style={{ marginBottom: 16 }}
+   320	        >
+   321	          <DevTaskDataPicker contract={selectedContract} value={selectedResourceIds} onChange={setSelectedResourceIds} />
+   322	        </Card>
+   323	
+   324	        <Card size="small" className="cds-dev-task-foot">
+   325	          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+   326	            <Text type="secondary"><InfoCircleOutlined style={{ marginRight: 6 }} />提交后可在「我的开发」列表中进行调试与执行</Text>
+   327	            <Space>
+   328	              <Button onClick={() => navigate('/flow/tasks')}>取消</Button>
+   329	              <Tooltip title={selectedContract ? null : '先选择合约'}>
+   330	                <Button type="primary" loading={createTask.isPending} onClick={() => { void submit(); }}>完成</Button>
+   331	              </Tooltip>
+   332	            </Space>
+   333	          </div>
+   334	        </Card>
+   335	      </Form>
+   336	    </div>
+   337	  );
+   338	}

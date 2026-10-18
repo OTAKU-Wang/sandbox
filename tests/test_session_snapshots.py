@@ -92,3 +92,42 @@ def test_retention_evicts_oldest(ws, monkeypatch):
     assert len(remaining) == 2
     assert ids[0] not in remaining  # oldest evicted
     assert ids[-1] in remaining
+
+
+# ── ocr A116: limit 0/negative = disabled, never a 500 ─────────────────────
+
+def test_max_snapshots_zero_disables_creation(ws, monkeypatch):
+    """CDS_SESSION_MAX_SNAPSHOTS=0 is an explicit operator decision: the
+    service must refuse with SnapshotError (the route maps it to HTTP 400),
+    never crash with IndexError inside the eviction loop."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "SESSION_MAX_SNAPSHOTS", 0)
+
+    with pytest.raises(ss.SnapshotError, match="disabled"):
+        ss.create_snapshot(ws, session_id="s")
+
+    # Nothing was written and the workspace is untouched.
+    assert ss.list_snapshots(ws) == []
+    assert (ws / "files" / "a.txt").read_bytes() == b"AAAA"
+
+
+def test_max_snapshots_negative_disables_creation(ws, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "SESSION_MAX_SNAPSHOTS", -1)
+
+    with pytest.raises(ss.SnapshotError, match="disabled"):
+        ss.create_snapshot(ws, session_id="s")
+    assert ss.list_snapshots(ws) == []
+
+
+def test_max_snapshots_default_still_creates(ws, monkeypatch):
+    """Unset/default (10) keeps normal behavior — over-correction guard."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "SESSION_MAX_SNAPSHOTS", 10)
+    m = ss.create_snapshot(ws, session_id="s")
+    assert m["snapshot_id"]
+    assert len(ss.list_snapshots(ws)) == 1
+

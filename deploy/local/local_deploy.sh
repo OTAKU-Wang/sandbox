@@ -6,6 +6,17 @@
 # Idempotent; secrets persist in /tmp/cds-local.env (never in the repo).
 set -euo pipefail
 
+# Strict argument parsing: unknown flags were silently ignored, and a stray
+# `--` (the separator run() itself uses) swallowed --bootstrap — the deploy
+# "succeeded" with no admin and no warning.
+BOOTSTRAP_ADMIN=0
+for _a in "$@"; do
+  case "$_a" in
+    --bootstrap) BOOTSTRAP_ADMIN=1 ;;
+    *) echo "FATAL: unknown argument: $_a (usage: local_deploy.sh [--bootstrap])" >&2; exit 1 ;;
+  esac
+done
+
 ENV_FILE=/tmp/cds-local.env
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ ! -f "$ENV_FILE" ]; then
@@ -24,6 +35,9 @@ if [ ! -f "$ENV_FILE" ]; then
   } > "$ENV_FILE"
   echo "[local] generated $ENV_FILE (admin creds inside; /tmp only)"
 fi
+# /tmp is world-readable and this file holds every credential of the stack:
+# permissions must not depend on the caller's umask (022 gave 644).
+chmod 600 "$ENV_FILE"
 set -a; source "$ENV_FILE"; set +a
 
 run() {
@@ -33,21 +47,34 @@ run() {
     if [ "$seen" = "1" ]; then cmd+=("$a"); else if [ "$a" = "--" ]; then seen=1; else args+=("$a"); fi; fi
   done
   docker rm -f "$name" >/dev/null 2>&1 || true
+  local _i _st=gone
   for _i in 1 2 3 4 5 6 7 8 9 10; do
-    docker ps -q -f name="^${name}$" | grep -q . || break
+    docker ps -q -f name="^${name}$" | grep -q . || { _st=gone; break; }
     sleep 1
+    _st=present
   done
-  docker run -d --name "$name" --network host --restart unless-stopped "${args[@]}" "$image" "${cmd[@]}"
+  [ "$_st" = gone ] || { echo "FATAL: $name still present after 10s teardown wait (crash-loop restart?); aborting before docker run"; exit 1; }
+  docker run -d --name "$name" --network host --restart unless-stopped "${args[@]}" "$image" "${cmd[@]+"${cmd[@]}"}"
 }
 
+# Array-valued health probe: wait_healthy <name> <tries> <cmd...>. The old
+# string form word-split AND glob-expanded the command in the host shell (a
+# password containing * or ? was expanded against the host CWD), and it burned
+# all tries on a crash-looping container instead of failing now.
 wait_healthy() {
-  local name="$1" cmd="$2" tries="${3:-30}" i=0
-  until docker exec "$name" $cmd >/dev/null 2>&1; do
-    i=$((i+1))
-    if [ "$i" -ge "$tries" ]; then echo "FATAL: $name not healthy after $i tries"; docker logs --tail 20 "$name" || true; exit 1; fi
+  local name="$1" tries="$2" i st; shift 2
+  for ((i=1; i<=tries; i++)); do
+    st=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)
+    case "$st" in
+      exited|restarting|dead|missing)
+        echo "FATAL: $name is $st while waiting for health:"; docker logs --tail 20 "$name" 2>&1 || true; exit 1;;
+    esac
+    docker exec "$name" "$@" >/dev/null 2>&1 && { echo "healthy: $name"; return 0; }
     sleep 2
   done
-  echo "healthy: $name"
+  echo "FATAL: $name not healthy after $((tries*2))s: $*"
+  docker logs --tail 20 "$name" || true
+  exit 1
 }
 
 wait_port() {
@@ -70,10 +97,22 @@ run l-redis redis:7-alpine \
   -v "l_cds_redis:/data" \
   -- redis-server --port 6380 --requirepass "$REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy allkeys-lru
 
+# ClickHouse: the official image does NOT recognize CLICKHOUSE_HTTP_PORT /
+# CLICKHOUSE_PORT (they were silently ignored: the server kept listening on
+# 8123/9000, the declared CDS_CLICKHOUSE_URL:8124 pointed at nothing, and
+# nothing probed it until a business audit write failed). Ports move via the
+# supported config.d mechanism instead, and the store is probed below.
+CH_PORTS_FILE=$(mktemp /tmp/l_cds_ch_ports.XXXXXX.xml)
+cat > "$CH_PORTS_FILE" <<'XMLEOF'
+<clickhouse>
+  <http_port>8124</http_port>
+  <tcp_port>9005</tcp_port>
+</clickhouse>
+XMLEOF
 run l-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -e CLICKHOUSE_DB=cds_audit -e CLICKHOUSE_USER=cds -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" \
-  -e CLICKHOUSE_HTTP_PORT=8124 -e CLICKHOUSE_PORT=9005 \
-  -v "l_cds_ch:/var/lib/clickhouse"
+  -v "l_cds_ch:/var/lib/clickhouse" \
+  -v "${CH_PORTS_FILE}:/etc/clickhouse-server/config.d/ports.xml:ro"
 
 run l-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -e MINIO_ROOT_USER=cds_minio_admin -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
@@ -88,18 +127,28 @@ run l-vault hashicorp/vault:1.17-flat \
   -e VAULT_DEV_ROOT_TOKEN_ID="$VAULT_TOKEN" -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
 
 echo "== waiting for middleware =="
-wait_healthy l-postgres "pg_isready -p 5432 -U cds" 45
-wait_healthy l-redis "redis-cli -p 6380 -a $REDIS_PASSWORD ping" 45
+wait_healthy l-postgres 45 pg_isready -p 5432 -U cds
+# redis-cli exits 0 even on WRONGPASS — grep the actual PONG.
+wait_healthy l-redis 45 sh -c 'redis-cli -p 6380 -a "$1" --no-auth-warning ping | grep -q PONG' _ "$REDIS_PASSWORD"
 wait_port 9010 45
 wait_port 8181 30
-wait_healthy l-vault "vault status -address=http://127.0.0.1:8200" 60
+wait_healthy l-vault 60 vault status -address=http://127.0.0.1:8200
+# the audit store must answer BEFORE LOCAL_DEPLOY_DONE: cds-api never blocks
+# on ClickHouse, so a dead audit path used to surface only at first write.
+wait_healthy l-clickhouse 30 clickhouse-client --port 9005 --query "SELECT 1"
+wait_port 8124 30
 
 VROOT="$(docker exec l-vault printenv VAULT_DEV_ROOT_TOKEN_ID)"
+if ! transit_out=$(docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VROOT" \
+  l-vault vault secrets enable -path=transit transit 2>&1); then
+  printf '%s\n' "$transit_out" | grep -q 'already in use' \
+    || { echo "FATAL: vault transit enable failed: $transit_out"; exit 1; }
+fi
+# verify the mount itself (a substring hit anywhere in `secrets list` output
+# would have passed even with transit mounted elsewhere or not at all)
 docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VROOT" \
-  l-vault vault secrets enable -path=transit transit 2>/dev/null \
-  || docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VROOT" \
-  l-vault vault secrets list 2>/dev/null | grep -q transit \
-  || { echo "FATAL: could not enable Vault transit engine"; exit 1; }
+  l-vault vault secrets list -format=table | awk '{print $1}' | grep -qx 'transit/' \
+  || { echo "FATAL: transit engine not mounted (verified via secrets list)"; exit 1; }
 
 echo "== schema =="
 # SS-14 RT-07: 会话结果卷 host_dir（cubelet bind mount 源, 必须宿主机存在）。
@@ -145,7 +194,6 @@ run l-cds-api cds-api:latest \
   -e CDS_CUBE_SANDBOX_STORAGE_MEDIA="" \
   -e CDS_CUBE_MASTER_ADDR="http://127.0.0.1:8089" \
   -e CDS_CUBE_VOLUME_PLUGIN_SOCKET="/run/cds-volume-plugin/cds.sock" \
-  -e CDS_KMS_REQUIRE_ATTESTATION=false \
   -v /run/cds-volume-plugin:/run/cds-volume-plugin \
   -v /var/lib/cds/sandbox-results:/var/lib/cds/sandbox-results \
   -e CDS_CUBE_DEK_LENGTH="16" \
@@ -172,14 +220,19 @@ until curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do
 done
 echo "healthy: l-cds-api"
 
-if [ "${1:-}" = "--bootstrap" ]; then
-  code=$(curl -s -o /tmp/l_bootstrap.json -w '%{http_code}' -X POST http://127.0.0.1:8000/api/v1/auth/register \
+if [ "$BOOTSTRAP_ADMIN" = "1" ]; then
+  BOOT_JSON=$(mktemp /tmp/l_bootstrap.XXXXXX.json)
+  code=$(curl -s -o "$BOOT_JSON" -w '%{http_code}' -X POST http://127.0.0.1:8000/api/v1/auth/register \
     -H 'Content-Type: application/json' \
     -d "{\"username\":\"$CDS_ADMIN_USER\",\"email\":\"$CDS_ADMIN_USER@cds-local.cn\",\"password\":\"$CDS_ADMIN_PASS\",\"role\":\"admin\"}")
   if [ "$code" = "201" ]; then echo "bootstrap admin created ($CDS_ADMIN_USER)"; else
-    if grep -q "already" /tmp/l_bootstrap.json 2>/dev/null; then echo "bootstrap: admin exists, kept existing"; else
-      echo "FATAL: bootstrap register failed ($code): $(cat /tmp/l_bootstrap.json | head -c 300)"; exit 1; fi
+    if grep -q "already" "$BOOT_JSON" 2>/dev/null; then echo "bootstrap: admin exists, kept existing"; else
+      # no `cat | head` pipe: under pipefail head's exit leaves cat with
+      # SIGPIPE(141) and the command substitution aborts the whole script
+      # before the real status code/body is ever printed.
+      echo "FATAL: bootstrap register failed ($code): $(head -c 300 "$BOOT_JSON")"; rm -f "$BOOT_JSON"; exit 1; fi
   fi
+  rm -f "$BOOT_JSON"
 fi
 
 echo "== summary =="
@@ -188,9 +241,16 @@ docker ps --format 'table {{.Names}}\t{{.Status}}'
 # uncommitted); sync app/ into the container (image app root is /app/app) so
 # the local node-track stack runs the tree under test. Re-run after any redeploy.
 if [ -d "$ROOT/app" ]; then
-  tar cf /tmp/l_cds_app_sync.tar -C "$ROOT" app
-  docker cp /tmp/l_cds_app_sync.tar l-cds-api:/tmp/l_app_sync.tar
+  # the sync must carry the migrations too and re-run them from the synced
+  # tree: previously alembic ran with the OLD image before the sync, so a tree
+  # carrying new revisions booted the lane as "new code on old schema" and
+  # only surfaced as runtime "column does not exist".
+  SYNC_TAR=$(mktemp /tmp/l_cds_app_sync.XXXXXX.tar)
+  tar cf "$SYNC_TAR" -C "$ROOT" app alembic alembic.ini
+  docker cp "$SYNC_TAR" l-cds-api:/tmp/l_app_sync.tar
+  rm -f "$SYNC_TAR"
   docker exec l-cds-api sh -c "tar xf /tmp/l_app_sync.tar -C /app"
+  docker exec l-cds-api python -m alembic upgrade head
   docker restart l-cds-api >/dev/null
   i=0
   until curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do

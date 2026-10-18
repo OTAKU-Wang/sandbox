@@ -1,11 +1,15 @@
 services:
+  # A283: 本文件所有密钥一律用 VAR:?说明 这种 fail-closed 插值形式（前面带美元符）—— compose 对未定义变量只 warn 并替换成空串，
+  # 于是 Postgres 会以空密码起来并对外发布端口（API 侧 validate_security_config 只在应用
+  # 启动时兜底，数据层已经先起来了）。required 插值让 `compose up` 在解析阶段就失败。
+
   # ─── 数据库层 ───
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: cds
       POSTGRES_USER: cds
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - empty boots Postgres with no password}
     ports:
       - "5432:5432"
     volumes:
@@ -19,13 +23,13 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - empty boots Redis open} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -41,7 +45,7 @@ services:
     environment:
       CLICKHOUSE_DB: cds_audit
       CLICKHOUSE_USER: cds
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required - empty disables audit-store auth}
 
   minio:
     image: minio/minio:RELEASE.2025-01-20T14-49-07Z
@@ -50,8 +54,8 @@ services:
       - "9001:9000"
       - "9002:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required - object-store root credential}
     volumes:
       - minio-data:/data
     healthcheck:
@@ -86,7 +90,7 @@ services:
     ports:
       - "8200:8200"
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:?VAULT_TOKEN is required - KMS root token}
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
       VAULT_LOCAL_CONFIG: |
         {
@@ -112,22 +116,22 @@ services:
       # secret requirement. Keep false unless actively debugging the stack.
       CDS_DEBUG: "false"
       CDS_LOG_JSON: "true"
-      CDS_DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@postgres:5432/cds
-      CDS_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CDS_DATABASE_URL: postgresql+asyncpg://cds:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/cds
+      CDS_REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       CDS_CLICKHOUSE_URL: http://clickhouse:8123/cds_audit
       CDS_OPA_URL: http://opa:8181
       CDS_VAULT_ADDR: http://vault:8200
-      CDS_VAULT_TOKEN: ${VAULT_TOKEN}
+      CDS_VAULT_TOKEN: ${VAULT_TOKEN:?VAULT_TOKEN is required - KMS root token}
       CDS_MINIO_ENDPOINT: minio:9000
-      CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY}
+      CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY:?CDS_JWT_SECRET_KEY is required - JWT signing secret}
       # P0 hardening switches �?production fail-closed posture.
       CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
       CDS_KMS_REQUIRE_ATTESTATION: "true"
       # CB-01: service token for the Go volume plugin's KMS volume-key endpoints
       # (must match the plugin's CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN; required).
-      CDS_KMS_SERVICE_TOKEN: ${CDS_KMS_SERVICE_TOKEN}
+      CDS_KMS_SERVICE_TOKEN: ${CDS_KMS_SERVICE_TOKEN:?CDS_KMS_SERVICE_TOKEN is required - Go volume plugin KMS token}
       CDS_DEV_SANDBOX_REQUIRE_CONTRACT: "true"
       # SS-19: 生产不在开发环里降级隔离等级 —— l2c 是唯一允许的开发环等级，
       # 生产 compose 也不携带 cds-jupyter 服务（未配 CDS_JUPYTER_PROXY_BASE_URL = 无入口）。
@@ -135,7 +139,7 @@ services:
       # PZ-10 (spec ss-11): MFA (TOTP) + SM2 cert login. Prod requires an
       # explicit MFA encryption key (empty key refuses to boot).
       CDS_AUTH_MFA_ENABLED: "true"
-      CDS_MFA_SECRET_ENCRYPTION_KEY: ${CDS_MFA_SECRET_ENCRYPTION_KEY}
+      CDS_MFA_SECRET_ENCRYPTION_KEY: ${CDS_MFA_SECRET_ENCRYPTION_KEY:?CDS_MFA_SECRET_ENCRYPTION_KEY is required - MFA at-rest key}
       CDS_AUTH_CERT_LOGIN: "true"
       # W3: stricter login throttle; per-scope limits sized for one replica.
       CDS_SESSION_DEFAULT_IDLE_POLICY: "kill"
@@ -208,8 +212,8 @@ services:
       # at their dev defaults, so they are pinned here.
       CDS_MIA_SHADOW_MODEL: "false"
       CDS_SM3_FALLBACK_ALLOWED: "false"
-      CDS_COLUMN_ENCRYPTION_KEY: ${CDS_COLUMN_ENCRYPTION_KEY}
-      CDS_ATTESTATION_ALLOWED_MEASUREMENTS: ${CDS_ATTESTATION_ALLOWED_MEASUREMENTS}
+      CDS_COLUMN_ENCRYPTION_KEY: ${CDS_COLUMN_ENCRYPTION_KEY:?CDS_COLUMN_ENCRYPTION_KEY is required - column DEK}
+      CDS_ATTESTATION_ALLOWED_MEASUREMENTS: ${CDS_ATTESTATION_ALLOWED_MEASUREMENTS:?CDS_ATTESTATION_ALLOWED_MEASUREMENTS is required - csv TEE measurement whitelist}
       # PZ-05: federation is mTLS-terminated (FG-008). Until real cert/key/CA
       # material is provisioned the channel stays off — prod would RAISE
       # otherwise (fail-closed, not silent skip).
@@ -237,6 +241,15 @@ services:
       - sandbox-workspace:/tmp/cds-sandbox
       - sandbox-workspace-l0:/tmp/cds-sandbox-l0
       - cds-storage:/tmp/cds-storage
+      # A285: 环境里声明的运行时写入路径同样必须落卷。三条路径的目录都由代码自建
+      # （egress_audit.py / shared_volumes.py 各自 mkdir -p），挂在目录而非文件上；
+      # 未挂卷时它们只存在于容器可写层，`compose up --force-recreate` 后即消失：
+      # /data/egress-audit（出口审计日志，retention 0=永久，丢了就是审计断链）、
+      # /data/shared-volumes（共享卷根）、/var/lib/cds/sandbox-results（Cube 结果目录，
+      # CDS_CUBE_DATAPLANE_ENABLED=true 时启用）。
+      - cds-egress-audit:/data/egress-audit
+      - cds-shared-volumes:/data/shared-volumes
+      - cds-sandbox-results:/var/lib/cds/sandbox-results
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -260,3 +273,7 @@ volumes:
   sandbox-workspace:
   sandbox-workspace-l0:
   cds-storage:
+  # A285: 声明式写入路径对应的三个卷（见 cds-api.volumes 注释）。
+  cds-egress-audit:
+  cds-shared-volumes:
+  cds-sandbox-results:

@@ -26,8 +26,12 @@
 # 测试钩子（仅测试/演练使用，生产不应设置）：
 #   CDS_CUBE_MOCK_ROOT=DIR  将以下路径重定向到 DIR 下，并把 DIR/bin 前置到 PATH：
 #     /dev/kvm, /proc/meminfo, /proc/filesystems, /sys/fs/bpf,
+#     /data/cubelet（未显式设 CDS_CUBE_DATA_DIR 时）,
+#     /run/cds-volume-plugin/cds.sock（未显式设 CDS_CUBE_VOLUME_PLUGIN_SOCKET 时）,
 #     DIR/etc/fs_type（数据盘文件系统类型）, DIR/etc/disk_pct（数据盘已用百分比）,
 #     DIR/etc/ebpf_syscall（1=内核支持 bpf syscall）, DIR/bin/<工具名>（xfs_info/bpftool/cubelet/... 垫片）
+#     注：该钩子会弱化整个硬门禁（组件均可被垫片接管），脚本会打印 MOCK 横幅并在结果行
+#     标注 MOCK；生产环境误设必须据此立即中止。
 #
 # 可覆盖环境变量（CDS_* 前缀，纪律沿用 6.1 矩阵；节点侧键不依赖代码默认值即可运行）：
 #   CDS_CUBE_KVM_DEVICE          默认 /dev/kvm
@@ -53,6 +57,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOCK_ROOT="${CDS_CUBE_MOCK_ROOT:-}"
 if [[ -n "${MOCK_ROOT}" ]]; then
   export PATH="${MOCK_ROOT}/bin:${PATH}"
+  # mock 钩子会把 <root>/bin 前置到 PATH，xfs_info/bpftool/cubelet/containerd 全可被垫片
+  # 接管，多项检查可被假性 PASS——一眼可见性是底线：横幅 + 结果行 MOCK 标记，禁生产。
+  echo "== MOCK 演练模式：CDS_CUBE_MOCK_ROOT=${MOCK_ROOT}（测试/演练专用，禁用于生产！）=="
 fi
 
 # 路径重定向：mock 模式下 /dev、/proc、/sys 下的固定路径指向 fixture
@@ -63,6 +70,9 @@ syspath() {
 KVM_DEVICE="${CDS_CUBE_KVM_DEVICE:-/dev/kvm}"
 [[ -n "${MOCK_ROOT}" ]] && KVM_DEVICE="${MOCK_ROOT}/dev/kvm"
 DATA_DIR="${CDS_CUBE_DATA_DIR:-/data/cubelet}"
+# 演练模式整根重定向数据盘（与 SOCK_PATH 同口径）：否则非 root 演练永远 FAIL，
+# 而真节点上以 root 跑演练又会把 dd/cp 探针写进生产数据盘（“仅测试/演练”假设不成立）
+[[ -n "${MOCK_ROOT}" && -z "${CDS_CUBE_DATA_DIR:-}" ]] && DATA_DIR="${MOCK_ROOT}/data/cubelet"
 MEMINFO="$(syspath /proc/meminfo)"
 PROC_FS="$(syspath /proc/filesystems)"
 BPF_DIR="$(syspath /sys/fs/bpf)"
@@ -83,17 +93,29 @@ EXPECTED_VERSION="${CDS_CUBE_EXPECTED_VERSION:-}"
 EXPECTED_SHA="${CDS_CUBE_EXPECTED_SHA:-}"
 MANIFEST="${CDS_CUBE_BUNDLE_MANIFEST:-${SCRIPT_DIR}/../../scripts/cube-bundle-manifest.json}"
 if [[ -f "${MANIFEST}" ]] && command -v python3 >/dev/null 2>&1; then
-  read -r _ver _sha < <(python3 - "${MANIFEST}" <<'EOF'
+  _ver="" _sha=""
+  # `read` 的退出码必须判定：manifest 非法/缺键/python 异常时 read 遇 EOF 返回 1，
+  # set -e 会在打印任何检查项之前静默 exit 1（下方内置兜底永远不可达）；若 python
+  # 只输出一个字段，${_ver}/${_sha} 还会被 set -u 打 unbound。|| true + 显式判空。
+  # `tr -d '\r'`：Windows 原生 python 在管道里写 CRLF，`read` 会把 \r 留在末变量里
+  # 污染钉住 sha（grep -qF 永远不中）；对 Linux（无 \r）是恒等操作
+  read -r _ver _sha < <(python3 - "${MANIFEST}" <<'EOF' | tr -d '\r'
 import json, sys
-m = json.load(open(sys.argv[1]))
+# 显式 utf-8：manifest 含中文注释；Windows/cp936 默认 locale 下裸 open() 会
+# UnicodeDecodeError（Linux 默认 utf-8 不暴露，本地门机暴露）——读钉住值不能碰运气
+m = json.load(open(sys.argv[1], encoding="utf-8"))
 cs = m["cubesandbox"]
 # 发布钩（节点二进制）与源码钩（上游 checkout）分列：旧清单无 release 块时退回源码钩
 rel = cs.get("release") or {}
 print(rel.get("version") or cs["version"], rel.get("git_sha") or cs["git_sha"])
 EOF
-)
-  EXPECTED_VERSION="${EXPECTED_VERSION:-${_ver}}"
-  EXPECTED_SHA="${EXPECTED_SHA:-${_sha}}"
+) || true
+  if [[ -n "${_ver}" ]]; then
+    EXPECTED_VERSION="${EXPECTED_VERSION:-${_ver}}"
+    EXPECTED_SHA="${EXPECTED_SHA:-${_sha}}"
+  else
+    echo "警告: bundle manifest 不可读或解析失败（${MANIFEST}）—— 回退内置钉住值继续预检"
+  fi
 fi
 # 兜底：与 scripts/cube-bundle-manifest.json 保持一致的内置钉住值
 EXPECTED_VERSION="${EXPECTED_VERSION:-v0.7.3-rc2}"
@@ -134,7 +156,13 @@ check_data_fs() {
   if [[ -n "${MOCK_ROOT}" && -f "${MOCK_ROOT}/etc/fs_type" ]]; then
     fs_type="$(tr -d '[:space:]' < "${MOCK_ROOT}/etc/fs_type")"
   else
-    fs_type="$(df -T "${DATA_DIR}" 2>/dev/null | awk 'NR==2 {print $2}')" || true
+    # 优先 findmnt：按挂载点直取 FSTYPE。`df -T` 在长设备名（LVM/NVMe namespace）下会把
+    # 设备名折行成第 2 行，NR==2 取到空 → 真 XFS 节点误报 'unknown' 阻断 bring-up。
+    # 无 findmnt 的环境（如 git-bash 冒烟）退回 `df -PT`：-P 保证不折行，-T 附类型列。
+    fs_type="$(findmnt -no FSTYPE -T "${DATA_DIR}" 2>/dev/null | tr -d '[:space:]')" || fs_type=""
+    if [[ -z "${fs_type}" ]]; then
+      fs_type="$(df -PT "${DATA_DIR}" 2>/dev/null | awk 'NR==2 {print $2}')" || fs_type=""
+    fi
   fi
   if [[ ! -d "${DATA_DIR}" ]]; then
     fail data_fs "数据盘目录 ${DATA_DIR} 不存在（先 mkfs.xfs 并挂载，见 §9.1）"
@@ -158,11 +186,18 @@ check_data_fs() {
     fail data_fs "xfs_info 不存在（xfsprogs 未安装）"
     return
   fi
-  # FICLONE 实测：在数据盘上做 refllink 复制（探针命令可覆盖，测试用垫片）
+  # FICLONE 实测：在数据盘上做 reflink 复制（探针命令可覆盖，测试用垫片）
   local probe_dir
   probe_dir="$(mktemp -d "${DATA_DIR}/.cds-preflight.XXXXXX")" || { fail data_fs "无法在 ${DATA_DIR} 建临时目录"; return; }
+  # 任何提前退出路径都不得把探针残留在生产数据盘（“只读检查”的声明靠 trap 兜底）
+  trap 'rm -rf "${probe_dir:-}"' RETURN
   local a="${probe_dir}/a" b="${probe_dir}/b"
-  dd if=/dev/zero of="${a}" bs=1k count=64 2>/dev/null
+  # dd 失败 = 数据盘只读/满盘/配额受限的真实形态：必须落为 FAIL 行，不能裸奔在
+  # set -e 下把整个预检静默带崩
+  if ! dd if=/dev/zero of="${a}" bs=1k count=64 2>/dev/null; then
+    fail data_fs "数据盘写探针 dd 失败（${a}）：只读/满盘/配额受限？"
+    return
+  fi
   if ! ${REFLINK_PROBE_CMD} "${a}" "${b}" 2>/dev/null; then
     rm -rf "${probe_dir}"
     fail data_fs "FICLONE 实测失败（${REFLINK_PROBE_CMD}）"
@@ -186,6 +221,8 @@ check_ebpf() {
   if [[ -n "${MOCK_ROOT}" && -f "${MOCK_ROOT}/etc/ebpf_syscall" ]]; then
     probe="$(tr -d '[:space:]' < "${MOCK_ROOT}/etc/ebpf_syscall")"
   elif command -v python3 >/dev/null 2>&1; then
+    # 探针自身异常（缺 ctypes / 被 seccomp 拦）必须显式落入 err 分支：裸赋值在
+    # set -e+pipefail 下会把整个 preflight 在检查中途带崩
     probe="$(python3 - <<'EOF'
 import ctypes, ctypes.util, os
 libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
@@ -197,11 +234,22 @@ err = ctypes.get_errno()
 # ENOSYS(38) = 内核无 bpf syscall；其它错误码 = 系统调用存在
 print("0" if err == 38 else "1")
 EOF
-)"
+)" || probe="err"
   elif grep -qw bpf "${PROC_FS}"; then
     probe="1"
   else
     probe="0"
+  fi
+  if [[ "${probe}" == "err" ]]; then
+    # 探针不可用 → 如实降级到必要条件判定并声明证据强度：不把“测不了”当“不支持”，
+    # 也不当“支持”
+    if grep -qw bpf "${PROC_FS}" 2>/dev/null; then
+      pass ebpf "bpftool 可用；bpf() 探针不可用（python 异常），退回 /proc/filesystems 声明 bpf（fs_type 非运行期保证，证据较弱）"
+      [[ -d "${BPF_DIR}" ]] || fail ebpf "/sys/fs/bpf 未挂载（bpffs 缺失）"
+    else
+      fail ebpf "bpf() 探针不可用（python 异常）且 ${PROC_FS} 无 bpf 声明——不能断定支持"
+    fi
+    return
   fi
   if [[ "${probe}" != "1" ]]; then
     fail ebpf "内核不支持 bpf（/proc/filesystems 无 bpf 或 bpf() syscall 为 ENOSYS）"
@@ -260,7 +308,7 @@ EOF
       return
     fi
   fi
-  pass tls_sidecar "TCP 可达 ${host}:${port}"
+  pass tls_sidecar "TCP 可达 ${host}:${port}（仅端口可达性，不含证书/协议校验；sidecar 身份确认属 verify.sh 安装后阶段，任何占用该端口的进程都能满足本项）"
 }
 
 # ---- 7. containerd ----
@@ -276,7 +324,13 @@ check_containerd() {
 # ---- 8. 资源水位 ----
 check_resources() {
   local mem_total_kb
-  mem_total_kb="$(awk '/^MemTotal/ {print $2; exit}' "${MEMINFO}" 2>/dev/null || echo 0)"
+  mem_total_kb="$(awk '/^MemTotal/ {print $2; exit}' "${MEMINFO}" 2>/dev/null)" || mem_total_kb=""
+  # 读不到数值必须如实报“无法读取”：旧 `|| echo 0` 把“文件存在但无 MemTotal 行”
+  # 伪装成实测 0GB 的“内存不足”，把环境异常误报成硬件不达标（读不到≠ 0）
+  if [[ ! "${mem_total_kb}" =~ ^[0-9]+$ ]]; then
+    fail resources "无法从 ${MEMINFO} 读取 MemTotal（读到: '${mem_total_kb:-<空>}'）——不猜内存数"
+    return
+  fi
   if [[ "${mem_total_kb}" -lt "${MIN_MEM_KB}" ]]; then
     fail resources "内存不足：需 ≥ $((MIN_MEM_KB / 1024 / 1024))GB，实测 $((mem_total_kb / 1024 / 1024))GB"
     return
@@ -285,7 +339,9 @@ check_resources() {
   if [[ -n "${MOCK_ROOT}" && -f "${MOCK_ROOT}/etc/disk_pct" ]]; then
     used_pct="$(tr -d '[:space:]\%' < "${MOCK_ROOT}/etc/disk_pct")"
   else
-    used_pct="$(df -P "${DATA_DIR}" 2>/dev/null | awk 'NR==2 {gsub(/%/,""); print $5}')"
+    # df 在 DATA_DIR 不存在/不可访（正是 data_fs 已 FAIL 的典型场景）时返 1：不
+    # || true 则 pipefail 让赋值崩掉整个预检（无 FAIL 行、无汇总、后续检查全消失）
+    used_pct="$(df -P "${DATA_DIR}" 2>/dev/null | awk 'NR==2 {gsub(/%/,""); print $5}' || true)"
   fi
   if [[ -z "${used_pct}" || ! "${used_pct}" =~ ^[0-9]+$ ]]; then
     fail resources "无法读取数据盘使用率: ${DATA_DIR}"
@@ -343,13 +399,21 @@ check_tee_probe() {
 # 表象是整机“无法上网”而与代理/VPN 自身配置无关。因此这一项在安装前硬拦，不降级。
 
 # 本机 IPv4 前缀采集：接口地址 + main 表路由（VPN 推送的静态路由只有路由没有接口地址，必须一并取）。
-# cube* 接口跳过：那是沙箱网段自己的桥，与判定同源。末尾 sort -u 兼承担把 grep 无命中的
-# 退出码归零（pipefail 下否则会把 set -e 的脚本带倒）。
+# cube* 接口跳过：那是沙箱网段自己的桥，与判定同源。注意 `ip addr` 行根本没有 ` dev `
+# 字段（那是 ip route 的语法）——旧 grep 对 addr 行完全无效：已部署节点的 cube0 桥地址
+# 会被当“本机前缀”参与重叠判定 → 每台已建站节点永久误报重叠、重装/升级复检被卡死。
+# 现按来源分别排除：addr 行按接口名列（$2），route 行按 `dev <iface>`。
+# 两个 ip 子命令任一失败都让函数返回非零（调用方 fail-closed）：“枚举不了”不能当
+# “无冲突”；成功时的空输出才是真无地址。
 host_prefixes() {
-  {
-    ip -o -4 addr show 2>/dev/null | grep -v -E ' dev cube[^ ]*'
-    ip -o -4 route show table main 2>/dev/null
-  } | awk '{
+  local addrs routes
+  addrs="$(ip -o -4 addr show 2>/dev/null)" || return 1
+  routes="$(ip -o -4 route show table main 2>/dev/null)" || return 1
+  printf '%s\n%s\n' "${addrs}" "${routes}" | awk '{
+      # addr 行："7: cube0 inet ..." —— 接口名在 $2，cube* 整行丢弃
+      if ($1 ~ /^[0-9]+:$/ && $2 ~ /^cube[a-zA-Z0-9_-]*$/) next;
+      # route 行：`... dev cube-dev ...` 整行丢弃
+      if ($0 ~ /(^|[[:space:]])dev[[:space:]]+cube[a-zA-Z0-9_-]*([[:space:]]|$)/) next;
       for (i = 1; i <= NF; i++)
         if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/) {
           split($i, o, ".");
@@ -360,8 +424,14 @@ host_prefixes() {
 }
 
 ip2int() {
+  # 八位组必须纯数字且 0-255：越界值（192.168.0.999 / 256.1.1.0）旧版算出进位的错误
+  # 整数（与 ip route 实际行为不一致，重叠判定静默失真）；前导零（08）会被当八进制。
+  # 非法输入返回非零且无输出，调用方必须处理（|| continue / || return）。
   local a b c d
-  IFS='.' read -r a b c d <<<"$1"
+  IFS='.' read -r a b c d <<<"$1" || true
+  [[ "${a:-}" =~ ^(0|[1-9][0-9]{0,2})$ && "${b:-}" =~ ^(0|[1-9][0-9]{0,2})$ \
+     && "${c:-}" =~ ^(0|[1-9][0-9]{0,2})$ && "${d:-}" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+  (( a <= 255 && b <= 255 && c <= 255 && d <= 255 )) || return 1
   echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
 }
 
@@ -425,10 +495,15 @@ check_sandbox_cidr() {
   fi
   local oneclick_env="/usr/local/services/cubetoolbox/.one-click.env"
   [[ -n "${MOCK_ROOT}" ]] && oneclick_env="${MOCK_ROOT}/usr/local/services/cubetoolbox/.one-click.env"
-  local cidr="${CUBE_SANDBOX_NETWORK_CIDR:-${CDS_CUBE_SANDBOX_CIDR:-}}"
+  # 头部文档口径：运维显式设 CDS_CUBE_SANDBOX_CIDR 预验候选段时必须赢过环境里残留的
+  # 上游键（install.sh 会 export CUBE_SANDBOX_NETWORK_CIDR，重跑时从 .one-click.env 带入）——
+  # 旧优先级下门禁实际校验的是另一个网段，PASS/FAIL 与操作者意图无关
+  local cidr="${CDS_CUBE_SANDBOX_CIDR:-${CUBE_SANDBOX_NETWORK_CIDR:-}}"
   local src="环境变量"
   if [[ -z "${cidr}" && -r "${oneclick_env}" ]]; then
-    cidr="$(sed -n 's/^CUBE_SANDBOX_NETWORK_CIDR=//p' "${oneclick_env}" | head -n1 | tr -d '\040\011\012\015\042\047')"
+    # 上游写法常是 `export KEY=`/带缩进/行首 BOM（行首精确匹配静默漏读 → 在已迁移
+    # 网段的机器上按上游默认段误拦）：容忍可选 export/缩进并剥 BOM
+    cidr="$(sed -e '1s/^\xEF\xBB\xBF//' -e 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}CUBE_SANDBOX_NETWORK_CIDR=//p' "${oneclick_env}" 2>/dev/null | head -n1 | tr -d '\040\011\012\015\042\047')" || true
     [[ -n "${cidr}" ]] && src="${oneclick_env}"
   fi
   if [[ -z "${cidr}" ]]; then
@@ -436,7 +511,10 @@ check_sandbox_cidr() {
     cidr="192.168.0.0/18"
     src="上游默认（.one-click.env 不可读或未设该键）"
   fi
-  if [[ ! "${cidr}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
+  # 八位组必须 0-255：只限“1-3 位数字”时 `192.168.0.999`/`256.1.1.0` 会被当合法值，
+  # ip2int 算出进位的错误整数，让本该拦截的重叠静默 PASS——断网硬门禁的判据不能错
+  local _octet='(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])'
+  if [[ ! "${cidr}" =~ ^${_octet}\.${_octet}\.${_octet}\.${_octet}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
     fail sandbox_cidr "沙箱网段格式非法: ${cidr}（来源: ${src}）"
     return
   fi
@@ -445,10 +523,16 @@ check_sandbox_cidr() {
   bint="$(ip2int "${base}")"
   bmask=$(( (0xFFFFFFFF << (32 - plen)) & 0xFFFFFFFF ))
   local hosts conflicts="" seen="" n=0 p pb pp pm net
-  hosts="$(host_prefixes)"
+  # “枚举失败”≠“无冲突”：ip 不可用/受限 netns 下断网硬门禁宁可拦下不放行；且赋值
+  # 必须在 if 上下文——旧裸赋值在 pipefail 非零时把整个预检在检查中途带崩（后续检查
+  # 与汇总行全部消失）
+  if ! hosts="$(host_prefixes)"; then
+    fail sandbox_cidr "无法枚举本机 IPv4 前缀（ip -o addr/route 失败，受限 netns/权限？）——宁可拦下也不放行"
+    return
+  fi
   while read -r p; do
     if [[ -z "${p}" ]]; then continue; fi
-    pb="$(ip2int "${p%%/*}")"
+    pb="$(ip2int "${p%%/*}")" || continue   # 越界/非数字前缀跳过（防御式；内核输出理论不出现）
     pp="${p##*/}"
     if (( pp > 32 )); then continue; fi
     pm=$(( (0xFFFFFFFF << (32 - pp)) & 0xFFFFFFFF ))
@@ -470,18 +554,23 @@ check_sandbox_cidr() {
 }
 
 echo "== CDS Cube 节点 preflight（SS-10 CB-02）钉住: ${EXPECTED_VERSION} ${EXPECTED_SHA:0:12} =="
+# —— 调度：顺序与头部检查项清单 1..10 一致（旧版与注释漂移：tee 实际排第 2、
+# resources 排最后——资源检查最容易被前面的提前退出吞掉；现 resources 前置、
+# tee 在 sandbox_cidr 硬门禁前；全脚本已无裸赋值/裸探针，汇总行必达）。
 check_kvm
-check_tee_probe
 check_data_fs
 check_ebpf
 check_cubelet_bin
 check_volume_sock
 check_tls_sidecar
 check_containerd
-check_sandbox_cidr
 check_resources
+check_tee_probe
+check_sandbox_cidr
 
-echo "== 结果: ${FAILURES} 项失败 =="
+mock_note=""
+[[ -n "${MOCK_ROOT}" ]] && mock_note="（MOCK 演练模式，结果不构成节点验收）"
+echo "== 结果: ${FAILURES} 项失败${mock_note} =="
 if [[ "${FAILURES}" -gt 0 ]]; then
   exit 1
 fi

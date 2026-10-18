@@ -134,3 +134,25 @@ def test_tf_to_transformers_rebuild_migration(tmp_path, monkeypatch):
     )
     assert index_t.engine == "transformers"
     assert stats_t["embedding_model_hash"] and stats_t["embedding_model_bundle"]
+
+
+def test_tiny_real_model_empty_text_reports_the_true_dimension(tmp_path, monkeypatch):
+    """A129: the dimension probed with empty text must be the model's real
+    output dimension — an index written with a guessed dim scores nothing."""
+    from app.core.config import get_settings
+    from app.services.rag_embedding import RAGEmbedder
+
+    pytest.importorskip("torch", reason="tiny real BERT needs torch; a host without it skips (CI installs it)")
+    pytest.importorskip("transformers", reason="tiny real BERT needs transformers; a host without it skips (CI installs it)")
+    _build_tiny_bert(tmp_path / "tiny-bert")
+    monkeypatch.setattr(get_settings(), "RAG_EMBEDDING_MODEL", str(tmp_path / "tiny-bert"))
+    embedder = RAGEmbedder(backend="transformers")
+
+    hidden = embedder._load_transformers()[1].config.hidden_size
+    scored = embedder.embed(QUERY)
+    empty = embedder.embed("")
+
+    assert hidden == 32
+    assert scored.dim == hidden and len(scored.vector) == hidden
+    assert empty.dim == hidden and len(empty.vector) == hidden
+    assert embedder.engine_dimension() == hidden

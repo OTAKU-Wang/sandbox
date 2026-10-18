@@ -1,0 +1,72 @@
+
+Preview: 65 file(s) changed  |  +5448  -0
+
+Will review (51):
+  [S]  alembic/env.py                                       +85   -0   
+  [S]  alembic/versions/0000_baseline_all_tables.py         +789  -0   
+  [S]  alembic/versions/0001_p0_security_hardening.py       +60   -0   
+  [S]  alembic/versions/0002_session_usability.py           +37   -0   
+  [S]  alembic/versions/0003_idle_policy.py                 +38   -0   
+  [S]  alembic/versions/0004_session_operations.py          +38   -0   
+  [S]  alembic/versions/0005_node_operations.py             +36   -0   
+  [S]  alembic/versions/0006_task_queue.py                  +43   -0   
+  [S]  alembic/versions/0007_shared_volumes.py              +54   -0   
+  [S]  alembic/versions/0008_mpc_persistence.py             +47   -0   
+  [S]  alembic/versions/0009_trained_models.py              +60   -0   
+  [S]  alembic/versions/0010_rag_generative.py              +37   -0   
+  [S]  alembic/versions/0011_chain_anchoring_records.py     +39   -0   
+  [S]  alembic/versions/0012_user_mfa.py                    +31   -0   
+  [S]  alembic/versions/0013_volume_keys.py                 +41   -0   
+  [S]  alembic/versions/0014_cube_templates.py              +61   -0   
+  [S]  alembic/versions/0015_cube_egress_dedup.py           +37   -0   
+  [S]  alembic/versions/0016_sandbox_tee_policy.py          +37   -0   
+  [S]  alembic/versions/0017_api_keys.py                    +55   -0   
+  [S]  alembic/versions/0018_owner_fks.py                   +34   -0   
+  [S]  alembic/versions/0019_flow_orchestration.py          +282  -0   
+  [S]  alembic/versions/0020_webhook_detached_history.py    +33   -0   
+  [S]  alembic/versions/0021_delivery_bundle_ownership.py   +44   -0   
+  [S]  alembic/versions/0022_compute_run_params.py          +27   -0   
+  [S]  alembic/versions/0023_task_fields.py                 +34   -0   
+  [S]  alembic/versions/0024_bundle_review_columns.py       +25   -0   
+  [S]  alembic/versions/0025_notebook_data_resource_ids.py  +21   -0   
+  [S]  alembic/versions/0026_notebook_description.py        +20   -0   
+  [S]  cds-volume-plugin/.gitignore                         +5    -0   
+  [S]  cds-volume-plugin/Dockerfile                         +55   -0   
+  [S]  cds-volume-plugin/Makefile                           +35   -0   
+  [S]  cds-volume-plugin/cipher.go                          +166  -0   
+  [S]  cds-volume-plugin/cli.go                             +182  -0   
+  [S]  cds-volume-plugin/config.go                          +81   -0   
+  [S]  cds-volume-plugin/kms.go                             +134  -0   
+  [S]  cds-volume-plugin/layout.go                          +122  -0   
+  [S]  cds-volume-plugin/main.go                            +57   -0   
+  [S]  cds-volume-plugin/plugin.go                          +406  -0   
+  [S]  cds-volume-plugin/proto/cdsvolume/v1/cdsvolume.proto +73   -0   
+  [S]  cds-volume-plugin/rootfs.go                          +116  -0   
+  [S]  cds-volume-plugin/selftest.go                        +55   -0   
+  [S]  cds-volume-plugin/server.go                          +172  -0   
+  [S]  cds-volume-plugin/sm4gcm/Makefile                    +31   -0   
+  [S]  cds-volume-plugin/sm4gcm/sm4_gcm.c                   +180  -0   
+  [S]  cds-volume-plugin/sm4gcm/sm4_gcm.h                   +44   -0   
+  [S]  contracts/AuditRegistry.sol                          +43   -0   
+  [S]  policies/system.rego                                 +5    -0   
+  [S]  sdk/cds_sdk/__init__.py                              +22   -0   
+  [S]  sdk/cds_sdk/client.py                                +1132 -0   
+  [S]  sdk/cds_sdk/stream.py                                +168  -0   
+  [S]  sdk/pyproject.toml                                   +19   -0   
+
+Excluded from review (14):
+  [S]  alembic/AGENTS.md                                            (unsupported_ext)
+  [S]  alembic/script.py.mako                                       (unsupported_ext)
+  [S]  cds-volume-plugin/AGENTS.md                                  (unsupported_ext)
+  [S]  cds-volume-plugin/README.md                                  (unsupported_ext)
+  [S]  cds-volume-plugin/gen/cdsvolumev1/cdsvolume.pb.go            (default_path)
+  [S]  cds-volume-plugin/gen/cdsvolumev1/cdsvolume_grpc.pb.go       (default_path)
+  [S]  cds-volume-plugin/gen/volumepluginv1/volumeplugin.pb.go      (default_path)
+  [S]  cds-volume-plugin/gen/volumepluginv1/volumeplugin_grpc.pb.go (default_path)
+  [S]  cds-volume-plugin/go.mod                                     (unsupported_ext)
+  [S]  cds-volume-plugin/go.sum                                     (unsupported_ext)
+  [S]  cds-volume-plugin/plugin_test.go                             (default_path)
+  [S]  policies/README.md                                           (unsupported_ext)
+  [S]  sdk/AGENTS.md                                                (unsupported_ext)
+  [S]  sdk/README.md                                                (unsupported_ext)
+

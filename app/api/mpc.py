@@ -160,9 +160,12 @@ async def reconstruct_key(
 @router.get("/keys")
 async def list_keys(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # 密钥清单是全局托管台账：mpc_keys 没有归属列（见 app/models/mpc_key.py），
+    # 无法按属主过滤，只能按角色收口 —— 与同 router 的 split/reconstruct 同组
+    # （ADMIN/OPERATOR），不放行 data_provider/buyer/regulator。
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
-    """List all managed MPC keys."""
+    """List all managed MPC keys (ops roles only — no per-owner column exists)."""
     keys = await mpc_service.list_keys(db)
     return [
         KeyResponse(
@@ -181,9 +184,10 @@ async def list_keys(
 async def get_key(
     key_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # 与 GET /keys 同一数据（清单里的一行）：按 id 取详情不得成为清单门禁的绕路。
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
-    """Get key details (without shares)."""
+    """Get key details (without shares) — ops roles only, same as GET /keys."""
     mpc_key = await mpc_service.get_key(db, key_id)
     if not mpc_key:
         raise HTTPException(status_code=404, detail="Key not found")
@@ -201,12 +205,22 @@ async def get_key(
 async def list_shares(
     key_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # 本端点返回 share_value 明文：拿到 threshold 份即可 Lagrange 重构主密钥，
+    # 等同导出密钥本身。因此收口到本 router 最严的 ADMIN 门禁（同 rotate/destroy），
+    # 任何已认证用户都不得批量读取他方密钥的分片。
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """List shares for a key."""
+    """List shares for a key — ADMIN only (share values reconstruct the secret)."""
     shares = await mpc_service.list_shares(db, key_id)
     if not shares:
         raise HTTPException(status_code=404, detail="Key not found or no shares")
+    # 读侧留痕：本响应等于把密钥材料交付出去（跟 rotate/destroy 同一敏感级），
+    # 没有这条审计记录就无法回答“谁在什么时候取走了哪个密钥的分片”。
+    await audit_service.log(
+        db, action="mpc.key.read_shares", resource_type="mpc_key",
+        user_id=current_user.id, resource_id=key_id,
+        detail={"share_count": len(shares), "threshold": shares[0].threshold},
+    )
     return [
         ShareResponse(
             share_id=s.share_id,

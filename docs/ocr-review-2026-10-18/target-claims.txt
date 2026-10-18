@@ -1,0 +1,400 @@
+### app/services/merkle_service.py #0
+sev=critical cat=security located=true existing="    if not _sm3_fallback_allowed():\n        raise RuntimeE
+content: `_sm3_fallback_allowed()` 对任何异常都 `return True`，属于典型的 fail-open：`get_settings()` 因环境变量缺失/类型校验失败/`app.core.config` 导入异常而抛错时，会被静默判定为“允许 SHA-256 回退”，生产环境会在没有任何日志提示的情况下用 SHA-256 生成审计 Merkle 根，直接违背模块声明的 GM/T 0004 合规前提（且与 config 中其余 fallback 开关“生产启动即校验拒绝”的立场不一致）。异常被完全丢弃，运维也无从定位是配置错误。
+
+建议：读配置失败时按 fail-closed 处理（返回 False），至少记录异常并仅在 DEBUG/测试环境放行。
+suggestion: def _sm3_fallback_allowed() -> bool:
+    """Whether the SHA-256 fallback for SM3 (gmssl missing) may be used."""
+    try:
+        from app.core.config import get_settings
+        settings = get_settings()
+        if bool(getattr(settings, "SM3_FALLBACK_ALLOWED", False)) and is_production(settings):
+            # prod must not silently run SHA-256
+            return False
+        return bool(settings.SM3_FALLBACK_ALLOWED)
+    except Exception as exc:  # config unavailable -> fail closed
+        logger.error("SM3_FALLBACK_ALLOWED lookup failed (%s); denying SHA-256 fallback", exc)
+        return False
+
+### app/services/merkle_service.py #1
+sev=critical cat=security located=true existing="        left_bytes = bytes.fromhex(left)\n        right_byt
+content: `left`/`right` 在证明验证路径上来自外部提交的 `proof_path`（pipeline 注释明确 proof 会被序列化供第三方验证），这里直接 `bytes.fromhex` 存在两个问题：
+1) 非十六进制字符串（如 `"zz"`、`"0x…"`、`None`、空串）会抛出未处理的 `ValueError`/`TypeError`，若该路径暴露到 HTTP 层即为可稳定触发的 500/DoS；
+2) 未校验长度，任意长度的 hex 串都会被接受参与拼接哈希，破坏“节点必为 32 字节摘要”的树结构假设（也为长度扩展/歧义拼接留口子）。
+
+建议在进入哈希前显式校验格式与长度，并返回可预期的错误而非裸异常。
+suggestion: left_bytes = self._decode_hash(left, "left")
+        right_bytes = self._decode_hash(right, "right")
+        return _hash(b"\x01" + left_bytes + right_bytes).hex()
+
+    @staticmethod
+    def _decode_hash(value: str, label: str) -> bytes:
+        """Validate a hex-encoded digest and decode it (SM3/SHA-256 = 32 bytes)."""
+        if not isinstance(value, str) or len(value) != 64:
+            raise ValueError(f"invalid {label} node hash: expected 64 hex chars")
+        try:
+            return bytes.fromhex(value)
+        except ValueError as exc:
+            raise ValueError(f"invalid {label} node hash: not hex") from exc
+
+### app/services/merkle_service.py #2
+sev=critical cat=security located=true existing="        current = proof.leaf_hash\n\n        for step in pr
+content: 当前验证逻辑是“自证式”的：期望根值 `proof.root_hash` 与被验证对象来自同一个（可能不可信的）`MerkleProof` 对象，验证器没有任何可信根来源。攻击者只要把 `root_hash` 设成自己用任意 `leaf_hash` + 任意 `proof_path` 算出的值，本函数就返回 True，对“防篡改审计”这一用途而言验证结果毫无意义。
+
+此外还有两个结构性缺陷：
+- 未绑定叶子总数：`build_tree` 对奇数层做“复制最后一个节点”的填充，导致 root([a]) == root([a,a])、root([a,b]) == root([a,b,c,c])，树长度不在证明内即存在根值可延展性（second-preimage 风险）。
+- `else` 分支把所有非 `"right"` 的 position（拼写错误、`"LEFT"`、`None`）一律当作 left，且 `step["hash"]`/`step["position"]` 缺失时直接 `KeyError`。
+
+建议：把接口改为 `verify_proof(proof, trusted_root, leaf_count)`，与锚定到链上/已存档的可信根比较；校验 position ∈ {"left","right"}、proof_path 长度与 leaf_count 推导出的树高一致；比较时使用大小写归一后的常量时间比较。
+suggestion: current = self._decode_hash(proof.leaf_hash, "leaf")
+        # NOTE: root must come from a trusted anchor, not from the proof itself.
+        for step in proof.proof_path:
+            position = step.get("position")
+            if position not in ("left", "right"):
+                raise ValueError(f"invalid proof step position: {position!r}")
+            sibling = self._decode_hash(step["hash"], "sibling")
+            if position == "right":
+                current = bytes.fromhex(_hash(b"\x01" + current + sibling))
+            else:
+                current = bytes.fromhex(_hash(b"\x01" + sibling + current))
+        return hmac.compare_digest(
+            current.hex(), proof.root_hash.lower()
+        )
+
+### app/services/merkle_service.py #3
+sev=medium cat=bug located=true existing="        batch = self.build_batch(events)\n        return ba
+content: 空输入未被拒绝：`build_tree([])` 返回 `[[]]`，`get_root` 因此返回空串 `""`。于是 `verify_batch_root([], "")`（或调用方把缺失的 root 传成 `""`/默认值）会返回 `(True, "")`，即“一条事件都没有的批次通过了根校验”，审计核验接口不应给出这种结果。同时 `==` 对 hex 大小写敏感，链上/存储侧若存成大写十六进制会恒定判为不匹配。
+
+建议：空 `events` 直接返回 `(False, "")` 或抛参数校验错误；根值比较前做大小写归一（建议 `hmac.compare_digest`）。
+suggestion: batch = self.build_batch(events)
+        if not batch.leaves or not expected_root:
+            return False, batch.root_hash
+        return (
+            hmac.compare_digest(batch.root_hash.lower(), expected_root.lower().strip()),
+            batch.root_hash,
+        )
+
+### app/services/merkle_service.py #4
+sev=low cat=maintainability located=true existing="        tree = self.build_tree(leaves)\n        if not tree
+content: `build_tree` 永不返回假值（空 leaves 时返回 `[[]]`，否则至少两级），因此这里的 `if not tree: return None` 是不可达死代码；同理末尾 `tree[-1][0] if tree[-1] else ""` 的兜底分支在通过上方 `leaf_index` 边界检查后也不可能命中。建议删掉这些永不生效的兜底，避免误导后续维护者以为存在“空树”状态。
+suggestion: tree = self.build_tree(leaves)
+
+### app/services/dp_budget.py #0
+sev=high cat=bug located=true existing="        remaining = self._cache.get(contract_id, 0.0)\n    
+content: 并发预算扣减存在 check-then-act 竞态：`dp_budget_ledger` 是模块级单例，`consume` 先读 `_cache` 余额、判断充足、再写回余额并插入条目，整个序列没有任何锁或原子操作保护。两个并发协程（同一 contract_id，`await self._ensure_loaded` / `await db.flush()` 都会让出事件循环）可以同时读到同一个 `remaining`，双双通过 `remaining < epsilon` 检查后各自扣减，导致 DP 预算被超支（隐私预算被超发是安全缺陷，不是普通计数误差），并且后一次写回会覆盖前一次（丢失更新）。多进程部署下问题更严重，因为 `_cache` 只是进程内状态。建议：用 `asyncio.Lock`（按 contract_id 分片）保护“检查+扣减”序列，并把余额判定下沉到数据库——例如对 allocation/status 行 `SELECT ... FOR UPDATE`，或用条件化原子 UPDATE（`... WHERE remaining_epsilon >= :eps`）以受影响行数判定成功。
+suggestion: 
+
+### app/services/dp_budget.py #1
+sev=high cat=bug located=true existing="        remaining = self._cache.get(budget_id, 0.0)\n      
+content: 同样的无锁 check-then-act 竞态也存在于同步快路径：`consume_sync` 被输出检查管线（PZ-02/MR-A3）高频调用，`读余额 → 判断 → 写回` 不是原子操作。虽然纯同步函数体内不会切换协程，但该方法没有任何锁，一旦从线程池/多线程执行器（`asyncio.to_thread`、`run_in_executor`、同步 WSGI 线程）并发调用同一 `budget_id`，就会同时通过余额检查造成预算超支与丢失更新。建议与 `consume` 一起加 `threading.Lock`（或按 id 分片锁），或将扣减改为原子的比较交换。
+suggestion: 
+
+### app/services/dp_budget.py #2
+sev=high cat=bug located=true existing="        except Exception:\n            # Keep compatibility
+content: 异常被静默丢弃且返回值仍为 True，会造成缓存与持久化状态永久背离：
+1) 上面的 `self._cache[contract_id] = remaining - epsilon` 已先落内存，若外层请求事务随后回滚（`db.add(entry)` + `flush()` 并未提交），DB 里没有任何消费记录，但缓存余额已被扣且 `_loaded` 已标记，之后永远不会重新从 DB 载入（见 `_ensure_loaded`），造成预算“凭空丢失”，且只能靠重启恢复。
+2) `_sync_status` 失败可能来自权限不足、迁移缺失、约束冲突等真实故障，这里 `except Exception: pass` 全部吞掉且没有任何日志，`dp_budget_status` 快照会长期停留在过期值，而调用方仍收到 True。
+建议：把缓存扣减推迟到事务成功提交之后（如使用 `event.listens_for(session, "after_commit")` 或在调用方 commit 后再更新缓存），失败时回滚缓存值；异常至少要 `logger.warning(..., exc_info=True)`，并收窄捕获的异常类型，或在状态同步失败时返回 False（DP 场景应 fail-closed）。
+suggestion: 
+
+### app/services/dp_budget.py #3
+sev=medium cat=maintainability located=true existing="    def _is_mock_session(self, db: AsyncSession) -> bool:\n
+content: 用 `unittest.mock` 模块名前缀判定“测试环境”属于把测试旁路写进生产逻辑，风险较高：
+- 生产代码路径的行为取决于传入对象的类定义模块，任何以 mock/proxy/wrapper 包装 session 的中间件（类定义在业务模块中）不会命中该判断，而真正的 DB 故障又被下一条 `except Exception: pass` 掩盖；
+- 反之，任何类偶然定义在 `unittest.mock` 命名空间下的对象都会跳过状态同步，使 `dp_budget_status` 物化快照静默失真；
+- 该判断还让测试通过的路径与生产路径不同，等于测试没有覆盖真实的失败语义。
+建议改为显式注入（例如构造参数 `skip_persist_for_tests` 或让测试使用真实的 SQLite session / 提供 fake repository），而不是在运行时探测类型。
+suggestion: 
+
+### app/services/dp_budget.py #4
+sev=medium cat=bug located=true existing="        if contract_id in self._loaded:\n            return
+content: 缓存只进不出、永不失效：`_loaded` 一旦记录 contract_id 就永久短路，之后所有 `get_remaining` / `consume` 都直接使用 `_cache`。这带来几个真实问题：
+1) 其他进程/其他 worker 的 `allocate()` 或 `consume()`（以及外部直接改库、迁移修正）不会让本进程缓存失效，DP 余额会长期停留在旧值，可能持续错误放行（隐私预算超发）或错误拒绝；
+2) 下方“无 allocation”分支会把缓存写成 0.0 并且同样加入 `_loaded`，意味着一个尚未分配预算的 contract 在本进程内被永久判定为 0，之后即使别的进程给它分配了预算，本进程也永远返回 0，直到重启；
+3) 存在 `DPBudgetStatus` 行时直接信任 `remaining_epsilon`，不与 `total_epsilon - consumed_epsilon` 或 entries 汇总校验，快照一旦因上面的异常吞没而过期就再无纠偏机会；
+4) `_cache` / `_loaded` 是模块级无界结构，contract 数量增长后不会回收，存在内存持续增长问题。
+建议：给缓存加 TTL/版本号（例如比较 status 行的 `updated_at`），或在 `consume` 时以数据库条件化原子 UPDATE 作为唯一权威判定；至少在事务回滚、allocate 之后显式失效对应 key。
+suggestion: 
+
+### app/services/dp_budget.py #5
+sev=medium cat=bug located=true existing="        alloc = result.scalar_one_or_none()\n        if all
+content: `allocate` 是读后改/插（read-modify-write）且没有行锁或 upsert：并发对同一 `contract_id` 调用时两个事务都会 `scalar_one_or_none()` 得到 None，各自 `db.add()` 同一主键，最终在 flush/commit 时抛 `IntegrityError`（重复主键）而不是预期的 upsert 语义；并发“改 total”与另一路的 `consume` 之间也没有串行化，可能把 total 改小后仍让先前通过的消费生效。建议使用方言 upsert（PostgreSQL `insert(...).on_conflict_do_update(index_elements=[contract_id], set_=...)` / SQLite `on_conflict_do_update`）配合 `SELECT ... FOR UPDATE`，并显式处理 upsert 与已消费额的关系。
+suggestion: 
+
+### app/services/dp_budget.py #6
+sev=low cat=bug located=true existing="            await self._sync_status(\n                db,\n
+content: 这里把 `last_consumed_at` 硬编码为 `None`，而 `allocate()` 和 `get_status()` 在同样重建快照的场景都调用了 `_get_last_consumed_at(db, contract_id)`。当 `dp_budget_status` 行缺失但 `dp_budget_entries` 已有消费记录时（正是本分支的条件），重建出来的快照会把最后消费时间抹成 NULL，丢失审计相关字段，且本方法是懒加载路径，后续不会再次修正。应改为 `last_consumed_at=await self._get_last_consumed_at(db, contract_id)`。
+suggestion: 
+
+### app/services/quota_manager.py #0
+sev=critical cat=bug located=true existing="        # Second pass: increment all if all allowed\n      
+content: 文档承诺 “All must pass or none are consumed”，但实现是「先逐个检查、再逐个递增」两趟操作，无法保证原子性：
+1) 两趟之间存在 TOCTOU 窗口，并发请求可同时通过第一趟；第二趟 Lua 因 `new_value > limit` 返回 `{current, 0}` 时返回值被直接丢弃，调用方仍拿到 `allowed=True`，实际未扣减 → 超配额且账实不符。
+2) 任一 key 的 `eval` 抛异常被 `except Exception: pass` 吞掉，该配额完全未扣减，结果仍是允许，也没有任何日志。
+3) 部分 key 已 SET、部分失败时没有回滚，已扣减的配额被永久吃掉。
+4) 第一趟里某个 key 的 eval 失败会 `pass` 落到本地回退分支，此时读到的是恒为 0 的 `_local_counters`，与 Redis 真实用量混用判断，同样会误判为可放行。
+建议：把多键的检查+写入合并进一个 Lua 脚本（对所有 KEYS 先算总量，全部通过才逐一 SET，否则原样返回），并检查/传播第二次 eval 的返回值与异常。
+suggestion: 
+
+### app/services/quota_manager.py #1
+sev=high cat=security located=true existing="            try:\n                val = await self._redis.g
+content: 这里三条路径都会返回 0：Redis 抛异常、key 未设置、`set_limits` 写入的 7 天 TTL 过期。而下游全部把 0/负值当作“不限制”——Lua 的 `if limit > 0 and new_value > limit`、本地回退的 `limit <= 0 or new_value <= limit`、`check_batch` 的 `limit > 0` 判断、网关路径的 `rows_limit > 0` 判断。结果是：限额缺失、TTL 过期或 Redis 抖动 = 配额被完全绕过；显式配置 0（禁止使用）同样变成无限。建议失败时记录日志并返回保守默认限额或抛错，明确区分“未设置 / 读取失败 / 限额为 0”三种语义（例如用 None 表示未知）。另外 Redis 返回 None 时直接 return 0，没有回落到 `_local_limits`，与异常分支行为不一致。
+suggestion: 
+
+### app/services/quota_manager.py #2
+sev=high cat=security located=true existing="                pipe.incrby(rows_key, rows_increment)\n    
+content: INCRBY 先于限额判断，且超限后没有任何回滚：被拒绝的请求仍会永久累加当日计数，客户端重试越多消耗越快，攻击者可以用大量被拒请求把某 app 的当日配额刷空（拒绝服务）；同时因为 `INCRBY` 语义本身允许越过上限，瞬时并发也可能真实突破限额。另外 rows 超限时直接 `return False`，bytes 的递增/判断尚未执行，两类配额状态不一致。建议改为 Lua 原子「检查后递增」（超限则不写入，返回 `{current, 0}`），或在检测到超限时对已 INCRBY 的 key 做等量 `DECRBY` 补偿后再返回。
+suggestion: 
+
+### app/services/quota_manager.py #3
+sev=medium cat=bug located=true existing="        # First pass: check all\n        for qt, (amount, l
+content: `check_batch` 与 `check_and_increment` 不同，limit=0 时不会调用 `get_limit()` 读取 `set_limits()` 已配置的限额，而 0 在 Lua（`limit > 0`）和本地逻辑里都表示“不限制”。依赖 `set_limits` 配置限额的调用方在此处会被无条件放行。建议与 `check_and_increment` 保持一致：`if not limit: limit = await self.get_limit(session_id, qt)`。
+suggestion: 
+
+### app/services/quota_manager.py #4
+sev=medium cat=bug located=true existing="                if rows_ttl == -1:\n                    fro
+content: 两个问题：
+1) `self._gateway_key(app_id, "rows")` 在 pipeline 之后重新取当前 UTC 日期，若执行恰好跨越 UTC 午夜，TTL 会被设到“新一天”的 key 上，而真正被写入的 `rows_key` 永远没有过期时间，成为 Redis 中的永久残留 key。应直接复用上面已计算的 `rows_key`。
+2) `expire` 独立于 pipeline 发起，若 INCRBY 成功后这一步异常（下面 `except` 会整体降级到本地），key 同样永不过期。建议把 `EXPIRE` 放进同一个 pipeline（MULTI/EXEC 内与 INCRBY 原子执行），或用 Lua 在递增的同一脚本里 `SET ... EX`/`EXPIRE`。
+此外 `datetime` 的函数内重复 import（本方法与 `_gateway_key` 各一次）可提到模块顶部。
+suggestion: 
+
+### app/services/quota_manager.py #5
+sev=medium cat=bug located=true existing="redis.call('SET', KEYS[1], new_value)"
+content: 会话计数 key 只写不设置过期时间，完全依赖 `reset()` 显式删除。会话异常退出、客户端崩溃或调用方漏调 `reset()` 时，`quota:{session_id}:{quota_type}` 会永久驻留 Redis，随会话数线性膨胀。建议增加 TTL 参数并改为 `redis.call('SET', KEYS[1], new_value, 'EX', tonumber(ARGV[3]))`（或首次创建时 `EXPIRE`），与 `set_limits` 的 7 天 TTL 对齐。顺带一提：`tonumber(current)` 在 value 非数字时返回 nil，后面的加法会让脚本报错，可加一层校验。
+suggestion: 
+
+### app/services/quota_manager.py #6
+sev=medium cat=bug located=true existing="        if rows_increment > 0:\n            rows_key = self
+content: 本地回退与 Redis 路径同样存在“先扣量后判限”的不一致：返回 False 时计数已写入且永不回滚，被拒请求持续吃掉本地每日配额。同时 `_local_gateway_counters` 的 key 含日期却从不清理，长驻进程会按 天 × app_id × 维度 无限累积（内存泄漏）；多进程部署时每个进程各自计数，实际限额被放大为 N 倍，且进程重启即清零，配额形同虚设。建议超限时回滚计数，写入时清理非当日 key，或在生产环境禁用本地限额回退（改为显式报错/依赖 Redis）。
+suggestion: 
+
+### app/services/quota_manager.py #7
+sev=medium cat=bug located=true existing="        # Local fallback\n        current = self._local_cou
+content: Redis 只是单次调用抖动（`eval` 抛异常）时，这里会把扣量记录进进程内存，Redis 恢复后这部分用量彻底丢失，Redis 中的真实用量长期偏低 → 配额被超额使用；多进程部署下每个进程还各自计数。建议区分“Redis 明确不可用（构造时无 client）”与“单次调用失败”，后者应向上抛错而非静默降级，至少把降级事件计入指标/告警，避免配额静默漂移。
+suggestion: 
+
+### app/services/quota_manager.py #8
+sev=medium cat=bug located=true existing="                QuotaType.DP_EPSILON: int(float(contract_li
+content: `contract_limits` 来自外部合约配置，`float()` / `int()` 遇到非数值（空串、"10,"、None 之外的异常类型）会抛 ValueError/TypeError 并中断整个 `reset()`。此时前面已经删除了所有旧配额 key，而 `set_limits()` 尚未执行，会话会停留在“无限额”状态（结合 limit=0 即不限制的实现，等于放开全部配额）。建议逐项容错解析（失败回退默认值并 `logger.warning`），或把删除动作放到限额解析成功之后，保证 reset 的原子性。
+suggestion: 
+
+### app/services/quota_manager.py #9
+sev=medium cat=bug located=true existing="            self._local_limits[key] = int(limit)\n         
+content: Redis 写入失败时只 `logger.warning` 并继续循环，方法正常返回：调用方认为限额已生效，但后续 `check_and_increment` 在 Redis 可用路径下读到 nil → limit=0 → 不限制（与 `get_limit` 的语义缺陷叠加就是配额绕过）。同时 `_local_limits[key]` 已写入，只有本地回退路径才受限额约束，两条路径行为分叉。建议聚合失败的 quota_type 后抛出异常（或返回失败列表），由上层决定是否拒绝建立会话；并可用 pipeline 批量写入缩小部分写入窗口。
+suggestion: 
+
+### app/services/quota_manager.py #10
+sev=low cat=maintainability located=true existing="            try:\n                val = await self._redis.g
+content: `get_usage` 这里 `except Exception: pass` 把 Redis 故障完全吞掉并返回 0，既无日志，又让“Redis 不可用”在调用方看来等同于“用量为 0”。与限额判定耦合后就是配额绕过，排查时也毫无线索。建议至少 `logger.warning("get_usage from redis failed: %s", e)`，并考虑在无法确定用量时向上抛错。
+suggestion: 
+
+### app/services/quota_manager.py #11
+sev=low cat=performance located=true existing="                logger.warning(f\"Redis quota check failed,
+content: 日志使用 f-string 会在调用点立即完成格式化，日志级别被关闭时也无法惰性求值。建议改为占位符形式：`logger.warning("Redis quota check failed, falling back to local: %s", e)`（本文件其余 `logger.warning` 同样适用）。
+suggestion: 
+
+### app/services/field_mask.py #0
+sev=high cat=security located=true existing="    def _hash(self, value: str) -> str:\n        \"\"\"SM3 
+content: HASH 模式为无盐、无密钥的裸 SM3（已确认 `crypto_service.sm3_hash` 只是对入参做纯摘要，gmssl 缺失时还回退 SHA-256）。姓名、手机号、身份证号、邮箱等低熵字段可被字典/彩虹表穷举还原，且确定性摘要可被跨数据集关联（join 攻击），不满足“不可逆”声明。建议改为带密钥/盐的 keyed hash（HMAC-SM3 或 SM3(salt || value)，盐/密钥从 KMS/配置注入且可按租户轮换），并在 MaskRule 中显式暴露 salt/key 版本；同时 `value.encode()` 建议写明 `"utf-8"`，避免依赖 locale 默认编码。
+suggestion: 
+
+### app/services/field_mask.py #1
+sev=high cat=security located=true existing="        elif gen_type == \"truncate\":\n            return 
+content: GENERALIZE 全链路 fail-open：`gen_type` 为 None / 拼写错误 / 新增未支持类型时落到最后的 `return value`，`_generalize_age`、`_generalize_date_month`、`_generalize_region` 在解析失败或未命中映射时同样返回原始值。对一个脱敏服务而言，“泛化失败”必须 fail-closed，否则规则配置稍有偏差就会把完整 PII（含精确日期、精确数值）直接输出，且调用方毫无感知。建议：解析失败/类型未知时返回安全占位（如 rule.placeholder 或 `[GENERALIZED]`），或抛出显式异常；至少 `logger.warning` 记录未命中的 gen_type 与字段名，让配置错误可见。
+suggestion: 
+
+### app/services/field_mask.py #2
+sev=high cat=bug located=true existing="        bucket_size = params.get(\"bucket_size\", 100)\n   
+content: `bucket_size` 完全未校验，存在多个崩溃/错值路径：
+- `params.get("bucket_size", 0)` 或显式传入 0 → `ZeroDivisionError`；
+- 传 `None`（如 YAML 里写了 `bucket_size:`）→ `TypeError: unsupported operand type(s) for //: float and NoneType`；
+- 传字符串 `"100"`（来自配置/HTTP 参数常见形态）→ `TypeError`；
+- 传负数 → `num // -100` 得到反向区间，输出形如 `[-200, -100)` 的错误桶；
+- 传非有限浮点（`float('inf')`）→ 结果为 nan 并进入 `int()` 抛 `ValueError`。
+由于这些异常在 `mask_row` 中没有被捕获，一条脏配置就会让整个脱敏批处理中断。建议在应用规则前做显式校验：`bucket_size = params.get("bucket_size") or 100`，再 `bucket_size = float(bucket_size)` 并断言 `bucket_size > 0` 且有限，否则抛 `ValueError` 或降级为 REDACT。
+suggestion: 
+
+### app/services/field_mask.py #3
+sev=medium cat=security located=true existing="            if rule.field_name not in masked:\n            
+content: fail-open：规则声明的字段在行数据里不存在时直接 `continue`，既不报错也不记日志。若规则里的字段名拼写错误、或上游做了列重命名/别名，敏感列会被“静默地完全脱敏失败”，原始 PII 直接进入对外输出，且调用方从 `rules_applied` 看不出异常。建议至少 `logger.warning("mask rule %s: field %r not found in row", ...)`，并可考虑对未命中字段返回 `missing_fields` 供上层做严格模式校验（或直接抛配置错误）。
+suggestion: 
+
+### app/services/field_mask.py #4
+sev=medium cat=bug located=true existing="            masked[rule.field_name] = self._apply_rule(str(
+content: 无条件 `str(value)` 会把脱敏结果（含未泛化成功时的原值）强制变成字符串：
+1) 类型契约被破坏——数值/布尔/日期列脱敏后在 JSON/DB 输出里变成 `"25"`、`"True"`、`"2020-01-02 00:00:00"`（datetime 的 str 表示带分隔符，还会让下游 `_generalize_date_*` 的解析依赖不确定格式）。
+2) 破坏 HASH 的确定性：`25`(int) 与 `25.0`(float)、`Decimal("25.00")` 会散列成不同摘要，与注释声称的 “deterministic for joins” 相悖。
+3) 对 dict/list 等复杂值会被 str 成 Python repr 再哈希，结果不可预期。
+建议按原始类型分派：数值统一走规范化的十进制字符串再哈希，REDACT 分支保留原类型（直接返回 placeholder，不做 str 化），或在文档中显式声明“输出统一为字符串”。
+suggestion: 
+
+### app/services/field_mask.py #5
+sev=medium cat=bug located=true existing="        for fmt in (\"%Y-%m-%d\", \"%Y/%m/%d\", \"%Y-%m-%dT
+content: 这里的截断长度 `len(fmt.replace('%',' ').strip()) + 5` 是脆弱的经验公式：格式串里的指令（每 3 字符 `%Y`）与被解析文本长度并无对应关系，靠 “+5” 凑出来的偏移对含多字面量的格式会算错（例如 `%Y-%m-%dT%H:%M:%S` 实际应取 19 字符，这里只取 18，恰好因为 `strptime` 的 `%S` 允许 1 位数字才“碰巧”通过）。新增格式或改用 `%Y%m%d`、`%d/%m/%Y` 等就会静默解析失败并落到兜底逻辑。另外 `except IndexError` 对 `value[:n]` 加 `strptime` 这条路径不可达（切片不越界，strptime 只抛 ValueError）。建议先对值做归一化（把 `/` 替换为 `-`、截取前 10 字符）后用 `datetime.fromisoformat` 或显式的定长格式解析，只捕获 `ValueError`，并去掉魔数偏移。
+suggestion: 
+
+### app/services/field_mask.py #6
+sev=medium cat=security located=true existing="        keep = params.get(\"keep_chars\", 3)\n        if le
+content: `keep_chars` 未做类型与取值范围校验：
+- 传入负数（如 -1）时 `len(value) <= keep` 恒为假，`value[:-1]` 会返回“除最后一个字符外的完整原值”，几乎等于不脱敏，属于严重 fail-open；
+- 传入非 int（如 `"3"`、`None`）时 `len(value) <= keep` 抛 `TypeError`，中断整批脱敏。
+另外当 `len(value) <= keep` 时原样返回，短敏感值（如 3 位缩写、短邮编）会整值泄露。建议校验 `keep = int(keep)`，`keep < 0` 视为配置错误（按 0 处理或抛错），并让 keep 与保留长度做上限裁剪（如 `min(keep, len(value)//2)`）。
+suggestion: 
+
+### app/services/field_mask.py #7
+sev=medium cat=bug located=true existing="            if low <= age < high:\n                return l
+content: 边界与兜底问题：最后一档 `(60, 120, "60+")` 是半开区间，`age >= 120` 落到 `return "unknown"`，与 “60+” 的业务语义不一致（高龄/脏数据 130 会被归为 unknown，导致统计口径丢失且与 60-119 岁人群不可比）。同时负数、NaN、`inf`（`int(float(value))` 对 inf 还会抛 OverflowError，未被 `except (ValueError, TypeError)` 捕获，直接冒泡中断脱敏流程）也一律落到 unknown。建议把最后一档写成上界闭区间/开区间哨兵（如 `(60, None, "60+")` 或直接用 `age >= 60` 分支），并把 `except` 扩展为 `except (ValueError, TypeError, OverflowError)`，同时对 `age < 0` 做显式判断。
+suggestion: 
+
+### app/services/field_mask.py #8
+sev=low cat=maintainability located=true existing="import re\nimport logging\nfrom enum import Enum"
+content: 死代码：`import re` 在本文件中从未使用；`logger = logging.getLogger(__name__)` 定义后也没有任何日志调用。而恰恰是本文件多处 fail-open 分支（规则字段未命中、泛化失败）最需要日志告警。建议删除未使用的 `re`，并在下述静默跳过的分支补上 `logger.warning`。
+suggestion: 
+
+### app/services/field_mask.py #9
+sev=low cat=security located=true existing="        masked = dict(row)"
+content: 只处理顶层 key：`dict(row)` 是浅拷贝，值为 dict/list（JSON 列、数组列）时其内部字段永远不会被规则命中，等于结构性脱敏旁路；同时这些嵌套对象与调用方传入的 `row` 是同一引用，下游若就地修改 masked_row 会反向污染源数据。建议对嵌套结构做递归掩码（或支持 `user.address.city` 这类路径式字段名），并在无法掩码时对容器类型统一走 REDACT。
+suggestion: 
+
+### app/services/field_mask.py #10
+sev=low cat=maintainability located=true existing="    def _redact(self, value: str, placeholder: str = \"[RED
+content: `value` 参数声明后从未使用（死参数）；同时 `"[REDACTED]"` 默认值在 `MaskRule.placeholder` 与此处重复定义，二者一旦改动不一致会产生行为歧义。建议去掉未使用参数，或让占位符常量集中定义（模块级 `DEFAULT_PLACEHOLDER`），由 `MaskRule` 引用。
+suggestion: 
+
+### app/services/alert_engine.py #0
+sev=high cat=bug located=true existing="        self._fired_alerts.extend(new_alerts)\n        retu
+content: `evaluate()` 的文档声明返回 "newly triggered alerts (not previously fired)"，但实现只是把结果追加到 `_fired_alerts`，从未用历史告警做去重/冷却过滤。由于各规则的状态（`_rejection_events`、`_dp_budget_snapshots` 等）在评估后不会被消费或清空，只要事件仍在窗口内（或快照仍存在），周期轮询（例如每秒/每 10 秒调用一次）会在每个周期重复产生完全相同的告警，导致告警风暴与下游通知刷屏；同时 `_fired_alerts` 会成倍膨胀。建议引入去重键（如 alert_type + session_id/user_id + 窗口槽）与冷却时间，只有当同一告警在 cooldown 内未触发过才返回并记录。
+suggestion: new_alerts = [a for a in new_alerts if not self._already_fired(a)]
+        self._fired_alerts.extend(new_alerts)
+        return new_alerts
+
+### app/services/alert_engine.py #1
+sev=high cat=bug located=true existing="        now = datetime.now(timezone.utc)\n        hour = no
+content: `_check_off_hours` 用“当前评估时刻”的 `now.hour` 判定是否处于异常时段，而不是查询事件自身的 `ts.hour`。这会产生双向错误：
+1) 误报：用户在 21:00 UTC 正常发起查询，若 `evaluate()` 在 22:00 之后才被调用，5 分钟窗口内的事件仍会被判为“off-hours access”（虽然 `recent_cutoff` 限制了 5 分钟，但只要轮询节奏与阈值边界重叠仍可能跨点误判）；
+2) 漏报：用户在 02:00 异常时段发起查询，若该时刻没有恰好调用 `evaluate()`（事件已被更晚的 5 分钟窗口淘汰），该行为永远不会被告警。
+同时 message 中的时间使用 `now`，与事件实际发生时间不一致，误导调查。应以事件时间判定：`is_off_hours = ts.hour >= OFF_HOURS_START or ts.hour < OFF_HOURS_END`，并在 message 中使用 `ts`。
+suggestion: now = datetime.now(timezone.utc)
+        # 逐条事件按事件自身时间判定，而非评估时刻
+
+### app/services/alert_engine.py #2
+sev=high cat=bug located=true existing="        for session_id, (_, remaining, total, user_id) in s
+content: `record_dp_budget` 写入的时间戳被直接丢弃（`_`），`RuleConfig.window_minutes` 也完全未参与判定，且快照从不在 session 结束后淘汰。结果是：任何一个曾经预算低于阈值的 session 会永久留在 `_dp_budget_snapshots` 中，`evaluate()` 每次调用都重新为它生成 HIGH/CRITICAL 告警——即使该 session 早已结束、或预算已回升。对 CRITICAL 级告警而言这是持续噪音，会淹没真实事件。建议按 `config.window_minutes` 过滤快照时间戳，并在 session 结束/预算充足时移除对应条目。
+suggestion: for session_id, (ts, remaining, total, user_id) in self._dp_budget_snapshots.items():
+            if config.window_minutes and (now - ts) > timedelta(minutes=config.window_minutes):
+                continue
+
+### app/services/alert_engine.py #3
+sev=high cat=security located=true existing="alert_engine = AlertRuleEngine()"
+content: 模块级单例暴露的 `_rejection_events` / `_query_events` / `_dp_budget_snapshots` / `_fired_alerts` 都是无保护的可变容器，而 `record_*`（业务请求线程）、`configure` 与 `evaluate`（后台轮询线程）会并发读写。`evaluate()` 内部对 `self._configs.items()` 与 `self._dp_budget_snapshots.items()` 做迭代，期间另一线程调用 `configure()` 或 `record_dp_budget()` 新增 key，会抛出 `RuntimeError: dictionary changed size during iteration`；列表在迭代中被 `append`/`clear`（`clear_events()`）同样会产生不一致快照。此外所有请求共享同一份事件流，用户 A 的事件会影响用户 B 的评估结果。建议在引擎内加入 `threading.Lock`（`record_*`、`configure`、`evaluate` 全部持锁，迭代前先做快照拷贝），或改为按 session/worker 隔离实例。
+suggestion: 
+
+### app/services/alert_engine.py #4
+sev=medium cat=performance located=true existing="        self._rejection_events: list[tuple[datetime, str, s
+content: `_rejection_events` 与 `_query_events` 只追加，仅在手动调用 `clear_events()` 时才清理；`_fired_alerts` 同样只增不减（`get_fired_alerts()` 还会每次全量 `list(...)` 拷贝）。在常驻服务中，随着流量增长（突发查询阈值 50/5min，意味着正常场景下每 5 分钟就有数十条写入），这些列表会无限增长：`evaluate()` 每次都要线性扫描全量历史事件，CPU 随运行时间持续上升，同时造成内存泄漏式占用。建议在追加时按最大窗口裁剪（例如用 `collections.deque(maxlen=...)` 或记录后清理 `cutoff` 之前的旧事件），并为 `_fired_alerts` 设置 `maxlen`。
+suggestion: 
+
+### app/services/alert_engine.py #5
+sev=medium cat=bug located=true existing="        recent_cutoff = now - timedelta(minutes=5)"
+content: 这里硬编码 5 分钟窗口，完全忽略了 `config.window_minutes`（默认配置中该规则为 0，调用方若通过 `configure` 调整窗口也不会生效）；同时本函数从未读取 `config.threshold`，使得 `RuleConfig(enabled=True, threshold=1, ...)` 的两个可调参数都变成死配置。建议统一使用 `config.window_minutes`（并在其为 0 时明确语义，如取默认值），并用 `config.threshold` 作为“单用户 off-hours 查询次数”阈值。
+suggestion: 
+
+### app/services/alert_engine.py #6
+sev=low cat=other located=true existing="logger = logging.getLogger(__name__)"
+content: `logger` 在整个文件中从未被使用（全文件无任何日志调用），属于死代码。告警引擎在阈值命中、配置非法（如 `threshold` 为负、`window_minutes` 为 0）等场景缺少可观测性日志。建议要么移除 `logging` 导入与 `logger` 定义，要么在关键路径（告警触发、配置更新）补上日志输出。
+suggestion: 
+
+### app/services/cross_space_policy.py #0
+sev=high cat=security located=true existing="    \"read_data\": TrustLevel.VERIFIED,\n    \"write_data\"
+content: `export_result` 在默认规则 `verified-data` 中被声明为 VERIFIED 级操作，但未出现在 `OPERATION_TRUST_MAP` 中。而 `evaluate()` 里用的是 `OPERATION_TRUST_MAP.get(operation, TrustLevel.BASIC)`，未知操作一律按 BASIC 处理，因此只要有 BASIC 信任且 `allowed_operations` 含 `export_result`，就会被放行 —— 默认规则的 VERIFIED 约束被完全绕过（沙箱侧反而只取到 L2）。
+
+建议：1) 显式补齐 `export_result` 等所有规则中出现的操作；2) 把未知操作的默认值改为“拒绝/最高要求”（fail-closed），例如查不到映射时直接返回 `OPERATION_NOT_ALLOWED`，避免新增操作时静默降级为最低信任要求。
+suggestion: 
+
+### app/services/cross_space_policy.py #1
+sev=high cat=bug located=true existing="    require_dp_budget: bool = False"
+content: `min_trust_level` 与 `require_dp_budget` 这两个规则字段在整个文件中从未被读取（全局仅此一处声明）。`evaluate()` 的信任等级判定完全依赖全局 `OPERATION_TRUST_MAP`，DP 预算判定只依赖调用方是否传入 `dp_budget_remaining`。结果是：调用方不传 `dp_budget_remaining`（默认 None）时，声明了 `require_dp_budget=True` 的规则对应的预算检查会被整体跳过；规则里配置的 `min_trust_level` 也只是装饰性数据。这与模块文档“Policy rules are evaluated in order; first matching rule wins”不符，属于策略配置被绕过。建议 evaluate 先按规则匹配出目标 rule，再以该 rule 的 `min_trust_level` / `min_sandbox_level` / `require_dp_budget` 作为判定依据（`require_dp_budget` 为真但未提供预算时应直接 DENY）。
+suggestion: 
+
+### app/services/cross_space_policy.py #2
+sev=high cat=security located=true existing="        # Check trust is active\n        if trust.status !=
+content: `FederationTrust` 定义了 `expires_at: datetime | None`（见 federation_connector.py），但 `evaluate()` 只校验了 `status == ACTIVE`，从未校验信任是否已过期。联邦信任到期后若未人工把 status 改为 REVOKED（典型实现靠定时任务同步，存在延迟窗口），跨空间访问仍会被 ALLOW，属于授权有效期失效风险。建议增加过期判定：`if trust.expires_at is not None and datetime.now(timezone.utc) >= trust.expires_at: DENY`（注意使用带时区的 now，避免与 aware datetime 比较抛 TypeError），并新增对应的 PolicyReason（如 TRUST_EXPIRED）。
+suggestion: 
+
+### app/services/cross_space_policy.py #3
+sev=medium cat=bug located=true existing="        for rule in sorted(self._rules, key=lambda r: r.pri
+content: 两处问题：
+1) 优先级语义不一致：`add_rule()` 维护 `self._rules` 为 priority 升序（配合文档“first matching rule wins”应取最小 priority），而这里却按 `reverse=True` 降序取首个匹配。同一操作命中多条规则时，自定义低优先级规则会被无声忽略；且每次 `evaluate` 都重新 `sorted()`，规则列表一多即为无谓开销（可预排序或维护缓存映射）。
+2) fail-open：`min_sandbox_level` 是自由字符串，若规则写成 "l2"、"L4" 等拼写/大小写错误，`SANDBOX_LEVEL_ORDER.get(required_sandbox, 0)` 会返回 0，使沙箱检查恒真通过。建议返回前校验 `required_sandbox in SANDBOX_LEVEL_ORDER`，非法值按最高等级（fail-closed）或直接拒绝该规则加载。
+suggestion: 
+
+### app/services/cross_space_policy.py #4
+sev=medium cat=maintainability located=true existing="    def add_rule(self, rule: CrossSpacePolicyRule):\n      
+content: `cross_space_policy` 是模块级单例，`self._rules` 会被运行期动态修改：这里既没有对重复 `rule_id` 的去重/覆盖校验，也没有任何同步保护。在 Web 服务（多线程/多 worker 处理请求）场景下，`append` + `sort` 与其他线程正在遍历 `self._rules`（`_get_min_sandbox_level`）并发执行，属于未加锁的复合更新，可能读到中间状态。建议加 `threading.Lock` 保护写入，或用“整体替换新列表”的方式（`self._rules = sorted(self._rules + [rule], ...)`）保证读侧看到一致快照，并对重复 `rule_id` 做显式处理。
+suggestion: 
+
+### app/services/cross_space_policy.py #5
+sev=medium cat=bug located=true existing="        return score.level.value, score.score"
+content: 此处返回的 level 来自 `trust_evaluator.TrustLevel`（platinum/gold/silver/new），而本引擎的授权判定使用的是 `federation_connector.TrustLevel`（none/basic/verified/full）。两套词表同名但完全不可互换：调用方极易把这里的返回值直接填进 `FederationTrust.trust_level` 或与 `OPERATION_TRUST_MAP` 比较，从而得到恒定不匹配（进而落到默认的 BASIC 放行分支）。建议返回显式的映射结果（如 platinum/gold→FULL、silver→VERIFIED、new→BASIC），或在返回类型/文档中明确这是评分等级、禁止直接用于授权判定。
+suggestion: 
+
+### app/services/cross_space_policy.py #6
+sev=low cat=maintainability located=true existing="from app.services.trust_evaluator import trust_evaluator, T
+content: `EvalTrustLevel` 被导入后从未使用（本文件判定逻辑用的是 federation 的 `TrustLevel`，二者同名易混淆，起别名反而掩盖了冲突）。同时 `logger` 定义后全文未使用，`PolicyAction.LOG_AND_ALLOW` 也没有任何代码路径会返回它，属于死代码；若确实需要审计日志，应在 DENY/ALLOW 分支中实际记录。建议删除未用导入与未用枚举成员，或补上日志调用。
+suggestion: 
+
+### app/services/cross_space_policy.py #7
+sev=low cat=bug located=true existing="        if trust.status != FederationStatus.ACTIVE:\n      
+content: `FederationStatus` 有 PENDING / SUSPENDED / REVOKED 三种非激活状态，这里统一上报为 `TRUST_SUSPENDED`，日志文案也会变成 “Trust is pending”。在安全审计场景中把“已吊销/未生效”误记为“已暂停”会误导排障与合规追溯。建议按实际状态映射 reason（或新增 `TRUST_NOT_ACTIVE`），消息中同时保留 trust_id 便于定位。
+suggestion: 
+
+### app/services/cross_space_policy.py #8
+sev=low cat=performance located=true existing="        trust_order = {TrustLevel.NONE: 0, TrustLevel.BASIC
+content: `trust_order` 这个等级映射表在每次 `evaluate()` 调用时都重新构造，而 `evaluate` 是跨空间请求鉴权的热路径（每个代理请求都会调）。建议提升为模块级常量（与 `SANDBOX_LEVEL_ORDER` 并列），或直接给 `TrustLevel` 定义 `order` 属性 / 用 `Enum` 的 `auto()` 值做比较，避免重复分配。
+suggestion: 
+
+### app/services/contract_fulfillment.py #0
+sev=high cat=bug located=true existing="        provisioned = []\n        errors = []\n\n        fo
+content: 履约流程缺少幂等与并发保护：这里只校验了 `contract.status == ACTIVE`，随后无条件为每个 product 创建 SandboxSession + 容器 + KMS 会话密钥。若 `fulfill_contract` 被重复调用（API 重试、状态机重复触发、消息重投）或被两个 worker 并发调用（读取合同时无 `with_for_update()`，状态检查与写入之间存在 check-then-act 窗口），同一 (contract_id, product_id) 会开通多个会话，遗留额外的容器与已分发密钥（密钥只能靠生命周期扫描回收）。建议：(1) 对合同行加 `select(...).with_for_update()`；(2) 先按 `contract_id == str(contract.id)` + `data_product_id` + 非终止状态查重，已存在则复用/跳过；(3) 最好补一个 (contract_id, data_product_id) 部分唯一索引兜底。另外部分失败时返回 `partial` 但合同仍为 ACTIVE，没有任何补偿/重试入口，建议一并记录待重试项。
+suggestion: 
+
+### app/services/contract_fulfillment.py #1
+sev=high cat=bug located=true existing="        # Generate session key\n        key_result = kms_se
+content: 外部副作用的异常清理不完整：容器已经开通后，`generate_session_key` 是同步 KMS 调用，可能抛异常（KMS 不可用、密钥配额）；此时容器已在运行、DB 里 session 仍是 `provisioning`，但异常直接冒泡到 `fulfill_contract` 被吞掉，既不销毁容器也不把 session 置为 FAILED，形成孤儿容器 + 悬挂会话（同样问题存在于下方 `attestation_from_provision`、`export_wrapped`、`export_sm2_ciphertext` 抛异常的情况——那时密钥已分发但 KeyMetadata 未落盘，重启后无法回收）。当前只对 `distribute_key` 返回假值这一条路径做了清理。建议把“生成密钥 → 分发 → 导出 → 落 KeyMetadata”整段包在 try/except 中，在 except 内统一执行 terminate + destroy_key + 置 FAILED + flush 后再 raise（用 `raise ... from e` 保留原因），并可把销毁逻辑抽成复用的私有 helper。
+suggestion: 
+
+### app/services/contract_fulfillment.py #2
+sev=high cat=security located=true existing="        if contract.allowed_sandbox_modes:\n            if 
+content: 权限判定存在子串匹配风险：`allowed_sandbox_modes` 是 JSON 列（`Mapped[list | None]`），本文件对它没有任何写入前的归一化，一旦某处写入的是逗号分隔字符串（如 `"query,train"`），`session.sandbox_mode not in contract.allowed_sandbox_modes` 就退化为字符串子串匹配——`"train" in "query,train"` 为真，甚至 `"uery,tra"` 也会通过，从而放行未授权的 sandbox mode；同理元素含空格（`["query", " train"]`）会误拒。应显式归一化为集合后再做精确成员判断，并对非 list/str 的意外类型直接拒绝。同时此处 `session.sandbox_mode` 是开通时写入的默认值，建议一并校验它是否在合同允许范围内。
+suggestion: 
+
+### app/services/contract_fulfillment.py #3
+sev=medium cat=performance located=true existing="        runtime = await get_sandbox_manager()\n        prov
+content: 在 `async def` 中直接调用同步阻塞的外部操作：`runtime.provision(...)`（拉起容器/沙箱，秒级）以及下面的 `kms_service.generate_session_key/distribute_key/export_wrapped/export_sm2_ciphertext`（含 SM2 加解密）都是同步函数（未 await 且直接 `.get()`/判假值）。`session_lifecycle.py` 对同一批 API 明确用 `await asyncio.to_thread(runtime.terminate, ...)`、`await asyncio.to_thread(kms_service.destroy_key, ...)` 包装，可证其为阻塞调用。在事件循环里同步执行会阻塞整个 worker，多产品循环时更会线性放大延迟。建议统一改为 `await asyncio.to_thread(...)`。
+suggestion: 
+
+### app/services/contract_fulfillment.py #4
+sev=medium cat=bug located=true existing="        allowed_levels = (contract.allowed_sandbox_levels o
+content: `allowed_levels[0].strip() if allowed_levels else "L3"` 中的 `else` 分支是死代码：`str.split(",")` 永不返回空列表（`"".split(",")` → `[""]`），该条件恒为真。更实质的问题是：直接取列表首元素既没有校验其是否为合法 `SandboxLevel`（例如配置写成 "l3 " 之外的 "L4"、空串、大小写不符的 "l2c"/"K8S"），也没有做“取合同允许集合中最严格等级”的策略，非法值会一路传到 `validate_resource_limits` 与 `runtime.provision`，可能在开通阶段才失败。建议显式过滤空白项并用 `SandboxLevel` 枚举校验，非法即抛 `ValueError`。
+suggestion: 
+
+### app/services/contract_fulfillment.py #5
+sev=medium cat=bug located=true existing="            timeout_seconds=contract.max_duration_hours * 3
+content: `contract.max_duration_hours` 在模型中是 `mapped_column(Integer, default=24)`，只有 Python 端默认值而 `nullable=False` 未声明，因此历史行/非 ORM 写入的行可能为 NULL，此时 `None * 3600` 抛 `TypeError`，导致该产品的整个开通流程失败并只留下 `errors` 条目。此外 0 或负值会创建出立即过期（timeout_seconds<=0）的会话。建议显式取默认并做区间校验，例如 `hours = contract.max_duration_hours or 24; if hours <= 0: raise ValueError(...)`。
+suggestion: 
+
+### app/services/contract_fulfillment.py #6
+sev=medium cat=bug located=true existing="        terminated = 0\n        for session in sessions:\n 
+content: 批量终止缺少逐会话错误隔离：`terminate_session` 并非只返回 bool，它内部可能抛异常——`SessionStatus(session.status)` 遇到未知状态值会 `ValueError`，`kms_service.destroy_key`（session_lifecycle.py:108）与 KeyMetadata 查询都没有 try/except 包裹。当前循环没有逐条捕获，任一会话清理失败都会中断整批：其余会话的容器/密钥/配额继续占用，且后面的 `db.flush()` 与 `contract.terminate_sessions` 审计日志也一并丢失，违背本函数 “Gap A1 释放全部资源” 的契约。建议每个会话单独 try/except，记录失败数并继续，返回值中区分成功/失败数（或至少审计 detail 里带上 failures）。
+suggestion: 
+
+### app/services/contract_fulfillment.py #7
+sev=low cat=maintainability located=true existing="from datetime import datetime, timedelta, timezone"
+content: 死代码：`datetime, timedelta, timezone` 在本文件中从未使用；同样 `sqlalchemy.func`（`from sqlalchemy import select, func`）和 `sandbox_session` 导入的 `SandboxLevel` 也未被引用。请清理无用导入，避免误导后续维护者以为文件内有时间/过期相关逻辑。
+suggestion: 
+
+### app/services/contract_fulfillment.py #8
+sev=low cat=performance located=true existing="                logger.error(f\"Failed to provision session
+content: 日志使用急切格式化的 f-string：即使 ERROR 级别被关闭也会先做字符串拼接，削弱 logging 的惰性格式化。建议改为占位符形式：`logger.error("Failed to provision session for product %s: %s", product_id, e)`（异常上下文可用 `exc_info=True`）。
+suggestion: 

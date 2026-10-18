@@ -1,0 +1,30 @@
+.......................................F                                 [100%]
+================================== FAILURES ===================================
+____________ test_prod_compose_has_no_unresolved_env_placeholders _____________
+
+    def test_prod_compose_has_no_unresolved_env_placeholders():
+        """Every ${VAR} in prod compose must be resolvable or fail-closed on use.
+    
+        We cannot resolve the secrets at test time (they live in .env), so instead
+        we pin that the required placeholders are declared in .env.example ¡ª an
+        operator diffing .env against .env.example would catch a missing secret.
+        """
+        env_example = _read(".env.example")
+        placeholders = set()
+        text = _read("docker-compose.prod.yml")
+        for line in text.splitlines():
+            for tok in line.split():
+                if tok.startswith("${") and tok.endswith("}") or "${" in tok and "}" in tok:
+                    name = tok.split("${")[1].split("}")[0].split(":")[0]
+                    if name:
+                        placeholders.add(name)
+        missing = [p for p in sorted(placeholders) if p not in env_example]
+>       assert not missing, f"prod compose placeholders not documented in .env.example: {missing}"
+E       AssertionError: prod compose placeholders not documented in .env.example: ['VAR']
+E       assert not ['VAR']
+
+tests\test_deploy_manifests.py:111: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_deploy_manifests.py::test_prod_compose_has_no_unresolved_env_placeholders
+1 failed, 39 passed in 10.21s
+PARENT_F5E_RC=1

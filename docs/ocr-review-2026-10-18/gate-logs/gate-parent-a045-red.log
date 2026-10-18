@@ -1,0 +1,73 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+______________ test_a045_forged_jwt_still_consumes_the_ip_bucket ______________
+
+rate_app = <fastapi.applications.FastAPI object at 0x000001FBE3E5CE00>
+
+    def test_a045_forged_jwt_still_consumes_the_ip_bucket(rate_app):
+        """伪造 `sub` 只能让它多一个自己的桶，不能把 IP 桶整条绕开。"""
+        client = TestClient(rate_app)
+        codes = [client.get("/api/v1/ping", headers={"Authorization": f"Bearer {_jwt('attacker-%d' % i)}"}).status_code
+                 for i in range(6)]
+>       assert 429 in codes, codes
+E       AssertionError: [200, 200, 200, 200, 200, 200]
+E       assert 429 in [200, 200, 200, 200, 200, 200]
+
+tests\test_ocr_a045_a046_a047.py:64: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.core.security:security.py:113 [RATE-LIMIT] Redis unavailable, failing open to in-process window (redis down). Rate limiting is per-replica until Redis recovers.
+__________________ test_a046_local_fallback_bounds_key_space __________________
+
+rate_app = <fastapi.applications.FastAPI object at 0x000001FBE3FDF560>
+
+    def test_a046_local_fallback_bounds_key_space(rate_app):
+        """Redis 回退路径的进程内桶必须有键数上限。"""
+        mw = RateLimitMiddleware(rate_app)
+        for i in range(5000):
+            mw._local_hit("ip", f"10.0.0.{i}", 100)
+>       assert len(mw._local) <= RateLimitMiddleware._MAX_LOCAL_BUCKETS
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: type object 'RateLimitMiddleware' has no attribute '_MAX_LOCAL_BUCKETS'
+
+tests\test_ocr_a045_a046_a047.py:75: AttributeError
+__________ test_a047_chunked_body_over_limit_is_not_delivered_intact __________
+
+    def test_a047_chunked_body_over_limit_is_not_delivered_intact():
+        """没有 content-length 的 chunked 请求也必须受 max_size_bytes 约束。"""
+        app = FastAPI()
+        app.add_middleware(RequestSizeLimitMiddleware, max_size_bytes=1024)
+    
+        @app.post("/ingest")
+        async def ingest(request: Request):
+            body = await request.body()
+            return {"received": len(body)}
+    
+        client = TestClient(app)
+        small = client.post("/ingest", content=b"x" * 200)
+        assert small.status_code == 200
+        assert small.json()["received"] == 200
+    
+        def oversized():
+            for _ in range(40):
+                yield b"y" * 100
+    
+        try:
+            resp = client.post("/ingest", content=oversized())
+        except Exception:
+            return
+>       assert resp.status_code in (400, 413) or resp.json().get("received", 0) <= 1024, resp.text[:200]
+E       AssertionError: {"received":4000}
+E       assert (200 in (400, 413) or 4000 <= 1024)
+E        +  where 200 = <Response [200 OK]>.status_code
+E        +  and   4000 = <built-in method get of dict object at 0x000001FBE54E2780>('received', 0)
+E        +    where <built-in method get of dict object at 0x000001FBE54E2780> = {'received': 4000}.get
+E        +      where {'received': 4000} = json()
+E        +        where json = <Response [200 OK]>.json
+
+tests\test_ocr_a045_a046_a047.py:101: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a045_a046_a047.py::test_a045_forged_jwt_still_consumes_the_ip_bucket
+FAILED tests/test_ocr_a045_a046_a047.py::test_a046_local_fallback_bounds_key_space
+FAILED tests/test_ocr_a045_a046_a047.py::test_a047_chunked_body_over_limit_is_not_delivered_intact
+3 failed in 1.54s
+A045_RED_RC=1

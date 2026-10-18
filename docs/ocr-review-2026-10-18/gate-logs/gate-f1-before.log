@@ -1,0 +1,201 @@
+(node:15692) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:428) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:484) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:484) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:29712) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27980) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:8112) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Feedback/__tests__/SimulationBadge.test.tsx (4 tests | 1 failed) 12ms
+     × 否定族优先：not_simulated → unsupported（曾误报 simulated） 9ms
+ ❯ src/components/Layout/__tests__/DataplaneBanner.test.tsx (3 tests | 2 failed) 2042ms
+     × 控制面档（dataplane.enabled=false）：横幅渲染，描述含 note 与 reason 1025ms
+     × 探针失败：不叠横幅，但恰好一次 console.warn（与“数据面健康”不得无痕同渲染） 1010ms
+stderr | src/components/Feedback/__tests__/QueryFeedback.test.tsx > CenteredLoading > 渲染转圈 + tip 文案（tip 文本自己渲染，不依赖 antd 的 tip prop）
+Warning: [antd: Spin] `tip` only work in nest or fullscreen pattern.
+
+stderr | src/components/Feedback/__tests__/QueryFeedback.test.tsx > CenteredLoading > 缺省 tip 为 加载中
+Warning: [antd: Spin] `tip` only work in nest or fullscreen pattern.
+
+ ❯ src/components/Feedback/__tests__/QueryFeedback.test.tsx (2 tests | 2 failed) 166ms
+     × 渲染转圈 + tip 文案（tip 文本自己渲染，不依赖 antd 的 tip prop） 151ms
+     × 缺省 tip 为 加载中 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Feedback/__tests__/QueryFeedback.test.tsx > CenteredLoading > 渲染转圈 + tip 文案（tip 文本自己渲染，不依赖 antd 的 tip prop）
+TestingLibraryElementError: Unable to find an element with the text: 加载能力矩阵. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33maria-busy[39m=[32m"true"[39m
+      [33maria-live[39m=[32m"polite"[39m
+      [33mclass[39m=[32m"ant-spin ant-spin-lg ant-spin-spinning ant-spin-show-text css-dev-only-do-not-override-mncuj7"[39m
+      [33mstyle[39m=[32m"display: block; margin: 100px auto;"[39m
+    [36m>[39m
+      [36m<span[39m
+        [33mclass[39m=[32m"ant-spin-dot-holder"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-spin-dot ant-spin-dot-spin"[39m
+        [36m>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+        [36m</span>[39m
+      [36m</span>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Feedback/__tests__/QueryFeedback.test.tsx:11:19
+      9|     const { container } = render(<CenteredLoading tip="加载能力矩阵" />);
+     10|     expect(container.querySelector('.ant-spin-spinning')).not.toBeNull…
+     11|     expect(screen.getByText('加载能力矩阵')).toBeInTheDocument();
+       |                   ^
+     12|   });
+     13|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/components/Feedback/__tests__/QueryFeedback.test.tsx > CenteredLoading > 缺省 tip 为 加载中
+TestingLibraryElementError: Unable to find an element with the text: 加载中. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33maria-busy[39m=[32m"true"[39m
+      [33maria-live[39m=[32m"polite"[39m
+      [33mclass[39m=[32m"ant-spin ant-spin-lg ant-spin-spinning ant-spin-show-text css-dev-only-do-not-override-mncuj7"[39m
+      [33mstyle[39m=[32m"display: block; margin: 100px auto;"[39m
+    [36m>[39m
+      [36m<span[39m
+        [33mclass[39m=[32m"ant-spin-dot-holder"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-spin-dot ant-spin-dot-spin"[39m
+        [36m>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+          [36m<i[39m
+            [33mclass[39m=[32m"ant-spin-dot-item"[39m
+          [36m/>[39m
+        [36m</span>[39m
+      [36m</span>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Feedback/__tests__/QueryFeedback.test.tsx:16:19
+     14|   it('缺省 tip 为 加载中', () => {
+     15|     render(<CenteredLoading />);
+     16|     expect(screen.getByText('加载中')).toBeInTheDocument();
+       |                   ^
+     17|   });
+     18| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/components/Feedback/__tests__/SimulationBadge.test.tsx > simulationStateForValue 披露口径 > 否定族优先：not_simulated → unsupported（曾误报 simulated）
+AssertionError: expected 'simulated' to be 'unsupported' // Object.is equality
+
+Expected: "unsupported"
+Received: "simulated"
+
+ ❯ src/components/Feedback/__tests__/SimulationBadge.test.tsx:8:54
+      6| describe('simulationStateForValue 披露口径', () => {
+      7|   it('否定族优先：not_simulated → unsupported（曾误报 simulated）', () => {
+      8|     expect(simulationStateForValue('not_simulated')).toBe('unsupported…
+       |                                                      ^
+      9|   });
+     10|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/components/Layout/__tests__/DataplaneBanner.test.tsx > DataplaneBanner SS-13 交付档横幅 > 控制面档（dataplane.enabled=false）：横幅渲染，描述含 note 与 reason
+TestingLibraryElementError: Unable to find an element by: [data-testid="dataplane-banner"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Layout/__tests__/DataplaneBanner.test.tsx:63:33
+     61|     getMatrix.mockResolvedValue(disabledMatrix);
+     62|     render(<DataplaneBanner />);
+     63|     const banner = await screen.findByTestId('dataplane-banner');
+       |                                 ^
+     64|     expect(banner).toBeInTheDocument();
+     65|     expect(banner.textContent).toContain('未启用 MicroVM 数据面');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/components/Layout/__tests__/DataplaneBanner.test.tsx > DataplaneBanner SS-13 交付档横幅 > 探针失败：不叠横幅，但恰好一次 console.warn（与“数据面健康”不得无痕同渲染）
+AssertionError: expected "warn" to be called 1 times, but got 0 times
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Layout/__tests__/DataplaneBanner.test.tsx:82:38
+     80|     getMatrix.mockRejectedValue({ code: 'UNAUTHORIZED', message: 'toke…
+     81|     render(<DataplaneBanner />);
+     82|     await waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+       |                                      ^
+     83|     expect(screen.queryByTestId('dataplane-banner')).toBeNull();
+     84|   });
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 4 passed (9)
+   Start at  21:37:59
+   Duration  15.63s (transform 214ms, setup 1.04s, import 30.59s, tests 2.22s, environment 8.04s)
+

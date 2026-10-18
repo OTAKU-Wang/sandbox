@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Alert,
   Card,
   Table,
   Tag,
@@ -22,7 +23,7 @@ import {
   HeartOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { connectorApi } from '../../services/connectorApi';
 import type { Connector, HeartbeatResponse } from '../../services/connectorApi';
 import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
@@ -66,11 +67,27 @@ export default function Connectors() {
   const [newApiKey, setNewApiKey] = useState<string>('');
   const [form] = Form.useForm();
 
-  // Fetch connectors
-  const { data: connectors, isLoading, isError, error, refetch } = useQuery({
+  // Fetch connectors（A313：keyset 游标可达 —— 后端每页只给 100 条，续拉游标在 X-Next-Cursor 头里，
+  // 服务层已把它并进结果；这里用 useInfiniteQuery 逐页拉，第 101 条起要能真的被看到）
+  const {
+    data: connectorPages,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['connectors'],
-    queryFn: () => connectorApi.listConnectors(),
+    queryFn: ({ pageParam }) => connectorApi.listConnectors(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
+  const connectors = connectorPages ? connectorPages.pages.flatMap((page) => page.items) : undefined;
+  const lastPage = connectorPages?.pages[connectorPages.pages.length - 1];
+  // 后端声明了「还有更多」而游标没透传过来（代理剥头）：无法续拉，只能显式披露截断。
+  const cursorLost = Boolean(lastPage && lastPage.possiblyTruncated && !hasNextPage);
 
   // Register connector mutation
   const registerMutation = useMutation({
@@ -280,6 +297,27 @@ export default function Connectors() {
           loading={isLoading}
           pagination={false}
         />
+        {hasNextPage && (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Button
+              data-testid="connectors-load-more"
+              onClick={() => { void fetchNextPage(); }}
+              loading={isFetchingNextPage}
+            >
+              已加载 {connectors?.length ?? 0} 条，还有更多 —— 加载下一页
+            </Button>
+          </div>
+        )}
+        {cursorLost && (
+          <div data-testid="connectors-truncated-warning">
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="后端声明连接器列表尚未取完，但续拉游标（X-Next-Cursor 响应头）没有透传到浏览器，当前列表可能不完整。"
+            />
+          </div>
+        )}
       </Card>
 
       {/* Register Connector Modal */}
@@ -373,9 +411,8 @@ export default function Connectors() {
             <Descriptions.Item label="最后在线">
               {heartbeatData.last_seen ? new Date(heartbeatData.last_seen).toLocaleString() : '无记录'}
             </Descriptions.Item>
-            <Descriptions.Item label="延迟">
-              {heartbeatData.latency_ms} ms
-            </Descriptions.Item>
+            {/* A318：后端 heartbeat 的 latency_ms 恒为 0（connectors.py get_connector_heartbeat_status
+                写死），不是实测延迟 —— 按禁伪造铁律不再把常量当测量值展示 */}
           </Descriptions>
         )}
       </Modal>

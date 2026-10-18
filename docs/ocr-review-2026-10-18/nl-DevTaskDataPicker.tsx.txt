@@ -1,0 +1,316 @@
+     1	// 图 2-2「关联数据」卡：双页签 + 右侧「已选择数据」面板。
+     2	//
+     3	// 勾选结果不是装饰：它进 POST /notebooks 的 data_resource_ids，服务端按子集注入并在
+     4	// 票据审计里记 subset/excluded。因此这里只允许勾选**所选合约已授权**的数据产品——
+     5	// 越权项在客户端就置灰并说明原因，而不是让用户提交后再吃一个 422。
+     6	import { keepPreviousData, useQuery } from '@tanstack/react-query';
+     7	import { Alert, Button, Empty, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
+     8	import type { TablePaginationConfig } from 'antd';
+     9	import { useMemo, useState } from 'react';
+    10	import type { CSSProperties } from 'react';
+    11	import { Link } from 'react-router-dom';
+    12	import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+    13	import { dataProductApi } from '../../services/dataProductApi';
+    14	import type { DataProduct } from '../../types/models';
+    15	import { CONTRACT_DATA_RESOLVE_LIMIT, buildContractDataSummary } from './contractDataModel';
+    16	import type { ContractOption } from './useContractOptions';
+    17	
+    18	const { Text } = Typography;
+    19	
+    20	/** 后端没下发该列时的占位口径（图 2-2 的「组织名称」列 5 行本身就是 `-`）。 */
+    21	export const DATA_PICKER_UNKNOWN = '未记录';
+    22	
+    23	/** 取数口径披露：图 2-2 画在筛选带下方一行灰字，这里收进「查询」按钮的 Tooltip（与 2-1 同口径）。 */
+    24	export const DATA_PICKER_SCOPE_HINT = '只有所选合约已授权的数据产品可勾选；未授权项与未关联数据资源的产品置灰。';
+    25	
+    26	/** 分页默认档：原型 2-2 分页带写 `10条/页`，与 2-1 的默认档同。 */
+    27	export const PICKER_PAGE_SIZE = 10;
+    28	
+    29	/** 双页签（图 2-2 y1067–1100）。默认停在「我购买的数据产品」：只有它可直接勾选，
+    30	 *  落到「本节点」会让首屏除已授权项外全部置灰（原型把第二项画成选中态，属未拍板的 P-5）。 */
+    31	const PICKER_SCOPES = [
+    32	  { key: 'purchased', label: '我购买的数据产品' },
+    33	  { key: 'node', label: '本节点登记的数据产品' },
+    34	] as const;
+    35	
+    36	type PickerScope = (typeof PICKER_SCOPES)[number]['key'];
+    37	
+    38	/** 药签按图 2-2 y1067..1097 实采：选中=实心 #1b6ff2 白字，未选=白底 #f1f2f4 描边灰字。
+    39	 *  首页/详情的浅底药签是另一种形态，这里不拄——图上的选中态是实心块。 */
+    40	const PICKER_TAB_BLUE = '#1b6ff2';
+    41	const pickerTabStyle = (active: boolean): CSSProperties => ({
+    42	  lineHeight: '26px',
+    43	  borderRadius: 6,
+    44	  border: `1px solid ${active ? PICKER_TAB_BLUE : '#f1f2f4'}`,
+    45	  background: active ? PICKER_TAB_BLUE : '#fff',
+    46	  color: active ? '#fff' : '#4e5969',
+    47	});
+    48	
+    49	export interface DevTaskDataPickerProps {
+    50	  contract: ContractOption | null;
+    51	  /** null = 未限定（注入合约授权的全部供数）；数组 = 已选数据资源 id（[] = 明确不注入）。 */
+    52	  value: string[] | null;
+    53	  onChange: (next: string[] | null) => void;
+    54	}
+    55	
+    56	interface PickerRow {
+    57	  key: string;
+    58	  product: DataProduct | null;
+    59	  resource_id: string | null;
+    60	  authorized: boolean;
+    61	  blocked_reason: string | null;
+    62	}
+    63	
+    64	function toRow(product: DataProduct | null, id: string, authorized: boolean): PickerRow {
+    65	  const resource = product?.resource_id ?? null;
+    66	  return {
+    67	    key: resource ?? `product:${id}`,
+    68	    product,
+    69	    resource_id: resource,
+    70	    authorized,
+    71	    blocked_reason: !authorized
+    72	      ? '未纳入所选合约的授权范围，勾选会被服务端拒绝'
+    73	      : product === null
+    74	        ? '当前账号取不回这份产品，无法确认其数据资源'
+    75	        : resource === null
+    76	          ? '该产品未关联数据资源，沙箱内无可注入文件'
+    77	          : null,
+    78	  };
+    79	}
+    80	
+    81	export default function DevTaskDataPicker({ contract, value, onChange }: DevTaskDataPickerProps) {
+    82	  const [keyword, setKeyword] = useState('');
+    83	  const [applied, setApplied] = useState('');
+    84	  const [scope, setScope] = useState<PickerScope>('purchased');
+    85	  const [nodePage, setNodePage] = useState(1);
+    86	  const [pageSize, setPageSize] = useState(PICKER_PAGE_SIZE);
+    87	  const productIds = useMemo(() => contract?.product_ids ?? [], [contract]);
+    88	  const authorizedIds = useMemo(() => new Set(productIds), [productIds]);
+    89	
+    90	  const purchased = useQuery({
+    91	    queryKey: ['dev-task-purchased-products', productIds],
+    92	    enabled: productIds.length > 0,
+    93	    queryFn: async () => {
+    94	      const head = productIds.slice(0, CONTRACT_DATA_RESOLVE_LIMIT);
+    95	      const settled = await Promise.allSettled(head.map((id) => dataProductApi.get(id)));
+    96	      return buildContractDataSummary(productIds, settled);
+    97	    },
+    98	  });
+    99	
+   100	  // 服务端分页：页码/页长进 queryKey，换页就是重新取那一页（不是把第 1 页切一刀）。
+   101	  // 取下一跳时留住上一页，否则分页器会瞬间掉回 total=0、「前往 X 页」与页码整条闪空。
+   102	  const nodeProducts = useQuery({
+   103	    queryKey: ['dev-task-node-products', applied, nodePage, pageSize],
+   104	    queryFn: () => dataProductApi.list({ q: applied || undefined, page: nodePage, page_size: pageSize }),
+   105	    placeholderData: keepPreviousData,
+   106	  });
+   107	
+   108	  const applyQuery = () => {
+   109	    setApplied(keyword.trim());
+   110	    setNodePage(1);
+   111	  };
+   112	  const resetQuery = () => {
+   113	    setKeyword('');
+   114	    setApplied('');
+   115	    setNodePage(1);
+   116	  };
+   117	
+   118	  if (!contract) {
+   119	    return <Alert type="info" showIcon message="选择关联合约后，这里列出可勾选的授权数据产品" />;
+   120	  }
+   121	  if (contract.product_ids === null) {
+   122	    return <Alert type="warning" showIcon message={`合约 ${contract.contract_no} 未下发授权数据清单，不替它编一个数字出来`} />;
+   123	  }
+   124	
+   125	  const purchasedRows = (purchased.data?.items ?? [])
+   126	    .map((item) => toRow(item.product, item.id, true))
+   127	    .filter((row) => !applied || (row.product?.name ?? row.key).includes(applied));
+   128	
+   129	  const nodeRows = (nodeProducts.data?.items ?? []).map((product) => toRow(product, product.id, authorizedIds.has(product.id)));
+   130	
+   131	  const selected = value ?? [];
+   132	  const selectedNames = new Map<string, string>();
+   133	  for (const row of [...purchasedRows, ...nodeRows]) {
+   134	    if (row.resource_id) selectedNames.set(row.resource_id, row.product?.name ?? row.resource_id);
+   135	  }
+   136	
+   137	  const columns = [
+   138	    {
+   139	      title: '数据产品名称',
+   140	      dataIndex: 'name',
+   141	      render: (_: unknown, row: PickerRow) =>
+   142	        row.product === null
+   143	          ? <Text type="secondary">取不回（id {row.key.replace('product:', '').slice(0, 8)}）</Text>
+   144	          : <Link to={`/data-products/${row.product.id}`}>{row.product.name}</Link>,
+   145	    },
+   146	    { title: '产品简介', dataIndex: 'desc', render: (_: unknown, row: PickerRow) => row.product?.description || DATA_PICKER_UNKNOWN },
+   147	    { title: '产品类型', dataIndex: 'type', render: (_: unknown, row: PickerRow) => row.product?.product_type || DATA_PICKER_UNKNOWN },
+   148	    { title: '交付方式', dataIndex: 'delivery', render: () => (contract.delivery_methods?.length ? contract.delivery_methods.join('、') : DATA_PICKER_UNKNOWN) },
+   149	    { title: '交付的使用场景', dataIndex: 'purpose', render: () => contract.purpose || DATA_PICKER_UNKNOWN },
+   150	    { title: '组织名称', dataIndex: 'org', render: () => DATA_PICKER_UNKNOWN },
+   151	    {
+   152	      title: '操作',
+   153	      dataIndex: 'op',
+   154	      render: (_: unknown, row: PickerRow) =>
+   155	        row.product === null
+   156	          ? DATA_PICKER_UNKNOWN
+   157	          : <Link to={`/data-products/${row.product.id}`}>详情</Link>,
+   158	    },
+   159	  ];
+   160	
+   161	  // 分页带（图 2-2 y1399–1430）：`共 N 条｜10条/页｜< 1 >｜前往 X 页`，样式用已收口的 .cds-task-pager。
+   162	  const pagerBase: TablePaginationConfig = {
+   163	    size: 'small',
+   164	    className: 'cds-task-pager',
+   165	    pageSize,
+   166	    showSizeChanger: true,
+   167	    showQuickJumper: true,
+   168	    hideOnSinglePage: false,
+   169	  };
+   170	
+   171	  // 「我购买的数据产品」是按 id 逐项取回的（上限 CONTRACT_DATA_RESOLVE_LIMIT），后端根本不给总数：
+   172	  // 分页条就只说「本页已载入 N 条」，拿 N 冒充「共 N 条」等于自称全量（取不回/无权/超限另有上方 Alert 点名）。
+   173	  const purchasedPagination: TablePaginationConfig = {
+   174	    ...pagerBase,
+   175	    total: purchasedRows.length,
+   176	    showTotal: () => `本页已载入 ${purchasedRows.length} 条`,
+   177	    onChange: (_page, size) => setPageSize(size),
+   178	  };
+   179	
+   180	  // 「本节点登记的数据产品」走服务端分页：后端 total 必须交给分页器。以前不传，antd 退回
+   181	  // dataSource.length，节点产品超过单页条数时屏上写「共 20 条」且只剩一页 —— 把「本页已载入」
+   182	  // 伪装成全量。现在总页数、「共 N 条」都按后端总数算，并同时写明本页只载入 N 条。
+   183	  const nodeTotal = nodeProducts.data?.total ?? null;
+   184	  const nodePagination: TablePaginationConfig = {
+   185	    ...pagerBase,
+   186	    current: nodePage,
+   187	    total: nodeTotal ?? nodeRows.length,
+   188	    showTotal: () =>
+   189	      nodeTotal === null
+   190	        ? `本页已载入 ${nodeRows.length} 条`
+   191	        : `后端共 ${nodeTotal} 条，本页载入 ${nodeRows.length} 条`,
+   192	    onChange: (page, size) => {
+   193	      setPageSize(size);
+   194	      setNodePage(page);
+   195	    },
+   196	  };
+   197	
+   198	  const renderTable = (
+   199	    rows: PickerRow[],
+   200	    pending: boolean,
+   201	    emptyText: string,
+   202	    pagination: TablePaginationConfig,
+   203	  ) => (
+   204	    <Table<PickerRow>
+   205	      size="small"
+   206	      rowKey="key"
+   207	      loading={pending}
+   208	      dataSource={rows}
+   209	      columns={columns}
+   210	      pagination={pagination}
+   211	      locale={{ emptyText: pending ? ' ' : emptyText }}
+   212	      rowSelection={{
+   213	        selectedRowKeys: selected,
+   214	        preserveSelectedRowKeys: true,
+   215	        onChange: (keys) => onChange(keys.map(String)),
+   216	        getCheckboxProps: (row) => ({
+   217	          disabled: row.blocked_reason !== null || row.resource_id === null,
+   218	          name: row.product?.name ?? row.key,
+   219	        }),
+   220	        renderCell: (_checked, row, _index, origin) =>
+   221	          row.blocked_reason ? <Tooltip title={row.blocked_reason}>{origin}</Tooltip> : origin,
+   222	      }}
+   223	    />
+   224	  );
+   225	
+   226	  return (
+   227	    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+   228	      <div style={{ flex: 1, minWidth: 0 }}>
+   229	        <Space style={{ display: 'flex', marginBottom: 12 }} wrap>
+   230	          <Text>数据产品名称</Text>
+   231	          <Input
+   232	            allowClear
+   233	            placeholder="请输入数据产品名称"
+   234	            value={keyword}
+   235	            style={{ width: 200 }}
+   236	            onChange={(e) => setKeyword(e.target.value)}
+   237	            onPressEnter={applyQuery}
+   238	          />
+   239	          {/*
+   240	           * 按钮顺序照图：重置在前、查询在后（图 2-2 筛选行 1:1 直读）。两颗都是白底描边：
+   241	           * 重置灰边灰字，查询蓝边蓝字（ghost）——与 2-1 页头的蓝实心查询不同屏不同口径，
+   242	           * 2-2 1:1 裁读确认（旧记录「蓝实心」是缩放视图误读，已更正）；取数口径收进 Tooltip。
+   243	           */}
+   244	          <Button onClick={resetQuery}>重置</Button>
+   245	          <Tooltip title={DATA_PICKER_SCOPE_HINT}>
+   246	            <Button type="primary" ghost onClick={applyQuery}>查询</Button>
+   247	          </Tooltip>
+   248	        </Space>
+   249	        {value === null && (
+   250	          <Alert
+   251	            type="info"
+   252	            showIcon
+   253	            style={{ marginBottom: 12 }}
+   254	            message={`未勾选时默认注入合约授权的全部 ${contract.product_ids.length} 项数据；勾选后只注入所选，未选中的不进气`}
+   255	          />
+   256	        )}
+   257	        {purchased.data && purchased.data.omitted + purchased.data.invisible > 0 && (
+   258	          <Alert
+   259	            type="warning"
+   260	            showIcon
+   261	            style={{ marginBottom: 12 }}
+   262	            message={`授权 ${purchased.data.granted} 项中：取回 ${purchased.data.resolved} 项，无权查看 ${purchased.data.invisible} 项，超出 ${CONTRACT_DATA_RESOLVE_LIMIT} 项上限未取回 ${purchased.data.omitted} 项`}
+   263	          />
+   264	        )}
+   265	        <Space size={8} wrap style={{ display: 'flex', marginBottom: 12 }}>
+   266	          {PICKER_SCOPES.map((tab) => (
+   267	            <button
+   268	              key={tab.key}
+   269	              type="button"
+   270	              style={pickerTabStyle(scope === tab.key)}
+   271	              data-testid={`task-tab-${tab.key}`}
+   272	              aria-pressed={scope === tab.key}
+   273	              onClick={() => setScope(tab.key)}
+   274	            >
+   275	              {tab.label}
+   276	            </button>
+   277	          ))}
+   278	        </Space>
+   279	        {scope === 'purchased' ? (
+   280	          productIds.length === 0
+   281	            ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该合约未绑定数据产品：任务在沙箱内没有可读的授权数据" />
+   282	            : purchased.isError
+   283	              ? <Alert type="error" showIcon message={`授权数据取不回：${getErrorMessage(purchased.error)}`} />
+   284	              : renderTable(purchasedRows, purchased.isPending, '没有已购买的数据产品', purchasedPagination)
+   285	        ) : (
+   286	          nodeProducts.isError
+   287	            ? <Alert type="error" showIcon message={`节点产品列表取不回：${getErrorMessage(nodeProducts.error)}`} />
+   288	            : renderTable(nodeRows, nodeProducts.isFetching, '本节点没有登记的数据产品', nodePagination)
+   289	        )}
+   290	      </div>
+   291	      <div className="cds-picker-side">
+   292	        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+   293	          <Text strong>{`已选择数据（${selected.length}个）`}</Text>
+   294	          <Button type="link" size="small" disabled={selected.length === 0} onClick={() => onChange([])}>清空</Button>
+   295	        </Space>
+   296	        {value === null ? (
+   297	          <Text type="secondary">未做选择：按合约授权全量注入</Text>
+   298	        ) : selected.length === 0 ? (
+   299	          <Text type="secondary">已清空：本任务不注入任何供数，沙箱 input/ 将为空</Text>
+   300	        ) : (
+   301	          <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0 }}>
+   302	            {selected.map((resourceId) => (
+   303	              <li key={resourceId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 0' }}>
+   304	                <Text ellipsis style={{ maxWidth: 170 }}>{selectedNames.get(resourceId) ?? resourceId}</Text>
+   305	                <Space size={4}>
+   306	                  <Tag bordered={false} style={{ marginInlineEnd: 0 }}>{resourceId.slice(0, 8)}</Tag>
+   307	                  <Button type="link" size="small" onClick={() => onChange(selected.filter((id) => id !== resourceId))}>移除</Button>
+   308	                </Space>
+   309	              </li>
+   310	            ))}
+   311	          </ul>
+   312	        )}
+   313	      </div>
+   314	    </div>
+   315	  );
+   316	}

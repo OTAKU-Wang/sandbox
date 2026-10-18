@@ -1,0 +1,81 @@
+(node:10464) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:4712) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:22824) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:22824) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:24536) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 语料规模自证：解析到的路由条目与表条目都打出来
+[routeCrumb] App.tsx 路由条目 47 条: ["/login","/register","/*","","data-products","data-resources","data-products/create","data-products/:id","contracts","contracts/create","contracts/:id","sandbox-sessions","sandbox-sessions/:id","dev-sandbox","notebooks","workloads","compute","deliveries","deliveries/dataset","deliveries/push","home","flow/tasks","flow/tasks/new","flow/tasks/:taskId","flow/guide","flow/quota","audit","output-control","catalog","monitoring","federation","training","connectors","identity/keys","certificates","ops/deployments","ops/network-policies","ops/pvcs","ops/logs","capability-matrix","data-pipeline","compliance-disclosure","mpc","system-status","users","api-keys","*"]
+[routeCrumb] ROUTE_CRUMBS 前缀 41 条: /flow/tasks/new /flow/tasks/ /flow/tasks /notebooks /deliveries/dataset /deliveries/push /deliveries /home /data-products/create /data-products /data-resources /contracts/create /contracts /workloads /compute /sandbox-sessions /dev-sandbox /output-control /audit /catalog /monitoring /identity/keys /certificates /connectors /federation /training /flow/guide /flow/quota /ops/deployments /ops/network-policies /ops/pvcs /ops/logs /capability-matrix /data-pipeline /compliance-disclosure /mpc /system-status /users /api-keys /login /register
+[routeCrumb] 参与差分的页面路径 45 条:
+/login
+/register
+/
+/data-products
+/data-resources
+/data-products/create
+/data-products/6f1c2c0a-0000-4111-8111-000000000001
+/contracts
+/contracts/create
+/contracts/6f1c2c0a-0000-4111-8111-000000000001
+/sandbox-sessions
+/sandbox-sessions/6f1c2c0a-0000-4111-8111-000000000001
+/dev-sandbox
+/notebooks
+/workloads
+/compute
+/deliveries
+/deliveries/dataset
+/deliveries/push
+/home
+/flow/tasks
+/flow/tasks/new
+/flow/tasks/6f1c2c0a-0000-4111-8111-000000000001
+/flow/guide
+/flow/quota
+/audit
+/output-control
+/catalog
+/monitoring
+/federation
+/training
+/connectors
+/identity/keys
+/certificates
+/ops/deployments
+/ops/network-policies
+/ops/pvcs
+/ops/logs
+/capability-matrix
+/data-pipeline
+/compliance-disclosure
+/mpc
+/system-status
+/users
+/api-keys
+
+stdout | src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > App.tsx 每条路由都命中表条目：没有一条落「运营概览」兜底
+[routeCrumb] 未命中/冒充运营概览: []
+
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 语料规模自证：解析到的路由条目与表条目都打出来 4ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > App.tsx 每条路由都命中表条目：没有一条落「运营概览」兜底 1ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 表里没有空前缀、也没有 / 这种吞全站的前缀；一律带前置斜杠 0ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 每条表条目都可达：不被排在更前面的前缀吞掉（find + 顺序命中的顺序契约） 0ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 命中不到时诚实报「未知页面」，不再冒充运营概览/仪表盘 1ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 前缀按段边界命中：/data-products 不能把 /data-products-archive 也算进来 0ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 带参段与更深段排在父前缀之前（/flow/tasks/new 不被 /flow/tasks 吞） 0ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 补上的映射逐字（段名取左栏菜单文案，不新造词） 0ms
+ ✓ src/components/Layout/__tests__/routeCrumb.test.ts > routeCrumb 表 ↔ App.tsx 路由表差分 > 登录/注册在 MainLayout 之外：style=none、无段（不画面包屑带） 0ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  21:57:15
+   Duration  2.16s (transform 60ms, setup 197ms, import 47ms, tests 9ms, environment 1.62s)
+

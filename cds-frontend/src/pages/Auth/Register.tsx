@@ -4,6 +4,7 @@ import { UserOutlined, LockOutlined, MailOutlined, BankOutlined, SafetyCertifica
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { authApi } from '../../services/authApi';
+import { describeAuthError } from './loginError';
 
 const { Title, Text } = Typography;
 
@@ -19,12 +20,9 @@ export default function Register() {
       login(resp.user, resp.access_token, resp.refresh_token);
       message.success('注册成功');
       navigate('/');
-    } catch (err: any) {
-      const detail = err?.detail;
-      const msg = Array.isArray(detail)
-        ? detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join('; ')
-        : detail || '注册失败';
-      message.error(msg);
+    } catch (err) {
+      // 只取 W2 信封的 code + message（与登录页同一映射），不把 detail 或整个错误对象吐给未认证访客。
+      message.error(describeAuthError(err, '注册失败'));
     } finally {
       setLoading(false);
     }
@@ -67,7 +65,7 @@ export default function Register() {
             <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email', message: '请输入有效邮箱' }]}>
               <Input prefix={<MailOutlined />} placeholder="邮箱地址" />
             </Form.Item>
-            <Form.Item name="password" label="密码" rules={[{ required: true, min: 8, message: '密码至少8位' }]}>
+            <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }, { min: 8, message: '密码至少8位' }]}>
               <Input.Password prefix={<LockOutlined />} placeholder="密码" />
             </Form.Item>
             {/* PZ-10：角色不再自助选择（后端只收省略/admin，选数商或买方必 422）——

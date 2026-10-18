@@ -1,0 +1,97 @@
+FFFFFFFFFFFFF.FFFFFFFF.                                                  [100%]
+================================== FAILURES ===================================
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:143: AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+E   assert 401 == 400
+     +  where 401 = <Response [401 Unauthorized]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:164: assert 401 == 400
+E   AssertionError: {"session_id":"1277d9f0-1740-4578-88e4-48d162062681","table_name":"people","row_count":2,"column_count":2}
+    assert 200 == 400
+     +  where 200 = <Response [200 OK]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:183: AssertionError: {"session_id":"1277d9f0-1740-4578-88e4-48d162062681","table_name":"people","row_count":2,"column_count":2}
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:216: AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:232: AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:246: AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+E   ValueError: badly formed hexadecimal UUID string
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\uuid.py:178: ValueError: badly formed hexadecimal UUID string
+E   ValueError: badly formed hexadecimal UUID string
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\uuid.py:178: ValueError: badly formed hexadecimal UUID string
+E   assert 'create_task' not in '"""Sandbox ...nt,\n    }\n'
+      
+      'create_task' is contained here:
+             loop.create_task(_attach_policy(session_id, engine))
+      ?           +++++++++++
+                except RuntimeError:
+                    pass
+                _engines[session_id] = engine...
+      
+      ...Full output truncated (358 lines hidden), use '-vv' to show
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:284: assert 'create_task' not in '"""Sandbox ...nt,\n    }\n'
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:294: AttributeError: 'SecureDuckDBEngine' object has no attribute 'policy_state'
+E   AssertionError: secure_duckdb must export POLICY_UNSET
+    assert False
+     +  where False = hasattr(duckdb_module, 'POLICY_UNSET')
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:320: AssertionError: secure_duckdb must export POLICY_UNSET
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'mark_policy_not_required'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:330: AttributeError: 'SecureDuckDBEngine' object has no attribute 'mark_policy_not_required'
+E   AssertionError: {"session_id":"a50-json-35f9edb9","table_name":"stolen","row_count":1,"column_count":1}
+    assert 200 == 403
+     +  where 200 = <Response [200 OK]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:367: AssertionError: {"session_id":"a50-json-35f9edb9","table_name":"stolen","row_count":1,"column_count":1}
+E   AssertionError: {"code":"HTTP_400","message":"Invalid Input Error: File 'C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_parquet_outside_im0\\victim.parquet' too small to be a Parquet file\n\nLINE 1: CREATE TABLE stolen AS SELECT * FROM read_parquet(?)\n                                             ^","request_id":"b40d8852e0404c81","detail":"Invalid Input Error: File 'C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_parquet_outside_im0\\victim.parquet' too small to be a Parquet file\n\nLINE 1: CREATE TABLE stolen AS SELECT * FROM read_parquet(?)\n                                             ^"}
+    assert 400 == 403
+     +  where 400 = <Response [400 Bad Request]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:413: AssertionError: {"code":"HTTP_400","message":"Invalid Input Error: File 'C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_parquet_outside_im0\\victim.parquet' too small to be a Parquet file\n\nLINE 1: CREATE TABLE stolen AS SELECT * FROM read_parquet(?)\n                                             ^","request_id":"b40d8852e0404c81","detail":"Invalid Input Error: File 'C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_parquet_outside_im0\\victim.parquet' too small to be a Parquet file\n\nLINE 1: CREATE TABLE stolen AS SELECT * FROM read_parquet(?)\n                                             ^"}
+E   AssertionError: {"code":"HTTP_400","message":"IO Error: No files found that match the pattern \"C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_glob_pattern_is_re0\\imports\\*.parquet\"\n\nLINE 1: CREATE TABLE enum AS SELECT * FROM read_parquet(?)\n                                           ^","request_id":"7865036ee7754527","detail":"IO Error: No files found that match the pattern \"C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_glob_pattern_is_re0\\imports\\*.parquet\"\n\nLINE 1: CREATE TABLE enum AS SELECT * FROM read_parquet(?)\n                                           ^"}
+    assert 400 == 403
+     +  where 400 = <Response [400 Bad Request]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:431: AssertionError: {"code":"HTTP_400","message":"IO Error: No files found that match the pattern \"C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_glob_pattern_is_re0\\imports\\*.parquet\"\n\nLINE 1: CREATE TABLE enum AS SELECT * FROM read_parquet(?)\n                                           ^","request_id":"7865036ee7754527","detail":"IO Error: No files found that match the pattern \"C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-43\\test_import_glob_pattern_is_re0\\imports\\*.parquet\"\n\nLINE 1: CREATE TABLE enum AS SELECT * FROM read_parquet(?)\n                                           ^"}
+E   AssertionError: {"session_id":"a50-link-447067e0","table_name":"stolen","row_count":1,"column_count":1}
+    assert 200 == 403
+     +  where 200 = <Response [200 OK]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:454: AssertionError: {"session_id":"a50-link-447067e0","table_name":"stolen","row_count":1,"column_count":1}
+E   AttributeError: 'SecureDuckDBEngine' object has no attribute 'max_import_bytes'
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:461: AttributeError: 'SecureDuckDBEngine' object has no attribute 'max_import_bytes'
+E   AssertionError: {"session_id":"a51-420f152d","encryption_configs":{"secret":{"dek_hex":"3ca2d840ab1586a63c5c057d751eff9c","encrypted_columns":{"id_no":"sm4-gcm"},"key_id":"sandbox-default"}}}
+    assert 200 == 403
+     +  where 200 = <Response [200 OK]>.status_code
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.column_encryption:column_encryption.py:364 CDS_COLUMN_ENCRYPTION_KEY not set — column encryption uses the built-in development default DEK (non-production only)
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:496: AssertionError: {"session_id":"a51-420f152d","encryption_configs":{"secret":{"dek_hex":"3ca2d840ab1586a63c5c057d751eff9c","encrypted_columns":{"id_no":"sm4-gcm"},"key_id":"sandbox-default"}}}
+E   AssertionError: []
+    assert []
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:521: AssertionError: []
+E   AssertionError: assert 'a56-stale-853fb46c' not in {'1277d9f0-1740-4578-88e4-48d162062681': <app.services.secure_duckdb.SecureDuckDBEngine object at 0x0000027D2DF1BB00>,...5b621a-1b12-4739-8732-9baedfe88aaf': <app.services.secure_duckdb.SecureDuckDBEngine object at 0x0000027D4BA16F90>, ...}
+     +  where {'1277d9f0-1740-4578-88e4-48d162062681': <app.services.secure_duckdb.SecureDuckDBEngine object at 0x0000027D2DF1BB00>,...5b621a-1b12-4739-8732-9baedfe88aaf': <app.services.secure_duckdb.SecureDuckDBEngine object at 0x0000027D4BA16F90>, ...} = sandbox_db._engines
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:539: AssertionError: assert 'a56-stale-853fb46c' not in {'1277d9f0-1740-4578-88e4-48d162062681': <app.services.secure_duckdb.SecureDuckDBEngine object at 0x0000027D2DF1BB00>,...5b621a-1b12-4739-8732-9baedfe88aaf': <app.services.secure_duckdb.SecureDuckDBEngine object at 0x0000027D4BA16F90>, ...}
+E   assert 200 == 404
+     +  where 200 = <Response [200 OK]>.status_code
+D:\workspace\sandbox\tests\test_sandbox_db_policy_gate.py:551: assert 200 == 404
+=========================== short test summary info ===========================
+FAILED tests/test_sandbox_db_policy_gate.py::test_contract_policy_is_attached_before_first_query
+FAILED tests/test_sandbox_db_policy_gate.py::test_contract_policy_denial_refuses_query
+FAILED tests/test_sandbox_db_policy_gate.py::test_missing_contract_refuses_execution_and_leaves_warning_and_audit
+FAILED tests/test_sandbox_db_policy_gate.py::test_inactive_contract_policy_refuses_query
+FAILED tests/test_sandbox_db_policy_gate.py::test_session_without_contract_is_not_policy_gated
+FAILED tests/test_sandbox_db_policy_gate.py::test_adhoc_session_id_outside_db_is_allowed
+FAILED tests/test_sandbox_db_policy_gate.py::test_default_session_ids_are_full_uuids
+FAILED tests/test_sandbox_db_policy_gate.py::test_default_session_id_path_still_executes
+FAILED tests/test_sandbox_db_policy_gate.py::test_no_fire_and_forget_policy_attach
+FAILED tests/test_sandbox_db_policy_gate.py::test_engine_refuses_sql_when_policy_required_but_missing
+FAILED tests/test_sandbox_db_policy_gate.py::test_policy_state_vocabulary_is_public
+FAILED tests/test_sandbox_db_policy_gate.py::test_policy_state_never_downgrades
+FAILED tests/test_sandbox_db_policy_gate.py::test_import_json_outside_import_root_is_refused
+FAILED tests/test_sandbox_db_policy_gate.py::test_import_parquet_outside_import_root_is_refused
+FAILED tests/test_sandbox_db_policy_gate.py::test_import_glob_pattern_is_refused
+FAILED tests/test_sandbox_db_policy_gate.py::test_symlink_escape_is_refused
+FAILED tests/test_sandbox_db_policy_gate.py::test_json_import_size_cap - Attr...
+FAILED tests/test_sandbox_db_policy_gate.py::test_encryption_config_dek_requires_privileged_role
+FAILED tests/test_sandbox_db_policy_gate.py::test_encryption_config_for_operator_is_audited
+FAILED tests/test_sandbox_db_policy_gate.py::test_ttl_sweep_runs_on_non_query_endpoints
+FAILED tests/test_sandbox_db_policy_gate.py::test_no_parallel_registry_survives_engine_ttl
+21 failed, 2 passed in 10.41s
+RC=1

@@ -40,6 +40,15 @@ class KMSService:
         self._wrapped_keys: dict[str, bytes] = {}  # wrapped DEK blobs
         self._sm2_encrypted_keys: dict[str, bytes] = {}  # SM2-encrypted DEK blobs
         self._cert_public_keys: dict[str, str] = {}  # key_id → SM2 public key used
+        # OCR-A161: the three dicts above are process memory. A DEK only outlives a
+        # restart if its caller persisted the wrapped blob — the one place boot
+        # recovery reads is KeyMetadata.wrapped_payload (kms_recovery).
+        # Whoever writes that row calls mark_persisted(); every other DEK is
+        # memory-only and is reported by unpersisted_key_ids() instead of silently
+        # dooming the ciphertext that references its key_id.
+        self._persisted_key_ids: set[str] = set()
+        self._durability_warned = False
+        self._unrecoverable_imports = 0
         self._kek_ready = False
 
     def _ensure_kek(self):
@@ -97,6 +106,21 @@ class KMSService:
             logger.info(f"[KMS] Generated DEK {key_id} with SM2 encryption")
         else:
             logger.info(f"[KMS] Generated and wrapped DEK {key_id}")
+
+        # OCR-A161: a DEK minted here is memory-only until somebody persists its
+        # wrapped blob. Callers that write ciphertext keyed by this key_id must put
+        # export_wrapped() into KeyMetadata.wrapped_payload in the same transaction —
+        # otherwise one api restart makes that data permanently undecryptable and
+        # nobody notices until a download raises. Say it at mint time, once.
+        if not self._durability_warned:
+            self._durability_warned = True
+            logger.warning(
+                f"[KMS] DEK {key_id} lives only in process memory: callers that persist "
+                f"ciphertext under this key_id must write export_wrapped() into "
+                f"KeyMetadata.wrapped_payload in the same transaction and call "
+                f"mark_persisted(), or a restart makes that data permanently "
+                f"undecryptable (OCR-A161)"
+            )
 
         return result
 
@@ -346,6 +370,7 @@ class KMSService:
             found = True
         if key_id in self._cert_public_keys:
             del self._cert_public_keys[key_id]
+        self._persisted_key_ids.discard(key_id)
         if found:
             logger.info(f"[KMS] Destroyed key {key_id}")
         return found
@@ -367,15 +392,64 @@ class KMSService:
     def import_wrapped(self, key_id: str, wrapped: bytes, sm2_ciphertext: bytes | None = None) -> bool:
         """Restore a persisted wrapped key blob into the in-memory store (gap B3).
 
-        Returns True when the blob was imported.
+        The blob is accepted only if the current KEK can actually unwrap it. With the
+        software HSM the KEK is process-local, so a row written by an earlier process
+        can be present in the DB and still be permanently undecryptable; loading it
+        and logging "Imported … from persistence" reports a recovery that did not
+        happen (OCR-A139 — the compensation path of OCR-A161). Reject it and count it
+        instead, so the operator sees an unrecoverable total rather than an INFO line
+        that lies.
+
+        Returns True when the blob was imported (i.e. this KEK can unwrap it).
         """
         if not key_id or not wrapped:
+            return False
+        if self.unwrap_wrapped(bytes(wrapped)) is None:
+            self._unrecoverable_imports += 1
+            logger.warning(
+                f"[KMS] REJECTED wrapped key {key_id}: the current KEK cannot unwrap it "
+                f"(unrecoverable={self._unrecoverable_imports}) — ciphertext persisted under "
+                f"this key_id is permanently undecryptable; cross-restart recovery needs a "
+                f"real Vault/HSM KEK (P-GAP-004)"
+            )
             return False
         self._wrapped_keys[key_id] = bytes(wrapped)
         if sm2_ciphertext:
             self._sm2_encrypted_keys[key_id] = bytes(sm2_ciphertext)
+        self.mark_persisted(key_id)
         logger.info(f"[KMS] Imported wrapped key {key_id} from persistence")
         return True
+
+    # ─── 持久化状态（OCR-A161）──────────────────────────────────────────────
+
+    def mark_persisted(self, key_id: str) -> None:
+        """Record that this key's wrapped blob exists outside this process.
+
+        Call it in the same transaction that writes
+        ``KeyMetadata.wrapped_payload`` — that is the column
+        ``kms_recovery.restore_wrapped_keys`` reads at boot.
+        """
+        if key_id:
+            self._persisted_key_ids.add(key_id)
+
+    def is_persisted(self, key_id: str) -> bool:
+        """True when the wrapped blob survives this process (already persisted)."""
+        return key_id in self._persisted_key_ids
+
+    def unpersisted_key_ids(self) -> list[str]:
+        """Memory-only DEK keys — ciphertext under them dies with the process.
+
+        Session keys are excluded on purpose: they are crypto-erased when the
+        session terminates and are never meant to outlive it.
+        """
+        return [
+            key_id for key_id in self._wrapped_keys
+            if key_id.startswith("dek-") and key_id not in self._persisted_key_ids
+        ]
+
+    def unrecoverable_import_count(self) -> int:
+        """Blobs rejected at load time because this KEK cannot unwrap them (OCR-A139)."""
+        return self._unrecoverable_imports
 
     async def cleanup_expired_distributions(self, db) -> int:
         """Revoke expired key distributions (TTL enforcement).

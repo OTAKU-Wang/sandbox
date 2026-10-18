@@ -14,6 +14,12 @@ leaves the process boundary — critical findings kill the process, emit a
 ``blocked`` frame and close the connection (fail-closed); other findings are
 redacted line-by-line. Raw exit codes travel alone — the ``exit`` frame
 never carries output.
+
+Mounts: each ``start`` frame resolves the session's shared-volume binds on a
+dedicated short transaction (the connect-time session is already closed once
+the stream loop runs). A resolution failure emits an ``error`` frame
+(``RUNTIME_UNAVAILABLE``) and refuses the command — a session that declared
+mounts is never executed without them (honest degradation, never silent).
 """
 import asyncio
 import hashlib
@@ -87,12 +93,14 @@ async def _consume_ticket(ticket: str) -> dict | None:
     try:
         redis = await get_redis()
         key = f"cds:ws-ticket:{jti}"
-        consumed = await redis.get(key)
+        # A25: GETDEL 单命令原子化。旧写法是 get 后 delete 两条命令，窗口内
+        # 两个并发连接可双双通过 ⇒ single-use 语义可被竞态绕过（需已泄露
+        # 票据 + 30s TTL 内毫秒级并发，影响面窄但语义是真的）。
+        consumed = await redis.getdel(key)
         if consumed is None:
             return None
-        await redis.delete(key)
     except Exception as e:
-        logger.warning("[WS] Ticket burn failed (Redis unavailable): %s", e)
+        logger.warning("[WS] Ticket burn failed (Redis unavailable or too old): %s", e)
         return None
     return payload
 
@@ -241,6 +249,7 @@ async def _stream_loop(ws: WebSocket, session, user_id: str) -> None:
 
             from app.api.sandbox_db import get_encryption_config_for_session
             from app.api.sandbox_sessions import _session_template_env
+            from app.services import shared_volumes
             from app.services.sandbox_manager import get_sandbox_manager as _get_runtime
 
             enc_config = get_encryption_config_for_session(str(session.id))
@@ -254,6 +263,31 @@ async def _stream_loop(ws: WebSocket, session, user_id: str) -> None:
             env_vars.update(_session_template_env(session))
             runtime = await _get_runtime()
             sandbox_mode = getattr(session, "sandbox_mode", None) or "structured_query"
+
+            # A24 (2026-10-18): 共享卷必须在流式通道里真解析一次。
+            # 旧写法把 `resolve_binds(db, …)` 写在 _run 里，但 `_stream_loop` 的
+            # 参数表里没有 `db`，模块也没有全局 `db`（真正的 db 只在 `exec_stream`
+            # 的 `async with async_session() as db` 里，且在 `_stream_loop` 之前就
+            # 已关闭）⇒ `db` 走 GLOBAL 查找必招 NameError，而紧随其后的
+            # `except Exception: binds = []` 无日志吐掉：非流式 exec 会正常挂共享卷，
+            # 走 WS 则永远不挂。现在自己开一条短事务（不能复用已关闭的请求
+            # session，也不能占住连接整个流），并且解析失败就显式拒绝：
+            # 带着 binds=[] 跑一个声明了挂载的会话 = 把降级藏起来（铁律禁止）。
+            try:
+                async with async_session() as vol_db:
+                    binds = await shared_volumes.resolve_binds(vol_db, session.id)
+            except Exception as e:
+                logger.warning(
+                    "[WS] Shared-volume resolution failed for session %s — refusing to "
+                    "exec without its declared mounts: %s", session.id, e,
+                )
+                await ws.send_json({
+                    "type": "error",
+                    "code": "RUNTIME_UNAVAILABLE",
+                    "message": "shared volume resolution failed — command not executed",
+                })
+                continue
+
             started = datetime.now(timezone.utc)
 
             async def _on_line(stream_name: str, line: str) -> None:
@@ -267,12 +301,6 @@ async def _stream_loop(ws: WebSocket, session, user_id: str) -> None:
                 await ws.send_json({"type": stream_name, "data": reviewed})
 
             async def _run() -> dict:
-                from app.services import shared_volumes
-
-                try:
-                    binds = await shared_volumes.resolve_binds(db, session.id)
-                except Exception:
-                    binds = []
                 return await runtime.execute_streaming(
                     session.container_id, command, "bash",
                     env_vars=env_vars, timeout=timeout,

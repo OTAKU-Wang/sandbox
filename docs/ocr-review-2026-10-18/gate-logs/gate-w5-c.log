@@ -1,0 +1,65 @@
+.F.....F.....                                                            [100%]
+================================== FAILURES ===================================
+_______________________ test_preflight_full_pass_matrix _______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-120/test_preflight_full_pass_matri0')
+
+    @needs_bash
+    def test_preflight_full_pass_matrix(tmp_path: Path) -> None:
+        """全好 fixture：除 volume_sock（Windows 造不出 AF_UNIX socket 文件，-S 必假）
+        外 9 项全 PASS，且汇总行存在、失败数为 1。"""
+        root = make_mock(tmp_path / "mock")
+        acc = TcpAccepter()
+        try:
+            r = run_bash([PREFLIGHT], env=base_env(root, CDS_CUBE_TLS_PROXY_PORT=acc.port),
+                         timeout=180)
+        finally:
+            acc.stop()
+        out = r.stdout + r.stderr
+        lines = [l for l in out.splitlines() if re.match(r"^(PASS|FAIL): ", l)]
+        seen_names = [re.match(r"^(?:PASS|FAIL): (\S+)", l).group(1) for l in lines]
+>       assert set(seen_names) == set(CHECK_NAMES), \
+            f"必须十项检查全有结果行（不得中途静默退出）:\n{out}"
+E       AssertionError: 必须十项检查全有结果行（不得中途静默退出）:
+E         == MOCK 演练模式：CDS_CUBE_MOCK_ROOT=/c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-120/test_preflight_full_pass_matri0/mock（测试/演练专用，禁用于生产！）==
+E         == CDS Cube 节点 preflight（SS-10 CB-02）钉住: v0.7.3-rc2 b0c4cc33fbfc ==
+E         PASS: kvm (KVM 设备可读写)
+E         PASS: data_fs (XFS + reflink（xfs_info reflink=1 + FICLONE 实测）)
+E         PASS: ebpf (bpftool 可用 + 内核 bpf 支持 + bpffs 已挂载)
+E         PASS: cubelet_bin (版本匹配发布钉住（v0.7.3-rc2 + b0c4cc33fbfc）)
+E         FAIL: volume_sock: CDS 卷插件 socket 不存在: /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-120/test_preflight_full_pass_matri0/mock/run/cds.sock（CB-03 二进制未部署或插件未启动）
+E         PASS: tls_sidecar (TCP 可达 127.0.0.1:53234（仅端口可达性，不含证书/协议校验；sidecar 身份确认属 verify.sh 安装后阶段，任何占用该端口的进程都能满足本项）)
+E         PASS: containerd (containerd containerd.io 1.7.20 abc)
+E         PASS: resources (内存 15GB / 数据盘余量 58%)
+E         tee=none
+E         PASS: tee_probe (无 TEE 硬件——如实上报 tee=none（SS-13 TEE 可选，裸 MicroVM 合法；已记录 /c/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-120/test_preflight_full_pass_matri0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）)
+E         PASS: sandbox_cidr (沙箱网段 192.168.0.0/18（来源: 上游默认（.one-click.env 不可读或未设该键））与本机 1 个 IPv4 前缀无重叠)
+E         PASS: sandbox_cidr (沙箱网段归属正常（来源: 上游默认（.one-click.env 不可读或未设该键），探针 192.168.0.2 → dev cube-dev table main）)
+E         == 结果: 1 项失败（MOCK 演练模式，结果不构成节点验收） ==
+E         
+E       assert {'containerd'...sources', ...} == {'containerd'...sources', ...}
+E         
+E         Extra items in the left set:
+E         'volume_sock:'
+E         Extra items in the right set:
+E         'volume_sock'
+E         Use -v to get more diff
+
+tests\test_cube_node_scripts.py:274: AssertionError
+_______________ test_preflight_tls_sidecar_discloses_port_only ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-120/test_preflight_tls_sidecar_dis0')
+
+    @needs_bash
+    def test_preflight_tls_sidecar_discloses_port_only(tmp_path: Path) -> None:
+        """P11：这一项只能证明端口有监听者；pass 文案必须如实限定范围。"""
+        root = make_mock(tmp_path / "mock")
+>       with TcpAccepter() as acc:
+             ^^^^^^^^^^^^^
+E       TypeError: 'TcpAccepter' object does not support the context manager protocol
+
+tests\test_cube_node_scripts.py:353: TypeError
+=========================== short test summary info ===========================
+FAILED tests/test_cube_node_scripts.py::test_preflight_full_pass_matrix - Ass...
+FAILED tests/test_cube_node_scripts.py::test_preflight_tls_sidecar_discloses_port_only
+2 failed, 11 passed, 22 deselected in 61.88s (0:01:01)

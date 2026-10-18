@@ -1,0 +1,329 @@
+FFFF...FF.FF.....F..                                                     [100%]
+================================== FAILURES ===================================
+__________ test_cursor_page_returns_only_own_identity[data_provider] __________
+
+client = <httpx.AsyncClient object at 0x000001B37FC24500>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B37FC241D0>
+role = 'data_provider'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("role", BUSINESS_ROLES)
+    async def test_cursor_page_returns_only_own_identity(client, db_session, role):
+        """游标首页：返回内容必须全部属于调用者，且自己的会话一条不少。"""
+        _, _, victim_rows = await _tenant(db_session, "buyer", {SessionStatus.RUNNING.value: 3})
+        headers, caller_id, own_rows = await _tenant(
+            db_session, role, {SessionStatus.RUNNING.value: 2}
+        )
+    
+        resp = await client.get(
+            "/api/v1/sandbox-sessions", params={"limit": 50, "cursor": ""}, headers=headers
+        )
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+    
+        # 身份钉死：不是「能 200」就算过 —— 每一条的 user_id 必须是当前用户
+        assert items, "own sessions must stay visible (never widen the fix into an empty list)"
+>       assert {item["user_id"] for item in items} == {caller_id}
+E       AssertionError: assert {'3a3ae8b1-51...d5ca952dbb28'} == {'891af61f-b6...d5ca952dbb28'}
+E         
+E         Extra items in the left set:
+E         '3a3ae8b1-51d2-4a87-9456-4dbf955cda01'
+E         Use -v to get more diff
+
+tests\test_session_list_cursor_scoping.py:94: AssertionError
+______________ test_cursor_page_returns_only_own_identity[buyer] ______________
+
+client = <httpx.AsyncClient object at 0x000001B37FFDC560>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B3141F61B0>
+role = 'buyer'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("role", BUSINESS_ROLES)
+    async def test_cursor_page_returns_only_own_identity(client, db_session, role):
+        """游标首页：返回内容必须全部属于调用者，且自己的会话一条不少。"""
+        _, _, victim_rows = await _tenant(db_session, "buyer", {SessionStatus.RUNNING.value: 3})
+        headers, caller_id, own_rows = await _tenant(
+            db_session, role, {SessionStatus.RUNNING.value: 2}
+        )
+    
+        resp = await client.get(
+            "/api/v1/sandbox-sessions", params={"limit": 50, "cursor": ""}, headers=headers
+        )
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+    
+        # 身份钉死：不是「能 200」就算过 —— 每一条的 user_id 必须是当前用户
+        assert items, "own sessions must stay visible (never widen the fix into an empty list)"
+>       assert {item["user_id"] for item in items} == {caller_id}
+E       AssertionError: assert {'df849aa8-53...c789cf79bedc'} == {'df849aa8-53...7c244778528a'}
+E         
+E         Extra items in the left set:
+E         'f6606627-d107-4698-9e4b-c789cf79bedc'
+E         Use -v to get more diff
+
+tests\test_session_list_cursor_scoping.py:94: AssertionError
+__________________ test_cursor_traversal_stays_inside_tenant __________________
+
+client = <httpx.AsyncClient object at 0x000001B37FFA83E0>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B31434CA10>
+
+    @pytest.mark.asyncio
+    async def test_cursor_traversal_stays_inside_tenant(client, db_session):
+        """逐页走完全部游标页：并集恰好等于自己的会话集（不多一页、不漏一条）。"""
+        await _tenant(db_session, "buyer", {SessionStatus.RUNNING.value: 3})
+        headers, caller_id, own_rows = await _tenant(
+            db_session, "data_provider", {SessionStatus.RUNNING.value: 3}
+        )
+        own_ids = {str(s.id) for s in own_rows}
+    
+        seen: list[str] = []
+        pages = 0
+        cursor = ""
+        while True:
+            resp = await client.get(
+                "/api/v1/sandbox-sessions", params={"limit": 1, "cursor": cursor}, headers=headers
+            )
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["items"]
+            for item in items:
+>               assert item["user_id"] == caller_id, f"page {pages} left the tenant: {item['id']}"
+E               AssertionError: page 2 left the tenant: 7daf7c87-b299-434a-b0c1-fef0fe7cc640
+E               assert '6e43e58b-4c0...-22f3d937d729' == '8af507e7-d97...-9acc43a12484'
+E                 
+E                 - 8af507e7-d97d-4aaf-a809-9acc43a12484
+E                 + 6e43e58b-4c0e-4d08-8bbe-22f3d937d729
+
+tests\test_session_list_cursor_scoping.py:126: AssertionError
+________________ test_cursor_mode_status_filter_is_scoped_too _________________
+
+client = <httpx.AsyncClient object at 0x000001B37FFA9D90>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B3143642C0>
+
+    @pytest.mark.asyncio
+    async def test_cursor_mode_status_filter_is_scoped_too(client, db_session):
+        """status 谓词与租户谓词必须同时生效（游标分支以前两个都丢）。"""
+        await _tenant(
+            db_session,
+            "buyer",
+            {SessionStatus.RUNNING.value: 2, SessionStatus.SUSPENDED.value: 2},
+        )
+        headers, caller_id, own_rows = await _tenant(
+            db_session, "data_provider", {SessionStatus.SUSPENDED.value: 1}
+        )
+    
+        resp = await client.get(
+            "/api/v1/sandbox-sessions",
+            params={"limit": 50, "cursor": "", "status": SessionStatus.SUSPENDED.value},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+        assert items, "the caller's own suspended session must still come back"
+>       assert {item["user_id"] for item in items} == {caller_id}
+E       AssertionError: assert {'650cf7f2-85...03124d4a85e3'} == {'650cf7f2-85...92aef20a4e8c'}
+E         
+E         Extra items in the left set:
+E         'b46ddb5f-33f0-4746-97c1-03124d4a85e3'
+E         Use -v to get more diff
+
+tests\test_session_list_cursor_scoping.py:160: AssertionError
+______________ test_cursor_mode_matches_offset_mode_identity_set ______________
+
+client = <httpx.AsyncClient object at 0x000001B314365C70>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B314366210>
+
+    @pytest.mark.asyncio
+    async def test_cursor_mode_matches_offset_mode_identity_set(client, db_session):
+        """对照组：游标模式与 offset 模式必须给出同一个身份集合。"""
+        await _tenant(db_session, "buyer", {SessionStatus.RUNNING.value: 3})
+        headers, _, own_rows = await _tenant(db_session, "data_provider", {SessionStatus.RUNNING.value: 2})
+    
+        offset = await client.get("/api/v1/sandbox-sessions", params={"limit": 50}, headers=headers)
+        cursor = await client.get(
+            "/api/v1/sandbox-sessions", params={"limit": 50, "cursor": ""}, headers=headers
+        )
+        assert offset.status_code == 200 and cursor.status_code == 200
+>       assert {i["id"] for i in offset.json()["items"]} == {
+            i["id"] for i in cursor.json()["items"]
+        } == {str(s.id) for s in own_rows}
+E       AssertionError: assert {'1b1dc515-a1...6b83b89208d3'} == {'1b1dc515-a1...6b83b89208d3'}
+E         
+E         Extra items in the right set:
+E         '65a28880-7ff7-42d3-9843-c498742ab22f'
+E         '838ebf60-104c-433e-bde1-6df26c9babb0'
+E         '58845b9e-b873-4420-a542-c4f7dbb462fd'
+E         Use -v to get more diff
+
+tests\test_session_list_cursor_scoping.py:196: AssertionError
+________________ test_ws_stream_mounts_attached_shared_volumes ________________
+
+client = <httpx.AsyncClient object at 0x000001B3143D7E00>
+ws_db = async_sessionmaker(class_='AsyncSession', bind=<sqlalchemy.ext.asyncio.engine.AsyncEngine object at 0x000001B3143EE990>, autoflush=True, expire_on_commit=False)
+fake_runtime = [{'command': 'ls /workspace/shared', 'container_id': 'l0-14777f036782', 'extra_binds': None}]
+
+    @pytest.mark.asyncio
+    async def test_ws_stream_mounts_attached_shared_volumes(client, ws_db, fake_runtime):
+        """A24 主断言：会话挂的共享卷必须真的出现在 execute_streaming 的 extra_binds 里。
+    
+        这里的 resolve_binds 不打桩 —— 走的就是服务层真实现（另一个 DB 连接），
+        正是旧实现必然抱 NameError 的那一句。
+        """
+        user, session = await _mk_running_session(ws_db)
+        volume, host_dir = await _attach_volume(ws_db, session, user, name="handoff", read_only=True)
+        ticket = await _ticket(user)
+    
+        tc = TestClient(app)
+        with tc.websocket_connect(
+            f"/api/v1/sandbox-sessions/{session.id}/exec/stream?ticket={ticket}"
+        ) as ws:
+            ws.send_json({"type": "start", "command": "ls /workspace/shared", "timeout": 30})
+            frames = _frames_until_close(ws)
+    
+        assert frames[-1]["type"] == "exit", frames
+        assert len(fake_runtime) == 1, fake_runtime
+        binds = fake_runtime[0]["extra_binds"]
+>       assert binds is not None, "shared volume was silently dropped from the streaming exec"
+E       AssertionError: shared volume was silently dropped from the streaming exec
+E       assert None is not None
+
+tests\test_exec_stream_shared_volumes.py:171: AssertionError
+______ test_ws_stream_discloses_and_refuses_when_volume_resolution_fails ______
+
+client = <httpx.AsyncClient object at 0x000001B3143638F0>
+ws_db = async_sessionmaker(class_='AsyncSession', bind=<sqlalchemy.ext.asyncio.engine.AsyncEngine object at 0x000001B314377DD0>, autoflush=True, expire_on_commit=False)
+fake_runtime = [{'command': 'ls /workspace/shared', 'container_id': 'l0-8f965d6f94c9', 'extra_binds': None}]
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B314362B40>
+
+    @pytest.mark.asyncio
+    async def test_ws_stream_discloses_and_refuses_when_volume_resolution_fails(
+        client, ws_db, fake_runtime, monkeypatch
+    ):
+        """A24 铁律面：解析不了共享卷必须“拒绝 + 披露”，不得带着 binds=[] 假装在跑。"""
+        user, session = await _mk_running_session(ws_db)
+        await _attach_volume(ws_db, session, user, name="handoff", read_only=True)
+    
+        async def _boom(db, session_id):
+            raise RuntimeError("db unreachable")
+    
+        monkeypatch.setattr("app.services.shared_volumes.resolve_binds", _boom)
+        ticket = await _ticket(user)
+    
+        tc = TestClient(app)
+        with tc.websocket_connect(
+            f"/api/v1/sandbox-sessions/{session.id}/exec/stream?ticket={ticket}"
+        ) as ws:
+            ws.send_json({"type": "start", "command": "ls /workspace/shared", "timeout": 30})
+            frames = _frames_until_close(ws)
+    
+        codes = [f.get("code") for f in frames if f["type"] == "error"]
+>       assert "RUNTIME_UNAVAILABLE" in codes, frames
+E       AssertionError: [{'data': 'streamed\u2060\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200b\u200b\ufeff\u200c\u200d\u200c\u200d\u200c\u2...00d\u200b\ufeff\u200b\u200c\u200b\ufeff\u200b\u200b', 'type': 'stdout'}, {'code': 0, 'duration_ms': 5, 'type': 'exit'}]
+E       assert 'RUNTIME_UNAVAILABLE' in []
+
+tests\test_exec_stream_shared_volumes.py:218: AssertionError
+_____________ test_ticket_consume_is_atomic_under_concurrent_use ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B314360EC0>
+
+    @pytest.mark.asyncio
+    async def test_ticket_consume_is_atomic_under_concurrent_use(monkeypatch):
+        """A25：get 与 delete 之间的窗口必须消失 —— 两个并发消费者只能过一个。
+    
+        包装器在 `get` 返回后插一个 `asyncio.sleep(0)`，把「RTT 已完成、下一条命令
+        未发出」这个竞态窗口放大成必然交错（确定性的调度点，不是赌时序）。
+        get→delete 写法下两个调用方双双拿到 payload；GETDEL 后只剩一个。
+        """
+        import app.api.session_stream as stream_module
+        import fakeredis.aioredis
+    
+        server = fakeredis.FakeServer()
+        inner = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    
+        class _RaceWindowRedis:
+            def __init__(self, target):
+                self._target = target
+    
+            async def get(self, key):
+                value = await self._target.get(key)
+                await asyncio.sleep(0)  # exactly the get→delete window A25 names
+                return value
+    
+            def __getattr__(self, name):
+                return getattr(self._target, name)
+    
+        async def _get_redis():
+            return _RaceWindowRedis(inner)
+    
+        monkeypatch.setattr(stream_module, "get_redis", _get_redis)
+    
+        ticket = (await stream_module.issue_ws_ticket(str(uuid.uuid4()), "data_provider"))["ticket"]
+        first, second = await asyncio.gather(
+            stream_module._consume_ticket(ticket), stream_module._consume_ticket(ticket)
+        )
+    
+        winners = [p for p in (first, second) if p is not None]
+>       assert len(winners) == 1, f"single-use ticket consumed {len(winners)} times (A25 race)"
+E       AssertionError: single-use ticket consumed 2 times (A25 race)
+E       assert 2 == 1
+E        +  where 2 = len([{'exp': 1792332966, 'iat': 1792332936, 'jti': '0e1d70c74f084f419465456442c25ca8', 'role': 'data_provider', ...}, {'exp': 1792332966, 'iat': 1792332936, 'jti': '0e1d70c74f084f419465456442c25ca8', 'role': 'data_provider', ...}])
+
+tests\test_exec_stream_shared_volumes.py:260: AssertionError
+_______________ test_auto_resume_without_contract_wakes_session _______________
+
+client = <httpx.AsyncClient object at 0x000001B314494890>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B314497020>
+session_owner = <app.models.user.User object at 0x000001B31434D280>
+
+    @pytest.mark.asyncio
+    async def test_auto_resume_without_contract_wakes_session(client, db_session, session_owner):
+        """A31: contract_id IS NULL 是「本就没有治理合约」，不是「合约已失效」。
+    
+        旧实现把 `contract_active = False` 当默认值，无合约会话一旦 SUSPENDED 就永久
+        410 SESSION_TERMINATED\uff08`_load_operable_session` \u4e5f\u8d70\u540c\u4e00\u5224\u636e \u21d2 \u624b\u5de5 /resume
+        同样堵死，三个隐式调用点全堵）。收紧不能过头：没有需要撤销的授权时，自动
+        resume 必须照常唤醒会话，并且唤醒的是它自己的会话（反向用例）。
+        """
+        session = await _mk_session(
+            db_session, session_owner, idle_policy="pause", auto_resume=True,
+            status=SessionStatus.SUSPENDED.value, pre_pause_status="running", age_hours=1,
+        )
+    
+        from app.services.auth_service import create_access_token
+    
+        headers = {"Authorization": f"Bearer {create_access_token(session_owner.id, session_owner.role)}"}
+        resp = await client.post(f"/api/v1/sandbox-sessions/{session.id}/refreshes", headers=headers)
+>       assert resp.status_code == 200, resp.text
+E       AssertionError: {"code":"SESSION_TERMINATED","message":"Session is suspended (idle auto-pause) and its governing contract is not active — auto-resume rejected; resume manually or contact the contract parties.","request_id":"a898fe3c0d7c40e6"}
+E       assert 410 == 200
+E        +  where 410 = <Response [410 Gone]>.status_code
+
+tests\test_idle_autopause.py:167: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.core.error_handlers:error_handlers.py:73 CDSError SESSION_TERMINATED: Session is suspended (idle auto-pause) and its governing contract is not active — auto-resume rejected; resume manually or contact the contract parties.
+============================== warnings summary ===============================
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_mounts_attached_shared_volumes
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_without_volume_sends_no_binds
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_discloses_and_refuses_when_volume_resolution_fails
+tests/test_exec_stream_shared_volumes.py::test_ticket_consume_is_atomic_under_concurrent_use
+  C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\jwt\api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_mounts_attached_shared_volumes
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_without_volume_sends_no_binds
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_discloses_and_refuses_when_volume_resolution_fails
+tests/test_exec_stream_shared_volumes.py::test_ticket_consume_is_atomic_under_concurrent_use
+  C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\jwt\api_jwt.py:365: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_session_list_cursor_scoping.py::test_cursor_page_returns_only_own_identity[data_provider]
+FAILED tests/test_session_list_cursor_scoping.py::test_cursor_page_returns_only_own_identity[buyer]
+FAILED tests/test_session_list_cursor_scoping.py::test_cursor_traversal_stays_inside_tenant
+FAILED tests/test_session_list_cursor_scoping.py::test_cursor_mode_status_filter_is_scoped_too
+FAILED tests/test_session_list_cursor_scoping.py::test_cursor_mode_matches_offset_mode_identity_set
+FAILED tests/test_exec_stream_shared_volumes.py::test_ws_stream_mounts_attached_shared_volumes
+FAILED tests/test_exec_stream_shared_volumes.py::test_ws_stream_discloses_and_refuses_when_volume_resolution_fails
+FAILED tests/test_exec_stream_shared_volumes.py::test_ticket_consume_is_atomic_under_concurrent_use
+FAILED tests/test_idle_autopause.py::test_auto_resume_without_contract_wakes_session
+9 failed, 11 passed, 8 warnings in 10.11s

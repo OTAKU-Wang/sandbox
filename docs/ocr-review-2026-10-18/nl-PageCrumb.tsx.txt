@@ -1,0 +1,40 @@
+     1	import { useLocation } from 'react-router-dom';
+     2	import { useCrumbStackStore } from '../../stores/crumbStackStore';
+     3	import { getRouteCrumb } from './routeCrumb';
+     4	
+     5	/**
+     6	 * 全站面包屑（用户 2026-10-17 定稿：「平台全面使用面包屑导航 但是要考虑通用性」）。
+     7	 *
+     8	 * 通用性 = 页面不再各写一份面包屑：
+     9	 * - 静态段来自路由注册表 `routeCrumb.ts`（唯一真值表）；
+    10	 * - 页内钻取段由 `useCrumbSegments` 写入 `crumbStackStore`（卸载自动清空）。
+    11	 *
+    12	 * 口径变更登记：开发系四屏那条带子在原型 PNG 上画的是「已打开页签」（2026-10-16 口径，
+    13	 * 曾按此实现过 `pills` 样式），2026-10-18 用户裁定**彻底删除页签带**，本文件只剩斜杠一种
+    14	 * 渲染（台账 §10.2 / spec §23）。像素真值上的差异照旧记录，不声称原型画的就是斜杠。
+    15	 */
+    16	export default function PageCrumb() {
+    17	  const { pathname } = useLocation();
+    18	  const stack = useCrumbStackStore((s) => s.stack);
+    19	  const crumb = getRouteCrumb(pathname);
+    20	  const segs = [...crumb.segs, ...stack];
+    21	
+    22	  if (crumb.style === 'none' || segs.length === 0) return null;
+    23	
+    24	  return (
+    25	    <nav className="cds-crumb-slash" aria-label="页面位置">
+    26	      {/* 图 4-1 §1.2：斜杠式前置文件夹描边图标（13×12，#afb5c0），3-1 同坐标同形；
+    27	          形按墨迹用 mask 画（与 4-1 子代理逐行读数同源），不用 anticon 字形凑。 */}
+    28	      <span className="cds-crumb-lead" aria-hidden />
+    29	      {segs.map((seg, index) => {
+    30	        const last = index === segs.length - 1;
+    31	        return [
+    32	          index > 0 ? <span key={`sep-${index}`} className="cds-crumb-sep">/</span> : null,
+    33	          <span key={`${index}-${seg}`} className={last ? 'is-current' : undefined} data-testid={last ? 'crumb-current' : undefined}>
+    34	            {seg}
+    35	          </span>,
+    36	        ];
+    37	      })}
+    38	    </nav>
+    39	  );
+    40	}

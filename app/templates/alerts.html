@@ -49,8 +49,8 @@ async function loadAlerts() {
             return `<tr>
                 <td>${formatDate(a.created_at || a.timestamp)}</td>
                 <td>${badge(a.severity || 'info', severityClass)}</td>
-                <td>${a.alert_type || a.type || '-'}</td>
-                <td>${truncate(a.message || a.description, 60)}</td>
+                <td>${esc(a.alert_type || a.type || '-')}</td>
+                <td>${esc(truncate(a.message || a.description, 60))}</td>
                 <td>${statusBadge(status)}</td>
                 <td>-</td>
             </tr>`;
@@ -59,7 +59,7 @@ async function loadAlerts() {
         $('#critical-alerts').textContent = critical;
         $('#today-alerts').textContent = today;
     } catch (e) {
-        $('#alerts-table').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${e.message}</td></tr>`;
+        $('#alerts-table').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${esc(e.message)}</td></tr>`;
     }
 }
 

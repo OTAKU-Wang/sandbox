@@ -63,14 +63,24 @@ def main():
     if s.status_code != 200:
         step("admin.login", "FAIL", s.status_code, s.text[:200])
         return finish(args.out)
-    ah = {"Authorization": f"Bearer {s.json()['access_token']}"}
+    try:
+        token = s.json().get("access_token", "")
+    except Exception:
+        token = ""
+    if not token:
+        step("admin.login", "FAIL", 200, "200 login without access_token")
+        return finish(args.out)
+    ah = {"Authorization": f"Bearer {token}"}
     step("admin.login", "PASS", 200)
 
-    # N1: schedulable node
+    # N1: schedulable node — envelope-tolerant: an error body / {"nodes": null}
+    # must yield an empty list (fail toward registration), not an AttributeError
+    # traceback with no evidence file.
     r = http.get("/api/v1/sandbox-nodes", headers=ah)
     nodes = r.json() if r.status_code == 200 else {}
-    nodes = nodes.get("nodes") if isinstance(nodes, dict) else nodes
-    nodes = nodes if isinstance(nodes, list) else nodes.get("items", [])
+    if isinstance(nodes, dict):
+        nodes = nodes.get("nodes", nodes.get("items", []))
+    nodes = [n for n in nodes if isinstance(n, dict)] if isinstance(nodes, list) else []
     schedulable = [n for n in nodes if n.get("schedulable")]
     if not schedulable and args.node_endpoint:
         caps = {"cubelet_endpoint": args.node_endpoint, "tee": "none"}
@@ -294,7 +304,7 @@ def finish(out):
     report = {"finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
               "total": len(EVIDENCE), "passed": len(EVIDENCE) - len(fails),
               "failed": len(fails), "evidence": EVIDENCE}
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     print(f"\n== {report['passed']}/{report['total']} passed, {report['failed']} failed -> {out}")
     return 1 if fails else 0

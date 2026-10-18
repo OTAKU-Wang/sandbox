@@ -1,0 +1,598 @@
+FFFFFFFFFF.                                                              [100%]
+================================== FAILURES ===================================
+________ test_data_load_runs_off_the_loop_and_is_reclaimed_afterwards _________
+
+client = <httpx.AsyncClient object at 0x000001D2D9B5B470>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2D9DA1E50>
+make_user = <function make_user.<locals>._make at 0x000001D2D9DCA160>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2D9E5FA10>
+
+    @pytest.mark.asyncio
+    async def test_data_load_runs_off_the_loop_and_is_reclaimed_afterwards(
+        client, db_session, make_user, monkeypatch
+    ):
+        headers, provider_id = await make_user("data_provider", "a52prov")
+        resource = await _mk_resource(db_session, provider_id)
+        product = await _mk_product(db_session, provider_id, resource_id=resource.id)
+    
+        captured: dict = {}
+        main_ident = threading.main_thread().ident
+    
+        def _fake_download(object_name):
+            captured["download_thread"] = threading.get_ident()
+            return CSV
+    
+        monkeypatch.setattr(storage_service, "download_decrypted", _fake_download)
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+        }, headers=headers)
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+    
+        # A52 — the blocking download must NOT have run on the event-loop thread.
+        assert captured["download_thread"] is not None
+>       assert captured["download_thread"] != main_ident, (
+            "A52: storage read + decrypt still executes on the event loop thread"
+        )
+E       AssertionError: A52: storage read + decrypt still executes on the event loop thread
+E       assert 31916 != 31916
+
+tests\test_dev_sandbox_data_load.py:127: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.kms_service:kms_service.py:117 [KMS] DEK dek-storage-test-resources/412d7538de9e4a3b98e49bd785cd2f2b.csv-8481828a lives only in process memory: callers that persist ciphertext under this key_id must write export_wrapped() into KeyMetadata.wrapped_payload in the same transaction and call mark_persisted(), or a restart makes that data permanently undecryptable (OCR-A161)
+WARNING  app.services.storage_service:storage_service.py:95 [storage] MinIO 不可用（No module named 'minio'），对象存储降级为本地目录 \tmp\cds-storage：该目录未入卷时容器重建会丢上传原件（库里仍为 ready），生产部署请安装 minio 客户端包并配置 CDS_MINIO_ENDPOINT
+___________ test_failed_provision_still_reclaims_the_plaintext_copy ___________
+
+client = <httpx.AsyncClient object at 0x000001D2D9E46C00>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA149D30>
+make_user = <function make_user.<locals>._make at 0x000001D2D9DCA520>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2D9EB97F0>
+
+    @pytest.mark.asyncio
+    async def test_failed_provision_still_reclaims_the_plaintext_copy(
+        client, db_session, make_user, monkeypatch
+    ):
+        """A54: provision 抛异常也不能留下明文残渣。"""
+        from app.services.data_product_sandbox import dev_sandbox
+    
+        headers, provider_id = await make_user("data_provider", "a54prov")
+        resource = await _mk_resource(db_session, provider_id)
+        product = await _mk_product(db_session, provider_id, resource_id=resource.id)
+    
+        monkeypatch.setattr(storage_service, "download_decrypted", lambda object_name: CSV)
+        staged_paths: list[Path] = []
+    
+        def _boom(session_id, level, data_path, timeout, user_id=""):
+            if data_path:
+                staged_paths.append(Path(data_path))
+            raise RuntimeError("provision blew up")
+    
+        monkeypatch.setattr(dev_sandbox.runtime, "provision", _boom)
+    
+        # ASGITransport re-raises server exceptions (raise_app_exceptions=True);
+        # what is under test is that the finally-branch still reclaimed the file.
+        with pytest.raises(RuntimeError, match="provision blew up"):
+            await client.post("/api/v1/dev-sandbox/sessions", json={
+                "mode": "structured",
+                "data_product_id": str(product.id),
+            }, headers=headers)
+        assert staged_paths, "test precondition: provision never saw a staged copy"
+        for path in staged_paths:
+>           assert not path.exists(), f"A54: plaintext copy survived a failed provision at {path}"
+E           AssertionError: A54: plaintext copy survived a failed provision at \tmp\cds-sandbox\data-load\c248a91f-375a-4be2-918f-d48e3690f14f\423a5b2131704e27b5f8fc805764ec6f\c4735486-7b14-4835-b8d0-c5240f896b84.csv
+E           assert not True
+E            +  where True = exists()
+E            +    where exists = WindowsPath('/tmp/cds-sandbox/data-load/c248a91f-375a-4be2-918f-d48e3690f14f/423a5b2131704e27b5f8fc805764ec6f/c4735486-7b14-4835-b8d0-c5240f896b84.csv').exists
+
+tests\test_dev_sandbox_data_load.py:177: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.core.error_handlers:error_handlers.py:116 Unhandled exception: provision blew up
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 81, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 192, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\anyio\_backends\_asyncio.py", line 783, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |                                    ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(value)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\app\core\security.py", line 191, in dispatch
+    |     return await call_next(request)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |                                    ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(value)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\app\core\security.py", line 161, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\cors.py", line 87, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |                                    ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(value)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\app\core\telemetry.py", line 76, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |                                    ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(value)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\app\core\telemetry.py", line 90, in dispatch
+    |     return await call_next(request)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    |     raise app_exc from app_exc.__cause__ or app_exc.__context__
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "D:\workspace\sandbox\app\main.py", line 262, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 716, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 736, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 290, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 130, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 116, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 670, in app
+    |     raw_response = await run_endpoint_function(
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 324, in run_endpoint_function
+    |     return await dependant.call(**values)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\app\api\dev_sandbox.py", line 183, in create_dev_session
+    |     session = dev_sandbox.create_session(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\app\services\data_product_sandbox.py", line 145, in create_session
+    |     result = self.runtime.provision(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\workspace\sandbox\tests\test_dev_sandbox_data_load.py", line 164, in _boom
+    |     raise RuntimeError("provision blew up")
+    | RuntimeError: provision blew up
+    +------------------------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\app\core\security.py", line 191, in dispatch
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\app\core\security.py", line 161, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\cors.py", line 87, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\app\core\telemetry.py", line 76, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\app\core\telemetry.py", line 90, in dispatch
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\workspace\sandbox\app\main.py", line 262, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 130, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 116, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 670, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 324, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\app\api\dev_sandbox.py", line 183, in create_dev_session
+    session = dev_sandbox.create_session(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\app\services\data_product_sandbox.py", line 145, in create_session
+    result = self.runtime.provision(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\workspace\sandbox\tests\test_dev_sandbox_data_load.py", line 164, in _boom
+    raise RuntimeError("provision blew up")
+RuntimeError: provision blew up
+______________________ test_stale_staging_dirs_are_swept ______________________
+
+    def test_stale_staging_dirs_are_swept():
+        """A54: 进程被强杀的中途残留由 mtime 清扫兜底（新目录不动）。"""
+>       from app.api.dev_sandbox import _data_load_root, _sweep_stale_data_load_dirs
+E       ImportError: cannot import name '_data_load_root' from 'app.api.dev_sandbox' (D:\workspace\sandbox\app\api\dev_sandbox.py)
+
+tests\test_dev_sandbox_data_load.py:182: ImportError
+_ test_dev_session_refuses_when_product_data_cannot_load[encrypting-True-False] _
+
+client = <httpx.AsyncClient object at 0x000001D2D9E47830>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA17FF50>
+make_user = <function make_user.<locals>._make at 0x000001D2DA250AE0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2D9EB9850>
+status = 'encrypting', with_storage = True, missing_row = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status,with_storage,missing_row", [
+        (ResourceStatus.ENCRYPTING.value, True, False),   # 资源还没 READY
+        (ResourceStatus.FAILED.value, True, False),       # 资源失败
+        (ResourceStatus.READY.value, False, False),       # READY 但没有 storage_path
+        (ResourceStatus.READY.value, True, True),         # 资源行根本不存在
+    ])
+    async def test_dev_session_refuses_when_product_data_cannot_load(
+        client, db_session, make_user, monkeypatch, status, with_storage, missing_row
+    ):
+        """A53: 密态沙箱不得用 201 假装「数据已挂载」。"""
+        headers, provider_id = await make_user("data_provider", "a53prov")
+        resource = await _mk_resource(db_session, provider_id, status=status, with_storage=with_storage)
+        product = await _mk_product(
+            db_session, provider_id,
+            resource_id=uuid.uuid4() if missing_row else resource.id,
+        )
+    
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+        }, headers=headers)
+    
+>       assert resp.status_code == 409, resp.text
+E       AssertionError: {"session_id":"b71cbd84-f4cc-4f18-9604-09e436d70157","mode":"structured","status":"running","container_id":"l3-fake","input_files":[],"output_files":[]}
+E       assert 201 == 409
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests\test_dev_sandbox_data_load.py:228: AssertionError
+__ test_dev_session_refuses_when_product_data_cannot_load[failed-True-False] __
+
+client = <httpx.AsyncClient object at 0x000001D2D9E5FA10>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA1498E0>
+make_user = <function make_user.<locals>._make at 0x000001D2DA133060>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2DA17EBD0>
+status = 'failed', with_storage = True, missing_row = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status,with_storage,missing_row", [
+        (ResourceStatus.ENCRYPTING.value, True, False),   # 资源还没 READY
+        (ResourceStatus.FAILED.value, True, False),       # 资源失败
+        (ResourceStatus.READY.value, False, False),       # READY 但没有 storage_path
+        (ResourceStatus.READY.value, True, True),         # 资源行根本不存在
+    ])
+    async def test_dev_session_refuses_when_product_data_cannot_load(
+        client, db_session, make_user, monkeypatch, status, with_storage, missing_row
+    ):
+        """A53: 密态沙箱不得用 201 假装「数据已挂载」。"""
+        headers, provider_id = await make_user("data_provider", "a53prov")
+        resource = await _mk_resource(db_session, provider_id, status=status, with_storage=with_storage)
+        product = await _mk_product(
+            db_session, provider_id,
+            resource_id=uuid.uuid4() if missing_row else resource.id,
+        )
+    
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+        }, headers=headers)
+    
+>       assert resp.status_code == 409, resp.text
+E       AssertionError: {"session_id":"daafc470-34d1-4cc3-a92d-46238fa59de3","mode":"structured","status":"running","container_id":"l3-fake","input_files":[],"output_files":[]}
+E       assert 201 == 409
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests\test_dev_sandbox_data_load.py:228: AssertionError
+__ test_dev_session_refuses_when_product_data_cannot_load[ready-False-False] __
+
+client = <httpx.AsyncClient object at 0x000001D2DA0C6B70>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA26BCE0>
+make_user = <function make_user.<locals>._make at 0x000001D2DA15E7A0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2DA17F140>
+status = 'ready', with_storage = False, missing_row = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status,with_storage,missing_row", [
+        (ResourceStatus.ENCRYPTING.value, True, False),   # 资源还没 READY
+        (ResourceStatus.FAILED.value, True, False),       # 资源失败
+        (ResourceStatus.READY.value, False, False),       # READY 但没有 storage_path
+        (ResourceStatus.READY.value, True, True),         # 资源行根本不存在
+    ])
+    async def test_dev_session_refuses_when_product_data_cannot_load(
+        client, db_session, make_user, monkeypatch, status, with_storage, missing_row
+    ):
+        """A53: 密态沙箱不得用 201 假装「数据已挂载」。"""
+        headers, provider_id = await make_user("data_provider", "a53prov")
+        resource = await _mk_resource(db_session, provider_id, status=status, with_storage=with_storage)
+        product = await _mk_product(
+            db_session, provider_id,
+            resource_id=uuid.uuid4() if missing_row else resource.id,
+        )
+    
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+        }, headers=headers)
+    
+>       assert resp.status_code == 409, resp.text
+E       AssertionError: {"session_id":"628cd55c-758d-4a4d-8732-15a3b2ebcc37","mode":"structured","status":"running","container_id":"l3-fake","input_files":[],"output_files":[]}
+E       assert 201 == 409
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests\test_dev_sandbox_data_load.py:228: AssertionError
+___ test_dev_session_refuses_when_product_data_cannot_load[ready-True-True] ___
+
+client = <httpx.AsyncClient object at 0x000001D2D9E5FE90>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA38DDC0>
+make_user = <function make_user.<locals>._make at 0x000001D2DA252020>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2D9DA3C80>
+status = 'ready', with_storage = True, missing_row = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status,with_storage,missing_row", [
+        (ResourceStatus.ENCRYPTING.value, True, False),   # 资源还没 READY
+        (ResourceStatus.FAILED.value, True, False),       # 资源失败
+        (ResourceStatus.READY.value, False, False),       # READY 但没有 storage_path
+        (ResourceStatus.READY.value, True, True),         # 资源行根本不存在
+    ])
+    async def test_dev_session_refuses_when_product_data_cannot_load(
+        client, db_session, make_user, monkeypatch, status, with_storage, missing_row
+    ):
+        """A53: 密态沙箱不得用 201 假装「数据已挂载」。"""
+        headers, provider_id = await make_user("data_provider", "a53prov")
+        resource = await _mk_resource(db_session, provider_id, status=status, with_storage=with_storage)
+        product = await _mk_product(
+            db_session, provider_id,
+            resource_id=uuid.uuid4() if missing_row else resource.id,
+        )
+    
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+        }, headers=headers)
+    
+>       assert resp.status_code == 409, resp.text
+E       AssertionError: {"session_id":"608403e7-c298-487b-9779-3d2d74f59c61","mode":"structured","status":"running","container_id":"l3-fake","input_files":[],"output_files":[]}
+E       assert 201 == 409
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests\test_dev_sandbox_data_load.py:228: AssertionError
+__________ test_dev_session_discloses_product_without_attached_data ___________
+
+client = <httpx.AsyncClient object at 0x000001D2DA17E660>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA3C7200>
+make_user = <function make_user.<locals>._make at 0x000001D2DA2520C0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2DA38F140>
+
+    @pytest.mark.asyncio
+    async def test_dev_session_discloses_product_without_attached_data(
+        client, db_session, make_user, monkeypatch
+    ):
+        """A53: 无绑定资源是合法形态，但必须显式披露，不能与「已加载」同形。"""
+        headers, provider_id = await make_user("data_provider", "a53nores")
+        product = await _mk_product(db_session, provider_id, resource_id=None)
+    
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+        }, headers=headers)
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+>       assert body["data_loaded"] is False
+               ^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'data_loaded'
+
+tests\test_dev_sandbox_data_load.py:253: KeyError
+______________ test_plain_dev_session_also_discloses_data_loaded ______________
+
+client = <httpx.AsyncClient object at 0x000001D2DA3C7BC0>
+make_user = <function make_user.<locals>._make at 0x000001D2DA253060>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2DA3C6FC0>
+
+    @pytest.mark.asyncio
+    async def test_plain_dev_session_also_discloses_data_loaded(
+        client, make_user, monkeypatch
+    ):
+        """不挂数据产品的纯开发会话：data_loaded=false（而不是缺字段）。"""
+        headers, _ = await make_user("data_provider", "a53plain")
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={"mode": "structured"},
+                                 headers=headers)
+        assert resp.status_code == 201, resp.text
+>       assert resp.json()["data_loaded"] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'data_loaded'
+
+tests\test_dev_sandbox_data_load.py:281: KeyError
+______________________ test_contract_sandbox_level_gate _______________________
+
+client = <httpx.AsyncClient object at 0x000001D2DA3C40B0>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001D2DA3C4140>
+make_user = <function make_user.<locals>._make at 0x000001D2D9DC9C60>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D2DA3C6F00>
+
+    @pytest.mark.asyncio
+    async def test_contract_sandbox_level_gate(client, db_session, make_user, monkeypatch):
+        """A55: \u5ba2\u6237\u7aef\u81ea\u9009\u6863\u4f4d\u9ad8\u4e8e\u5408\u7ea6\u5141\u8bb8\u6863\u4f4d \u21d2 400\uff0c\u5141\u8bb8\u6863\u4f4d\u4ecd\u53ef\u7528\uff08\u9632\u8fc7\u5ea6\u4fee\u6b63\uff09\u3002"""
+        monkeypatch.setattr(get_settings(), "DEV_SANDBOX_REQUIRE_CONTRACT", True)
+    
+        headers, provider_id = await make_user("data_provider", "a55prov")
+        resource = await _mk_resource(db_session, provider_id)
+        product = await _mk_product(db_session, provider_id, resource_id=resource.id)
+        contract = await _mk_contract(db_session, provider_id, [product.id], allowed_levels="L2")
+    
+        monkeypatch.setattr(storage_service, "download_decrypted", lambda object_name: CSV)
+        captured: dict = {}
+        _spy_provision(monkeypatch, captured)
+    
+        resp = await client.post("/api/v1/dev-sandbox/sessions", json={
+            "mode": "structured",
+            "data_product_id": str(product.id),
+            "contract_id": str(contract.id),
+            "sandbox_level": "L3",
+        }, headers=headers)
+>       assert resp.status_code == 400, resp.text
+E       AssertionError: {"session_id":"16a0f581-314c-4e73-9c32-dafe8456dc89","mode":"structured","status":"running","container_id":"l3-fake","input_files":[],"output_files":[]}
+E       assert 201 == 400
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests\test_dev_sandbox_data_load.py:306: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_dev_sandbox_data_load.py::test_data_load_runs_off_the_loop_and_is_reclaimed_afterwards
+FAILED tests/test_dev_sandbox_data_load.py::test_failed_provision_still_reclaims_the_plaintext_copy
+FAILED tests/test_dev_sandbox_data_load.py::test_stale_staging_dirs_are_swept
+FAILED tests/test_dev_sandbox_data_load.py::test_dev_session_refuses_when_product_data_cannot_load[encrypting-True-False]
+FAILED tests/test_dev_sandbox_data_load.py::test_dev_session_refuses_when_product_data_cannot_load[failed-True-False]
+FAILED tests/test_dev_sandbox_data_load.py::test_dev_session_refuses_when_product_data_cannot_load[ready-False-False]
+FAILED tests/test_dev_sandbox_data_load.py::test_dev_session_refuses_when_product_data_cannot_load[ready-True-True]
+FAILED tests/test_dev_sandbox_data_load.py::test_dev_session_discloses_product_without_attached_data
+FAILED tests/test_dev_sandbox_data_load.py::test_plain_dev_session_also_discloses_data_loaded
+FAILED tests/test_dev_sandbox_data_load.py::test_contract_sandbox_level_gate
+10 failed, 1 passed in 6.90s
+R1_DEVRED_RC=1

@@ -1,0 +1,25 @@
+.................FFFF                                                    [100%]
+================================== FAILURES ===================================
+E   assert 0 == 2
+     +  where 0 = len([])
+D:\workspace\sandbox\tests\test_pz04_honesty_gates.py:248: assert 0 == 2
+E   assert 0 == 1
+     +  where 0 = len([])
+D:\workspace\sandbox\tests\test_pz04_honesty_gates.py:264: assert 0 == 1
+E   assert 0 == 1
+     +  where 0 = len([])
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-4d215ea1
+D:\workspace\sandbox\tests\test_pz04_honesty_gates.py:282: assert 0 == 1
+E   assert 0 == 2
+     +  where 0 = len([])
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-18206167
+D:\workspace\sandbox\tests\test_pz04_honesty_gates.py:299: assert 0 == 2
+=========================== short test summary info ===========================
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_allowed
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_denied_fails_honestly
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_denied
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_allowed
+4 failed, 17 passed in 7.23s
+LOCK_RC=1

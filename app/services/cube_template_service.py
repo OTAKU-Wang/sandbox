@@ -374,13 +374,20 @@ def presign_artifact_url(artifact_id: str, ttl_seconds: int) -> str | None:
     )
 
 
-def upload_artifact(artifact_path: str) -> str:
+def upload_artifact(artifact_path: str, artifact_id: str) -> str:
     """Upload the built artifact to CDS MinIO (plaintext: it is a scenario
     image, and the node must download the raw ext4 — envelope encryption is
-    not viable for the distribution path)."""
+    not viable for the distribution path).
+
+    The object key is ``minio_object_name(artifact_id)`` — the very key
+    ``presign_artifact_url`` signs (A91). Nodes pull the presigned URL, so a
+    key derived from the local file name (the conversion script always emits
+    ``artifact.ext4``) would hand every node a NoSuchKey 404 and make every
+    template overwrite one shared object.
+    """
     settings = get_settings()
     client = _minio_client_or_none()
-    object_name = minio_object_name(Path(artifact_path).stem)
+    object_name = minio_object_name(artifact_id)
     if client is not None:
         client.fput_object(settings.MINIO_BUCKET, object_name, artifact_path)
         return object_name
@@ -520,7 +527,7 @@ class CubeTemplateService:
             # TC chain verdict: Go service, not reusable as a script).
             conv = await asyncio.to_thread(convert_rootfs, tpl.image_ref or "", work_dir)
             # (b) upload artifact to CDS MinIO → register sha256/size.
-            object_name = await asyncio.to_thread(upload_artifact, conv["artifact_path"])
+            object_name = await asyncio.to_thread(upload_artifact, conv["artifact_path"], tpl.artifact_id)
             tpl.sha256 = conv["sha256"]
             tpl.size_bytes = conv["size_bytes"]
             if isinstance(tpl.probe_config, dict) and not tpl.probe_config:

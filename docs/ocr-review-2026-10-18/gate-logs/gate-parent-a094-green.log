@@ -1,0 +1,148 @@
+..............................FFFFF....................................  [100%]
+================================== FAILURES ===================================
+_________ TestSM3GlobalReplacement.test_no_sha256_in_security_modules _________
+
+self = <tests.test_p0_security_gaps.TestSM3GlobalReplacement object at 0x000001B625A571D0>
+
+    def test_no_sha256_in_security_modules(self):
+        """安全模块核心路径不应有 hashlib.sha256 调用（gmssl fallback 除外）"""
+        import glob
+    
+        # These files should use SM3 for all primary crypto paths
+        security_files = glob.glob("app/services/field_acl.py") + \
+                        glob.glob("app/services/gateway_service.py") + \
+                        glob.glob("app/services/merkle_service.py")
+    
+        for fpath in security_files:
+>           content = Path(fpath).read_text()
+                      ^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/field_acl.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 29: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+_________ Test128SecurityAuditFixes.test_session_id_attribute_exists __________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000001B625A56E10>
+
+    def test_session_id_attribute_exists(self):
+        """audit_service.py 应使用 self.session_id 而非 self._session_id"""
+>       source = Path("app/services/audit_service.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/audit_service.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 27: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+___________ Test128SecurityAuditFixes.test_code_file_path_whitelist ___________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000001B625A56960>
+
+    def test_code_file_path_whitelist(self):
+        """code_file 路径应有白名单校验"""
+>       source = Path("app/services/secure_duckdb.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:337: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/secure_duckdb.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 26: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+_________ Test128SecurityAuditFixes.test_firecracker_rootfs_readonly __________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000001B625A56660>
+
+    def test_firecracker_rootfs_readonly(self):
+        """Firecracker rootfs 应设为只读"""
+>       source = Path("app/services/firecracker_runtime.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:346: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/firecracker_runtime.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 41: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+_____________ Test128SecurityAuditFixes.test_seccomp_fail_closed ______________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000001B625A56240>
+
+    def test_seccomp_fail_closed(self):
+        """seccomp 默认应为 fail-closed"""
+>       source = Path("app/services/sandbox_security.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:354: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/sandbox_security.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 32: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+=========================== short test summary info ===========================
+FAILED tests/test_p0_security_gaps.py::TestSM3GlobalReplacement::test_no_sha256_in_security_modules
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_session_id_attribute_exists
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_code_file_path_whitelist
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_firecracker_rootfs_readonly
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_seccomp_fail_closed
+5 failed, 66 passed in 33.95s
+A094_GREEN_RC=1

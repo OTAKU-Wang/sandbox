@@ -98,6 +98,10 @@ export interface AuditExportResult {
    * 响应头拿不到，所以在此按后端同一命名规则给出，不自造前缀。
    */
   filename: string;
+  /**
+   * 取 Blob 自证的 type（网关抹平为空时回退 text/csv）：这里拿不到响应头，
+   * 所以不再抄一份后端 Content-Disposition/Content-Type 的原文冒充真值。
+   */
   contentType: string;
 }
 
@@ -113,6 +117,46 @@ export interface MerkleProofResult {
   leaf_index: number;
   total_leaves: number;
   backend?: AnchorBackendDisclosure | null;
+}
+
+/** 嗅探只读头部几百字节：把整份 CSV 读进内存才发现它不是 CSV，代价太大（导出可达数十万行）。 */
+const CSV_SNIFF_BYTES = 512;
+
+/** 除 CSV 本体之外的可放行类型（octet-stream 交给首行内容判定兜底）。 */
+const CSV_LIKE_TYPES = ['text/csv', 'application/csv', 'application/vnd.ms-excel', 'application/octet-stream'];
+
+/**
+ * 2xx 的 Blob 到底是不是 CSV：共享拦截器只把 response.data 交给调用方，
+ * Content-Type / Content-Disposition 在这一层已经不存在，所以只能靠 Blob 自己的
+ * type + 首行内容。网关的 HTML 错误页、登录页、被当成 2xx 下发的 W2 JSON 错误
+ * 信封、以及空响应体（audit.py 即使 0 条也会写表头行）都得当场报错，绝不能让
+ * 用户下载到一个打开是 502 页面的 audit_export_30d.csv。
+ * 返回给用户看的原因；一切正常时返回 null。
+ */
+async function csvPayloadProblem(blob: Blob): Promise<string | null> {
+  const head = (await blob.slice(0, CSV_SNIFF_BYTES).text()).replace(/^\uFEFF/, '').trimStart();
+  const type = blob.type.split(';')[0].trim().toLowerCase();
+  if (blob.size === 0 || head === '') {
+    return '导出响应为空：后端即使 0 条记录也会写表头行，空体说明这份下载不是审计导出。';
+  }
+  if (head.startsWith('<')) {
+    return `导出响应是 HTML 页面而不是 CSV${type ? `（Content-Type: ${type}）` : ''}：请求多半被网关或登录页截下来了，请重新登录后再试。`;
+  }
+  if (head.startsWith('{') || head.startsWith('[')) {
+    let backendMessage = '';
+    try {
+      const envelope = JSON.parse(head) as { code?: unknown; message?: unknown };
+      if (typeof envelope.message === 'string' && envelope.message) backendMessage = `：${envelope.message}`;
+      else if (typeof envelope.code === 'string' && envelope.code) backendMessage = `：${envelope.code}`;
+    } catch {
+      // 截断的 JSON 片段：拿不到 message 也要报「不是 CSV」，不静默放行
+    }
+    return `导出响应是 JSON 错误信封而不是 CSV${backendMessage}，本次未生成文件。`;
+  }
+  if (type && !CSV_LIKE_TYPES.includes(type)) {
+    return `导出响应的类型是 ${type}，不是 CSV，本次未生成文件。`;
+  }
+  return null;
 }
 
 export const auditApi = {
@@ -158,6 +202,7 @@ export const auditApi = {
    * 导出审计日志（PRD 4-1 顶栏「导出审计日志」）。镜像 audit.py::export_audit_records：
    * 只有 days + format 两个参数 —— 列表页的 action 等筛选后端在此端点上不存在，
    * 传了也不会生效，所以这里不传，页面必须自己说明导出范围。
+   * csv 分支落盘前先嗅探内容：2xx 不等于就是 CSV（见 csvPayloadProblem）。
    */
   export: async ({ days, format = 'csv' }: AuditExportParams): Promise<AuditExportResult> => {
     if (format === 'json') {
@@ -169,12 +214,12 @@ export const auditApi = {
         contentType: 'application/json',
       };
     }
+    let blob: Blob;
     try {
-      const blob: Blob = await api.get('/audit/export', {
+      blob = await api.get('/audit/export', {
         params: { days, format: 'csv' },
         responseType: 'blob',
       });
-      return { blob, filename: `audit_export_${days}d.csv`, contentType: 'text/csv' };
     } catch (error: unknown) {
       // responseType='blob' 时连错误体都是 Blob：还原成 W2 envelope 再抛，
       // 页面才能继续用 getErrorMessage 显示后端真实原因（而非「导出失败」兜底）。
@@ -189,5 +234,8 @@ export const auditApi = {
       }
       throw error;
     }
+    const problem = await csvPayloadProblem(blob);
+    if (problem) throw new Error(problem);
+    return { blob, filename: `audit_export_${days}d.csv`, contentType: blob.type || 'text/csv' };
   },
 };

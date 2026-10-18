@@ -1,12 +1,16 @@
 # CI known failures baseline（W7 软门禁）
 
-> 规则：`Full suite (informational)` job 的失败数**不得增长**。每次合入后人工比对下方基线；
+> 规则：`Full suite (informational)` 的失败数**不得增长**。远程 lane（本表基线）
+> 仍按惯例人工比对；GitHub lane 自 2026-10-18 起由 `ci/check_full_suite_budget.py` +
+> `ci/full-suite-baseline.json` 机器门控（基线未建立前只计数并显式告警，建立后增长即红）；
 > 新失败如果是本次改动引入，必须修复后合入。环境性失败清单见
 > `docs/ai-sandbox-gap-remediation-plan.md` 各轮回归结论。
 
 ## 门禁层（不适用）
 
-Gate tests job 的测试文件必须全绿，任何失败直接阻断合入。清单以 `.github/workflows/ci.yml` 为唯一真源（远程 lane 现场解析该文件，不得另维一份），当前 **36 项**（2026-10-16 新增守卫 `tests/test_frontend_api_contract.py` 后远程实测 `GATE_FILES=36`；该行之前的运行实测为 35，含新增守卫 `tests/test_frontend_api_contract.py`）。
+Gate tests job 的测试文件必须全绿，任何失败直接阻断合入。清单以 `.github/workflows/ci.yml` 为唯一真源（远程 lane 现场解析该文件，不得另维一份），当前 **40 项**。历史实测：2026-10-16 新增守卫 `tests/test_frontend_api_contract.py` 后远程 `GATE_FILES=36`（该行之前的运行实测为 35）；此后守卫陆续入单（`test_sandbox_db_policy_gate`、`test_ci_workflow_policy` 等）。自 2026-10-18 起计数由 `tests/test_ci_workflow_policy.py` **机器锁定**：清单内文件必须存在、数量必须等于本句声明值，漂移当场红；人工计数纪律作废。
+
+同轮（w5 运维复核）CI 整改，详见 `.github/workflows/ci.yml` 头部纪律注释：全部 job 收敛为最小 `permissions: contents: read`（`GITHUB_TOKEN` 不再继承 write-all）；`secrets` job 改为校验和钉定的 gitleaks 8.30.1 二进制全历史扫描，不再向第三方 Action 显式传 `GITHUB_TOKEN`（`ci/gitleaks.toml` 白名单仅含 5 处逐条复核过的测试/文档假值，按 secret 值精确匹配）；新增 `migration-pg` job 在 postgres:16 service 上跑**带类型比对**的 `alembic check`（SQLite lane 只能 `ALEMBIC_COMPARE_TYPES=0`，UUID/JSONB/Numeric 类型漂移自此不再只有生产 PG 一个暴露面）；前端 job 补上 `npm test`（vitest，硬门）与 `npm run lint`（信息性基线：13 个已知 error，continue-on-error + 告警，见 2026-10-16 过程记录行）；全量步骤去掉 `|| true` 与 `if: always()`（门禁红则全量不再重复消耗）。
 
 ## 全量层基线
 

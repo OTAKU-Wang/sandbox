@@ -1,0 +1,49 @@
+.........FF                                                              [100%]
+================================== FAILURES ===================================
+_______________ test_upload_and_presign_use_the_same_object_key _______________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-76/test_upload_and_presign_use_th0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000231DBEECBC0>
+
+    def test_upload_and_presign_use_the_same_object_key(tmp_path, monkeypatch):
+        """A91: \u8282\u70b9\u6309\u9884\u7b7e\u540d URL \u4e0b\u8f7d \u2014\u2014 \u4e0a\u4f20 key \u4e0e\u9884\u7b7e\u540d key \u4e0d\u540c \u21d2 \u6c38\u8fdc NoSuchKey\u3002"""
+        import app.services.cube_template_service as cts
+    
+        fake = _fake_minio(monkeypatch)
+        # 构建脚本永远输出 artifact.ext4（scripts/cube-rootfs-convert.sh:104）
+        artifact = tmp_path / "artifact.ext4"
+        artifact.write_bytes(b"rootfs-bytes")
+        artifact_id = "rfs-0123456789ab"
+    
+>       key = cts.upload_artifact(str(artifact), artifact_id)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: upload_artifact() takes 1 positional argument but 2 were given
+
+tests\test_cube_template_dist.py:602: TypeError
+_______________ test_two_templates_do_not_share_one_object_key ________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-76/test_two_templates_do_not_shar0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000231DBECFCB0>
+
+    def test_two_templates_do_not_share_one_object_key(tmp_path, monkeypatch):
+        """A91: 按文件名取 key 会让所有模板写同一个 key（互相覆盖 + sha mismatch）。"""
+        import app.services.cube_template_service as cts
+    
+        fake = _fake_minio(monkeypatch)
+        paths, ids = [], ["rfs-aaaaaaaaaaaa", "rfs-bbbbbbbbbbbb"]
+        for i in ids:
+            path = tmp_path / i / "artifact.ext4"   # 同一文件名，不同目录
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"rootfs")
+            paths.append(str(path))
+    
+>       keys = [cts.upload_artifact(p, aid) for p, aid in zip(paths, ids)]
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: upload_artifact() takes 1 positional argument but 2 were given
+
+tests\test_cube_template_dist.py:624: TypeError
+=========================== short test summary info ===========================
+FAILED tests/test_cube_template_dist.py::test_upload_and_presign_use_the_same_object_key
+FAILED tests/test_cube_template_dist.py::test_two_templates_do_not_share_one_object_key
+2 failed, 9 passed in 4.65s
+R6_SVCRED_RC=1

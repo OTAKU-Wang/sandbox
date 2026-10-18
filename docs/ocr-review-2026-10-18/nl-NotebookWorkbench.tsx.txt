@@ -1,0 +1,1355 @@
+     1	// SS-23 /notebooks = 原型图 1「2-3 我的开发 · 调试环境」的外框重建（唯一事实源：
+     2	// D:/workspace/.cds-e2e/img-specs/group-B.md §图 1）。
+     3	//
+     4	// 外框逐字对齐转写：标题卡（标题 + 交付场景副标题 + 仅 1 个「← 返回列表」）、
+     5	// 左栏「文件目录」（250 宽、44px 行距、勾选框+文件图标+名称、底部两行灰字统计）、
+     6	// 右栏上「编辑器卡」（卡头 / 五项纯文字工具条 / 代码区 / 底部状态条）、
+     7	// 右栏下「输出/日志卡」（输出·问题·终端三页签 + 执行态 + 两个灰蓝图标钮 + 底部会话行）。
+     8	//
+     9	// 槽位口径（项目铁律 honest degradation / 禁伪造，逐条在 notebookWorkbenchModel.ts 里实现）：
+    10	// · 绿点「● 沙箱已连接」只由 GET /sandbox-sessions/{id} 的 status=="running" 驱动；
+    11	//   上一次执行落在 cds_stateless 时改画橙点并写明降级原因，绝不画假绿点。
+    12	// · CPU / 内存已用（D-e2e-48）：接 GET /sandbox-sessions/{id}/metering 的 cgroup v2 真读数（5s 轮询）；
+    13	//   后端读不到 cgroup（l2c 在 VM 内等）就回 available:false → 状态条继续「未计量」，不编数字。
+    14	//   沙箱内 Python 版本 / 光标（开发环分支）：仍无接口 → 未计量·未接入。
+    15	// · 「执行成功 · 6.4s」取本会话审计流最后一条 sandbox.execute 的 exit_code 与 duration_ms。
+    16	// · 卡头「已自动保存 HH:MM:SS」（D-e2e-48）：自动保存 = 本页前端 2s 防抖真 PUT，时间取 PUT
+    17	//   返回的 updated_at；服务端没有自动保存任务，离开本页即不再触发，每次自动保存同样 +1 版本。
+    18	// · 日志正文只渲染 GET /sandbox-sessions/{id}/logs 的真实事件；原型那句「输出结果不落盘，
+    19	//   仅保留最近 24 小时日志」与本平台事实不符（persist 会把输出写回笔记、审计日志无 24h 清理），
+    20	//   故改成本页真实口径。
+    21	// · 代码区内部（真 JupyterLab iframe / 自研单元格编辑器）是 SS-19 已批准的偏离，本文件不动其内部实现。
+    22	import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+    23	import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, Modal, Select, Spin, Tooltip, Typography, message } from 'antd';
+    24	import type { MenuProps } from 'antd';
+    25	import {
+    26	  ArrowLeftOutlined,
+    27	  CheckCircleFilled,
+    28	  DownOutlined,
+    29	  FileTextOutlined,
+    30	  InfoCircleOutlined,
+    31	  ReloadOutlined,
+    32	} from '@ant-design/icons';
+    33	import Editor from '@monaco-editor/react';
+    34	import { useNavigate, useSearchParams } from 'react-router-dom';
+    35	import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+    36	import './monacoSetup';
+    37	import './notebookWorkbench.css';
+    38	import {
+    39	  describeFlowError,
+    40	  UNKNOWN_TEXT,
+    41	  parseNotebookContent,
+    42	  serializeNotebookContent,
+    43	  canonicalizeNotebookContent,
+    44	  defaultNotebookPath,
+    45	  useCreateNotebook,
+    46	  useCreateWorkload,
+    47	  useDeleteNotebook,
+    48	  useExecuteCell,
+    49	  useJupyterStatus,
+    50	  useNotebook,
+    51	  useNotebooks,
+    52	  useOpenJupyterEnv,
+    53	  useRunNotebook,
+    54	  useStartDevSession,
+    55	  useUpdateNotebook,
+    56	  type CellExecuteResult,
+    57	  type JupyterEnvTicket,
+    58	  type Notebook,
+    59	} from '../../services/flow';
+    60	import { sandboxApi } from '../../services/sandboxApi';
+    61	import { useQuotaUsage } from '../../services/quotaApi';
+    62	import { fetchJupyterTree } from '../../services/jupyterContents';
+    63	import { CenteredLoading, QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
+    64	import { backendFromCellResult, backendFromNotebook, toOutputPane } from './display';
+    65	import { RuntimeStatusBanner } from './RuntimeStatusBanner';
+    66	import { useContractOptions } from './useContractOptions';
+    67	import { FileDirectoryPanel, OutputLogCard, type OutputTabKey } from './notebookWorkbenchPanels';
+    68	import {
+    69	  DISK_QUOTA_SCOPE_HINT,
+    70	  NBW_BACK,
+    71	  NBW_MENUS,
+    72	  NBW_NOT_MEASURED,
+    73	  NBW_SUBTITLE,
+    74	  NBW_TITLE,
+    75	  buildLogLines,
+    76	  applyViewCleared,
+    77	  clockOf,
+    78	  connectionState,
+    79	  cursorText,
+    80	  detectEol,
+    81	  fileBasename,
+    82	  gibFromMb,
+    83	  isAliveSessionStatus,
+    84	  jupyterEntryToNode,
+    85	  lastExecutionFromLogs,
+    86	  runStatusView,
+    87	  sessionFilesToTree,
+    88	  summarizeFiles,
+    89	  type ConnectionState,
+    90	  type WorkbenchFileNode,
+    91	  type WorkbenchLogLine,
+    92	} from './notebookWorkbenchModel';
+    93	
+    94	const { Text } = Typography;
+    95	
+    96	interface CellState {
+    97	  running: boolean;
+    98	  result: CellExecuteResult | null;
+    99	}
+   100	
+   101	// 单元格 id 只要在本页生命周期里唯一即可；仓里没有 nanoid 这个依赖，就不为一个计数器加包。
+   102	let cellSeq = 0;
+   103	const nextCellId = () => `cell-${(cellSeq += 1)}`;
+   104	
+   105	/** 会话目录 = 后端下发的 notebook_path 去掉文件名；开发环反代只允许列这个前缀以内。 */
+   106	function sessionDirOf(notebookPath: string | null | undefined): string {
+   107	  const segments = String(notebookPath ?? '').split('/').filter(Boolean);
+   108	  segments.pop();
+   109	  return segments.join('/');
+   110	}
+   111	
+   112	function countFiles(nodes: WorkbenchFileNode[]): number {
+   113	  return nodes.reduce(
+   114	    (acc, node) => acc + (node.isDirectory ? countFiles(node.children ?? []) : 1),
+   115	    0,
+   116	  );
+   117	}
+   118	
+   119	/** 内存配额分母：优先会话真实限额，其次任务档位；两个都没有就写未记录。 */
+   120	/** 自动保存防抖窗口：导出给测试，避免用写死的 sleep 验时序。 */
+   121	export const AUTO_SAVE_DEBOUNCE_MS = 2000;
+   122	
+   123	function memoryQuotaMb(sessionLimits: Record<string, unknown> | null, debugMemoryMb: number | null | undefined): number | null {
+   124	  const fromSession = sessionLimits && typeof sessionLimits.memory_mb === 'number' ? sessionLimits.memory_mb : null;
+   125	  return fromSession ?? (typeof debugMemoryMb === 'number' ? debugMemoryMb : null);
+   126	}
+   127	
+   128	// ───────────────────────────── 页面（标题卡 + 选中的本子） ─────────────────────────────
+   129	
+   130	export default function NotebookWorkbench() {
+   131	  const [searchParams, setSearchParams] = useSearchParams();
+   132	  const taskParam = searchParams.get('task');
+   133	  const [pickedId, setPickedId] = useState<string | null>(null);
+   134	  const [createOpen, setCreateOpen] = useState(false);
+   135	  const notebooksQuery = useNotebooks(null, 1, 50);
+   136	  const items = notebooksQuery.data?.items ?? [];
+   137	
+   138	  // ?task=<id>：卡片跳进来的上下文。选中态是从「地址栏 + 后端列表」推导出来的，不走 effect：
+   139	  // 只有列表里真的有这个 id 才算选中，否则 /notebooks?task=<删掉的本子> 会对不存在的 id
+   140	  // 发详情请求，页面挂在 404 上而不是回到「还没选」。列表还在路上时先转圈，不闪一下空状态。
+   141	  const taskKnown = !!taskParam && items.some((item) => item.id === taskParam);
+   142	  const selectedId = pickedId ?? (taskKnown ? taskParam : null);
+   143	  const awaitingTaskParam = pickedId === null && !!taskParam && !notebooksQuery.data;
+   144	  const { data: detail, isLoading, isError, error, refetch } = useNotebook(selectedId);
+   145	
+   146	  // 地址栏里的 task 参数刻意留着（刷新/收藏都回到同一个本子），只在手动换本子时清掉。
+   147	  const pick = useCallback(
+   148	    (id: string | null) => {
+   149	      setPickedId(id);
+   150	      if (searchParams.has('task')) setSearchParams({}, { replace: true });
+   151	    },
+   152	    [searchParams, setSearchParams],
+   153	  );
+   154	
+   155	  return (
+   156	    <div className="nbw-root">
+   157	      <div className="nbw-titlecard">
+   158	        <div>
+   159	          <div className="nbw-titlecard-title">{NBW_TITLE}</div>
+   160	          <div className="nbw-titlecard-sub">{NBW_SUBTITLE}</div>
+   161	        </div>
+   162	        <BackButton />
+   163	      </div>
+   164	
+   165	      {/* 原型上没有告警条；但后端真报「没有可用 MicroVM 运行时」时必须挂出来（honest degradation），
+   166	          运行时健康时这个组件自己返回 null，画面回到原型样。 */}
+   167	      <RuntimeStatusBanner />
+   168	
+   169	      {isError ? <QueryErrorAlert error={error} message="调试对象加载失败" onRetry={() => { void refetch(); }} /> : null}
+   170	
+   171	      {!selectedId ? (
+   172	        awaitingTaskParam ? (
+   173	          <CenteredLoading />
+   174	        ) : (
+   175	          <PickNotebookCard
+   176	            items={items.map((item) => ({ id: item.id, title: item.title }))}
+   177	            onPick={pick}
+   178	            onCreate={() => setCreateOpen(true)}
+   179	          />
+   180	        )
+   181	      ) : isLoading ? (
+   182	        <CenteredLoading />
+   183	      ) : detail ? (
+   184	        <NotebookWorkspace
+   185	          key={detail.id}
+   186	          notebook={detail}
+   187	          siblings={items.map((item) => ({ id: item.id, title: item.title, task_no: item.task_no }))}
+   188	          onPick={pick}
+   189	          onCreate={() => setCreateOpen(true)}
+   190	        />
+   191	      ) : null}
+   192	
+   193	      <CreateNotebookModal
+   194	        open={createOpen}
+   195	        onClose={() => setCreateOpen(false)}
+   196	        onCreated={(nb) => {
+   197	          setCreateOpen(false);
+   198	          pick(nb.id);
+   199	        }}
+   200	      />
+   201	    </div>
+   202	  );
+   203	}
+   204	
+   205	function BackButton() {
+   206	  const navigate = useNavigate();
+   207	  return (
+   208	    <Button icon={<ArrowLeftOutlined />} onClick={() => void navigate('/flow/tasks')}>
+   209	      {NBW_BACK}
+   210	    </Button>
+   211	  );
+   212	}
+   213	
+   214	/** 没有选中对象时的落点：图 1 没有这一屏，但也不能凭空画文件目录/日志，只给两个真动作。 */
+   215	function PickNotebookCard({
+   216	  items,
+   217	  onPick,
+   218	  onCreate,
+   219	}: {
+   220	  items: { id: string; title: string }[];
+   221	  onPick: (id: string) => void;
+   222	  onCreate: () => void;
+   223	}) {
+   224	  const menu: MenuProps = {
+   225	    onClick: ({ key }) => onPick(key),
+   226	    items: items.length
+   227	      ? items.map((item) => ({ key: item.id, label: item.title }))
+   228	      : [{ key: 'empty', label: '后端没有返回任何开发任务', disabled: true }],
+   229	  };
+   230	  return (
+   231	    <section className="nbw-card" style={{ minHeight: 260 }}>
+   232	      <div className="nbw-card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+   233	        <Empty
+   234	          description={
+   235	            <span style={{ fontSize: 12 }}>
+   236	              还没有选中的调试对象：GET /notebooks 里是你在后端真实存在的开发任务，选一个再进调试环境。
+   237	            </span>
+   238	          }
+   239	        >
+   240	          <Dropdown menu={menu} trigger={['click']}>
+   241	            <Button type="primary">选择调试对象</Button>
+   242	          </Dropdown>
+   243	          <Button onClick={onCreate} style={{ marginLeft: 8 }}>
+   244	            新建 Notebook
+   245	          </Button>
+   246	        </Empty>
+   247	      </div>
+   248	    </section>
+   249	  );
+   250	}
+   251	
+   252	// ─────────────────────── 工作区（左栏 + 右栏两张卡） ───────────────────────
+   253	
+   254	function NotebookWorkspace({
+   255	  notebook,
+   256	  siblings,
+   257	  onPick,
+   258	  onCreate,
+   259	}: {
+   260	  notebook: Notebook;
+   261	  siblings: { id: string; title: string; task_no?: string | null }[];
+   262	  onPick: (id: string | null) => void;
+   263	  onCreate: () => void;
+   264	}) {
+   265	  const navigate = useNavigate();
+   266	  const queryClient = useQueryClient();
+   267	  const [messageApi, contextHolder] = message.useMessage();
+   268	  // 高危确认框走 hook 版（进 contextHolder）：静态 Modal.confirm 拿不到主题，在测试里也不可靠。
+   269	  const [modalApi, modalHolder] = Modal.useModal();
+   270	
+   271	  const parsed = useMemo(() => parseNotebookContent(notebook.content), [notebook.content]);
+   272	  const [savedContent, setSavedContent] = useState(() => serializeNotebookContent(parsed, parsed.cells.length ? parsed.cells : ['']));
+   273	  const [cells, setCells] = useState(() => parsed.cells.map((cell) => ({ id: nextCellId(), value: cell })));
+   274	  const [cellStates, setCellStates] = useState<Record<string, CellState>>({});
+   275	  const [persistOutput, setPersistOutput] = useState(true);
+   276	  const [lastBackend, setLastBackend] = useState<string | null>(null);
+   277	  const [lastDegraded, setLastDegraded] = useState<string | null>(null);
+   278	  const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null);
+   279	  const [ticket, setTicket] = useState<JupyterEnvTicket | null>(null);
+   280	  const [showDevEnv, setShowDevEnv] = useState(false);
+   281	  const [labLoaded, setLabLoaded] = useState(false);
+   282	  const [showJupyter, setShowJupyter] = useState(false);
+   283	  const [tab, setTab] = useState<OutputTabKey>('output');
+   284	  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+   285	  const [downloading, setDownloading] = useState(false);
+   286	  const [clearedAt, setClearedAt] = useState<string | null>(null);
+   287	  const [localLines, setLocalLines] = useState<WorkbenchLogLine[]>([]);
+   288	  const [localRun, setLocalRun] = useState<{
+   289	    ok: boolean | null;
+   290	    durationMs: number | null;
+   291	    label: string;
+   292	    at: string | null;
+   293	    blocked?: boolean;
+   294	  } | null>(null);
+   295	  const [savedAt, setSavedAt] = useState<string | null>(null);
+   296	  const [autoSave, setAutoSave] = useState(false);
+   297	  const localSeq = useRef(0);
+   298	  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+   299	
+   300	  const update = useUpdateNotebook();
+   301	  const executeCell = useExecuteCell();
+   302	  const runAll = useRunNotebook();
+   303	  const startDevSession = useStartDevSession();
+   304	  const createWorkload = useCreateWorkload();
+   305	  const archiveNotebook = useDeleteNotebook();
+   306	  const openEnv = useOpenJupyterEnv();
+   307	
+   308	  const sessionId = notebook.session_id;
+   309	
+   310	  // ── 会话侧真实数据（全部只读 GET，可按 status 轮询）──
+   311	  const sessionQuery = useQuery({
+   312	    queryKey: ['sandbox-session', sessionId ?? null],
+   313	    queryFn: () => sandboxApi.get(sessionId as string),
+   314	    enabled: !!sessionId,
+   315	    refetchInterval: 20_000,
+   316	  });
+   317	  const sessionStatus = sessionQuery.data?.status ?? null;
+   318	  const alive = isAliveSessionStatus(sessionStatus);
+   319	
+   320	  // D-e2e-48：状态条 CPU/内存——5s 轮询真端口 GET /sandbox-sessions/{id}/metering；
+   321	  // 后端读不到 cgroup（l2c 在 VM 内／会话非运行）就回 available:false，前端继续未计量。
+   322	  const meteringQuery = useQuery({
+   323	    queryKey: ['session-metering', sessionId ?? null],
+   324	    queryFn: () => sandboxApi.getMetering(sessionId as string),
+   325	    enabled: !!sessionId && alive,
+   326	    refetchInterval: 5_000,
+   327	  });
+   328	  const metering = meteringQuery.data;
+   329	
+   330	  const filesQuery = useQuery({
+   331	    queryKey: ['session-files', sessionId ?? null],
+   332	    queryFn: () => sandboxApi.listFiles(sessionId as string),
+   333	    enabled: !!sessionId && alive,
+   334	  });
+   335	  const usageQuery = useQuery({
+   336	    queryKey: ['session-usage', sessionId ?? null],
+   337	    queryFn: () => sandboxApi.getUsage(sessionId as string),
+   338	    enabled: !!sessionId && alive,
+   339	  });
+   340	  const logsQuery = useQuery({
+   341	    queryKey: ['session-logs', sessionId ?? null],
+   342	    queryFn: () => sandboxApi.getLogs(sessionId as string, { limit: 200 }),
+   343	    enabled: !!sessionId,
+   344	    refetchInterval: 10_000,
+   345	  });
+   346	  const quotaQuery = useQuotaUsage();
+   347	
+   348	  const sessionDir = sessionDirOf(ticket?.notebook_path);
+   349	  const treeQuery = useQuery({
+   350	    queryKey: ['jupyter-contents', ticket?.session_id ?? '', sessionDir],
+   351	    queryFn: async () => {
+   352	      const tree = await fetchJupyterTree(sessionDir);
+   353	      return tree;
+   354	    },
+   355	    enabled: !!(ticket && sessionDir && labLoaded),
+   356	  });
+   357	
+   358	  const terminateSession = useMutation({
+   359	    mutationFn: (id: string) => sandboxApi.terminate(id),
+   360	    onSuccess: () => {
+   361	      messageApi.success('沙箱会话已终止');
+   362	      void queryClient.invalidateQueries({ queryKey: ['sandbox-session'] });
+   363	      void logsQuery.refetch();
+   364	    },
+   365	    onError: (err: unknown) => messageApi.error(`终止失败：${getErrorMessage(err, '后端未返回原因')}`),
+   366	  });
+   367	
+   368	  // ── 文件目录数据源：开发环目录（递归、含字节）优先，否则会话上传文件清单 ──
+   369	  const jupyterRoot = treeQuery.data && showDevEnv && labLoaded ? treeQuery.data.root : null;
+   370	  const jupyterNodes: WorkbenchFileNode[] | null = jupyterRoot
+   371	    ? (jupyterRoot.children ?? []).map(jupyterEntryToNode)
+   372	    : null;
+   373	  const sessionNodes = Array.isArray(filesQuery.data?.files) ? sessionFilesToTree(filesQuery.data.files) : null;
+   374	  // 后端对 cube/l2c 会话会直说 files=null（工作区在 VM 内，宿主侧不可枚举），不是「空目录」。
+   375	  const workspaceNotEnumerable = alive && !!filesQuery.data && !Array.isArray(filesQuery.data.files);
+   376	  const treeNodes: WorkbenchFileNode[] | null = jupyterNodes ?? sessionNodes;
+   377	  const treeSummary = treeNodes ? summarizeFiles(treeNodes) : null;
+   378	  const listed = useMemo(() => treeNodes ?? [], [treeNodes]);
+   379	  const usageBytes = usageQuery.data?.workspace?.bytes;
+   380	  const panelSummary = treeSummary
+   381	    ? {
+   382	        count: countFiles(listed),
+   383	        bytes: typeof usageBytes === 'number' ? usageBytes : treeSummary.bytes,
+   384	        partial: !!treeSummary.partial,
+   385	      }
+   386	    : null;
+   387	  const treeError = jupyterNodes
+   388	    ? null
+   389	    : filesQuery.isError
+   390	      ? getErrorMessage(filesQuery.error, '后端未返回文件清单')
+   391	      : null;
+   392	  const quotaLimitMb = quotaQuery.data?.tenant_resources?.limits?.disk_mb;
+   393	  const quotaText = typeof quotaLimitMb === 'number' && quotaLimitMb > 0 ? gibFromMb(quotaLimitMb) : null;
+   394	
+   395	  const panelEmptyHint = !sessionId
+   396	    ? '还没有沙箱会话：点「运行 → 启动调试沙箱」或直接执行单元格，后端会创建会话，那时才谈得上沙箱内目录。'
+   397	    : sessionQuery.isPending
+   398	      ? '正在向后端确认沙箱会话状态（GET /sandbox-sessions/{id}）。'
+   399	      : sessionQuery.isError
+   400	        ? `沙箱会话状态查询失败：${getErrorMessage(sessionQuery.error, '后端未返回原因')}`
+   401	        : !alive
+   402	          ? `沙箱会话已是终态（status=${sessionStatus ?? UNKNOWN_TEXT}）：工作区按后端口径回收，目录不再可读。`
+   403	          : workspaceNotEnumerable
+   404	            ? '后端说这个会话的工作区在虚机内，宿主侧不可枚举（GET /sandbox-sessions/{id}/files 返 files=null）：到 JupyterLab 开发环里看目录。'
+   405	            : '会话文件接口返回空清单（GET /sandbox-sessions/{id}/files 只列工作区 files/ 顶层）：确实一个文件都没有。';
+   406	
+   407	  const refreshTree = () => {
+   408	    if (jupyterNodes) void treeQuery.refetch();
+   409	    else void filesQuery.refetch();
+   410	  };
+   411	
+   412	  const chosenFiles = useMemo(() => {
+   413	    const walk = (nodes: WorkbenchFileNode[]): WorkbenchFileNode[] =>
+   414	      nodes.flatMap((node) => (node.isDirectory ? walk(node.children ?? []) : [node]));
+   415	    return walk(listed).filter((node) => selectedFiles.includes(node.key));
+   416	  }, [listed, selectedFiles]);
+   417	
+   418	  const downloadSelected = async () => {
+   419	    if (!sessionId || !chosenFiles.length) return;
+   420	    setDownloading(true);
+   421	    for (const file of chosenFiles) {
+   422	      try {
+   423	        const { blob, review } = await sandboxApi.downloadFile(sessionId, file.name);
+   424	        const url = URL.createObjectURL(blob);
+   425	        const link = document.createElement('a');
+   426	        link.href = url;
+   427	        link.download = file.name;
+   428	        link.click();
+   429	        URL.revokeObjectURL(url);
+   430	        if (review?.status === 'redacted') messageApi.warning(`${file.name}：输出审查已脱敏后才放行`);
+   431	      } catch (err) {
+   432	        const detail = (err as { detail?: { findings_count?: number } }).detail;
+   433	        messageApi.error(
+   434	          `${file.name} 取回失败：${getErrorMessage(err, '后端未返回原因')}${
+   435	            detail?.findings_count ? `（命中 ${detail.findings_count} 项）` : ''
+   436	          }`,
+   437	        );
+   438	      }
+   439	    }
+   440	    setDownloading(false);
+   441	  };
+   442	
+   443	  // ── 内容编辑与保存 ──
+   444	  const contentNow = serializeNotebookContent(parsed, cells.map((cell) => cell.value));
+   445	  const dirty = contentNow !== savedContent;
+   446	  // 「后端被别人改了」= 后端现在的内容 ≠ 本页上次同步的内容（与你在编辑区改了多少无关）。
+   447	  const serverChanged = !!savedContent && savedContent !== canonicalizeNotebookContent(notebook.content);
+   448	
+   449	  const saveContent = async (nextCells = cells, silent = false) => {
+   450	    const sources = nextCells.map((cell) => cell.value);
+   451	    try {
+   452	      const doc = await update.mutateAsync({
+   453	        id: notebook.id,
+   454	        payload: { content: canonicalizeNotebookContent(serializeNotebookContent(parsed, sources)) },
+   455	      });
+   456	      setSavedContent(serializeNotebookContent(parsed, sources));
+   457	      setSavedAt(clockOf(doc.updated_at));
+   458	      if (!silent) messageApi.success(`已保存（v${doc.version}）`);
+   459	    } catch (err) {
+   460	      messageApi.error(`保存失败：${describeFlowError(err, '后端未返回原因')}`);
+   461	    }
+   462	  };
+   463	
+   464	  // D-e2e-48：自动保存对齐原型卡头「已自动保存 HH:MM:SS」——实现 = 本页前端每次编辑
+   465	  // 重置一个 2s 计时器，到点静默 PUT（服务端仍无自动保存任务，离开本页即不再触发）；
+   466	  // 自动保存与手动保存同价：每次都是新版本（代价写在卡头 tooltip，不假装免费）。
+   467	  const autoSaveBridge = useRef(saveContent);
+   468	  autoSaveBridge.current = saveContent;
+   469	  // CR B-1：服务端已被别人改过时，自动保存不得盲 PUT 掉别人的版本——
+   470	  // 冲突横幅（reloadFromServer）必须活到用户亲手处置；手动保存是用户
+   471	  // 知情决策，仍照走。ref 而非闭包：2s 窗口内后端回流也要被看见。
+   472	  const serverChangedRef = useRef(false);
+   473	  serverChangedRef.current = serverChanged;
+   474	  useEffect(() => {
+   475	    if (!dirty) return undefined;
+   476	    const timer = window.setTimeout(() => {
+   477	      if (serverChangedRef.current) {
+   478	        setAutoSave(false);
+   479	        return;
+   480	      }
+   481	      if (!update.isPending) {
+   482	        setAutoSave(true);
+   483	        void autoSaveBridge.current(undefined, true);
+   484	      }
+   485	    }, AUTO_SAVE_DEBOUNCE_MS);
+   486	    return () => window.clearTimeout(timer);
+   487	  }, [dirty, cells, update.isPending]);
+   488	
+   489	  const reloadFromServer = () => {
+   490	    const fresh = parseNotebookContent(notebook.content);
+   491	    setSavedContent(serializeNotebookContent(fresh, fresh.cells.length ? fresh.cells : ['']));
+   492	    setCells(fresh.cells.map((cell) => ({ id: nextCellId(), value: cell })));
+   493	    setCellStates({});
+   494	  };
+   495	
+   496	  const pushLocalLine = (line: Omit<WorkbenchLogLine, 'key' | 'clock'>) => {
+   497	    localSeq.current += 1;
+   498	    setLocalLines((prev) => [
+   499	      ...prev.slice(-49),
+   500	      { ...line, key: `local:${localSeq.current}`, clock: clockOf(line.at) },
+   501	    ]);
+   502	  };
+   503	
+   504	  const markExecuted = (label: string, result: { ok: boolean; backend?: string | null; exit_code?: number; output_blocked?: boolean; degraded_reason?: string | null; kernel_error?: string | null; blocked_reason?: string | null } | null, failure: unknown) => {
+   505	    const at = new Date().toISOString();
+   506	    if (!result) {
+   507	      setLocalRun({ ok: null, durationMs: null, label, at });
+   508	      pushLocalLine({
+   509	        at,
+   510	        text: `本页发起 ${label} · 请求失败：${describeFlowError(failure, '后端未返回原因')}`,
+   511	        tone: 'error',
+   512	        problem: true,
+   513	      });
+   514	      return;
+   515	    }
+   516	    if (result.backend) setLastBackend(result.backend);
+   517	    setLastDegraded(result.degraded_reason ?? null);
+   518	    const ok = !!result.ok && !result.output_blocked;
+   519	    setLocalRun({ ok, durationMs: null, label, at, blocked: !!result.output_blocked });
+   520	    pushLocalLine({
+   521	      at,
+   522	      text: `本页发起 ${label} · 后端 ${result.backend ?? UNKNOWN_TEXT} · 退出码 ${result.exit_code ?? UNKNOWN_TEXT}${
+   523	        result.output_blocked ? ` · 输出被阻断（${result.blocked_reason ?? 'output_inspection_blocked'}）` : ''
+   524	      }${result.degraded_reason ? ` · 降级：${result.degraded_reason}` : ''}${
+   525	        result.kernel_error ? ` · 内核错误：${String(result.kernel_error).slice(0, 120)}` : ''
+   526	      }`,
+   527	      tone: ok ? 'ok' : 'error',
+   528	      problem: !ok,
+   529	    });
+   530	    // 审计流是权威来源：跑完就补拉一次，让状态与耗时随后由后端字段说话。
+   531	    void logsQuery.refetch();
+   532	    void sessionQuery.refetch();
+   533	  };
+   534	
+   535	  const runCell = async (cellId: string, index: number) => {
+   536	    const cell = cells[index];
+   537	    if (!cell) return;
+   538	    setCellStates((prev) => ({ ...prev, [cellId]: { running: true, result: null } }));
+   539	    try {
+   540	      const result = await executeCell.mutateAsync({
+   541	        id: notebook.id,
+   542	        payload: {
+   543	          code: cell.value,
+   544	          cell_index: persistOutput ? index : undefined,
+   545	          persist: persistOutput,
+   546	        },
+   547	      });
+   548	      setCellStates((prev) => ({ ...prev, [cellId]: { running: false, result } }));
+   549	      markExecuted(`单元格 #${index + 1}`, result, null);
+   550	    } catch (err) {
+   551	      setCellStates((prev) => ({ ...prev, [cellId]: { running: false, result: null } }));
+   552	      markExecuted(`单元格 #${index + 1}`, null, err);
+   553	      messageApi.error(`执行失败：${describeFlowError(err, '单元格执行失败')}`);
+   554	    }
+   555	  };
+   556	
+   557	  const runAllCells = async () => {
+   558	    try {
+   559	      const result = await runAll.mutateAsync(notebook.id);
+   560	      const list = result.results ?? [];
+   561	      list.forEach((item) => {
+   562	        const cell = cells[item.cell_index];
+   563	        if (cell) setCellStates((prev) => ({ ...prev, [cell.id]: { running: false, result: item } }));
+   564	      });
+   565	      const failed = list.find((item) => !item.ok || item.output_blocked);
+   566	      const summaryResult = list.length
+   567	        ? { ...(failed ?? list[list.length - 1]), ok: result.passed && !failed }
+   568	        : null;
+   569	      markExecuted(
+   570	        `全部 ${list.length} 个单元格${result.passed ? '（通过）' : '（有失败）'}`,
+   571	        summaryResult,
+   572	        null,
+   573	      );
+   574	    } catch (err) {
+   575	      markExecuted('全部单元格', null, err);
+   576	      messageApi.error(`运行失败：${describeFlowError(err, '运行全部失败')}`);
+   577	    }
+   578	  };
+   579	
+   580	  const startSandbox = () => {
+   581	    startDevSession.mutate(notebook.id, {
+   582	      onSuccess: (created) => {
+   583	        messageApi.success(`调试沙箱已就绪：会话 ${created.session_id}（等级 ${created.sandbox_level}）`);
+   584	        void queryClient.invalidateQueries({ queryKey: ['sandbox-session'] });
+   585	        void queryClient.invalidateQueries({ queryKey: ['session-logs'] });
+   586	      },
+   587	      onError: (err: unknown) => messageApi.error(`启动调试沙箱失败：${describeFlowError(err, '后端未返回原因')}`),
+   588	    });
+   589	  };
+   590	
+   591	  const openDevEnv = () => {
+   592	    openEnv.mutate(notebook.id, {
+   593	      onSuccess: (next) => {
+   594	        setLabLoaded(false);
+   595	        setTicket(next);
+   596	        setShowDevEnv(true);
+   597	      },
+   598	      onError: (err: unknown) => messageApi.error(`打开开发环失败：${describeFlowError(err, '后端未返回可用票据')}`),
+   599	    });
+   600	  };
+   601	
+   602	  const promote = () => {
+   603	    createWorkload.mutate(
+   604	      {
+   605	        name: `${notebook.title} 负载`,
+   606	        notebook_id: notebook.id,
+   607	        contract_id: notebook.contract_id ?? undefined,
+   608	      },
+   609	      {
+   610	        onSuccess: (wl) =>
+   611	          messageApi.success(
+   612	            `已提升为负载：${wl.name}${wl.contract_id ? '' : '（未关联合约，发布前需在负载中心补齐）'}`,
+   613	          ),
+   614	        onError: (err: unknown) => messageApi.error(`提升失败：${describeFlowError(err, '提升为负载失败')}`),
+   615	      },
+   616	    );
+   617	  };
+   618	
+   619	  const archive = () => {
+   620	    archiveNotebook.mutate(notebook.id, {
+   621	      onSuccess: () => {
+   622	        messageApi.success('已归档');
+   623	        onPick(null);
+   624	      },
+   625	      onError: (err: unknown) => messageApi.error(`归档失败：${describeFlowError(err, '归档失败')}`),
+   626	    });
+   627	  };
+   628	
+   629	  const focusLab = () => {
+   630	    iframeRef.current?.contentWindow?.focus();
+   631	    messageApi.info('焦点已交给 JupyterLab：运行/中断都在开发环里按它自己的口径执行（本页无法替 iframe 里的内核跑单元格）');
+   632	  };
+   633	
+   634	  // ── 日志与执行态 ──
+   635	  const logLines = applyViewCleared(
+   636	    buildLogLines(logsQuery.data?.logs ?? [], localLines),
+   637	    clearedAt,
+   638	  );
+   639	  const lastBackendExec = lastExecutionFromLogs(logsQuery.data?.logs ?? []);
+   640	  const status = runStatusView(lastBackendExec, localRun);
+   641	  const conn: ConnectionState = connectionState({
+   642	    sessionId,
+   643	    status: sessionStatus,
+   644	    loading: sessionQuery.isPending,
+   645	    error: sessionQuery.isError ? sessionQuery.error : null,
+   646	    degradedBackend: lastBackend ?? notebook.execution_backend,
+   647	    degradedReason: lastDegraded,
+   648	  });
+   649	  const memoryQuota = memoryQuotaMb(sessionQuery.data?.resource_limits ?? null, notebook.debug_memory_mb);
+   650	  const language = notebook.language?.trim() || UNKNOWN_TEXT;
+   651	  const fileName = fileBasename(notebook.path, notebook.title || UNKNOWN_TEXT);
+   652	  // 卡头那个灰色日期就是后端写的 updated_at（列 onupdate=now()），只取到日。
+   653	  const updatedDate = notebook.updated_at ? notebook.updated_at.slice(0, 10) : UNKNOWN_TEXT;
+   654	  const eol = detectEol(contentNow);
+   655	  const stopEnabled = alive && !terminateSession.isPending;
+   656	  const stopHint = !sessionId
+   657	    ? '还没有沙箱会话可终止'
+   658	    : alive
+   659	      ? '终止沙箱会话（POST /sandbox-sessions/{id}/terminate）：平台没有「中断单次执行」的接口，终止会话就是真实的停止手段'
+   660	      : `会话已是终态（status=${sessionStatus ?? UNKNOWN_TEXT}），没有可终止的会话`;
+   661	
+   662	  // ── 工具条五项菜单（全部指向真实动作；没有真动作的项一律 disabled 并写明原因）──
+   663	  const cellBranch = !showDevEnv;
+   664	  // 卡头文件名下拉 = 开发任务切换器（真动作）；数据源是本页已载入的那一页任务，不是全量检索。
+   665	  const switcher: MenuProps = {
+   666	    onClick: ({ key }) => {
+   667	      if (key === '__create') onCreate();
+   668	      else onPick(key);
+   669	    },
+   670	    items: [
+   671	      ...(siblings.length
+   672	        ? siblings.map((item) => ({
+   673	            key: item.id,
+   674	            label: `${item.title}${item.task_no ? ` · ${item.task_no}` : ''}`,
+   675	            disabled: item.id === notebook.id,
+   676	          }))
+   677	        : [{ key: '__none', label: '后端没有返回其他开发任务', disabled: true }]),
+   678	      { type: 'divider' },
+   679	      { key: '__create', label: '新建 Notebook…' },
+   680	    ],
+   681	  };
+   682	
+   683	  const fileMenu: MenuProps = {
+   684	    onClick: ({ key }) => {
+   685	      if (key === 'save') {
+   686	        setAutoSave(false);
+   687	        void saveContent();
+   688	      }
+   689	      if (key === 'reload') reloadFromServer();
+   690	      if (key === 'persist') setPersistOutput((prev) => !prev);
+   691	      if (key === 'promote') promote();
+   692	      if (key === 'archive') archive();
+   693	      if (key === 'create') onCreate();
+   694	    },
+   695	    items: [
+   696	      { key: 'create', label: '新建 Notebook…' },
+   697	      { key: 'save', label: '保存（内容写回后端，版本 +1）', disabled: !dirty || update.isPending },
+   698	      { key: 'reload', label: '载入后端最新内容', disabled: !serverChanged },
+   699	      { key: 'persist', label: `${persistOutput ? '☑' : '☐'} 输出写入笔记（persist）` },
+   700	      { type: 'divider' },
+   701	      { key: 'promote', label: '提升为负载' },
+   702	      { key: 'archive', label: '归档当前 Notebook', danger: true },
+   703	    ],
+   704	  };
+   705	
+   706	  const editMenu: MenuProps = {
+   707	    onClick: ({ key }) => {
+   708	      if (key === 'add') setCells((prev) => [...prev, { id: nextCellId(), value: '' }]);
+   709	      if (key === 'remove') setCells((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+   710	    },
+   711	    items: cellBranch
+   712	      ? [
+   713	          { key: 'add', label: '新增单元格' },
+   714	          { key: 'remove', label: '删除末尾单元格', disabled: cells.length <= 1 },
+   715	        ]
+   716	      : [
+   717	          {
+   718	            key: 'lab',
+   719	            label: '开发环分支：单元格由 JupyterLab 自己编辑，本页不代理',
+   720	            disabled: true,
+   721	          },
+   722	        ],
+   723	  };
+   724	
+   725	  const viewMenu: MenuProps = {
+   726	    onClick: ({ key }) => {
+   727	      if (key === 'lab') (showDevEnv ? () => setShowDevEnv(false) : openDevEnv)();
+   728	      if (key === 'jupyter') setShowJupyter((prev) => !prev);
+   729	      if (key === 'tree') refreshTree();
+   730	      if (key === 'sandbox') startSandbox();
+   731	      if (key === 'records') void navigate(`/flow/tasks/${notebook.id}`);
+   732	      if (key === 'quota') void navigate('/flow/quota');
+   733	    },
+   734	    items: [
+   735	      {
+   736	        key: 'lab',
+   737	        label: showDevEnv ? '返回单元格编辑器' : '打开 Jupyter 开发环（申请一次性票据）',
+   738	        disabled: openEnv.isPending,
+   739	      },
+   740	      { key: 'jupyter', label: `${showJupyter ? '☑' : '☐'} Jupyter 可用性探测` },
+   741	      { key: 'tree', label: '刷新文件目录' },
+   742	      { key: 'sandbox', label: '启动/复用调试沙箱' },
+   743	      { type: 'divider' },
+   744	      { key: 'records', label: '运行记录（任务详情）' },
+   745	      { key: 'quota', label: '配额用量' },
+   746	    ],
+   747	  };
+   748	
+   749	  const languageMenu: MenuProps = {
+   750	    items: [
+   751	      {
+   752	        key: 'lang',
+   753	        label: `语言：${language} —— 创建时确定，PUT /notebooks 载荷里没有 language，故本页只读`,
+   754	        disabled: true,
+   755	      },
+   756	      { key: 'kernel', label: `内核：${notebook.kernel ?? UNKNOWN_TEXT}（NotebookOut.kernel）`, disabled: true },
+   757	    ],
+   758	  };
+   759	
+   760	  const runMenu: MenuProps = {
+   761	    onClick: ({ key }) => {
+   762	      if (key === 'all') void runAllCells();
+   763	      if (key === 'sandbox') startSandbox();
+   764	      if (key === 'lab') focusLab();
+   765	    },
+   766	    items: cellBranch
+   767	      ? [
+   768	          { key: 'all', label: '运行全部单元格', disabled: runAll.isPending },
+   769	          { key: 'sandbox', label: '启动/复用调试沙箱' },
+   770	          {
+   771	            key: 'hint',
+   772	            label: '中断单次执行没有接口：要停止只能终止会话（输出卡右侧的停止图标）',
+   773	            disabled: true,
+   774	          },
+   775	        ]
+   776	      : [
+   777	          { key: 'lab', label: '把焦点交给 JupyterLab（运行在它里面执行）' },
+   778	          { key: 'sandbox', label: '启动/复用调试沙箱' },
+   779	        ],
+   780	  };
+   781	
+   782	  const menuProps: Record<(typeof NBW_MENUS)[number], MenuProps> = {
+   783	    文件: fileMenu,
+   784	    编辑: editMenu,
+   785	    查看: viewMenu,
+   786	    语言: languageMenu,
+   787	    运行: runMenu,
+   788	  };
+   789	
+   790	  return (
+   791	    <div className="nbw-columns">
+   792	      {contextHolder}
+   793	      {modalHolder}
+   794	      <FileDirectoryPanel
+   795	        nodes={listed}
+   796	        summary={panelSummary}
+   797	        loading={(filesQuery.isPending && alive) || (showDevEnv && treeQuery.isPending)}
+   798	        error={treeError}
+   799	        emptyHint={panelEmptyHint}
+   800	        quotaText={quotaText}
+   801	        quotaHint={
+   802	          quotaText
+   803	            ? `分子=本会话工作区实测字节（GET /sandbox-sessions/${sessionId ?? '-'}/usage → workspace.bytes；开发环分支=已读到的文件字节合计）。${DISK_QUOTA_SCOPE_HINT}`
+   804	            : '账号级磁盘额度未取到（GET /deliveries/quota-usage 未返回 tenant_resources.limits.disk_mb），故分母显示「配额未记录」。'
+   805	        }
+   806	        partialHint={treeQuery.data?.incomplete ? treeQuery.data.note ?? '目录清单不是全量' : null}
+   807	        refreshing={jupyterNodes ? treeQuery.isFetching : filesQuery.isFetching}
+   808	        onRefresh={refreshTree}
+   809	        refreshEnabled={!!sessionId && (alive || showDevEnv)}
+   810	        selected={selectedFiles}
+   811	        onToggle={(key, checked) =>
+   812	          setSelectedFiles((prev) => (checked ? [...prev, key] : prev.filter((item) => item !== key)))
+   813	        }
+   814	        onDownloadSelected={() => {
+   815	          void downloadSelected();
+   816	        }}
+   817	        downloading={downloading}
+   818	      />
+   819	
+   820	      <div className="nbw-right">
+   821	        {/* ───── 编辑器卡片（图 1 §3.2）───── */}
+   822	        <section className="nbw-card nbw-card-grow" aria-label="代码编辑器">
+   823	          <div className="nbw-card-head">
+   824	            <div style={{ minWidth: 0 }}>
+   825	              <Dropdown menu={switcher} trigger={['click']}>
+   826	                <span className="nbw-editor-name">
+   827	                  <FileTextOutlined style={{ color: '#1b6ef3' }} />
+   828	                  <span style={{ maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+   829	                    {fileName}
+   830	                  </span>
+   831	                  <DownOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+   832	                </span>
+   833	              </Dropdown>
+   834	              <div className="nbw-editor-meta">
+   835	                <span>{updatedDate}</span>
+   836	                <SaveState dirty={dirty} saving={update.isPending} savedAt={savedAt} auto={autoSave} />
+   837	                <Tooltip title="这份内容在本页改过但还没写回后端：文件 → 保存（PUT /notebooks/{id}）">
+   838	                  {dirty ? <InfoCircleOutlined style={{ color: '#ad6800' }} /> : null}
+   839	                </Tooltip>
+   840	              </div>
+   841	            </div>
+   842	            <Dropdown menu={languageMenu} trigger={['click']}>
+   843	              <span className="nbw-lang-pick">
+   844	                {language} <DownOutlined style={{ fontSize: 10 }} />
+   845	              </span>
+   846	            </Dropdown>
+   847	          </div>
+   848	
+   849	          <div className="nbw-toolbar">
+   850	            <div className="nbw-toolbar-left">
+   851	              {NBW_MENUS.map((label) => (
+   852	                <Dropdown key={label} menu={menuProps[label]} trigger={['click']}>
+   853	                  <span className="nbw-menu-label">{label}</span>
+   854	                </Dropdown>
+   855	              ))}
+   856	            </div>
+   857	            <div className="nbw-toolbar-right">
+   858	              <Tooltip
+   859	                title={
+   860	                  cellBranch
+   861	                    ? '本页 Monaco 编辑器实例的 tabSize=4（写回后端时按源码原样保留，不做格式化）'
+   862	                    : '开发环是 JupyterLab iframe：缩进由它自己的编辑器决定，本页读不到，标未接入'
+   863	                }
+   864	              >
+   865	                <span className="nbw-tool-item">{cellBranch ? '缩进：4 空格' : '缩进：未接入'}</span>
+   866	              </Tooltip>
+   867	              <Tooltip
+   868	                title={
+   869	                  cellBranch
+   870	                    ? '浏览器与 Monaco 的文本都是 UTF-8（PUT /notebooks 的 JSON 体同理）'
+   871	                    : '开发环 iframe 内文件的编码本页读不到，标未接入'
+   872	                }
+   873	              >
+   874	                <span className="nbw-tool-item">{cellBranch ? '编码：UTF-8' : '编码：未接入'}</span>
+   875	              </Tooltip>
+   876	              <Tooltip title={conn.hint}>
+   877	                <span className={`nbw-chip nbw-chip-${conn.tone}`}>{conn.label}</span>
+   878	              </Tooltip>
+   879	            </div>
+   880	          </div>
+   881	
+   882	          <div className="nbw-code-area">
+   883	            {serverChanged ? (
+   884	              <Alert
+   885	                type="warning"
+   886	                showIcon
+   887	                message="后端内容已被别处更新，与本页编辑器不一致"
+   888	                action={
+   889	                  <Button size="small" onClick={reloadFromServer}>
+   890	                    载入后端最新内容
+   891	                  </Button>
+   892	                }
+   893	                description="编辑区仍是你的版本，运行执行的是编辑区内容；保存会让后端版本 +1。"
+   894	              />
+   895	            ) : null}
+   896	            {openEnv.isError ? (
+   897	              <Alert type="error" showIcon message="打开开发环失败" description={describeFlowError(openEnv.error, '后端未返回可用票据')} />
+   898	            ) : null}
+   899	
+   900	            {showDevEnv && ticket ? (
+   901	              <DevEnvFrame
+   902	                ticket={ticket}
+   903	                iframeRef={iframeRef}
+   904	                onLoaded={() => setLabLoaded(true)}
+   905	                treeError={treeQuery.isError ? getErrorMessage(treeQuery.error, '开发环目录读取失败') : null}
+   906	              />
+   907	            ) : (
+   908	              <>
+   909	                <BackendStrip
+   910	                  notebook={notebook}
+   911	                  cellStates={cellStates}
+   912	                  persistOutput={persistOutput}
+   913	                  onTogglePersist={() => setPersistOutput((prev) => !prev)}
+   914	                  lastBackend={lastBackend}
+   915	                />
+   916	                {cells.map((cell, index) => (
+   917	                  <div className="nbw-cell-block" key={cell.id}>
+   918	                    <div className="nbw-cell-bar">
+   919	                      <Text type="secondary" style={{ fontSize: 12 }}>
+   920	                        #{index + 1} {notebook.kernel ?? 'cell'}
+   921	                      </Text>
+   922	                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+   923	                        {cellStates[cell.id]?.running || executeCell.isPending ? <Spin size="small" /> : null}
+   924	                        <Button size="small" onClick={() => void runCell(cell.id, index)} disabled={executeCell.isPending}>
+   925	                          运行
+   926	                        </Button>
+   927	                        <Button size="small" type="text" disabled={cells.length === 1} onClick={() => setCells((prev) => prev.filter((item) => item.id !== cell.id))}>
+   928	                          删除
+   929	                        </Button>
+   930	                      </div>
+   931	                    </div>
+   932	                    <Editor
+   933	                      height="160px"
+   934	                      language={notebook.language ?? 'python'}
+   935	                      value={cell.value}
+   936	                      onChange={(value) => {
+   937	                        const next = cells.map((item) => (item.id === cell.id ? { ...item, value: value ?? '' } : item));
+   938	                        setCells(next);
+   939	                      }}
+   940	                      onMount={(editor) => {
+   941	                        editor.onDidChangeCursorPosition((event) =>
+   942	                          setCursor({ line: event.position.lineNumber, column: event.position.column }),
+   943	                        );
+   944	                      }}
+   945	                      options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, tabSize: 4 }}
+   946	                    />
+   947	                    {cellStates[cell.id]?.result ? (
+   948	                      <OutputView result={cellStates[cell.id]!.result!} />
+   949	                    ) : null}
+   950	                  </div>
+   951	                ))}
+   952	                <Button size="small" icon={<ReloadOutlined />} onClick={() => setCells((prev) => [...prev, { id: nextCellId(), value: '' }])}>
+   953	                  新增单元格
+   954	                </Button>
+   955	              </>
+   956	            )}
+   957	            {showJupyter ? <JupyterPanel notebookId={notebook.id} /> : null}
+   958	          </div>
+   959	
+   960	          <div className="nbw-statusbar">
+   961	            <div className="nbw-statusbar-group">
+   962	              <Tooltip
+   963	                title={
+   964	                  cellBranch
+   965	                    ? '光标位置来自本页 Monaco 编辑器的 position 事件；还没点进编辑器时没有光标可报，显示「—」。'
+   966	                    : '未接入：开发环是 iframe，跨文档拿不到里面的光标位置'
+   967	                }
+   968	              >
+   969	                <span>{cursorText(cellBranch ? cursor : null)}</span>
+   970	              </Tooltip>
+   971	              <span>{cellBranch ? 'UTF-8' : '编码 未接入'}</span>
+   972	              <span>{eol}</span>
+   973	              <Tooltip title="语言取 NotebookOut.language（真字段）；沙箱内解释器版本没有任何接口下发（cells/execute 只回 ok/backend/stdout…，runtime-status 也不含版本），故版本号显示未计量。">
+   974	                <span>{`${language} · 版本${NBW_NOT_MEASURED}`}</span>
+   975	              </Tooltip>
+   976	            </div>
+   977	            <div className="nbw-statusbar-group">
+   978	              <Tooltip
+   979	                title={
+   980	                  metering?.available && metering.cpu_percent != null
+   981	                    ? `cgroup v2 cpu.stat 真采样（${metering.sampled_ms ?? 250}ms 窗口，单核百分比，5s 轮询；来源 ${metering.source ?? '-'}）。`
+   982	                    : `未计量：${metering?.reason ?? '无会话或尚未取到读数'}；画一个 CPU 百分比就是编数字。`
+   983	                }
+   984	              >
+   985	                <span>{metering?.available && metering.cpu_percent != null ? `CPU ${metering.cpu_percent}%` : `CPU ${NBW_NOT_MEASURED}`}</span>
+   986	              </Tooltip>
+   987	              <Tooltip
+   988	                title={
+   989	                  metering?.available && metering.memory_used_mb != null
+   990	                    ? `分子 = cgroup memory.current（5s 轮询）；分母优先 cgroup memory.max，无上限时回落会话配额。`
+   991	                    : `已用侧未计量：${metering?.reason ?? '无会话或尚未取到读数'}；分母是真配额：优先沙箱会话 resource_limits.memory_mb，没有则回落任务档位 debug_memory_mb。`
+   992	                }
+   993	              >
+   994	                <span>{`${metering?.available && metering.memory_used_mb != null ? `内存 ${gibFromMb(metering.memory_used_mb)}` : `内存 ${NBW_NOT_MEASURED}`} / ${(() => {
+   995	                  const limitMb = metering?.available ? metering.memory_limit_mb ?? memoryQuota : memoryQuota;
+   996	                  return limitMb ? `${gibFromMb(limitMb)} 配额` : '配额未记录';
+   997	                })()}`}</span>
+   998	              </Tooltip>
+   999	            </div>
+  1000	          </div>
+  1001	        </section>
+  1002	
+  1003	        {/* ───── 输出 / 日志卡片（图 1 §3.3）───── */}
+  1004	        <OutputLogCard
+  1005	          lines={logLines}
+  1006	          tab={tab}
+  1007	          onTab={setTab}
+  1008	          status={status}
+  1009	          statusHint={status.hint}
+  1010	          onStop={() => {
+  1011	            if (!sessionId) return;
+  1012	            // 高危动作：先二次确认再打下后端那条真接口（项目里高危动作的统一做法）。
+  1013	            modalApi.confirm({
+  1014	              title: '终止沙箱会话？',
+  1015	              content: `沙箱里正在跑的东西一起结束，会话密钥随即销毁，工作区按后端口径回收（POST /sandbox-sessions/${sessionId}/terminate）。`,
+  1016	              okText: '终止',
+  1017	              okButtonProps: { danger: true },
+  1018	              cancelText: '取消',
+  1019	              onOk: () => terminateSession.mutate(sessionId),
+  1020	            });
+  1021	          }}
+  1022	          stopEnabled={stopEnabled}
+  1023	          stopHint={stopHint}
+  1024	          onClear={() => {
+  1025	            // 「清空视图」= 只看比这一刻更晚的事件；后端审计日志一行都不动。
+  1026	            setClearedAt(logLines.length ? logLines[logLines.length - 1].at : new Date().toISOString());
+  1027	            setLocalLines([]);
+  1028	            setTab('output');
+  1029	          }}
+  1030	          clearEnabled={logLines.length > 0}
+  1031	          sessionLine={
+  1032	            sessionId
+  1033	              ? `沙箱会话 ${sessionId} · 本页读的是后端会话审计流最近 ${logsQuery.data?.count ?? 0} 条`
+  1034	              : '沙箱会话 未创建 · 执行时后端会为本任务创建会话，日志届时才有来源'
+  1035	          }
+  1036	          sessionHint={
+  1037	            '原型那句「输出结果不落盘，仅保留最近 24 小时日志」在本平台不成立，故不照抄：'
+  1038	            + 'persist=true 时单元格输出会写回笔记内容（落库），执行事件的保留期由审计日志保留策略决定（平台没有 24 小时清理）。'
+  1039	          }
+  1040	          fullLogTo={sessionId ? `/sandbox-sessions/${sessionId}` : null}
+  1041	          onOpenFullLog={() => sessionId && void navigate(`/sandbox-sessions/${sessionId}`)}
+  1042	          notices={
+  1043	            showDevEnv && ticket ? (
+  1044	              <div style={{ marginTop: 8 }}>
+  1045	                <Text type="secondary" style={{ fontSize: 12 }}>
+  1046	                  开发环会话 {ticket.session_id} · 等级 {ticket.sandbox_level ?? UNKNOWN_TEXT} · 票据 {ticket.ttl}s 一次性有效
+  1047	                  {ticket.injected.length ? ` · 已注入 ${ticket.injected.length} 个供数文件到 input/` : ' · input/ 未注入供数'}
+  1048	                </Text>
+  1049	              </div>
+  1050	            ) : null
+  1051	          }
+  1052	        />
+  1053	      </div>
+  1054	    </div>
+  1055	  );
+  1056	}
+  1057	
+  1058	/** 卡头保存态：只在真保存成功后亮绿勾，并写明这个时间是保存动作写的，不是自动保存。 */
+  1059	/** 卡头保存态：auto=true 时文案是「已自动保存」（D-e2e-48 前端防抖 PUT，非后端任务）。 */
+  1060	function SaveState({ dirty, saving, savedAt, auto }: { dirty: boolean; saving: boolean; savedAt: string | null; auto: boolean }) {
+  1061	  if (saving) {
+  1062	    return (
+  1063	      <span>
+  1064	        <Spin size="small" /> 保存中
+  1065	      </span>
+  1066	    );
+  1067	  }
+  1068	  if (savedAt) {
+  1069	    return (
+  1070	      <Tooltip title="时间取 PUT /notebooks/{id} 返回的 updated_at（列 onupdate=now()）。自动保存 = 本页前端 2 秒防抖 PUT：服务端没有自动保存任务，离开本页即不再触发；每次自动保存同样 +1 版本。">
+  1071	        <span className="nbw-saved-ok">
+  1072	          <CheckCircleFilled style={{ marginRight: 4 }} />
+  1073	          {auto ? '已自动保存' : '已保存'} {savedAt}
+  1074	        </span>
+  1075	      </Tooltip>
+  1076	    );
+  1077	  }
+  1078	  return <span>{dirty ? '有未保存修改' : '无改动'}</span>;
+  1079	}
+  1080	
+  1081	/** 真 JupyterLab iframe（SS-19 已批准的代码区内偏离）；只在外框里换位置，不改它的行为。 */
+  1082	function DevEnvFrame({
+  1083	  ticket,
+  1084	  iframeRef,
+  1085	  onLoaded,
+  1086	  treeError,
+  1087	}: {
+  1088	  ticket: JupyterEnvTicket;
+  1089	  iframeRef: RefObject<HTMLIFrameElement | null>;
+  1090	  onLoaded: () => void;
+  1091	  treeError: string | null;
+  1092	}) {
+  1093	  const level = ticket.sandbox_level;
+  1094	  return (
+  1095	    <>
+  1096	      <Alert
+  1097	        type="warning"
+  1098	        showIcon
+  1099	        message="开发环环境说明（不掩饰）"
+  1100	        description={
+  1101	          <div style={{ lineHeight: 1.7 }}>
+  1102	            <div>
+  1103	              JupyterLab 跑在独立容器里（<code>cds-jupyter</code>），会话等级 <code>{level ?? '未下发'}</code>
+  1104	              {level === 'l2c' ? '（CubeSandbox MicroVM）' : '，不是 CubeSandbox MicroVM'}。终端接口已在镜像内关闭，
+  1105	              文件与 kernel 由后端按本会话目录前缀限制。
+  1106	            </div>
+  1107	            <div>
+  1108	              当前目录就是本会话的产物目录：只有写在这里的文件会被成果包采集，并且逐个过 T5 出口网关审查与水印；
+  1109	              空产物会被如实记为真空。
+  1110	            </div>
+  1111	            {ticket.inject_errors?.length ? (
+  1112	              <div style={{ color: '#c0392b' }}>
+  1113	                供数异常 {ticket.inject_errors.length} 项（后端原话）：{ticket.inject_errors.slice(0, 3).join('；')}
+  1114	                {ticket.inject_errors.length > 3 ? '…' : ''}
+  1115	              </div>
+  1116	            ) : null}
+  1117	            {treeError ? <div style={{ color: '#c0392b' }}>左栏目录读取失败：{treeError}</div> : null}
+  1118	          </div>
+  1119	        }
+  1120	      />
+  1121	      <iframe
+  1122	        ref={iframeRef}
+  1123	        title="Jupyter 开发环"
+  1124	        src={ticket.url}
+  1125	        onLoad={onLoaded}
+  1126	        style={{
+  1127	          width: '100%',
+  1128	          flex: '1 1 auto',
+  1129	          minHeight: 360,
+  1130	          border: '1px solid rgba(128,128,128,0.35)',
+  1131	          borderRadius: 6,
+  1132	          background: '#fff',
+  1133	        }}
+  1134	      />
+  1135	    </>
+  1136	  );
+  1137	}
+  1138	
+  1139	function OutputView({ result }: { result: CellExecuteResult }) {
+  1140	  const pane = toOutputPane(result);
+  1141	  if (!pane) return null;
+  1142	  return (
+  1143	    <div style={{ padding: 8, borderTop: '1px solid #eef1f6', display: 'grid', gap: 6 }}>
+  1144	      {typeof pane.exitCode === 'number' ? (
+  1145	        <Text type="secondary" style={{ fontSize: 12 }}>
+  1146	          {`退出码 ${pane.exitCode}`}
+  1147	        </Text>
+  1148	      ) : null}
+  1149	      {pane.blocked ? (
+  1150	        <Alert
+  1151	          type="error"
+  1152	          showIcon
+  1153	          message="输出被管控策略阻断"
+  1154	          description={pane.blockedReason ?? '后端未返回阻断原因（blocked_reason 为空）'}
+  1155	        />
+  1156	      ) : null}
+  1157	      {pane.repr ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{pane.repr}</pre> : null}
+  1158	      {pane.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{pane.stdout}</pre> : null}
+  1159	      {pane.stderr ? <pre style={{ margin: 0, color: '#c0392b', whiteSpace: 'pre-wrap' }}>{pane.stderr}</pre> : null}
+  1160	      {!pane.hasContent ? (
+  1161	        <Text type="secondary" style={{ fontSize: 12 }}>
+  1162	          无输出（stdout/stderr/repr 都是空）
+  1163	        </Text>
+  1164	      ) : null}
+  1165	      {result.degraded_reason ? (
+  1166	        <Text type="warning" style={{ fontSize: 12 }}>
+  1167	          {`执行路径降级：${result.degraded_reason}`}
+  1168	        </Text>
+  1169	      ) : null}
+  1170	    </div>
+  1171	  );
+  1172	}
+  1173	
+  1174	/** 执行后端披露条：只转述后端下发的 backend/stateful/degraded_reason，不推断未登记的后端。 */
+  1175	function BackendStrip({
+  1176	  notebook,
+  1177	  cellStates,
+  1178	  persistOutput,
+  1179	  onTogglePersist,
+  1180	  lastBackend,
+  1181	}: {
+  1182	  notebook: Notebook;
+  1183	  cellStates: Record<string, CellState>;
+  1184	  persistOutput: boolean;
+  1185	  onTogglePersist: () => void;
+  1186	  lastBackend: string | null;
+  1187	}) {
+  1188	  const views = Object.values(cellStates)
+  1189	    .map((state) => state.result)
+  1190	    .filter(Boolean)
+  1191	    .map((result) => backendFromCellResult(result!));
+  1192	  const latest = lastBackend ? views.find((view) => view.backend === lastBackend) ?? null : null;
+  1193	  const view = latest ?? backendFromNotebook(notebook);
+  1194	  const source = latest ? '本次执行结果' : '笔记记录（尚未在本页执行）';
+  1195	
+  1196	  return (
+  1197	    <Alert
+  1198	      type={view?.degraded ? 'warning' : 'info'}
+  1199	      showIcon
+  1200	      message={
+  1201	        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+  1202	          <span>
+  1203	            {view
+  1204	              ? `执行后端 ${view.backend}：${view.label}（${view.stateful ? '有状态' : '无状态'}·${source}）`
+  1205	              : '执行后端未知（尚未执行，后端未下发 execution_backend）'}
+  1206	          </span>
+  1207	          <Checkbox checked={persistOutput} onChange={onTogglePersist}>
+  1208	            输出写入笔记（persist）
+  1209	          </Checkbox>
+  1210	          {notebook.last_executed_at ? (
+  1211	            <Text type="secondary" style={{ fontSize: 12 }}>
+  1212	              最近执行 {notebook.last_executed_at}
+  1213	            </Text>
+  1214	          ) : null}
+  1215	        </span>
+  1216	      }
+  1217	      description={
+  1218	        view?.degraded ? (
+  1219	          <span style={{ fontSize: 12 }}>{view.reasons.join('；')}</span>
+  1220	        ) : view && !view.known ? (
+  1221	          <span style={{ fontSize: 12 }}>后端标识未登记，不推断成降级，也不推断成健康。</span>
+  1222	        ) : null
+  1223	      }
+  1224	    />
+  1225	  );
+  1226	}
+  1227	
+  1228	function JupyterPanel({ notebookId }: { notebookId: string }) {
+  1229	  const { data, isPending, isError, error } = useJupyterStatus(notebookId);
+  1230	  if (isPending) return <Spin size="small" />;
+  1231	  if (isError) {
+  1232	    return (
+  1233	      <Alert
+  1234	        type="warning"
+  1235	        showIcon
+  1236	        message="Jupyter 可用性探测失败"
+  1237	        description={<span style={{ fontSize: 12 }}>{getErrorMessage(error, '后端未返回原因')}</span>}
+  1238	      />
+  1239	    );
+  1240	  }
+  1241	  const dev = data?.dev_env ?? null;
+  1242	  return (
+  1243	    <div style={{ marginTop: 8 }}>
+  1244	      <Text type="secondary" style={{ fontSize: 12 }}>
+  1245	        {`Jupyter: ${data?.jupyter_available ? '可用' : '不可用'} · 代理: ${data?.proxy_enabled ? '已启用' : '未启用'} · 执行后端: ${data?.notebook_execution_backend ?? UNKNOWN_TEXT}`}
+  1246	      </Text>
+  1247	      {data?.jupyter_path ? (
+  1248	        <div>
+  1249	          <Text type="secondary" style={{ fontSize: 12 }}>
+  1250	            {`Jupyter 路径: ${data.jupyter_path}`}
+  1251	          </Text>
+  1252	        </div>
+  1253	      ) : null}
+  1254	      {data?.probe_error ? (
+  1255	        <div>
+  1256	          <Text type="warning" style={{ fontSize: 12 }}>
+  1257	            {`探测链本身失败（不等于未安装）: ${data.probe_error}`}
+  1258	          </Text>
+  1259	        </div>
+  1260	      ) : null}
+  1261	      {dev ? (
+  1262	        <div>
+  1263	          <Text type={dev.available ? 'secondary' : 'warning'} style={{ fontSize: 12 }}>
+  1264	            {dev.available
+  1265	              ? `在线开发环: 可用（等级 ${dev.sandbox_level}）`
+  1266	              : `在线开发环: 不可用 —— ${dev.reason ?? '后端未说明原因'}`}
+  1267	          </Text>
+  1268	        </div>
+  1269	      ) : null}
+  1270	    </div>
+  1271	  );
+  1272	}
+  1273	
+  1274	function CreateNotebookModal({
+  1275	  open,
+  1276	  onClose,
+  1277	  onCreated,
+  1278	}: {
+  1279	  open: boolean;
+  1280	  onClose: () => void;
+  1281	  onCreated: (notebook: Notebook) => void;
+  1282	}) {
+  1283	  const [form] = Form.useForm();
+  1284	  const create = useCreateNotebook();
+  1285	  const { data: contractOptions } = useContractOptions();
+  1286	  const [messageApi, contextHolder] = message.useMessage();
+  1287	  const title = Form.useWatch('title', form);
+  1288	  const path = Form.useWatch('path', form);
+  1289	  // 路径不唯一（后端不拦重名）：把已存在的本子提个醒，但不弹确认框——新建框架里没有这个口径。
+  1290	  const { data: existing } = useNotebooks(null, 1, 50);
+  1291	  const duplicated = !!path && (existing?.items ?? []).some((item) => item.path === path);
+  1292	
+  1293	  useEffect(() => {
+  1294	    if (!open) return;
+  1295	    form.setFieldsValue({ title: '未命名分析', path: defaultNotebookPath('未命名分析'), contract_id: undefined });
+  1296	  }, [open, form]);
+  1297	
+  1298	  const submit = async () => {
+  1299	    const values = await form.validateFields();
+  1300	    try {
+  1301	      const nb = await create.mutateAsync({
+  1302	        title: values.title,
+  1303	        path: values.path?.trim() || defaultNotebookPath(values.title),
+  1304	        contract_id: values.contract_id ?? null,
+  1305	      });
+  1306	      messageApi.success('已创建');
+  1307	      onCreated(nb);
+  1308	    } catch (err) {
+  1309	      messageApi.error(describeFlowError(err, '创建 Notebook 失败'));
+  1310	    }
+  1311	  };
+  1312	
+  1313	  return (
+  1314	    <Modal
+  1315	      title="新建 Notebook"
+  1316	      open={open}
+  1317	      onCancel={onClose}
+  1318	      onOk={() => {
+  1319	        void submit();
+  1320	      }}
+  1321	      confirmLoading={create.isPending}
+  1322	    >
+  1323	      {contextHolder}
+  1324	      <Form form={form} layout="vertical">
+  1325	        <Form.Item name="title" label="标题" rules={[{ required: true }]}>
+  1326	          <Input />
+  1327	        </Form.Item>
+  1328	        <Form.Item name="path" label="路径" rules={[{ required: true }]}>
+  1329	          <Input />
+  1330	        </Form.Item>
+  1331	        {duplicated ? (
+  1332	          <Alert
+  1333	            type="warning"
+  1334	            showIcon
+  1335	            style={{ marginBottom: 12 }}
+  1336	            message={`已有 Notebook 用这个路径：${title ?? ''}`}
+  1337	            description="后端不要求路径唯一（Notebook.path 无唯一约束），两个本子会共用这个名字，建议换一个。"
+  1338	          />
+  1339	        ) : null}
+  1340	        <Form.Item name="contract_id" label="关联合约">
+  1341	          <Select
+  1342	            allowClear
+  1343	            showSearch
+  1344	            optionFilterProp="label"
+  1345	            placeholder="可选：关联合约后即可在线执行"
+  1346	            options={(contractOptions ?? []).map((contract) => ({
+  1347	              value: contract.id,
+  1348	              label: `${contract.title}（${contract.contract_no}）`,
+  1349	            }))}
+  1350	          />
+  1351	        </Form.Item>
+  1352	      </Form>
+  1353	    </Modal>
+  1354	  );
+  1355	}

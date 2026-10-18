@@ -1,0 +1,467 @@
+     1	"""RLS Strategy Engine — Row-Level Security policy evaluation.
+     2	
+     3	Provides three policy types for fine-grained data access control:
+     4	- Region policy: Filter by geographic region/tenant
+     5	- Time policy: Filter by time window (data retention, embargo periods)
+     6	- Sensitivity policy: Filter by security level clearance
+     7	
+     8	Policies are evaluated and converted to SQL WHERE clauses for injection
+     9	into database queries.
+    10	"""
+    11	import logging
+    12	import re
+    13	from dataclasses import dataclass, field
+    14	from datetime import datetime, timezone, timedelta
+    15	from enum import Enum
+    16	from typing import Any
+    17	
+    18	logger = logging.getLogger(__name__)
+    19	
+    20	
+    21	class PolicyType(str, Enum):
+    22	    REGION = "region"
+    23	    TIME = "time"
+    24	    SENSITIVITY = "sensitivity"
+    25	
+    26	
+    27	class SensitivityLevel(str, Enum):
+    28	    PUBLIC = "public"
+    29	    INTERNAL = "internal"
+    30	    CONFIDENTIAL = "confidential"
+    31	    SECRET = "secret"
+    32	
+    33	    @classmethod
+    34	    def clearance_rank(cls, level: str) -> int:
+    35	        """Return numeric rank for comparison (higher = more sensitive)."""
+    36	        ranks = {
+    37	            cls.PUBLIC.value: 0,
+    38	            cls.INTERNAL.value: 1,
+    39	            cls.CONFIDENTIAL.value: 2,
+    40	            cls.SECRET.value: 3,
+    41	        }
+    42	        return ranks.get(level, -1)
+    43	
+    44	
+    45	@dataclass
+    46	class RLSPolicy:
+    47	    """A single Row-Level Security policy."""
+    48	    policy_id: str
+    49	    name: str
+    50	    policy_type: PolicyType
+    51	    enabled: bool = True
+    52	    priority: int = 0  # Higher = evaluated first
+    53	    conditions: dict[str, Any] = field(default_factory=dict)
+    54	    description: str = ""
+    55	
+    56	    def to_sql_condition(self, context: dict[str, Any]) -> str | None:
+    57	        """Generate SQL WHERE clause from policy + evaluation context.
+    58	
+    59	        Returns None if policy doesn't apply to the current context.
+    60	        """
+    61	        if not self.enabled:
+    62	            return None
+    63	
+    64	        if self.policy_type == PolicyType.REGION:
+    65	            return self._region_condition(context)
+    66	        elif self.policy_type == PolicyType.TIME:
+    67	            return self._time_condition(context)
+    68	        elif self.policy_type == PolicyType.SENSITIVITY:
+    69	            return self._sensitivity_condition(context)
+    70	        return None
+    71	
+    72	    def _region_condition(self, context: dict[str, Any]) -> str | None:
+    73	        """Generate region-based WHERE clause.
+    74	
+    75	        Conditions:
+    76	        - allowed_regions: list of allowed region codes
+    77	        - region_column: column name containing the region data
+    78	        """
+    79	        allowed = self.conditions.get("allowed_regions", [])
+    80	        region_column = self.conditions.get("region_column", "region")
+    81	        user_region = context.get("user_region")
+    82	
+    83	        if not allowed or not user_region:
+    84	            return None
+    85	
+    86	        if user_region not in allowed:
+    87	            # Deny access — return impossible condition
+    88	            return "FALSE"
+    89	
+    90	        return f"{region_column} = '{self._escape(user_region)}'"
+    91	
+    92	    def _time_condition(self, context: dict[str, Any]) -> str | None:
+    93	        """Generate time-based WHERE clause.
+    94	
+    95	        Conditions:
+    96	        - time_column: column name for timestamp filtering
+    97	        - min_age_hours: minimum data age (no access to data newer than this)
+    98	        - max_age_hours: maximum data age (no access to data older than this)
+    99	        - embargo_hours: block access to data within this many hours of creation
+   100	        """
+   101	        time_column = self.conditions.get("time_column", "created_at")
+   102	        min_age_hours = self.conditions.get("min_age_hours")
+   103	        max_age_hours = self.conditions.get("max_age_hours")
+   104	        embargo_hours = self.conditions.get("embargo_hours")
+   105	
+   106	        now = datetime.now(timezone.utc)
+   107	        conditions = []
+   108	
+   109	        if embargo_hours is not None:
+   110	            cutoff = now - timedelta(hours=embargo_hours)
+   111	            conditions.append(f"{time_column} <= '{cutoff.isoformat()}'")
+   112	
+   113	        if min_age_hours is not None:
+   114	            cutoff = now - timedelta(hours=min_age_hours)
+   115	            conditions.append(f"{time_column} <= '{cutoff.isoformat()}'")
+   116	
+   117	        if max_age_hours is not None:
+   118	            cutoff = now - timedelta(hours=max_age_hours)
+   119	            conditions.append(f"{time_column} >= '{cutoff.isoformat()}'")
+   120	
+   121	        if not conditions:
+   122	            return None
+   123	
+   124	        return " AND ".join(conditions)
+   125	
+   126	    def _sensitivity_condition(self, context: dict[str, Any]) -> str | None:
+   127	        """Generate sensitivity-level WHERE clause.
+   128	
+   129	        Conditions:
+   130	        - sensitivity_column: column name for sensitivity level
+   131	        - max_allowed_level: maximum sensitivity level the user can access
+   132	        """
+   133	        sensitivity_column = self.conditions.get("sensitivity_column", "security_level")
+   134	        max_level = self.conditions.get("max_allowed_level", "public")
+   135	        user_clearance = context.get("user_clearance", "public")
+   136	
+   137	        max_rank = SensitivityLevel.clearance_rank(max_level)
+   138	        user_rank = SensitivityLevel.clearance_rank(user_clearance)
+   139	
+   140	        if user_rank >= max_rank:
+   141	            # User has sufficient clearance — no filtering needed
+   142	            return None
+   143	
+   144	        # Filter to only levels the user can access
+   145	        allowed_levels = [
+   146	            level.value
+   147	            for level in SensitivityLevel
+   148	            if SensitivityLevel.clearance_rank(level.value) <= user_rank
+   149	        ]
+   150	        in_clause = ", ".join(f"'{l}'" for l in allowed_levels)
+   151	        return f"{sensitivity_column} IN ({in_clause})"
+   152	
+   153	    @staticmethod
+   154	    def _escape(value: str) -> str:
+   155	        """Basic SQL string escaping."""
+   156	        return value.replace("'", "''")
+   157	
+   158	
+   159	@dataclass
+   160	class RLSContext:
+   161	    """Evaluation context for RLS policies."""
+   162	    user_id: str | None = None
+   163	    user_region: str | None = None
+   164	    user_clearance: str | None = None
+   165	    user_roles: list[str] = field(default_factory=list)
+   166	    request_time: datetime | None = None
+   167	    session_id: str | None = None
+   168	
+   169	
+   170	class RLSEngine:
+   171	    """Row-Level Security policy engine.
+   172	
+   173	    Manages policies, evaluates them against request context, and generates
+   174	    SQL WHERE clauses for injection into database queries.
+   175	    """
+   176	
+   177	    def __init__(self):
+   178	        self._policies: dict[str, RLSPolicy] = {}
+   179	
+   180	    def add_policy(self, policy: RLSPolicy) -> None:
+   181	        """Register a new RLS policy."""
+   182	        self._policies[policy.policy_id] = policy
+   183	        logger.info(f"Registered RLS policy: {policy.policy_id} ({policy.policy_type.value})")
+   184	
+   185	    def remove_policy(self, policy_id: str) -> bool:
+   186	        """Remove an RLS policy."""
+   187	        if policy_id in self._policies:
+   188	            del self._policies[policy_id]
+   189	            return True
+   190	        return False
+   191	
+   192	    def get_policy(self, policy_id: str) -> RLSPolicy | None:
+   193	        """Get a policy by ID."""
+   194	        return self._policies.get(policy_id)
+   195	
+   196	    def list_policies(self, policy_type: PolicyType | None = None) -> list[RLSPolicy]:
+   197	        """List all policies, optionally filtered by type."""
+   198	        policies = list(self._policies.values())
+   199	        if policy_type:
+   200	            policies = [p for p in policies if p.policy_type == policy_type]
+   201	        return sorted(policies, key=lambda p: p.priority, reverse=True)
+   202	
+   203	    def evaluate_sql(
+   204	        self,
+   205	        context: RLSContext,
+   206	        table_name: str | None = None,
+   207	        policy_ids: list[str] | None = None,
+   208	    ) -> str | None:
+   209	        """Evaluate all applicable policies and return combined SQL WHERE clause.
+   210	
+   211	        Args:
+   212	            context: Request context with user info
+   213	            table_name: Optional table name for table-specific policies
+   214	            policy_ids: Optional list of specific policy IDs to evaluate
+   215	
+   216	        Returns:
+   217	            SQL WHERE clause string, or None if no filtering needed.
+   218	            Multiple policies are AND-combined.
+   219	        """
+   220	        eval_context = {
+   221	            "user_id": context.user_id,
+   222	            "user_region": context.user_region,
+   223	            "user_clearance": context.user_clearance,
+   224	            "user_roles": context.user_roles,
+   225	            "request_time": context.request_time,
+   226	        }
+   227	
+   228	        # Select policies to evaluate
+   229	        policies = list(self._policies.values())
+   230	        if policy_ids:
+   231	            policies = [p for p in policies if p.policy_id in policy_ids]
+   232	
+   233	        # Filter to enabled, sorted by priority
+   234	        policies = [p for p in policies if p.enabled]
+   235	        policies.sort(key=lambda p: p.priority, reverse=True)
+   236	
+   237	        conditions = []
+   238	        for policy in policies:
+   239	            condition = policy.to_sql_condition(eval_context)
+   240	            if condition:
+   241	                if condition == "FALSE":
+   242	                    return "FALSE"  # Deny all — short circuit
+   243	                conditions.append(f"({condition})")
+   244	
+   245	        if not conditions:
+   246	            return None
+   247	
+   248	        return " AND ".join(conditions)
+   249	
+   250	    def inject_rls_where(self, sql: str, rls_where: str) -> str:
+   251	        """Inject RLS WHERE clause into a SQL query.
+   252	
+   253	        Handles:
+   254	        - SELECT with existing WHERE: append AND
+   255	        - SELECT without WHERE: add WHERE
+   256	        - Subqueries: inject into outermost SELECT
+   257	        """
+   258	        if not rls_where:
+   259	            return sql
+   260	
+   261	        # Normalize whitespace
+   262	        sql = sql.strip()
+   263	
+   264	        # Find the main FROM clause to inject after it
+   265	        # Simple approach: find WHERE or add one
+   266	        sql_upper = sql.upper()
+   267	
+   268	        if " WHERE " in sql_upper:
+   269	            # Find the last WHERE (outermost query)
+   270	            where_idx = sql_upper.rfind(" WHERE ")
+   271	            insert_pos = where_idx + len(" WHERE ")
+   272	            return (
+   273	                sql[:insert_pos]
+   274	                + f"({rls_where}) AND "
+   275	                + sql[insert_pos:]
+   276	            )
+   277	        elif " GROUP BY " in sql_upper:
+   278	            idx = sql_upper.find(" GROUP BY ")
+   279	            return (
+   280	                sql[:idx]
+   281	                + f" WHERE ({rls_where}) "
+   282	                + sql[idx:]
+   283	            )
+   284	        elif " ORDER BY " in sql_upper:
+   285	            idx = sql_upper.find(" ORDER BY ")
+   286	            return (
+   287	                sql[:idx]
+   288	                + f" WHERE ({rls_where}) "
+   289	                + sql[idx:]
+   290	            )
+   291	        elif " LIMIT " in sql_upper:
+   292	            idx = sql_upper.find(" LIMIT ")
+   293	            return (
+   294	                sql[:idx]
+   295	                + f" WHERE ({rls_where}) "
+   296	                + sql[idx:]
+   297	            )
+   298	        else:
+   299	            # Append WHERE at end
+   300	            return f"{sql} WHERE ({rls_where})"
+   301	
+   302	    def validate_policy(self, policy: RLSPolicy) -> list[str]:
+   303	        """Validate a policy configuration. Returns list of errors."""
+   304	        errors = []
+   305	
+   306	        if not policy.policy_id:
+   307	            errors.append("policy_id is required")
+   308	        if not policy.name:
+   309	            errors.append("name is required")
+   310	
+   311	        if policy.policy_type == PolicyType.REGION:
+   312	            if "allowed_regions" not in policy.conditions:
+   313	                errors.append("Region policy requires 'allowed_regions' condition")
+   314	        elif policy.policy_type == PolicyType.TIME:
+   315	            if not any(
+   316	                k in policy.conditions
+   317	                for k in ("min_age_hours", "max_age_hours", "embargo_hours")
+   318	            ):
+   319	                errors.append("Time policy requires at least one of: min_age_hours, max_age_hours, embargo_hours")
+   320	        elif policy.policy_type == PolicyType.SENSITIVITY:
+   321	            if "max_allowed_level" not in policy.conditions:
+   322	                errors.append("Sensitivity policy requires 'max_allowed_level' condition")
+   323	            else:
+   324	                max_level = policy.conditions["max_allowed_level"]
+   325	                if max_level not in SensitivityLevel.__members__.values():
+   326	                    errors.append(f"Invalid sensitivity level: {max_level}")
+   327	
+   328	        return errors
+   329	
+   330	    # ── Row-level evaluation API (simplified) ──────────────────
+   331	
+   332	    def evaluate(
+   333	        self,
+   334	        policy: dict[str, Any],
+   335	        row: dict[str, Any],
+   336	        user_region: str | None = None,
+   337	        user_clearance: int | None = None,
+   338	    ) -> bool:
+   339	        """Evaluate a single policy against a row (row-level access control).
+   340	
+   341	        Args:
+   342	            policy: Policy dict with 'type' and type-specific fields
+   343	            row: Data row to evaluate
+   344	            user_region: User's region for region policies
+   345	            user_clearance: User's clearance level for sensitivity policies
+   346	
+   347	        Returns:
+   348	            True if access allowed, False if denied.
+   349	        """
+   350	        policy_type = policy.get("type", "")
+   351	
+   352	        if policy_type == "region":
+   353	            allowed_regions = policy.get("allowed_regions", [])
+   354	            if user_region is None:
+   355	                return False
+   356	            row_region = row.get("region", "")
+   357	            return user_region in allowed_regions and row_region in allowed_regions
+   358	
+   359	        elif policy_type == "sensitivity":
+   360	            max_level = policy.get("max_level", 0)
+   361	            row_sensitivity = row.get("sensitivity", 0)
+   362	            if user_clearance is None:
+   363	                return False
+   364	            return user_clearance >= row_sensitivity and user_clearance >= max_level
+   365	
+   366	        elif policy_type == "time":
+   367	            return self.evaluate_time_policy(policy)
+   368	
+   369	        return True
+   370	
+   371	    def evaluate_time_policy(
+   372	        self,
+   373	        policy: dict[str, Any],
+   374	        current_hour: int | None = None,
+   375	    ) -> bool:
+   376	        """Evaluate a time-based policy.
+   377	
+   378	        Args:
+   379	            policy: Policy dict with 'start_hour' and 'end_hour'
+   380	            current_hour: Current hour (0-23). If None, uses actual current hour.
+   381	
+   382	        Returns:
+   383	            True if within allowed time window, False otherwise.
+   384	        """
+   385	        if current_hour is None:
+   386	            from datetime import datetime
+   387	            current_hour = datetime.now().hour
+   388	
+   389	        start = policy.get("start_hour", 0)
+   390	        end = policy.get("end_hour", 24)
+   391	
+   392	        # Inclusive start, exclusive end
+   393	        return start <= current_hour < end
+   394	
+   395	    def evaluate_composite(
+   396	        self,
+   397	        policies: list[dict[str, Any]],
+   398	        row: dict[str, Any],
+   399	        user_region: str | None = None,
+   400	        user_clearance: int | None = None,
+   401	    ) -> bool:
+   402	        """Evaluate multiple policies against a row (AND logic).
+   403	
+   404	        Returns True only if ALL policies allow access.
+   405	        """
+   406	        for policy in policies:
+   407	            if not self.evaluate(policy, row, user_region, user_clearance):
+   408	                return False
+   409	        return True
+   410	
+   411	    def inject_filter(
+   412	        self,
+   413	        sql: str,
+   414	        policy: dict[str, Any],
+   415	        user_region: str | None = None,
+   416	        user_clearance: int | None = None,
+   417	    ) -> str:
+   418	        """Inject a WHERE clause into SQL based on policy.
+   419	
+   420	        Returns rewritten SQL with appropriate WHERE clause.
+   421	        """
+   422	        policy_type = policy.get("type", "")
+   423	
+   424	        if policy_type == "region":
+   425	            column = policy.get("column", "region")
+   426	            if user_region:
+   427	                condition = f"{column} = '{self._escape_sql(user_region)}'"
+   428	                return self._inject_where(sql, condition)
+   429	
+   430	        elif policy_type == "sensitivity":
+   431	            column = policy.get("column", "sensitivity_level")
+   432	            if user_clearance is not None:
+   433	                condition = f"{column} <= {user_clearance}"
+   434	                return self._inject_where(sql, condition)
+   435	
+   436	        return sql
+   437	
+   438	    @staticmethod
+   439	    def _inject_where(sql: str, condition: str) -> str:
+   440	        """Inject a WHERE condition into a SQL query."""
+   441	        sql = sql.strip()
+   442	        sql_upper = sql.upper()
+   443	
+   444	        if " WHERE " in sql_upper:
+   445	            idx = sql_upper.find(" WHERE ")
+   446	            insert_pos = idx + len(" WHERE ")
+   447	            return sql[:insert_pos] + f"{condition} AND " + sql[insert_pos:]
+   448	        elif " GROUP BY " in sql_upper:
+   449	            idx = sql_upper.find(" GROUP BY ")
+   450	            return sql[:idx] + f" WHERE {condition} " + sql[idx:]
+   451	        elif " ORDER BY " in sql_upper:
+   452	            idx = sql_upper.find(" ORDER BY ")
+   453	            return sql[:idx] + f" WHERE {condition} " + sql[idx:]
+   454	        elif " LIMIT " in sql_upper:
+   455	            idx = sql_upper.find(" LIMIT ")
+   456	            return sql[:idx] + f" WHERE {condition} " + sql[idx:]
+   457	        else:
+   458	            return f"{sql} WHERE {condition}"
+   459	
+   460	    @staticmethod
+   461	    def _escape_sql(value: str) -> str:
+   462	        """Basic SQL string escaping."""
+   463	        return value.replace("'", "''")
+   464	
+   465	
+   466	# Singleton
+   467	rls_engine = RLSEngine()

@@ -1,0 +1,46 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_____________________ test_failed_operation_records_error _____________________
+
+client = <httpx.AsyncClient object at 0x000001B9E1ECB530>
+db_session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001B9E14947D0>
+owner_and_headers = (<app.models.sandbox_session.SandboxSession object at 0x000001B9E1B2EA80>, {'Authorization': 'Bearer eyJhbGciOiJIUzI1N...b2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMDg2NSwidHlwZSI6ImFjY2VzcyJ9.IX5BDxxOPkSSnxBqgYpC7TATzjiANyAgyYtj6_0C4zM'})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B9E1C80560>
+
+    @pytest.mark.asyncio
+    async def test_failed_operation_records_error(
+        client, db_session, owner_and_headers, monkeypatch
+    ):
+        from app.services import session_snapshots as ss
+    
+        def _boom(workspace, session_id):
+            raise ss.SnapshotError("workspace vanished")
+    
+        monkeypatch.setattr(ss, "create_snapshot", _boom)
+        session, headers = owner_and_headers
+    
+        resp = await client.post(
+            f"/api/v1/sandbox-sessions/{session.id}/snapshots",
+            params={"async": "true"},
+            headers=headers,
+        )
+        assert resp.status_code == 202
+        await ops.flush_background_operations()
+    
+        poll = await client.get(
+            f"/api/v1/sandbox-sessions/operations/{resp.json()['operation_id']}", headers=headers
+        )
+        assert poll.status_code == 200
+        payload = poll.json()
+>       assert payload["status"] == "failed"
+E       AssertionError: assert 'running' == 'failed'
+E         
+E         - failed
+E         + running
+
+tests\test_async_operations.py:131: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.services.session_operations:session_operations.py:119 [SessionOps] Operation 800cc048-1250-4daa-933a-7995f266b21e failed: workspace vanished
+=========================== short test summary info ===========================
+FAILED tests/test_async_operations.py::test_failed_operation_records_error - ...
+1 failed in 1.20s

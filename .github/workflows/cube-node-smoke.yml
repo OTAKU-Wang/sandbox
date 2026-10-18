@@ -11,6 +11,11 @@
 #   会让 PR 状态 check 挂起直至超时。因此本 job 仅由 workflow_dispatch 手动触发，
 #   定向 self-hosted `kvm` 标签 runner——普通 push/PR 完全不受影响。
 #   真实节点 bring-up + 全链路 e2e 仍归环境验收项 FG-017。
+#
+# 2026-10 运维复核整改：token 收敛为 contents: read；install 经绝对路径调用并
+# 导出 install.sh 红线要求的 TLS 三元组 + 审计服务令牌（此前必 die）；loop 设备
+# 幂等（绝不 truncate/mkfs 既有数据）+ always 清理；冒烟私钥 077/060 且随清理
+# 步骤删除；node_ip 输入写入 job summary（不再是死输入）。
 name: cube-node-smoke
 
 on:
@@ -21,6 +26,10 @@ on:
         required: false
         default: ""
 
+# 本 workflow 只读取仓库内容；收敛 GITHUB_TOKEN，绝不继承仓库默认宽权限
+permissions:
+  contents: read
+
 jobs:
   node-smoke:
     # KVM 标签 runner（self-hosted 组）。托管 runner 无 kvm 标签 → 本 job 在托管
@@ -30,22 +39,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 记录 dispatch 输入（node_ip 仅记录）
+        env:
+          NODE_IP: ${{ inputs.node_ip }}
+        run: |
+          {
+            echo "## Dispatch inputs"
+            echo "- node_ip: \`${NODE_IP:-（未填写 — runner 本机冒烟）}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: 语法门禁（所有 runner 通用）
         run: |
           bash -n deploy/cube-node/preflight.sh deploy/cube-node/install.sh deploy/cube-node/verify.sh
           python3 -m json.tool scripts/cube-bundle-manifest.json > /dev/null
 
-      - name: 准备 XFS loop 设备（数据盘前置，spec §2.1）
+      - name: 准备 XFS loop 设备（数据盘前置，spec §2.1；幂等，可回收）
         run: |
           set -euo pipefail
           LOOP_FILE=/var/tmp/cds-cube-smoke-xfs.img
+          LOOP_REC=/var/tmp/cds-cube-smoke-loop
+          OWNED=/var/tmp/cds-cube-smoke-owned
           mkdir -p /data/cubelet
-          if ! mountpoint -q /data/cubelet; then
-            truncate -s 8G "${LOOP_FILE}"
-            losetup -fP --show "${LOOP_FILE}" > /var/tmp/cds-cube-smoke-loop
-            LOOP_DEV=$(cat /var/tmp/cds-cube-smoke-loop)
-            mkfs.xfs -f "${LOOP_DEV}"
-            mount "${LOOP_DEV}" /data/cubelet
+          if mountpoint -q /data/cubelet; then
+            echo "==> /data/cubelet 已挂载（非本次运行所建）：只复用，不清理，不重格式化"
+            rm -f "$OWNED"
+          else
+            # 幂等红线：既有镜像文件绝不 truncate——runner 重启后挂载消失而镜像
+            # 仍在时，上一次冒烟的真实数据就躺在里面
+            [ -f "$LOOP_FILE" ] || truncate -s 8G "$LOOP_FILE"
+            LOOP_DEV=""
+            if [ -s "$LOOP_REC" ] && losetup -c "$(cat "$LOOP_REC")" >/dev/null 2>&1; then
+              LOOP_DEV=$(cat "$LOOP_REC")
+            else
+              LOOP_DEV=$(losetup -fP --show "$LOOP_FILE")
+              echo "$LOOP_DEV" > "$LOOP_REC"
+            fi
+            # mkfs 仅在设备上没有文件系统时执行；绝不格式化承载数据的盘
+            if ! blkid "$LOOP_DEV" >/dev/null 2>&1; then
+              mkfs.xfs -f "$LOOP_DEV"
+            fi
+            mount "$LOOP_DEV" /data/cubelet
+            # 标记为本次运行接管：teardown 只回收自己挂载的东西
+            : > "$OWNED"
           fi
 
       - name: preflight（硬门禁）
@@ -54,13 +89,25 @@ jobs:
       - name: install（compute role + CDS 组件）
         run: |
           set -euo pipefail
-          # 冒烟 runner 使用本地测试证书（生产必为 certificate_service 签发）
+          # cd 之前记住仓库绝对路径：/tmp/cds-smoke-tls 下相对路径无法解析
+          REPO_DIR="$PWD"
+          # 共享 runner 上的冒烟私钥绝不落到全局可读路径（umask 先于文件生成）
+          umask 077
           mkdir -p /tmp/cds-smoke-tls && cd /tmp/cds-smoke-tls
+          chmod 700 /tmp/cds-smoke-tls
+          # 冒烟 runner 使用本地测试证书（生产必为 certificate_service 签发）
           openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
             -keyout tls.key -out tls.crt -days 2 -nodes \
             -subj "/CN=cds-cube-node-smoke" -addext "subjectAltName=IP:127.0.0.1"
           cp tls.crt ca.crt
-          bash deploy/cube-node/install.sh
+          chmod 600 tls.key
+          # install.sh 红线：缺证书三元组或审计服务令牌 = 直接 die（不静默明文、
+          # 不静默交付注定 401 的审计链路）。冒烟用自签证书 + 一次性随机令牌。
+          CDS_CUBE_TLS_CERT=/tmp/cds-smoke-tls/tls.crt \
+          CDS_CUBE_TLS_KEY=/tmp/cds-smoke-tls/tls.key \
+          CDS_CUBE_TLS_CA=/tmp/cds-smoke-tls/ca.crt \
+          CDS_CUBE_AUDIT_SERVICE_TOKEN="$(openssl rand -hex 24)" \
+            bash "${REPO_DIR}/deploy/cube-node/install.sh"
 
       - name: verify（机读验收）
         run: |
@@ -70,3 +117,20 @@ jobs:
           CDS_CUBE_TLS_CA=/tmp/cds-smoke-tls/ca.crt \
             bash deploy/cube-node/verify.sh --json | tee verify-report.json
           python3 -c "import json; r=json.load(open('verify-report.json')); assert r['ok'], r"
+
+      - name: 清理（loop 设备 + 冒烟 TLS；失败路径也回收）
+        if: ${{ always() }}
+        run: |
+          set -uo pipefail
+          OWNED=/var/tmp/cds-cube-smoke-owned
+          LOOP_REC=/var/tmp/cds-cube-smoke-loop
+          # 只拆本次运行接管的状态；别人预先挂载的 /data/cubelet 原样留下
+          if [ -f "$OWNED" ] && mountpoint -q /data/cubelet; then
+            umount /data/cubelet || umount -l /data/cubelet || true
+          fi
+          if [ -s "$LOOP_REC" ]; then
+            losetup -d "$(cat "$LOOP_REC")" 2>/dev/null || true
+          fi
+          rm -f "$LOOP_REC" "$OWNED" /var/tmp/cds-cube-smoke-xfs.img
+          # 冒烟证书目录（含私钥）不留过夜
+          rm -rf /tmp/cds-smoke-tls

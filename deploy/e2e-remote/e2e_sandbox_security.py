@@ -34,6 +34,29 @@ def step(name, status, status_code=None, note="", excerpt=""):
     return status == "PASS"
 
 
+def _as_items(payload):
+    """Pure extractor for every envelope shape the gateway may answer with.
+
+    The old inline chain (`nodes.get("nodes") ... nodes.get("items", [])`)
+    raised AttributeError on {}, {"nodes": null}, string items etc. — i.e.
+    exactly on the error branches where FAIL evidence must be recorded, and
+    the harness died with a traceback instead of writing the report.
+    """
+    if isinstance(payload, dict):
+        payload = payload.get("nodes", payload.get("items", []))
+    if not isinstance(payload, list):
+        return []
+    return [x for x in payload if isinstance(x, dict)]
+
+
+def _access_token(resp):
+    try:
+        body = resp.json()
+    except Exception:
+        return ""
+    return body.get("access_token", "") if isinstance(body, dict) else ""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("base_url")
@@ -41,7 +64,12 @@ def main():
     ap.add_argument("--out", default="e2e_sandbox_security_evidence.json")
     args = ap.parse_args()
     base = args.base_url.rstrip("/")
-    admin_pass = os.environ.get("CDS_E2E_ADMIN_PASS", "CdsE2e!Admin123")
+    # Required env, no committed default (the literal default password lived
+    # in git history — claims batch-87).
+    admin_pass = os.environ.get("CDS_E2E_ADMIN_PASS")
+    if not admin_pass:
+        step("admin.login", "FAIL", note="CDS_E2E_ADMIN_PASS is required (no default)")
+        return finish(args.out)
     http = httpx.Client(base_url=base, timeout=60)
 
     s = http.post(f"{base}/api/v1/auth/login",
@@ -49,7 +77,11 @@ def main():
     if s.status_code != 200:
         step("admin.login", "FAIL", s.status_code, note=s.text[:200])
         return finish(args.out)
-    ah = {"Authorization": f"Bearer {s.json()['access_token']}"}
+    token = _access_token(s)
+    if not token:
+        step("admin.login", "FAIL", 200, note="200 login without access_token")
+        return finish(args.out)
+    ah = {"Authorization": f"Bearer {token}"}
     step("admin.login", "PASS", 200)
 
     # Probe product must be PUBLISHED for the l2c node gate to be the first
@@ -89,9 +121,12 @@ def main():
     for lvl in ("L0", "L1", "L2"):
         r = http.post(f"{base}/api/v1/sandbox-sessions", headers=ah,
                       json={"data_product_id": product_id, "sandbox_level": lvl})
-        ok = r.status_code == 400
+        # A bare 400 is not the contract: the W2 body must say WHY (SS-13
+        # "legacy_level_retired"), or any unrelated validation 400 passes.
+        ok = r.status_code == 400 and "retired" in r.text.lower()
         step(f"failclosed.legacy_{lvl.lower()}", "PASS" if ok else "FAIL", r.status_code,
-             note="retired level -> 400", excerpt=r.text[:200])
+             note="retired level -> 400 with legacy_level_retired reason",
+             excerpt=r.text[:200])
 
     # D-e2e-10: meta path is /capability-matrix (bare /api/v1/meta is 404).
     # Three-surface TEE/engineness consistency (remote, node-less):
@@ -114,9 +149,7 @@ def main():
 
     r = http.get(f"{base}/api/v1/sandbox-nodes", headers=ah)
     ok = r.status_code == 200
-    nodes = r.json() if ok else {}
-    nodes = nodes.get("nodes") if isinstance(nodes, dict) else nodes
-    nodes = nodes if isinstance(nodes, list) else nodes.get("items", [])
+    nodes = _as_items(r.json() if ok else None)
     schedulable = [n for n in nodes if n.get("status") in ("ready", "active", "available")]
     step("nodes.registry", "PASS" if (ok and not schedulable) else "FAIL", r.status_code,
          note=f"registry lists {len(nodes)} nodes, {len(schedulable)} schedulable (expect 0 on remote)",
@@ -130,7 +163,7 @@ def finish(out):
     report = {"finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
               "total": len(EVIDENCE), "passed": len(EVIDENCE) - len(fails),
               "failed": len(fails), "evidence": EVIDENCE}
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     print(f"\n== {report['passed']}/{report['total']} passed, "
           f"{report['failed']} failed -> {out}")

@@ -55,7 +55,11 @@ def main():
     ap.add_argument("--out", default="e2e_tds_scenarios_evidence.json")
     args = ap.parse_args()
     base = args.base_url.rstrip("/")
-    admin_pass = os.environ.get("CDS_E2E_ADMIN_PASS", "CdsE2e!Admin123")
+    # Required env, no committed default (lived in git history — claims batch-87).
+    admin_pass = os.environ.get("CDS_E2E_ADMIN_PASS")
+    if not admin_pass:
+        step("setup.admin", "FAIL", note="CDS_E2E_ADMIN_PASS is required (no default)")
+        return finish(args.out)
     http = httpx.Client(base_url=base, timeout=60)
 
     r = http.post(f"{base}/api/v1/auth/login",
@@ -63,7 +67,14 @@ def main():
     if r.status_code != 200:
         step("setup.admin", "FAIL", r.status_code, note=r.text[:200])
         return finish(args.out)
-    ah = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    try:
+        token = r.json().get("access_token", "")
+    except Exception:
+        token = ""
+    if not token:
+        step("setup.admin", "FAIL", 200, note="200 login without access_token")
+        return finish(args.out)
+    ah = {"Authorization": f"Bearer {token}"}
     step("setup.admin", "PASS", 200)
 
     ha = register(http, base, "tds_buyer_a" + secrets.token_hex(2))
@@ -180,7 +191,7 @@ def finish(out):
     report = {"finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
               "total": len(EVIDENCE), "passed": len(EVIDENCE) - len(fails) - len(skips),
               "skipped": len(skips), "failed": len(fails), "evidence": EVIDENCE}
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     print(f"\n== {report['passed']} passed / {report['skipped']} skipped / "
           f"{report['failed']} failed -> {out}")

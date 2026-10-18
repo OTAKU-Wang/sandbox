@@ -38,7 +38,7 @@ from app.api.sandbox_db import get_encryption_config_for_session
 from app.services.sandbox_audit import get_sandbox_audit_collector
 from app.services.quota_manager import quota_manager, QuotaType
 import tempfile
-from sqlalchemy import func
+from sqlalchemy import and_, func
 
 router = APIRouter()
 
@@ -737,12 +737,18 @@ async def list_sandbox_sessions(
 ):
     base = select(SandboxSession)
     count_base = select(func.count()).select_from(SandboxSession)
+    # A30: 两条分页路径共用同一组谓词 —— 游标分支以前不传 `where=`，等于把
+    # 租户/状态条件整条丢掉（`paginate_keyset` 的 where 是选传），`?cursor=` 直接
+    # 返回全平台会话第一页。filters 是唯一的谓词来源，两条分支都从它构造。
+    filters = []
     if not _can_view_all_sessions(current_user):
-        base = base.where(SandboxSession.user_id == current_user.id)
-        count_base = count_base.where(SandboxSession.user_id == current_user.id)
+        filters.append(SandboxSession.user_id == current_user.id)
     if status:
-        base = base.where(SandboxSession.status == status)
-        count_base = count_base.where(SandboxSession.status == status)
+        filters.append(SandboxSession.status == status)
+    where = and_(*filters) if filters else None
+    if where is not None:
+        base = base.where(where)
+        count_base = count_base.where(where)
 
     # W8: opt-in keyset mode — response envelope unchanged, paging info goes
     # to the X-Next-Cursor header (total is not computed in cursor mode).
@@ -750,7 +756,9 @@ async def list_sandbox_sessions(
         from app.core.pagination import paginate_keyset
 
         try:
-            rows, next_cursor = await paginate_keyset(db, SandboxSession, cursor=cursor, limit=limit)
+            rows, next_cursor = await paginate_keyset(
+                db, SandboxSession, cursor=cursor, limit=limit, where=where
+            )
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid pagination cursor")
         if next_cursor:
@@ -1752,36 +1760,60 @@ def _active_or_suspended(session: SandboxSession) -> None:
         )
 
 
+async def _governing_contract_is_active(db: AsyncSession, contract_id: str) -> tuple[bool, str]:
+    """Can the contract named by `contract_id` still back a data-access grant?
+
+    Returns ``(active, reason)``. Fail-closed on every non-ACTIVE/SIGNED shape:
+    unparseable id, missing row, or a contract in any other state.
+    """
+    from app.models.contract import Contract, ContractStatus
+
+    try:
+        contract_uuid = uuid.UUID(contract_id)
+    except ValueError:
+        return False, "contract_id_unparseable"
+
+    contract = (await db.execute(
+        select(Contract).where(Contract.id == contract_uuid)
+    )).scalar_one_or_none()
+    if contract is None:
+        return False, "contract_not_found"
+    if contract.status in (ContractStatus.ACTIVE.value, ContractStatus.SIGNED.value):
+        return True, ""
+    return False, "contract_not_active"
+
+
 async def _maybe_auto_resume(session: SandboxSession, db: AsyncSession) -> None:
     """W9: wake an auto-resumable suspended session on interaction.
 
-    Safety chain (order fixed): ① the governing contract must still be
-    ACTIVE/SIGNED — a terminated contract means the data-access grant is
-    gone and the session stays asleep (410, client stops retrying);
-    ② transition back to the pre-pause state; ③ grant one fresh timeout
-    window so the resumed session does not instantly re-expire (Round 39
-    refreshes cap still applies).
+    Safety chain (order fixed): ① the governing contract, when the session has
+    one, must still be ACTIVE/SIGNED — a terminated contract means the
+    data-access grant is gone and the session stays asleep (410, client stops
+    retrying); ② transition back to the pre-pause state; ③ grant one fresh
+    timeout window so the resumed session does not instantly re-expire
+    (Round 39 refreshes cap still applies).
+
+    A31 (2026-10-18): 「没有合约」不是「合约已失效」。`contract_id` 可以为空
+    （model/schema 均为 Optional，`_validate_session_contract` 对空值直接放行，
+    DEV_SANDBOX_REQUIRE_CONTRACT 只门控 dev_sandbox 路径），而旧写法把
+    `contract_active` 初始化为 False ⇒ 无合约会话一旦 SUSPENDED 就永久 410：
+    `_load_operable_session` / execute / 文件面 / WS 流式四个调用点全走这个判据，
+    连报错文案建议的手工 POST /{id}/resume 也一并被堵（它经 `_load_operable_session`）
+    ⇒ 会话变成无法唤醒也无法取数的死状态。现在只有「挂着合约但合约不可用」
+    （行不存在 / UUID 不合法 / 状态非 ACTIVE|SIGNED）才 fail-closed 拒唤醒。
     """
     if session.status != SessionStatus.SUSPENDED.value or not session.auto_resume:
         return
 
     from app.core.errors import SessionTerminated
 
-    contract_active = False
-    if session.contract_id:
-        try:
-            contract_uuid = uuid.UUID(str(session.contract_id))
-        except ValueError:
-            contract_uuid = None
-        if contract_uuid is not None:
-            from app.models.contract import Contract, ContractStatus
-
-            c_result = await db.execute(select(Contract).where(Contract.id == contract_uuid))
-            contract = c_result.scalar_one_or_none()
-            contract_active = bool(
-                contract
-                and contract.status in (ContractStatus.ACTIVE.value, ContractStatus.SIGNED.value)
-            )
+    contract_id = str(session.contract_id).strip() if session.contract_id is not None else ""
+    if not contract_id:
+        # 无治理合约 ⇒ 没有可撤销的授权，自动 resume 照常（A31）。
+        contract_active = True
+        reason = ""
+    else:
+        contract_active, reason = await _governing_contract_is_active(db, contract_id)
 
     if not contract_active:
         from app.services.audit_service import audit_service
@@ -1789,12 +1821,12 @@ async def _maybe_auto_resume(session: SandboxSession, db: AsyncSession) -> None:
         await audit_service.log_standalone(
             action="session.auto_resume_rejected", resource_type="sandbox_session",
             user_id=session.user_id, session_id=session.id,
-            detail={"reason": "contract_not_active", "contract_id": session.contract_id},
+            detail={"reason": reason, "contract_id": session.contract_id},
         )
         raise SessionTerminated(
             "Session is suspended (idle auto-pause) and its governing contract "
-            "is not active — auto-resume rejected; resume manually or contact "
-            "the contract parties."
+            "is not active — auto-resume and manual resume are both refused "
+            "while the contract is unavailable; contact the contract parties."
         )
 
     try:

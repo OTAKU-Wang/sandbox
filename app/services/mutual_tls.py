@@ -133,9 +133,10 @@ class SM2CertificateAuthority:
             "not_before": now.isoformat(),
             "not_after": (now + timedelta(days=validity_days)).isoformat(),
             "public_key": public_key,
-            "space_id": space_id,
             "is_ca": False,
         }
+        if space_id:
+            cert_data["space_id"] = space_id
 
         payload_str = "|".join(f"{k}={v}" for k, v in sorted(cert_data.items()))
         signature = self._crypto.sign(

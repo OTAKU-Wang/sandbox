@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
+from app.services.merkle_service import escape_leaf_field
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,51 @@ class AuditService:
         signature event string; both default to None so existing call sites
         and their stored detail payloads stay byte-identical.
         """
+        # 审计叶子完整性 / Merkle leaf integrity — the frozen leaf preimage
+        # (merkle_service.merkle_leaf_preimage) joins
+        # id|action|resource_type|resource_id|created_at with "|" and neither
+        # escapes nor length-prefixes it, so a raw "|" in one of the three
+        # free-text fields lets two different facts produce one leaf hash and
+        # therefore one anchored (immutable) root. The format itself cannot
+        # change — verify/merkle-proof recompute it, so any edit would make
+        # every previously anchored root unverifiable — so the ambiguity is
+        # closed here, on the write side, for new rows only.
+        #
+        # Sanitised (reversibly) rather than rejected, deliberately:
+        # resource_id legitimately carries node-supplied text on the cube-egress
+        # path (map_egress_record writes str(policy["matched_rule"])), and
+        # callers such as db_access_proxy wrap this funnel in try/except — a
+        # raise would drop the audit row instead of protecting it. The mutation
+        # is disclosed on the row and in the log, never silent (same rule as
+        # detail["_sm2_sign_error"] below).
+        escaped_fields: list[str] = []
+        clean_action = escape_leaf_field(action)
+        clean_resource_type = escape_leaf_field(resource_type)
+        clean_resource_id = escape_leaf_field(resource_id)
+        for _name, _before, _after in (
+            ("action", action, clean_action),
+            ("resource_type", resource_type, clean_resource_type),
+            ("resource_id", resource_id, clean_resource_id),
+        ):
+            if _after != _before:
+                escaped_fields.append(_name)
+        if escaped_fields:
+            action, resource_type, resource_id = (
+                clean_action,
+                clean_resource_type,
+                clean_resource_id,
+            )
+            if detail is None:
+                detail = {}
+            detail["_leaf_escaped_fields"] = escaped_fields
+            logger.warning(
+                "[AUDIT INTEGRITY] audit leaf field(s) %s carried the reserved '|' "
+                "separator and were escaped to '\\|' so the Merkle leaf stays "
+                "unambiguous — action=%r resource_type=%r resource_id=%r; "
+                "reversible, and recorded in detail._leaf_escaped_fields",
+                escaped_fields, action, resource_type, resource_id,
+            )
+
         if actor_type is not None or actor_id is not None:
             if detail is None:
                 detail = {}

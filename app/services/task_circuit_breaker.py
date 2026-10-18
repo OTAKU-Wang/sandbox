@@ -95,11 +95,12 @@ class TaskCircuitBreaker:
         """Record a failed task execution. Returns new circuit state."""
         stats = self._get_stats(session_id)
         now = time.time()
+        prev_failure_time = stats.last_failure_time
         stats.last_failure_time = now
         stats.total_failures += 1
 
         # Reset count if outside window
-        if now - stats.last_failure_time > self.config.failure_window_seconds:
+        if now - prev_failure_time > self.config.failure_window_seconds:
             stats.failure_count = 0
 
         stats.failure_count += 1

@@ -220,14 +220,12 @@ async def _anchor_batch(db: AsyncSession, entries: list[AuditLog], node_id: str)
     → merkle_service.get_root → blockchain_adapter.anchor → tx_hash stamp."""
     from app.services.blockchain_adapter import blockchain_adapter
     from app.services.crypto_service import crypto_service
-    from app.services.merkle_service import merkle_service
+    from app.services.merkle_service import merkle_leaf_preimage, merkle_service
 
     for entry in entries:
         await db.refresh(entry)
     record_hashes = [
-        crypto_service.sm3_hash(
-            f"{e.id}|{e.action}|{e.resource_type}|{e.resource_id}|{e.created_at}".encode()
-        )
+        crypto_service.sm3_hash(merkle_leaf_preimage(e))
         for e in entries
     ]
     merkle_root = merkle_service.get_root(record_hashes)

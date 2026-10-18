@@ -57,8 +57,8 @@ fi
 # another task.
 PIN_FALLBACK="9b75d33907ed7336b1eef73a935ae2d1990d9b35"
 
-_json_field() { # $1=file  $2..=candidate keys; prints first non-empty value
-  "$PY" - "$1" "$2" <<'PYEOF'
+_json_field() { # $1=file  $2..=候选键（点号可嵌套：cubesandbox.git_sha）; 打印第一个非空字符串值
+  "$PY" - "$1" "${@:2}" <<'PYEOF'
 import json, sys
 path, keys = sys.argv[1], sys.argv[2:]
 try:
@@ -68,22 +68,37 @@ except Exception:
 if not isinstance(d, dict):
     sys.exit(0)
 for k in keys:
-    v = d.get(k)
-    if isinstance(v, str) and len(v) >= 7:
-        print(v)
+    cur, ok = d, True
+    for part in k.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            ok = False
+            break
+    if ok and isinstance(cur, str) and len(cur) >= 7:
+        print(cur)
         break
 PYEOF
 }
 
 PIN="${CUBE_PIN:-}"
 if [ -z "$PIN" ] && [ -f "$ROOT/scripts/cube-bundle-manifest.json" ]; then
-  PIN="$(_json_field "$ROOT/scripts/cube-bundle-manifest.json" git_sha sha commit || true)"
+  # 真实 schema 的 git_sha 嵌套在 cubesandbox 下（顶层查找永远取不到 = 死代码）
+  PIN="$(_json_field "$ROOT/scripts/cube-bundle-manifest.json" cubesandbox.git_sha git_sha sha commit || true)"
 fi
 if [ -z "$PIN" ] && [ -f "$STUBS/_VERSION.json" ]; then
   PIN="$(_json_field "$STUBS/_VERSION.json" commit git_sha || true)"
 fi
-[ -n "$PIN" ] || PIN="$PIN_FALLBACK"
-echo "pinned sha: $PIN"
+PIN_SOURCE="manifest/_VERSION/fallback"
+[ -n "$PIN" ] || { PIN="$PIN_FALLBACK"; PIN_SOURCE="PIN_FALLBACK"; }
+# 参数注入面收敛：PIN 会被拼进 git rev-parse/archive/tag，先做 hex 形状校验
+case "$PIN" in
+  ''|*[!0-9a-fA-F]*) echo "ERROR: pinned sha 不是合法 hex: $PIN" >&2; exit 3 ;;
+esac
+if [ "${#PIN}" -lt 7 ] || [ "${#PIN}" -gt 40 ]; then
+  echo "ERROR: pinned sha 长度必须在 7..40: $PIN" >&2; exit 3
+fi
+echo "pinned sha: $PIN (source: ${CUBE_PIN:+env override }${PIN_SOURCE})"
 
 # --- upstream source (mirror preferred per spec §5.1, working-copy fallback) --
 MIRROR="${CUBE_MIRROR:-/opt/cds/cube-mirror.git}"
@@ -99,7 +114,14 @@ echo "upstream source: $SRC ($SRC_KIND)"
 # 红线 7: the clean working copy must stay zero-diff. A bare mirror has no
 # worktree, so the gate applies to work-copies only.
 if [ "$SRC_KIND" = "work-copy" ]; then
-  dirty="$(git -C "$SRC" status --porcelain 2>/dev/null || true)"
+  # 目录存在不等于仓库有效：否则干净门控被“存在但非仓库”直接绕过
+  git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1 \
+    || { echo "ERROR: $SRC 存在但不是有效 git 仓库（红线 7 干净门控无法核验）" >&2; exit 3; }
+  # 命令失败 ≠ “干净”：git 错误（index.lock/dubious ownership/权限）必须硬失败
+  if ! dirty="$(git -C "$SRC" status --porcelain 2>&1)"; then
+    echo "ERROR: git status 失败，无法核验干净门控（红线 7 fail-closed）: $dirty" >&2
+    exit 3
+  fi
   if [ -n "$dirty" ]; then
     {
       echo "ERROR: upstream working copy is DIRTY — refusing to run (红线 7: 零 tracked 文件修改):"
@@ -110,16 +132,16 @@ if [ "$SRC_KIND" = "work-copy" ]; then
 fi
 
 # Pin object must exist (read-only verify; a missing object means the repo
-# needs a fetch — the only legal upstream write).
-if ! git -C "$SRC" rev-parse --verify --quiet "${PIN}^{commit}" >/dev/null; then
+# needs a fetch — the only legal upstream write). Resolve to the full oid so a
+# 7..40-char short pin never produces a spurious HEAD!=pin warning.
+if ! PIN_FULL="$(git -C "$SRC" rev-parse --verify "${PIN}^{commit}" 2>/dev/null)"; then
   echo "ERROR: pinned sha $PIN not present in $SRC — fetch the upstream ref first" >&2
   exit 3
 fi
+PIN="$PIN_FULL"
 
-# HEAD == pin is the expected state but NOT a hard gate: spec §5.2 — all proto
-# extraction goes through `git archive <sha>`, so generation is independent of
-# which ref the working copy happens to be at. Mismatch is disclosed, not hidden.
 HEAD="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)"
+[ -n "$HEAD" ] || { echo "ERROR: 读不到 $SRC 的 HEAD" >&2; exit 3; }
 if [ "$HEAD" != "$PIN" ]; then
   echo "WARNING: upstream HEAD ($HEAD) != pinned sha ($PIN) — generating from the pin via git archive (spec §5.2); consider \`git -C $SRC reset --hard $PIN\` (红线 7: the only legal upstream write)" >&2
 fi
@@ -137,9 +159,19 @@ fi
 # errorcode,types,...}). third_party/google WKTs are resolved by protoc's
 # built-ins, never generated.
 cd "$TMP/pkgs/proto"
-mapfile -t PROTO_FILES < <(find services types -name '*.proto' 2>/dev/null | LC_ALL=C sort)
+[ -d services ] || { echo "ERROR: pkgs/proto/services 在 $PIN 不存在" >&2; exit 3; }
+SEARCH=(services)
+if [ -d types ]; then
+  SEARCH+=(types)
+else
+  echo "WARNING: pkgs/proto/types 缺失 —— 只生成 services/ 子集，proto_hash 覆盖面将收窄" >&2
+fi
+mapfile -t PROTO_FILES < <(find "${SEARCH[@]}" -name '*.proto' | LC_ALL=C sort)
 [ "${#PROTO_FILES[@]}" -gt 0 ] || { echo "ERROR: no .proto files found under pkgs/proto/{services,types} at $PIN" >&2; exit 3; }
 echo "generating ${#PROTO_FILES[@]} protos: ${PROTO_FILES[*]#services/}"
+
+# 生成物集合的单一来源定义（relocate/repath/prune 三处必须严格一致）
+find_gen() { find "$@" \( -name '*_pb2*.py' -o -name '*_pb2*.pyi' \) -type f; }
 
 # --- protoc -------------------------------------------------------------------
 GEN="$TMP/gen"
@@ -149,13 +181,20 @@ rm -rf "$GEN" && mkdir -p "$GEN"
   --python_out="$GEN" \
   --grpc_python_out="$GEN" \
   "${PROTO_FILES[@]}"
-[ -f "$GEN/services/cubebox/v1/cubebox_pb2.py" ] || { echo "ERROR: protoc did not emit services/cubebox/v1/cubebox_pb2.py" >&2; exit 3; }
+# 完整性门：逐个 proto 断言双产物，漏生成任何服务都不能“成功”退出
+missing=""
+for f in "${PROTO_FILES[@]}"; do
+  for suffix in _pb2.py _pb2_grpc.py; do
+    [ -f "$GEN/$f$suffix" ] || missing="$missing $f$suffix"
+  done
+done
+[ -z "$missing" ] || { echo "ERROR: protoc 未产出:$missing" >&2; exit 3; }
 
 # --- relocate: strip the `services/` prefix so packages sit under app/_stubs/cube/
 mkdir -p "$STUBS"
 (
   cd "$GEN"
-  find . \( -name '*_pb2*.py' -o -name '*_pb2*.pyi' \) -type f | while IFS= read -r f; do
+  find_gen . | while IFS= read -r f; do
     rel="${f#./}"
     rel="${rel#services/}"
     dest="$STUBS/$rel"
@@ -168,25 +207,30 @@ mkdir -p "$STUBS"
 # (see header). Only import lines at column 0 of generated files are touched.
 (
   cd "$STUBS"
-  find . \( -name '*_pb2*.py' -o -name '*_pb2*.pyi' \) -type f | while IFS= read -r f; do
-    sed -i \
+  find_gen . | while IFS= read -r f; do
+    # 不用 GNU 原地编辑开关（BSD/macOS sed 的 -i 吞参数），临时文件+mv 两边通用
+    sed \
       -e 's/^\(from \)services\./\1app._stubs.cube./' \
       -e 's/^\(import \)services\./\1app._stubs.cube./' \
       -e 's/^\(from \)types\./\1app._stubs.cube.types./' \
       -e 's/^\(import \)types\./\1app._stubs.cube.types./' \
-      "$f"
+      "$f" > "$f.repath.tmp" && mv -f "$f.repath.tmp" "$f"
   done
 )
 
 # --- prune stale generated files from an older proto tree ----------------------
 (
   cd "$STUBS"
-  find . \( -name '*_pb2*.py' -o -name '*_pb2*.pyi' \) -type f | sed 's|^\./||' | LC_ALL=C sort > "$TMP/have"
+  find_gen . | sed 's|^\./||' | LC_ALL=C sort > "$TMP/have"
   ( cd "$TMP/pkgs/proto"
     for f in "${PROTO_FILES[@]}"; do
       base="${f%.*}"
       echo "${base#services/}_pb2.py"
       echo "${base#services/}_pb2_grpc.py"
+      # grpc_tools 会随 python_out 产 .pyi；want 清单不含它们时 prune 会把
+      # 刚生成的类型存根当陈旧文件静默清空（repath 本就处理 .pyi，意图是保留）
+      echo "${base#services/}_pb2.pyi"
+      echo "${base#services/}_pb2_grpc.pyi"
     done | LC_ALL=C sort > "$TMP/want"
   )
   comm -23 "$TMP/have" "$TMP/want" | while IFS= read -r f; do
@@ -197,7 +241,7 @@ mkdir -p "$STUBS"
 # --- package markers (never overwrite an existing __init__.py) -----------------
 mkdir -p "$ROOT/app/_stubs"
 [ -f "$ROOT/app/_stubs/__init__.py" ] || printf '' > "$ROOT/app/_stubs/__init__.py"
-find "$STUBS" -type d | while IFS= read -r d; do
+find "$STUBS" -name __pycache__ -prune -o -type d -print | while IFS= read -r d; do
   init="$d/__init__.py"
   if [ ! -f "$init" ]; then
     printf '"""CubeSandbox gRPC stubs (generated — SS-10 CB-00). Do not edit; see _VERSION.json."""\n' > "$init"
@@ -205,16 +249,23 @@ find "$STUBS" -type d | while IFS= read -r d; do
 done
 
 # --- _VERSION.json (spec §5.2 fields + tasking fields, superset) ---------------
-TAGS_AT_PIN="$(git -C "$SRC" tag --points-at "$PIN" 2>/dev/null | LC_ALL=C sort || true)"
+if ! TAGS_AT_PIN="$(git -C "$SRC" tag --points-at "$PIN" 2>"$TMP/tag_err" | LC_ALL=C sort)"; then
+  echo "WARNING: git tag --points-at 失败（$(head -1 "$TMP/tag_err" 2>/dev/null)）—— tag 将记为 unknown" >&2
+  TAGS_AT_PIN=""
+elif [ -z "$TAGS_AT_PIN" ]; then
+  echo "NOTE: 该 pin 上没有 tag（mirror 可能未 fetch refs/tags），tag 将记为 unknown" >&2
+fi
 TAG="$(printf '%s\n' "$TAGS_AT_PIN" | grep -E '^v[0-9]' | head -1 || true)"
 [ -n "$TAG" ] || TAG="$(printf '%s\n' "$TAGS_AT_PIN" | head -1 || true)"
 TAG="${TAG:-unknown}"
 
 export CUBE_TAGS_AT_PIN="$TAGS_AT_PIN"
-"$PY" - "$STUBS" "$TMP/pkgs/proto" "$PIN" "$TAG" <<'PYEOF'
+# 先写临时区：import 自检通过后才原子落盘，失败时仓库不会留在“元数据声称已生成”
+# 但代码不可导入的损坏态。
+"$PY" - "$STUBS" "$TMP/pkgs/proto" "$PIN" "$TAG" "$TMP/_VERSION.json" <<'PYEOF'
 import hashlib, json, os, sys, datetime
 
-stubs, proto_root, pin, tag = sys.argv[1:5]
+stubs, proto_root, pin, tag, out_path = sys.argv[1:6]
 
 def h(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
@@ -237,9 +288,11 @@ proto_hash = h(buf)
 buf = b""
 for rel in sorted(
     os.path.relpath(os.path.join(dp, fn), stubs)
-    for dp, _, fns in os.walk(stubs)
+    for dp, dn, fns in os.walk(stubs)
     for fn in fns
-    if os.path.relpath(os.path.join(dp, fn), stubs) != "_VERSION.json"
+    # __pycache__/*.pyc 与解释器/时间戳相关，计入 stub_hash 会让同一 pin 出不同 hash
+    if "__pycache__" not in os.path.relpath(os.path.join(dp, fn), stubs).split(os.sep)
+    and os.path.relpath(os.path.join(dp, fn), stubs) != "_VERSION.json"
 ):
     with open(os.path.join(stubs, rel), "rb") as f:
         buf += rel.encode() + b"\0" + hashlib.sha256(f.read()).hexdigest().encode() + b"\0"
@@ -257,22 +310,34 @@ version = {
     "proto_hash": proto_hash,
     "stub_hash": h(buf),
 }
-with open(os.path.join(stubs, "_VERSION.json"), "w", encoding="utf-8") as f:
+with open(out_path, "w", encoding="utf-8") as f:
     json.dump(version, f, indent=2, ensure_ascii=False)
     f.write("\n")
-print("wrote _VERSION.json:", json.dumps(version))
+print("staged _VERSION.json (落盘推迟到 import 自检通过后):", json.dumps(version))
 PYEOF
 
 # --- self-check: the generated package must import -----------------------------
+# 覆盖面 = 全部生成服务（不是只抽 cubebox+volumeplugin 两个）；-B 禁止自检把
+# __pycache__ 写进 stubs 目录。
+IMPORT_STMTS=""
+for f in "${PROTO_FILES[@]}"; do
+  mod="${f#services/}"; mod="${mod%.proto}"
+  IMPORT_STMTS="${IMPORT_STMTS}from app._stubs.cube.${mod//\//.} import ${mod##*/}_pb2, ${mod##*/}_pb2_grpc\n"
+done
 (
   cd "$ROOT"
-  "$PY" - <<'PYEOF'
+  printf '%b' "$IMPORT_STMTS" > "$TMP/imports.py"
+  "$PY" -B -c "
+import pathlib, sys
+src = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+exec(compile(src, 'generated-imports', 'exec'))
 from app._stubs.cube.cubebox.v1 import cubebox_pb2, cubebox_pb2_grpc
-from app._stubs.cube.volumeplugin.v1 import volumeplugin_pb2, volumeplugin_pb2_grpc
 assert cubebox_pb2_grpc.CubeboxMgrStub
-assert cubebox_pb2.RunCubeSandboxRequest.DESCRIPTOR.name == "RunCubeSandboxRequest"
-print("import check OK: cubebox + volumeplugin stubs import cleanly")
-PYEOF
+assert cubebox_pb2.RunCubeSandboxRequest.DESCRIPTOR.name == 'RunCubeSandboxRequest'
+print('import self-check ok: all generated stub modules import cleanly')
+" "$TMP/imports.py"
 )
+
+mv -f "$TMP/_VERSION.json" "$STUBS/_VERSION.json"
 
 echo "gen-cube-stubs.sh: done (pin $PIN, tag $TAG)"

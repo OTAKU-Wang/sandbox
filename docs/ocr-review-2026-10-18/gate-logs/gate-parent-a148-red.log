@@ -1,0 +1,55 @@
+F..FF                                                                    [100%]
+================================== FAILURES ===================================
+______ test_a148_sm3_fallback_gate_fails_closed_when_settings_unreadable ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002712BC6AB70>
+
+    def test_a148_sm3_fallback_gate_fails_closed_when_settings_unreadable(monkeypatch):
+        """配置读不出来时必须**不放行** SHA-256 冒充 SM3。"""
+    
+        def boom():
+            raise RuntimeError("settings unavailable")
+    
+        import app.core.config as config
+    
+        monkeypatch.setattr(config, "get_settings", boom)
+>       assert merkle_service._sm3_fallback_allowed() is False
+E       assert True is False
+E        +  where True = <function _sm3_fallback_allowed at 0x00000271278D1440>()
+E        +    where <function _sm3_fallback_allowed at 0x00000271278D1440> = merkle_service._sm3_fallback_allowed
+
+tests\test_ocr_a148_a079_a008.py:31: AssertionError
+___________________ test_a079_username_accepts_plain_value ____________________
+
+    def test_a079_username_accepts_plain_value():
+>       assert UserCreate(username="alice_01", password="Sup3rSecret!").username == "alice_01"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       pydantic_core._pydantic_core.ValidationError: 1 validation error for UserCreate
+E       email
+E         Field required [type=missing, input_value={'username': 'alice_01', ...ssword': 'Sup3rSecret!'}, input_type=dict]
+E           For further information visit https://errors.pydantic.dev/2.14/v/missing
+
+tests\test_ocr_a148_a079_a008.py:53: ValidationError
+___________ test_a008_explicit_row_count_survives_without_resource ____________
+
+client = <httpx.AsyncClient object at 0x000002712BED71A0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMDFhZjk2Yy1lNGQ0LTQ4MjEtYjNiNS1lMGUxM2ViZjk...yb2xlIjoiZGF0YV9wcm92aWRlciIsImV4cCI6MTc5MjQyMDY0MywidHlwZSI6ImFjY2VzcyJ9.0ik9helNGy_0qzp3OUSmiR3297BEHydpS81Lfu0r9Yg'}
+
+    @pytest.mark.asyncio
+    async def test_a008_explicit_row_count_survives_without_resource(client: AsyncClient, auth_headers: dict):
+        resp = await client.post(
+            "/api/v1/data-products",
+            json={"name": "RowCount Explicit", "row_count": 123},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+>       assert resp.json()["row_count"] == 123
+E       assert None == 123
+
+tests\test_ocr_a148_a079_a008.py:64: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ocr_a148_a079_a008.py::test_a148_sm3_fallback_gate_fails_closed_when_settings_unreadable
+FAILED tests/test_ocr_a148_a079_a008.py::test_a079_username_accepts_plain_value
+FAILED tests/test_ocr_a148_a079_a008.py::test_a008_explicit_row_count_survives_without_resource
+3 failed, 2 passed in 2.29s
+PARENT_RED_RC=1

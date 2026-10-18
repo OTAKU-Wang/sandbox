@@ -1,0 +1,233 @@
+(node:19008) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38040) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:18504) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:18504) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:10468) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17004) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:18620) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/services/__tests__/dataResourceApi.test.ts (4 tests | 3 failed) 11ms
+     × 把分页交给后端：paginated=true 与 page/page_size 一起发出去 5ms
+     × 不传参数时按第 1 页 20 条请求 1ms
+     × 不再在前端 slice：后端回几行就是几行，total 用后端的而不是数组长度 1ms
+ ❯ src/services/__tests__/uploadBoundary.test.ts (3 tests | 1 failed) 10ms
+     × 数据资源上传逐调用放宽超时（A311：后端上限 500MB，全局 30s 必先把请求掐了） 4ms
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密文对象没删掉：不得报成功
+An update to ResourceList inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密文对象没删掉：不得报成功
+An update to Portal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密文对象没删掉：不得报成功
+An update to CSSMotion inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密文对象没删掉：不得报成功
+An update to CSSMotion inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密文对象没删掉：不得报成功
+An update to CSSMotion inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密钥没销毁：同样不得报成功
+An update to ResourceList inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密钥没销毁：同样不得报成功
+An update to Portal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密钥没销毁：同样不得报成功
+An update to CSSMotion inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密钥没销毁：同样不得报成功
+An update to CSSMotion inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密钥没销毁：同样不得报成功
+An update to CSSMotion inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ❯ src/pages/DataResources/__tests__/ResourceListDelete.test.tsx (3 tests | 2 failed) 3416ms
+     × 密文对象没删掉：不得报成功 1906ms
+     × 密钥没销毁：同样不得报成功 1227ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/dataResourceApi.test.ts > 数据资源列表分页（A310） > 把分页交给后端：paginated=true 与 page/page_size 一起发出去
+TypeError: allItems.slice is not a function
+ ❯ Object.list src/services/dataResourceApi.ts:61:30
+     59|     const pageSize = params?.page_size ?? 20;
+     60|     const start = (page - 1) * pageSize;
+     61|     return { items: allItems.slice(start, start + pageSize), total: al…
+       |                              ^
+     62|   },
+     63|
+ ❯ src/services/__tests__/dataResourceApi.test.ts:43:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/services/__tests__/dataResourceApi.test.ts > 数据资源列表分页（A310） > 不传参数时按第 1 页 20 条请求
+TypeError: allItems.slice is not a function
+ ❯ Object.list src/services/dataResourceApi.ts:61:30
+     59|     const pageSize = params?.page_size ?? 20;
+     60|     const start = (page - 1) * pageSize;
+     61|     return { items: allItems.slice(start, start + pageSize), total: al…
+       |                              ^
+     62|   },
+     63|
+ ❯ src/services/__tests__/dataResourceApi.test.ts:55:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/services/__tests__/dataResourceApi.test.ts > 数据资源列表分页（A310） > 不再在前端 slice：后端回几行就是几行，total 用后端的而不是数组长度
+TypeError: allItems.slice is not a function
+ ❯ Object.list src/services/dataResourceApi.ts:61:30
+     59|     const pageSize = params?.page_size ?? 20;
+     60|     const start = (page - 1) * pageSize;
+     61|     return { items: allItems.slice(start, start + pageSize), total: al…
+       |                              ^
+     62|   },
+     63|
+ ❯ src/services/__tests__/dataResourceApi.test.ts:66:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/services/__tests__/uploadBoundary.test.ts > multipart 上传不得手写 Content-Type > 数据资源上传逐调用放宽超时（A311：后端上限 500MB，全局 30s 必先把请求掐了）
+TypeError: actual value must be number or bigint, received "undefined"
+ ❯ src/services/__tests__/uploadBoundary.test.ts:44:29
+     42|
+     43|     const config = post.mock.calls[0][2] as { timeout?: number } | und…
+     44|     expect(config?.timeout).toBeGreaterThanOrEqual(300_000);
+       |                             ^
+     45|   });
+     46|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密文对象没删掉：不得报成功
+AssertionError: expected "Mock" to be called at least once
+ ❯ src/pages/DataResources/__tests__/ResourceListDelete.test.tsx:100:44
+     98|     await confirmDelete();
+     99|
+    100|     await vi.waitFor(() => expect(warning).toHaveBeenCalled());
+       |                                            ^
+    101|     expect(success).not.toHaveBeenCalled();
+    102|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/pages/DataResources/__tests__/ResourceListDelete.test.tsx > 删除反馈跟着响应体走（A312） > 密钥没销毁：同样不得报成功
+AssertionError: expected "Mock" to be called at least once
+ ❯ src/pages/DataResources/__tests__/ResourceListDelete.test.tsx:117:44
+    115|     await confirmDelete();
+    116|
+    117|     await vi.waitFor(() => expect(warning).toHaveBeenCalled());
+       |                                            ^
+    118|     expect(success).not.toHaveBeenCalled();
+    119|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  6 failed | 4 passed (10)
+   Start at  22:57:13
+   Duration  16.59s (transform 278ms, setup 1.00s, import 10.03s, tests 3.44s, environment 7.70s)
+

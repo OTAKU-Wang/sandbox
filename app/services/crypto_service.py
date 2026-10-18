@@ -8,6 +8,8 @@ import hashlib
 import logging
 from dataclasses import dataclass
 
+from app.core.errors import CDSError
+
 logger = logging.getLogger(__name__)
 
 # Try importing gmssl; hash operations fall back to SHA-256 if unavailable.
@@ -203,6 +205,31 @@ class CryptoService:
             return bytes.fromhex(decrypted)
         return decrypted
 
+    # ─── 跨方签名原文的字节锁（OCR-A110 critical / OCR-A255）───────────────────
+    # `|` 分隔字段、`,` 分隔 purpose_scope 元素。字段里出现分隔符就能拼出与另一组
+    # 字段**完全相同**的原文（`contract_no="X|purpose:Y"` 与 `purpose="Y"` 同串），
+    # 而这份原文的 SM2 签名就是双方的不可否认证据 —— 一条签名同时为两种互斥的用
+    # 途限定背书。这里在拼接前**拒绝**而不是转义：原文形状同时被 cds-frontend 的
+    # utils/crypto.ts contractSignPayload 逐字镜像（前端拿不到服务端私钥，必须先本地
+    # 算出同一串字节），改编码得两端同改，转义最容易错成「各自转义」→ 验签静默失败。
+    # 长度上限取 DB 列宽（app/models/contract.py：contract_no / purpose 均为
+    # String(64)），所以任何合法落库值都不会被这条校验拒掉。
+    _PAYLOAD_MAX_LEN = 64
+    _PAYLOAD_ROLE_MAX_LEN = 16
+    _PAYLOAD_SCOPE_MAX_ITEMS = 64
+
+    @classmethod
+    def _payload_field_issues(
+        cls, field: str, value: object, *, max_len: int, forbidden: str = "|",
+    ) -> list[dict]:
+        """一个字段能否无歧义地进原文：不含分隔符、不超列宽。"""
+        text = "" if value is None else str(value)
+        issues = [{"field": field, "reason": f"contains forbidden separator {ch!r}"}
+                  for ch in forbidden if ch in text]
+        if len(text) > max_len:
+            issues.append({"field": field, "reason": f"exceeds {max_len} characters"})
+        return issues
+
     @staticmethod
     def contract_sign_data(contract_id: str, contract_no: str, party_role: str, timestamp: str,
                            purpose: str | None = None, purpose_scope: list | None = None) -> bytes:
@@ -210,8 +237,38 @@ class CryptoService:
 
         Gap A4: a purpose limitation is part of the signed payload so both
         parties commit to it. purpose=None keeps the legacy payload shape,
-        so existing purpose-less contracts verify unchanged.
+        so existing purpose-less contracts verify unchanged. ``purpose_scope=[]``
+        and ``None`` denote the same bytes — an explicit empty scope adds no
+        restriction, matching the frontend mirror's ``purposeScope.length > 0``.
+
+        Raises CDSError(VALIDATION_ERROR, 422) when a field would make the payload
+        ambiguous (an embedded ``|`` / `,`) or overlong: an ambiguous payload is one
+        the counterparty can re-sign/reinterpret, so it is refused, never escaped
+        (OCR-A110 / OCR-A255).
         """
+        v = CryptoService._payload_field_issues
+        errors: list[dict] = []
+        errors += v("contract_id", contract_id, max_len=CryptoService._PAYLOAD_MAX_LEN)
+        errors += v("contract_no", contract_no, max_len=CryptoService._PAYLOAD_MAX_LEN)
+        errors += v("party_role", party_role, max_len=CryptoService._PAYLOAD_ROLE_MAX_LEN)
+        errors += v("timestamp", timestamp, max_len=CryptoService._PAYLOAD_MAX_LEN)
+        errors += v("purpose", purpose, max_len=CryptoService._PAYLOAD_MAX_LEN)
+        if purpose_scope is not None:
+            if len(purpose_scope) > CryptoService._PAYLOAD_SCOPE_MAX_ITEMS:
+                errors.append({"field": "purpose_scope",
+                               "reason": f"more than {CryptoService._PAYLOAD_SCOPE_MAX_ITEMS} elements"})
+            for idx, item in enumerate(purpose_scope):
+                for issue in v("purpose_scope", item,
+                               max_len=CryptoService._PAYLOAD_MAX_LEN, forbidden="|,"):
+                    errors.append({**issue, "index": idx})
+        if errors:
+            raise CDSError(
+                "合约签名原文不得含 `|` / `,` 分隔符，且不得超过落库列宽："
+                "有歧义的原文可被对方重新解释，平台拒签",
+                code="VALIDATION_ERROR", http_status=422,
+                detail={"errors": errors},
+            )
+
         base = f"CDS-SIGN|{contract_id}|{contract_no}|{party_role}|{timestamp}"
         if purpose:
             base += f"|purpose:{purpose}"
@@ -222,8 +279,13 @@ class CryptoService:
     def sign_with_hsm(self, data: bytes, key_id: str) -> SM2Signature:
         """Sign data using HSM-managed key (P0-2).
 
-        Attempts HSM signing first. Falls back to software SM2 with warning if HSM
-        is unavailable or does not support SM2.
+        One attempt only. The private key behind ``key_id`` lives solely inside the
+        adapter that holds it, so repeating the identical call cannot possibly succeed:
+        the old body logged "falling back to software SM2" and then re-issued the same
+        ``hsm_adapter.sign(data, key_id)`` (OCR-A113) — a fallback that never existed.
+        A software keypair is the *caller's* explicit choice (audit_service and
+        contract_service catch this and generate one under ``__software__``), which
+        keeps the key source visible instead of pretending the HSM signed.
 
         Args:
             data: Raw bytes to sign
@@ -233,43 +295,31 @@ class CryptoService:
             SM2Signature with hex-encoded r||s
 
         Raises:
-            ValueError: If key_id not found in either HSM or software fallback
+            ValueError: the configured adapter cannot sign with this key_id — there
+                is no second path for an HSM-held key id
         """
         from app.services.hsm_adapter import hsm_adapter
         try:
             sig_bytes = hsm_adapter.sign(data, key_id)
-            return SM2Signature(signature=sig_bytes.hex())
         except (RuntimeError, ValueError, AttributeError) as e:
-            logger.warning(
-                f"[CRYPTO] HSM signing failed for key {key_id}: {e} — "
-                f"falling back to software SM2"
-            )
-        # Fallback: try software HSM (which stores SM2 keypairs)
-        try:
-            sig_bytes = hsm_adapter.sign(data, key_id)
-            return SM2Signature(signature=sig_bytes.hex())
-        except (RuntimeError, ValueError, AttributeError):
-            pass
-        raise ValueError(
-            f"Signing key {key_id} not available in HSM or software fallback"
-        )
+            raise ValueError(
+                f"Signing key {key_id} is unusable in the configured HSM adapter ({e}) — "
+                f"no software fallback exists for an HSM-held key id"
+            ) from e
+        return SM2Signature(signature=sig_bytes.hex())
 
     def generate_hsm_signing_keypair(self, key_id: str) -> tuple[str, str]:
         """Generate an SM2 signing key pair in HSM (P0-2).
 
         Returns (public_key_hex, key_id). The private key never leaves HSM.
 
-        Falls back to software HSM if hardware HSM doesn't support SM2.
+        Fails loudly when the adapter has no SM2 support. The old body logged
+        "falling back to software SM2 keypair" and then re-raised the same exception
+        (OCR-A113) — the log promised a fallback the code did not take. Generating a
+        software keypair is the caller's visible decision, not a side effect.
         """
         from app.services.hsm_adapter import hsm_adapter
-        try:
-            return hsm_adapter.generate_signing_keypair(key_id)
-        except (RuntimeError, AttributeError) as e:
-            logger.warning(
-                f"[CRYPTO] HSM key generation failed: {e} — "
-                f"falling back to software SM2 keypair"
-            )
-            raise
+        return hsm_adapter.generate_signing_keypair(key_id)
 
 
 crypto_service = CryptoService()

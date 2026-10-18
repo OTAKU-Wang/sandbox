@@ -13,12 +13,15 @@ const statusColors: Record<string, string> = {
   active: 'green',
   revoked: 'red',
   expired: 'orange',
+  // 证书 `not_after` 缺失/不可解析时服务层给 unknown：不得显示为「有效」，也不得空标签。
+  unknown: 'default',
 };
 
 const statusLabels: Record<string, string> = {
   active: '有效',
   revoked: '已撤销',
   expired: '已过期',
+  unknown: '无法确认',
 };
 
 export default function Certificates() {

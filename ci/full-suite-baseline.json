@@ -1,0 +1,6 @@
+{
+  "established": false,
+  "failures": null,
+  "errors": null,
+  "note": "GitHub-lane failure budget for the informational full-suite run (enforced by ci/check_full-suite-baseline wiring in ci.yml). The authoritative full-suite numbers remain the remote py3.12 production-image + PG16 lane — those rows live in ci/known-failures.md and are NOT comparable with this lane (different DB/env/hardware). Procedure: after the first green GitHub full-suite run, set failures/errors to the observed counts and established=true; from then on any growth fails the budget step."
+}

@@ -1,0 +1,347 @@
+.FFFF..FFFFFFFFFFF                                                       [100%]
+================================== FAILURES ===================================
+______________ test_every_job_runs_with_declared_least_privilege ______________
+
+    def test_every_job_runs_with_declared_least_privilege() -> None:
+        problems: list[str] = []
+        for wf_name, expected_jobs in EXPECTED_PERMISSIONS.items():
+            doc = _load(wf_name)
+>           effective = _effective_permissions(wf_name, doc)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ci_workflow_policy.py:99: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+wf_name = 'ci.yml'
+doc = {'name': 'CI', True: {'pull_request': None, 'push': {'branches': ['main']}}, 'concurrency': {'cancel-in-progress': Tru...nv': {'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}'}, 'uses': 'gitleaks/gitleaks-action@v2'}], 'timeout-minutes': 10}}}
+
+    def _effective_permissions(wf_name: str, doc: dict) -> dict[str, dict]:
+        """Map job_id -> flattened {scope: level} after workflow-level defaults."""
+        wf_perm = doc.get("permissions")
+        out: dict[str, dict] = {}
+        for job_id, job in (doc.get("jobs") or {}).items():
+            if "permissions" in job:
+                perm = job["permissions"]
+            else:
+                perm = wf_perm
+>               assert perm is not None, (
+                    f"{wf_name}: job '{job_id}' has neither job-level nor "
+                    "workflow-level permissions — GITHUB_TOKEN would inherit the "
+                    "repository default (write-all on classic repos)"
+                )
+E               AssertionError: ci.yml: job 'backend' has neither job-level nor workflow-level permissions — GITHUB_TOKEN would inherit the repository default (write-all on classic repos)
+E               assert None is not None
+
+tests\test_ci_workflow_policy.py:63: AssertionError
+______________________ test_no_write_all_grants_anywhere ______________________
+
+    def test_no_write_all_grants_anywhere() -> None:
+        problems = []
+        for wf in WORKFLOWS:
+            doc = _load(wf.name)
+>           for job_id, perm in _effective_permissions(wf.name, doc).items():
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ci_workflow_policy.py:123: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+wf_name = 'ci.yml'
+doc = {'name': 'CI', True: {'pull_request': None, 'push': {'branches': ['main']}}, 'concurrency': {'cancel-in-progress': Tru...nv': {'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}'}, 'uses': 'gitleaks/gitleaks-action@v2'}], 'timeout-minutes': 10}}}
+
+    def _effective_permissions(wf_name: str, doc: dict) -> dict[str, dict]:
+        """Map job_id -> flattened {scope: level} after workflow-level defaults."""
+        wf_perm = doc.get("permissions")
+        out: dict[str, dict] = {}
+        for job_id, job in (doc.get("jobs") or {}).items():
+            if "permissions" in job:
+                perm = job["permissions"]
+            else:
+                perm = wf_perm
+>               assert perm is not None, (
+                    f"{wf_name}: job '{job_id}' has neither job-level nor "
+                    "workflow-level permissions — GITHUB_TOKEN would inherit the "
+                    "repository default (write-all on classic repos)"
+                )
+E               AssertionError: ci.yml: job 'backend' has neither job-level nor workflow-level permissions — GITHUB_TOKEN would inherit the repository default (write-all on classic repos)
+E               assert None is not None
+
+tests\test_ci_workflow_policy.py:63: AssertionError
+_____________ test_third_party_actions_pinned_to_full_commit_sha ______________
+
+    def test_third_party_actions_pinned_to_full_commit_sha() -> None:
+        sha_re = re.compile(r"^[0-9a-f]{40}$")
+        problems = []
+        for wf in WORKFLOWS:
+            doc = _load(wf.name)
+            for job_id, job in (doc.get("jobs") or {}).items():
+                for step in job.get("steps") or []:
+                    uses = (step or {}).get("uses")
+                    if not uses or "@" not in uses:
+                        continue
+                    action, ref = uses.rsplit("@", 1)
+                    org = action.split("/")[0]
+                    if org == "actions":  # GitHub first-party majors are tolerated
+                        continue
+                    if not sha_re.match(ref):
+                        problems.append(
+                            f"{wf.name}:{job_id}: third-party action '{action}' pinned to "
+                            f"mutable ref '{ref}' — pin the full commit SHA"
+                        )
+>       assert not problems, "\n".join(problems)
+E       AssertionError: ci.yml:secrets: third-party action 'gitleaks/gitleaks-action' pinned to mutable ref 'v2' — pin the full commit SHA
+E       assert not ["ci.yml:secrets: third-party action 'gitleaks/gitleaks-action' pinned to mutable ref 'v2' — pin the full commit SHA"]
+
+tests\test_ci_workflow_policy.py:154: AssertionError
+___________________ test_no_secret_interpolation_into_steps ___________________
+
+    def test_no_secret_interpolation_into_steps() -> None:
+        """No `${{ secrets.* }}` may reach any step's with/env — a token passed to a
+        third-party action is an exfiltration path (old gitleaks-action@v2)."""
+        needle = re.compile(r"\$\{\{[^}]*\bsecrets\.", re.IGNORECASE)
+        problems = []
+        for wf in WORKFLOWS:
+            doc = _load(wf.name)
+            for job_id, job in (doc.get("jobs") or {}).items():
+                for field in ("env",):
+                    if needle.search(json.dumps(job.get(field) or {})):
+                        problems.append(f"{wf.name}:{job_id}: secrets in job env")
+                for idx, step in enumerate(job.get("steps") or []):
+                    blob = json.dumps({k: step.get(k) for k in ("with", "env")})
+                    if needle.search(blob):
+                        label = step.get("name") or step.get("uses") or idx
+                        problems.append(f"{wf.name}:{job_id} step '{label}': secrets interpolation")
+>       assert not problems, "\n".join(problems)
+E       AssertionError: ci.yml:secrets step 'gitleaks/gitleaks-action@v2': secrets interpolation
+E       assert not ["ci.yml:secrets step 'gitleaks/gitleaks-action@v2': secrets interpolation"]
+
+tests\test_ci_workflow_policy.py:173: AssertionError
+_________________ test_gate_count_matches_known_failures_doc __________________
+
+    def test_gate_count_matches_known_failures_doc() -> None:
+        count = len(_gate_files())
+        doc = (CI_DIR / "known-failures.md").read_text(encoding="utf-8")
+        m = re.search(r"当前\s*\*\*(\d+)\s*项\*\*", doc)
+        assert m, "ci/known-failures.md lost its '当前 **N** 项' gate-count declaration"
+        declared = int(m.group(1))
+>       assert declared == count, (
+            f"ci.yml gate list has {count} files but ci/known-failures.md declares "
+            f"{declared} — gate coverage drifted; update ci.yml and this sentence together"
+        )
+E       AssertionError: ci.yml gate list has 39 files but ci/known-failures.md declares 36 — gate coverage drifted; update ci.yml and this sentence together
+E       assert 36 == 39
+
+tests\test_ci_workflow_policy.py:234: AssertionError
+_______________ test_budget_script_exists_and_is_wired_into_ci ________________
+
+    def test_budget_script_exists_and_is_wired_into_ci() -> None:
+>       assert BUDGET_SCRIPT.exists(), "ci/check_full_suite_budget.py missing — soft gate unimplemented"
+E       AssertionError: ci/check_full_suite_budget.py missing — soft gate unimplemented
+E       assert False
+E        +  where False = exists()
+E        +    where exists = WindowsPath('D:/workspace/sandbox/ci/check_full_suite_budget.py').exists
+
+tests\test_ci_workflow_policy.py:269: AssertionError
+_____________________ test_budget_script_fails_on_growth ______________________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-97/test_budget_script_fails_on_gr0')
+
+    def test_budget_script_fails_on_growth(tmp_path: Path) -> None:
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(
+            json.dumps({"established": True, "failures": 2, "errors": 0}), encoding="utf-8"
+        )
+        over = _junit(tmp_path / "over.xml", failures=3, errors=0, skipped=0, tests=10)
+        eq = _junit(tmp_path / "eq.xml", failures=2, errors=0, skipped=0, tests=10)
+        err_over = _junit(tmp_path / "err.xml", failures=0, errors=3, skipped=0, tests=10)
+>       assert _run_budget(over, baseline).returncode == 1
+E       AssertionError: assert 2 == 1
+E        +  where 2 = CompletedProcess(args=['D:\\workspace\\sandbox\\.venv-gate\\Scripts\\python.exe', 'D:\\workspace\\sandbox\\ci\\check_f...pData\\Local\\Temp\\pytest-of-清彧\\pytest-97\\test_budget_script_fails_on_gr0\\baseline.json'], returncode=2, stdout='').returncode
+E        +    where CompletedProcess(args=['D:\\workspace\\sandbox\\.venv-gate\\Scripts\\python.exe', 'D:\\workspace\\sandbox\\ci\\check_f...pData\\Local\\Temp\\pytest-of-清彧\\pytest-97\\test_budget_script_fails_on_gr0\\baseline.json'], returncode=2, stdout='') = _run_budget(WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-97/test_budget_script_fails_on_gr0/over.xml'), WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-97/test_budget_script_fails_on_gr0/baseline.json'))
+
+tests\test_ci_workflow_policy.py:297: AssertionError
+____________ test_budget_script_honest_when_baseline_unestablished ____________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-97/test_budget_script_honest_when0')
+
+    def test_budget_script_honest_when_baseline_unestablished(tmp_path: Path) -> None:
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(json.dumps({"established": False}), encoding="utf-8")
+        rep = _junit(tmp_path / "r.xml", failures=99, errors=0, skipped=0, tests=100)
+        proc = _run_budget(rep, baseline)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: None
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\workspace\\sandbox\\.venv-gate\\Scripts\\python.exe', 'D:\\workspace\\sandbox\\ci\\check_f...pData\\Local\\Temp\\pytest-of-清彧\\pytest-97\\test_budget_script_honest_when0\\baseline.json'], returncode=2, stdout='').returncode
+
+tests\test_ci_workflow_policy.py:307: AssertionError
+___________________ test_torch_cpu_wheel_is_the_final_state ___________________
+
+    def test_torch_cpu_wheel_is_the_final_state() -> None:
+        doc = _load("ci.yml")
+        steps = doc["jobs"]["backend"]["steps"]
+        req_idx = next(
+            i for i, s in enumerate(steps) if "requirements.txt" in s.get("run", "")
+        )
+        cpu_idx = [
+            i
+            for i, s in enumerate(steps)
+            if "download.pytorch.org/whl/cpu" in s.get("run", "")
+            and "force-reinstall" in s.get("run", "")
+        ]
+>       assert cpu_idx, "no same-version --force-reinstall step pinning the CPU wheel"
+E       AssertionError: no same-version --force-reinstall step pinning the CPU wheel
+E       assert []
+
+tests\test_ci_workflow_policy.py:334: AssertionError
+______________________ test_frontend_runs_tests_and_lint ______________________
+
+    def test_frontend_runs_tests_and_lint() -> None:
+        doc = _load("ci.yml")
+        steps = doc["jobs"]["frontend"]["steps"]
+        runs = [s.get("run", "") for s in steps]
+>       assert any("npm test" in r for r in runs), "frontend job must run vitest"
+E       AssertionError: frontend job must run vitest
+E       assert False
+E        +  where False = any(<generator object test_frontend_runs_tests_and_lint.<locals>.<genexpr> at 0x00000264CA4931D0>)
+
+tests\test_ci_workflow_policy.py:351: AssertionError
+___________ test_smoke_install_uses_absolute_path_and_required_env ____________
+
+    def test_smoke_install_uses_absolute_path_and_required_env() -> None:
+        install = next(s for s in _smoke_steps() if "install" in str(s.get("name", "")))
+        run = install["run"]
+        assert "deploy/cube-node/install.sh" in run
+>       assert re.search(r"(REPO_DIR|GITHUB_WORKSPACE)\S*\}?/deploy/cube-node/install\.sh", run), (
+            "install.sh is invoked by a relative path — after `cd /tmp/cds-smoke-tls` "
+            "it can never resolve (set -e fails the step)"
+        )
+E       AssertionError: install.sh is invoked by a relative path — after `cd /tmp/cds-smoke-tls` it can never resolve (set -e fails the step)
+E       assert None
+E        +  where None = <function search at 0x00000264BEF1D120>('(REPO_DIR|GITHUB_WORKSPACE)\\S*\\}?/deploy/cube-node/install\\.sh', 'set -euo pipefail\n# 冒烟 runner 使用本地测试证书（生产必为 certificate_service 签发）\nmkdir -p /tmp/cds-smoke-tls && cd /tmp/cds-smok..."/CN=cds-cube-node-smoke" -addext "subjectAltName=IP:127.0.0.1"\ncp tls.crt ca.crt\nbash deploy/cube-node/install.sh\n')
+E        +    where <function search at 0x00000264BEF1D120> = re.search
+
+tests\test_ci_workflow_policy.py:381: AssertionError
+______________ test_smoke_loop_setup_is_idempotent_and_torn_down ______________
+
+    def test_smoke_loop_setup_is_idempotent_and_torn_down() -> None:
+        steps = _smoke_steps()
+        setup = next(s for s in steps if "XFS" in str(s.get("name", "")))
+        run = setup["run"]
+>       assert "blkid" in run, (
+            "mkfs.xfs -f must be guarded by a filesystem probe — re-running after a "
+            "runner reboot would otherwise reformat a data-bearing loop image"
+        )
+E       AssertionError: mkfs.xfs -f must be guarded by a filesystem probe — re-running after a runner reboot would otherwise reformat a data-bearing loop image
+E       assert 'blkid' in 'set -euo pipefail\nLOOP_FILE=/var/tmp/cds-cube-smoke-xfs.img\nmkdir -p /data/cubelet\nif ! mountpoint -q /data/cubele...  LOOP_DEV=$(cat /var/tmp/cds-cube-smoke-loop)\n  mkfs.xfs -f "${LOOP_DEV}"\n  mount "${LOOP_DEV}" /data/cubelet\nfi\n'
+
+tests\test_ci_workflow_policy.py:396: AssertionError
+______________________ test_smoke_records_node_ip_input _______________________
+
+    def test_smoke_records_node_ip_input() -> None:
+        doc = _load(SMOKE)
+        assert "node_ip" in (doc.get("on") or doc.get(True, {})).get("workflow_dispatch", {}).get(
+            "inputs", {}
+        )
+        body = json.dumps(_smoke_steps())
+>       assert "GITHUB_STEP_SUMMARY" in body and "node_ip" in body, (
+            "node_ip was a declared-but-dead input; it must be recorded verbatim"
+        )
+E       AssertionError: node_ip was a declared-but-dead input; it must be recorded verbatim
+E       assert ('GITHUB_STEP_SUMMARY' in '[{"uses": "actions/checkout@v4"}, {"name": "\\u8bed\\u6cd5\\u95e8\\u7981\\uff08\\u6240\\u6709 runner \\u901a\\u7528\\...erify-report.json\\npython3 -c \\"import json; r=json.load(open(\'verify-report.json\')); assert r[\'ok\'], r\\"\\n"}]')
+
+tests\test_ci_workflow_policy.py:417: AssertionError
+___________________ test_watch_clone_failure_is_fail_closed ___________________
+
+    def test_watch_clone_failure_is_fail_closed() -> None:
+        run = _watch_run("Clone upstream")
+>       assert "clone-failed" not in run, (
+            "a marker-file skip path lets clone failures report green — the weekly "
+            "monitor would silently stop monitoring (fail-open)"
+        )
+E       AssertionError: a marker-file skip path lets clone failures report green — the weekly monitor would silently stop monitoring (fail-open)
+E       assert 'clone-failed' not in 'REPO="${CUB...ailed"\nfi\n'
+E         
+E         'clone-failed' is contained here:
+E           "
+E             echo "clone-failed" > "$RUNNER_TEMP/clone-failed"
+E         ?         ++++++++++++
+E           fi
+
+tests\test_ci_workflow_policy.py:436: AssertionError
+________ test_watch_gate_step_passes_output_via_env_and_handles_exit3 _________
+
+    def test_watch_gate_step_passes_output_via_env_and_handles_exit3() -> None:
+        doc = _load(WATCH)
+        steps = doc["jobs"]["contract-check"]["steps"]
+        gate = next(s for s in steps if "Gate" in str(s.get("name", "")))
+>       assert "${{" not in gate["run"], (
+            "step outputs are untrusted context — interpolate via env:, not into the script body"
+        )
+E       AssertionError: step outputs are untrusted context — interpolate via env:, not into the script body
+E       assert '${{' not in 'case "${{ s...  ;;\nesac\n'
+E         
+E         '${{' is contained here:
+E           case "${{ steps.check.outputs.code }}" in
+E         ?       +++
+E             0)
+E               echo "no contract drift since the pinned sha — auto-follow safe (spec §5.3)"
+E               ;;...
+E         
+E         ...Full output truncated (15 lines hidden), use '-vv' to show
+
+tests\test_ci_workflow_policy.py:452: AssertionError
+============================== warnings summary ===============================
+tests/test_ci_workflow_policy.py::test_budget_script_fails_on_growth
+  C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-13 (_readerthread)
+  
+  Traceback (most recent call last):
+    File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\subprocess.py", line 1599, in _readerthread
+      buffer.append(fh.read())
+                    ^^^^^^^^^
+    File "<frozen codecs>", line 322, in decode
+  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc7 in position 9: invalid continuation byte
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+tests/test_ci_workflow_policy.py::test_budget_script_honest_when_baseline_unestablished
+  C:\Users\清彧\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-16 (_readerthread)
+  
+  Traceback (most recent call last):
+    File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\subprocess.py", line 1599, in _readerthread
+      buffer.append(fh.read())
+                    ^^^^^^^^^
+    File "<frozen codecs>", line 322, in decode
+  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc7 in position 9: invalid continuation byte
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_ci_workflow_policy.py::test_every_job_runs_with_declared_least_privilege
+FAILED tests/test_ci_workflow_policy.py::test_no_write_all_grants_anywhere - ...
+FAILED tests/test_ci_workflow_policy.py::test_third_party_actions_pinned_to_full_commit_sha
+FAILED tests/test_ci_workflow_policy.py::test_no_secret_interpolation_into_steps
+FAILED tests/test_ci_workflow_policy.py::test_gate_count_matches_known_failures_doc
+FAILED tests/test_ci_workflow_policy.py::test_budget_script_exists_and_is_wired_into_ci
+FAILED tests/test_ci_workflow_policy.py::test_budget_script_fails_on_growth
+FAILED tests/test_ci_workflow_policy.py::test_budget_script_honest_when_baseline_unestablished
+FAILED tests/test_ci_workflow_policy.py::test_torch_cpu_wheel_is_the_final_state
+FAILED tests/test_ci_workflow_policy.py::test_frontend_runs_tests_and_lint - ...
+FAILED tests/test_ci_workflow_policy.py::test_smoke_install_uses_absolute_path_and_required_env
+FAILED tests/test_ci_workflow_policy.py::test_smoke_loop_setup_is_idempotent_and_torn_down
+FAILED tests/test_ci_workflow_policy.py::test_smoke_records_node_ip_input - A...
+FAILED tests/test_ci_workflow_policy.py::test_watch_clone_failure_is_fail_closed
+FAILED tests/test_ci_workflow_policy.py::test_watch_gate_step_passes_output_via_env_and_handles_exit3
+15 failed, 3 passed, 2 warnings in 5.21s

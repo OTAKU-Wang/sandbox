@@ -1,0 +1,672 @@
+     1	// SS-18 原型 2-4「我的开发-任务详情」（图规格 = 机器转录 img-specs/group-B.md §图 2）：
+     2	// 八张卡纵向单列，逐张照图（任务标题 → 4 个统计小卡 → 基本信息 → 我的合约 → 资源配置 → 关联数据 → 运行记录 → 结果集），
+     3	// 全页无分页器（图二次放大确认），一次取全（后端 page_size 上限内；取不全时如实写出未取回条数）。
+     4	//
+     5	// 诚实口径（项目铁律 honest degradation / 禁伪造）：
+     6	// - 每个数字都取后端下发值；后端字段存在但没下发 → 「未记录」，整列/整项没有来源 → 「—」（图上自己也用破折号）；
+     7	// - 内存实测占用后端根本没有采样源（home.not_collected 的 memory.measured），使用量写「未计量」，
+     8	//   进度条只画空槽，不画 47.5% 这类假填充；
+     9	// - 「沙箱环境运行中…」这句只在 GET /sandbox-sessions 里真查到本任务的 running 会话时说；
+    10	// - 成果包在数据模型里按**合约 + 会话**归集（`delivery_bundles` 没有任务维度外键），
+    11	//   所以「产出结果集」如实按合约归集并写明口径，不假装这一条任务独产。
+    12	import { useState } from 'react';
+    13	import { useNavigate, useParams, Link } from 'react-router-dom';
+    14	import { useQuery } from '@tanstack/react-query';
+    15	import {
+    16	  Alert,
+    17	  Button,
+    18	  Card,
+    19	  Col,
+    20	  Descriptions,
+    21	  Modal,
+    22	  Progress,
+    23	  Row,
+    24	  Space,
+    25	  Statistic,
+    26	  Table,
+    27	  Tag,
+    28	  Tooltip,
+    29	  Typography,
+    30	  message,
+    31	} from 'antd';
+    32	import {
+    33	  ArrowLeftOutlined,
+    34	  CaretRightFilled,
+    35	  CheckCircleFilled,
+    36	  ClockCircleOutlined,
+    37	  CodeOutlined,
+    38	  DatabaseOutlined,
+    39	  ExportOutlined,
+    40	  ImportOutlined,
+    41	  InfoCircleOutlined,
+    42	  LockOutlined,
+    43	  ProfileOutlined,
+    44	  ReloadOutlined,
+    45	  RiseOutlined,
+    46	} from '@ant-design/icons';
+    47	import type { ColumnsType } from 'antd/es/table';
+    48	import type { ReactNode } from 'react';
+    49	import TaskRunRecords from './TaskRunRecords';
+    50	import type { DebugRunRecordInput } from './TaskRunRecords';
+    51	import { bundleReviewMeta, bundleWatermarkMeta } from './display';
+    52	import {
+    53	  BUNDLE_EXPORT_STATUS_HINT,
+    54	  BUNDLE_NAME_HINT,
+    55	  DEV_TASK_NODE_HINT,
+    56	  MEMORY_USAGE_UNMEASURED,
+    57	  NO_ACTIVE_DEBUG_SESSION_NOTE,
+    58	  NO_SOURCE_TEXT,
+    59	  PRODUCT_ORG_HINT,
+    60	  RESULT_SET_SCOPE_HINT,
+    61	  SANDBOX_MEMORY_RUNNING_NOTE,
+    62	  formatDevTaskTime,
+    63	  formatPrototypeMemory,
+    64	  memoryUnmeasuredReason,
+    65	  notebookStateMeta,
+    66	  productTypeLabel,
+    67	  statusTagTone,
+    68	  taskNodeText,
+    69	} from './devTasksModel';
+    70	import { useContractById } from './useContractOptions';
+    71	import type { ContractOption } from './useContractOptions';
+    72	import { CONTRACT_DATA_RESOLVE_LIMIT, buildContractDataSummary } from './contractDataModel';
+    73	import type { ContractDataItem } from './contractDataModel';
+    74	import { dataProductApi } from '../../services/dataProductApi';
+    75	import { usersApi } from '../../services/usersApi';
+    76	import { sandboxApi } from '../../services/sandboxApi';
+    77	import { useAuthStore } from '../../stores/authStore';
+    78	import {
+    79	  TASK_DEBUG_METHOD_OPTIONS,
+    80	  TASK_EXPORT_MODE_OPTIONS,
+    81	  UNKNOWN_TEXT,
+    82	  describeDeliveryMethod,
+    83	  describeFlowError,
+    84	  formatBytes,
+    85	  formatDateTime,
+    86	  taskEnumLabel,
+    87	  useDatasetBundles,
+    88	  useHomeOverview,
+    89	  useNotebook,
+    90	  useRunNotebook,
+    91	} from '../../services/flow';
+    92	import type { DatasetBundleRow } from '../../services/flow';
+    93	import { CenteredLoading, QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+    94	import './taskDetail.css';
+    95	
+    96	const { Text, Title } = Typography;
+    97	
+    98	/** 图 2-4「资源配置」左栏两句固定说明。 */
+    99	const DEBUG_MEMORY_CAPTION = '用于在线调试、断点运行与日志查看';
+   100	const EXEC_MEMORY_CAPTION = '用于全量任务正式执行环境';
+   101	const MEMORY_QUOTA_NOTE = '内存配额将应用于调试与执行阶段';
+   102	/** 图 2-4「关联数据」「结果集」两句固定说明（照图原文）。 */
+   103	const GRANTED_DATA_NOTE = '已授权到沙箱的数据产品，详情信息为只读';
+   104	const RESULT_SET_NOTE = '按合约约定，结果集已通过 OpenApi 导出至「我的结果集」；';
+   105	/** 一页取全的批量：后端各表 page_size 上限都在 100 以内（1000 会 422）。 */
+   106	const FULL_PAGE_SIZE = 100;
+   107	
+   108	const footnoteStyle = { fontSize: 12 } as const;
+   109	
+   110	/** 统计小卡右侧那种「彩色底 + 白色图形」图标（图：紫底圆柱、橙底柱状图文档）。 */
+   111	function TintedIcon({ icon, background }: { icon: ReactNode; background: string }) {
+   112	  return (
+   113	    <span
+   114	      style={{
+   115	        display: 'inline-flex',
+   116	        alignItems: 'center',
+   117	        justifyContent: 'center',
+   118	        width: 24,
+   119	        height: 24,
+   120	        borderRadius: 4,
+   121	        background,
+   122	        color: '#fff',
+   123	      }}
+   124	    >
+   125	      {icon}
+   126	    </span>
+   127	  );
+   128	}
+   129	
+   130	export default function FlowTaskDetail() {
+   131	  const { taskId } = useParams<{ taskId: string }>();
+   132	  const navigate = useNavigate();
+   133	  const notebookQuery = useNotebook(taskId ?? null);
+   134	  const organization = useAuthStore((state) => state.user?.organization);
+   135	  const [detailProduct, setDetailProduct] = useState<ContractDataItem | null>(null);
+   136	  const [debugRecords, setDebugRecords] = useState<DebugRunRecordInput[]>([]);
+   137	  /** 执行任务的失败原因：除了 toast，还在卡 A 里留一行错语（瞬时提示不能当唯一披露，也不能吞）。 */
+   138	  const [runError, setRunError] = useState<string | null>(null);
+   139	  const runNotebook = useRunNotebook();
+   140	
+   141	  const notebook = notebookQuery.data;
+   142	  const contractId = notebook?.contract_id ?? null;
+   143	  const sessionId = notebook?.session_id ?? null;
+   144	
+   145	  // 合约按 id 取回：列表接口 limit 上限 20，靠列表命中会把「不在第一页」误判成「没有合约」。
+   146	  const contractQuery = useContractById(contractId);
+   147	  const contract: ContractOption | null = contractQuery.data ?? null;
+   148	
+   149	  // 内存使用量的唯一权威披露：home.not_collected 的 memory.measured（后端自己说没有采样源）。
+   150	  const home = useHomeOverview();
+   151	  const bundles = useDatasetBundles(contractId, 1, FULL_PAGE_SIZE);
+   152	
+   153	  // 关联数据 = 合约授权进沙箱的数据产品清单；null（未下发）与 []（确实没绑）是两件事。
+   154	  const grantedIds = contract?.product_ids ?? [];
+   155	  const products = useQuery({
+   156	    queryKey: ['flow', 'task-detail', 'contract-data-products', grantedIds],
+   157	    enabled: grantedIds.length > 0,
+   158	    queryFn: async () => {
+   159	      const head = grantedIds.slice(0, CONTRACT_DATA_RESOLVE_LIMIT);
+   160	      const settled = await Promise.allSettled(head.map((id) => dataProductApi.get(id)));
+   161	      return buildContractDataSummary(grantedIds, settled);
+   162	    },
+   163	  });
+   164	  // 组织名称：按 provider_id 到账号选项里解析 organization（上限 100，后端 le=100）。
+   165	  const orgOptions = useQuery({
+   166	    queryKey: ['flow', 'task-detail', 'user-options'],
+   167	    queryFn: () => usersApi.options({ limit: FULL_PAGE_SIZE }),
+   168	  });
+   169	  // 「沙箱环境运行中」这句只认真查到的 running 会话（按 session_id 归位，退回按合约归位）。
+   170	  const runningSessions = useQuery({
+   171	    queryKey: ['flow', 'task-detail', 'running-sessions'],
+   172	    queryFn: () => sandboxApi.list({ page: 1, page_size: FULL_PAGE_SIZE, status: 'running' }),
+   173	  });
+   174	
+   175	  if (notebookQuery.isPending) return <CenteredLoading />;
+   176	  if (notebookQuery.isError) return <QueryErrorAlert error={notebookQuery.error} />;
+   177	  if (!notebook) return <Alert type="warning" showIcon message="没有找到这条开发任务" />;
+   178	
+   179	  const state = notebookStateMeta(notebook);
+   180	  const workbenchPath = `/notebooks?task=${encodeURIComponent(notebook.id)}`;
+   181	  const memoryQuotaText = {
+   182	    debug: formatPrototypeMemory(notebook.debug_memory_mb),
+   183	    exec: formatPrototypeMemory(notebook.exec_memory_mb),
+   184	  };
+   185	  const grantedCount = contract?.product_ids ? contract.product_ids.length : null;
+   186	  const bundleTotal = bundles.data?.total ?? null;
+   187	  const unmeasuredReason = memoryUnmeasuredReason(home.data?.not_collected);
+   188	
+   189	  const sessionRows = runningSessions.data?.items ?? [];
+   190	  const activeSession
+   191	    = sessionRows.find((row) => row.id === sessionId)
+   192	      ?? (contractId ? sessionRows.find((row) => row.contract_id === contractId) ?? null : null);
+   193	
+   194	  const orgNameById = new Map((orgOptions.data ?? []).map((option) => [option.id, option.organization]));
+   195	  const organizationOf = (item: ContractDataItem): string => {
+   196	    const providerId = item.product?.provider_id;
+   197	    if (!providerId) return NO_SOURCE_TEXT;
+   198	    return orgNameById.get(providerId)?.trim() || NO_SOURCE_TEXT;
+   199	  };
+   200	
+   201	  /** 执行任务：真调 POST /notebooks/{id}/run，失败（含 409 NOTEBOOK_NO_CELLS）原样提示，不吞。 */
+   202	  const runThisTask = () => {
+   203	    runNotebook.mutate(notebook.id, {
+   204	      onSuccess: (result) => {
+   205	        setRunError(null);
+   206	        const failed = result.results.find((cell) => !cell.ok);
+   207	        setDebugRecords((prev) => [
+   208	          ...prev,
+   209	          {
+   210	            kind: 'notebook',
+   211	            label: `整本运行（${result.results.length} 个单元格）`,
+   212	            at: new Date().toISOString(),
+   213	            ok: result.passed,
+   214	            backend: result.results[0]?.backend ?? null,
+   215	            exit_code: failed ? failed.exit_code : 0,
+   216	            blocked: failed?.blocked_reason ?? null,
+   217	            executed: result.results.length,
+   218	            skipped: 0,
+   219	          },
+   220	        ]);
+   221	        if (result.passed) {
+   222	          message.success(`整本运行通过：${result.results.length} 个单元格`);
+   223	        } else {
+   224	          message.warning(`整本运行未通过：${result.results.length} 个单元格里有失败，见运行记录`);
+   225	        }
+   226	      },
+   227	      onError: (error) => {
+   228	        const reason = describeFlowError(error, '执行任务失败');
+   229	        setRunError(reason);
+   230	        message.error(reason);
+   231	      },
+   232	    });
+   233	  };
+   234	
+   235	  // ---------- 我的合约（图 D）----------
+   236	  // 1:1 裁读（2-4-contract-zone）：这一屏是三个灰底只读盒（基本信息同款），不是表 ——
+   237	  // 旧「通栏表」是缩放视图误读，已按图重建；口径仍挂 label 悬浮层。
+   238	  const exportModeText = contract?.delivery_methods === null || contract?.delivery_methods === undefined
+   239	    ? UNKNOWN_TEXT
+   240	    : contract.delivery_methods.length
+   241	      ? contract.delivery_methods.map(describeDeliveryMethod).join('、')
+   242	      : NO_SOURCE_TEXT;
+   243	  const EXPORT_MODE_SCOPE_HINT = `取合约的交付方式白名单（flow-config.delivery_methods）；任务自身的成果导出方式：${notebook.export_mode ? taskEnumLabel(TASK_EXPORT_MODE_OPTIONS, notebook.export_mode) : UNKNOWN_TEXT}`;
+   244	  /** 配额盒：图上值是裸数字 + 右端白底 G 小片；formatPrototypeMemory 带的「 G」尾缀拆进芯片，不重复画。 */
+   245	  const quotaParts = (text: string) => (text.endsWith(' G') ? { value: text.slice(0, -2), unit: true } : { value: text, unit: false });
+   246	
+   247	  // ---------- 关联数据（图 F：七列逐列照图）----------
+   248	  const grantedColumns: ColumnsType<ContractDataItem> = [
+   249	    {
+   250	      title: '数据产品名称',
+   251	      key: 'name',
+   252	      render: (_: unknown, row) => (row.product
+   253	        ? <Typography.Link onClick={() => setDetailProduct(row)}>{row.product.name}</Typography.Link>
+   254	        : <Text type="warning">未取回（未发布或本账号无权查看）· {row.id}</Text>),
+   255	    },
+   256	    {
+   257	      title: '产品简介',
+   258	      key: 'description',
+   259	      render: (_: unknown, row) => row.product?.description ?? UNKNOWN_TEXT,
+   260	    },
+   261	    {
+   262	      title: '产品类型',
+   263	      key: 'product_type',
+   264	      width: 130,
+   265	      render: (_: unknown, row) => productTypeLabel(row.product?.product_type),
+   266	    },
+   267	    {
+   268	      title: (
+   269	        <Tooltip title="数据产品载荷没有交付方式字段：这一列取关联合约 flow-config 的 delivery_methods（对整份授权生效）。">
+   270	          <span>交付方式</span>
+   271	        </Tooltip>
+   272	      ),
+   273	      key: 'delivery_methods',
+   274	      width: 140,
+   275	      render: () => (contract?.delivery_methods?.length
+   276	        ? contract.delivery_methods.map(describeDeliveryMethod).join('、')
+   277	        : NO_SOURCE_TEXT),
+   278	    },
+   279	    {
+   280	      title: (
+   281	        <Tooltip title="同样取合约的用途（contracts.purpose）：交付的使用场景按合约约定，数据产品载荷里没有这一项。">
+   282	          <span>交付的使用场景</span>
+   283	        </Tooltip>
+   284	      ),
+   285	      key: 'purpose',
+   286	      width: 170,
+   287	      render: () => contract?.purpose ?? NO_SOURCE_TEXT,
+   288	    },
+   289	    {
+   290	      title: (
+   291	        <Tooltip title={PRODUCT_ORG_HINT}>
+   292	          <span>组织名称</span>
+   293	        </Tooltip>
+   294	      ),
+   295	      key: 'organization',
+   296	      width: 130,
+   297	      render: (_: unknown, row) => organizationOf(row),
+   298	    },
+   299	    {
+   300	      title: '操作',
+   301	      key: 'actions',
+   302	      width: 80,
+   303	      render: (_: unknown, row) => <Typography.Link onClick={() => setDetailProduct(row)}>详情</Typography.Link>,
+   304	    },
+   305	  ];
+   306	
+   307	  // ---------- 结果集（图 H：六列逐列照图）----------
+   308	  const bundleColumns: ColumnsType<DatasetBundleRow> = [
+   309	    {
+   310	      title: '结果集名称',
+   311	      key: 'name',
+   312	      render: (_: unknown, row) => (
+   313	        <Tooltip title={BUNDLE_NAME_HINT}>
+   314	          <Text code>{row.file_name?.trim() ? row.file_name : row.bundle_id}</Text>
+   315	        </Tooltip>
+   316	      ),
+   317	    },
+   318	    {
+   319	      title: '生成时间',
+   320	      dataIndex: 'created_at',
+   321	      width: 180,
+   322	      render: (value: string | null) => formatDateTime(value),
+   323	    },
+   324	    {
+   325	      title: '数据行数',
+   326	      dataIndex: 'row_count',
+   327	      width: 110,
+   328	      render: (value: number | null | undefined) => (typeof value === 'number' ? `${value} 行` : NO_SOURCE_TEXT),
+   329	    },
+   330	    {
+   331	      title: '文件大小',
+   332	      dataIndex: 'size_bytes',
+   333	      width: 110,
+   334	      render: (value: number | null | undefined) => (typeof value === 'number' ? formatBytes(value) : NO_SOURCE_TEXT),
+   335	    },
+   336	    {
+   337	      title: '导出状态',
+   338	      key: 'export_status',
+   339	      width: 120,
+   340	      render: (_: unknown, row) => {
+   341	        const review = bundleReviewMeta(row.t5_review_status);
+   342	        const watermark = bundleWatermarkMeta(row.watermark_status);
+   343	        return (
+   344	          <Space direction="vertical" size={2}>
+   345	            <Tooltip title={BUNDLE_EXPORT_STATUS_HINT}>
+   346	              <span>{NO_SOURCE_TEXT}</span>
+   347	            </Tooltip>
+   348	            <Space size={4} wrap>
+   349	              <Text type="secondary" style={footnoteStyle}>出域审查</Text>
+   350	              <Tag color={review.color}>{review.label}</Tag>
+   351	              <Text type="secondary" style={footnoteStyle}>水印</Text>
+   352	              <Tag color={watermark.color}>{watermark.label}</Tag>
+   353	            </Space>
+   354	          </Space>
+   355	        );
+   356	      },
+   357	    },
+   358	    {
+   359	      title: '操作',
+   360	      key: 'actions',
+   361	      width: 120,
+   362	      render: () => (
+   363	        <Link to={`/deliveries?contract=${encodeURIComponent(contractId ?? '')}`}>查看结果集</Link>
+   364	      ),
+   365	    },
+   366	  ];
+   367	
+   368	  /** 「资源使用情况」一行：图上标签与值同一行（值右端），下一行 6px 进度槽；分子没有采样源就不画填充。 */
+   369	  const memoryUsageRow = (label: string, quotaText: string) => (
+   370	    <>
+   371	      <div className="t24-mem-row">
+   372	        <span>{label}</span>
+   373	        <Tooltip title={unmeasuredReason}>
+   374	          <span className="t24-mem-value">{`${MEMORY_USAGE_UNMEASURED} / ${quotaText}`}</span>
+   375	        </Tooltip>
+   376	      </div>
+   377	      <div className="t24-mem-bar">
+   378	        <Tooltip title={unmeasuredReason}>
+   379	          <Progress percent={0} showInfo={false} />
+   380	        </Tooltip>
+   381	      </div>
+   382	    </>
+   383	  );
+   384	
+   385	  return (
+   386	    <Space direction="vertical" size={16} style={{ width: '100%' }} className="cds-t24">
+   387	      {/* A 任务标题：图 y138..249 —— 白卡 h112 内缩 24，三钮 h38 右置 */}
+   388	      <div className="cds-page-toolbar t24-head">
+   389	        <div className="t24-head-main">
+   390	          <div className="t24-head-row">
+   391	            <h4 className="t24-title">{notebook.title}</h4>
+   392	            <Tag className={`t24-tag ${statusTagTone(state.color)}`}>{state.label}</Tag>
+   393	          </div>
+   394	          <div className="t24-head-sub">
+   395	            # {notebook.task_no ?? notebook.id} · 创建时间 {formatDevTaskTime(notebook.created_at) ?? UNKNOWN_TEXT} · 最近执行{' '}
+   396	            {formatDevTaskTime(notebook.last_executed_at) ?? UNKNOWN_TEXT}
+   397	          </div>
+   398	        </div>
+   399	        <div className="t24-head-actions">
+   400	          {/* 1:1 裁读（2-4-head-btns-x2）：返回列表白底描边灰字，进入调试白底蓝描边蓝字（ghost）+方框箭头图标，
+   401	              执行任务实心蓝；旧「text 无底 / link 无框 / play-square」是缩放误读，已换。 */}
+   402	          <Button className="t24-btn-back" icon={<ArrowLeftOutlined />} onClick={() => navigate('/flow/tasks')}>
+   403	            返回列表
+   404	          </Button>
+   405	          <Button type="primary" ghost icon={<ImportOutlined />} onClick={() => navigate(workbenchPath)}>
+   406	            进入调试
+   407	          </Button>
+   408	          <Button type="primary" icon={<CaretRightFilled />} loading={runNotebook.isPending} onClick={runThisTask}>
+   409	            执行任务
+   410	          </Button>
+   411	        </div>
+   412	      </div>
+   413	      {runError ? (
+   414	        <Alert
+   415	          type="error"
+   416	          showIcon
+   417	          message={`执行任务失败：${runError}`}
+   418	          description="错误原样取自后端（不改写、不吞）：任务里有可运行的单元格后再试。"
+   419	        />
+   420	      ) : null}
+   421	
+   422	      {/* B 四个统计小卡：图 y266..377 —— 一张白卡内 4 块 #f8fbff 小卡（h112 间距 16，40×40 浅底芯片）；数值只能取后端真实计数 */}
+   423	      <Card className="t24-tiles">
+   424	        <div className="t24-tile-row">
+   425	          <div className="t24-tile">
+   426	            <span className="t24-chip is-green"><ReloadOutlined /></span>
+   427	            <Statistic title="任务状态" value={state.label} />
+   428	          </div>
+   429	          <div className="t24-tile">
+   430	            <span className="t24-chip is-blue"><CodeOutlined /></span>
+   431	            <Statistic title="模型调试方法" value={taskEnumLabel(TASK_DEBUG_METHOD_OPTIONS, notebook.debug_method)} />
+   432	          </div>
+   433	          <div className="t24-tile">
+   434	            <span className="t24-chip is-purple"><DatabaseOutlined /></span>
+   435	            <Tooltip title="取关联合约下发的授权数据清单长度（contract.product_ids）；合约未下发清单时记「未记录」，不按 0 计。">
+   436	              <Statistic title="关联数据产品" value={grantedCount ?? UNKNOWN_TEXT} suffix={grantedCount === null ? undefined : '个'} />
+   437	            </Tooltip>
+   438	          </div>
+   439	          <div className="t24-tile">
+   440	            <span className="t24-chip is-orange"><ProfileOutlined /></span>
+   441	            <Tooltip title="取 GET /deliveries/dataset/bundles 的 total：成果包按合约归集（交付包表没有任务维度外键），这里是该合约下的成果包总数。">
+   442	              <Statistic title="产出结果集" value={bundleTotal ?? UNKNOWN_TEXT} suffix={bundleTotal === null ? undefined : '个'} />
+   443	            </Tooltip>
+   444	          </div>
+   445	        </div>
+   446	      </Card>
+   447	
+   448	      {/* C 基本信息：label 12 灰在上 + #f7f8fa 值盒（三列，描述整宽 h82）；图上无 info 图标，口径挂到 label 悬浮 */}
+   449	      <Card className="t24-card" size="small" title={<span className="t24-ht"><span className="t24-bar" />基本信息</span>}>
+   450	        <div className="t24-fields">
+   451	          <div className="t24-field">
+   452	            <div className="t24-field-label">任务名称</div>
+   453	            <div className="t24-field-box">{notebook.title}</div>
+   454	          </div>
+   455	          <div className="t24-field">
+   456	            <div className="t24-field-label">任务编号</div>
+   457	            <div className="t24-field-box">{notebook.task_no ?? UNKNOWN_TEXT}</div>
+   458	          </div>
+   459	          <div className="t24-field">
+   460	            <Tooltip title={DEV_TASK_NODE_HINT}>
+   461	              <div className="t24-field-label">所属节点</div>
+   462	            </Tooltip>
+   463	            <div className="t24-field-box">{taskNodeText(organization)}</div>
+   464	          </div>
+   465	          <div className="t24-field t24-field-span">
+   466	            <Tooltip title="任务描述取后端 NotebookOut.description（创建任务时填写），后端未下发即「未记录」。">
+   467	              <div className="t24-field-label">任务描述</div>
+   468	            </Tooltip>
+   469	            <div className="t24-field-box is-multiline">{notebook.description ?? UNKNOWN_TEXT}</div>
+   470	          </div>
+   471	        </div>
+   472	      </Card>
+   473	
+   474	      {/* D 我的合约：三枚灰底只读盒（基本信息同款），图上标题后有 ⓘ */}
+   475	      <Card
+   476	        className="t24-card"
+   477	        size="small"
+   478	        title={<span className="t24-ht"><span className="t24-bar" />我的合约<InfoCircleOutlined className="t24-hicon" /><span className="t24-hnote">合约用于约束模型输出格式与导出通道</span></span>}
+   479	      >
+   480	        {contract === null ? (
+   481	          <Alert type="info" showIcon message="本任务未关联合约：没有可展示的合约约束" />
+   482	        ) : (
+   483	          <div className="t24-fields">
+   484	            <div className="t24-field">
+   485	              <Tooltip title={`合约编号 ${contract.contract_no || NO_SOURCE_TEXT}`}>
+   486	                <div className="t24-field-label">合约名称</div>
+   487	              </Tooltip>
+   488	              <div className="t24-field-box">{contract.title}</div>
+   489	            </div>
+   490	            <div className="t24-field">
+   491	              <Tooltip title="后端把调试方法落在任务上（NotebookOut.debug_method），合约不下发这一项。">
+   492	                <div className="t24-field-label">模型调试方法</div>
+   493	              </Tooltip>
+   494	              <div className="t24-field-box">
+   495	                {notebook.debug_method ? <CodeOutlined className="t24-box-ico" /> : null}
+   496	                {taskEnumLabel(TASK_DEBUG_METHOD_OPTIONS, notebook.debug_method)}
+   497	              </div>
+   498	            </div>
+   499	            <div className="t24-field">
+   500	              <Tooltip title={EXPORT_MODE_SCOPE_HINT}>
+   501	                <div className="t24-field-label">结果导出方式</div>
+   502	              </Tooltip>
+   503	              <div className="t24-field-box">
+   504	                {exportModeText !== UNKNOWN_TEXT && exportModeText !== NO_SOURCE_TEXT ? <RiseOutlined className="t24-box-ico" /> : null}
+   505	                {exportModeText}
+   506	              </div>
+   507	            </div>
+   508	          </div>
+   509	        )}
+   510	      </Card>
+   511	
+   512	      {/* E 资源配置 */}
+   513	      <Card
+   514	        className="t24-card"
+   515	        size="small"
+   516	        title={<span className="t24-ht"><span className="t24-bar" />资源配置<InfoCircleOutlined className="t24-hicon" /><span className="t24-hnote">{MEMORY_QUOTA_NOTE}</span></span>}
+   517	      >
+   518	        {/* 图：三列（调试配额 / 执行配额 / 右端 328 宽 #f3f8ff 面板 y948..1101）；配额按 1:1 裁读是灰底只读盒 + 右端白底 G 片，不是大号数字 */}
+   519	        <div className="t24-res">
+   520	          <div>
+   521	            <div className="t24-quota-label">调试环境内存（G）</div>
+   522	            <div className="t24-quota-box">
+   523	              <span>{quotaParts(memoryQuotaText.debug).value}</span>
+   524	              {quotaParts(memoryQuotaText.debug).unit ? <span className="t24-quota-g">G</span> : null}
+   525	            </div>
+   526	            <span className="t24-quota-note">{DEBUG_MEMORY_CAPTION}</span>
+   527	          </div>
+   528	          <div>
+   529	            <div className="t24-quota-label">执行环境内存（G）</div>
+   530	            <div className="t24-quota-box">
+   531	              <span>{quotaParts(memoryQuotaText.exec).value}</span>
+   532	              {quotaParts(memoryQuotaText.exec).unit ? <span className="t24-quota-g">G</span> : null}
+   533	            </div>
+   534	            <span className="t24-quota-note">{EXEC_MEMORY_CAPTION}</span>
+   535	          </div>
+   536	          <div className="t24-panel">
+   537	            <div className="t24-panel-title"><CheckCircleFilled /> 资源使用情况</div>
+   538	            {memoryUsageRow('调试内存使用', memoryQuotaText.debug)}
+   539	            <div className="t24-mem-gap" />
+   540	            {memoryUsageRow('执行内存使用', memoryQuotaText.exec)}
+   541	            {/* 图面板尾行只有一行且就是会话态那句（2-4-measured §6 y1075..1092）；「未计量」声明从屏上退到
+   542	                行值本身（右端就是「未计量 / 配额」）与悬浮层，不再多占一行（§12.6「多一行」）。 */}
+   543	            <Tooltip
+   544	              title={`平台没有逐任务/逐会话的内存采样源，使用量记「${MEMORY_USAGE_UNMEASURED}」，分母才是任务上填写的配额上限；后端为什么没有分子：GET /flow/dashboard/home 的 not_collected: memory.measured。`}
+   545	            >
+   546	              <span className="t24-panel-foot">
+   547	                {activeSession ? SANDBOX_MEMORY_RUNNING_NOTE : NO_ACTIVE_DEBUG_SESSION_NOTE}
+   548	              </span>
+   549	            </Tooltip>
+   550	          </div>
+   551	        </div>
+   552	      </Card>
+   553	
+   554	      {/* F 关联数据 */}
+   555	      <Card
+   556	        className="t24-card"
+   557	        size="small"
+   558	        title={<span className="t24-ht"><span className="t24-bar" />关联数据<LockOutlined className="t24-hicon" /><span className="t24-hnote">{GRANTED_DATA_NOTE}</span></span>}
+   559	        extra={grantedCount === null
+   560	          ? <Text type="secondary" style={footnoteStyle}>授权清单{UNKNOWN_TEXT}</Text>
+   561	          : <Text style={{ color: '#1b6ef3' }}><DatabaseOutlined style={{ marginRight: 6 }} />{`共 ${grantedCount} 个数据产品`}</Text>}
+   562	      >
+   563	        {contractQuery.isError ? (
+   564	          <QueryErrorAlert error={contractQuery.error} message="关联合约取不回：交付方式与使用场景两列只能记「—」" />
+   565	        ) : contract === null ? (
+   566	          <Alert type="info" showIcon message="本任务未关联合约：数据随合约整体授权进沙箱，没有合约就没有授权数据" />
+   567	        ) : contract.product_ids === null ? (
+   568	          <Alert
+   569	            type="warning"
+   570	            showIcon
+   571	            message={`合约 ${contract.contract_no} 未下发授权数据清单，不替它编一个数字出来`}
+   572	          />
+   573	        ) : (
+   574	          <Table<ContractDataItem>
+   575	            className="t24-table is-f"
+   576	            size="small"
+   577	            rowKey="id"
+   578	            columns={grantedColumns}
+   579	            dataSource={products.data?.items ?? []}
+   580	            loading={products.isPending}
+   581	            pagination={false}
+   582	            locale={tableEmpty(
+   583	              products.isError
+   584	                ? '授权数据取不回：详情列记「未记录」'
+   585	                : '该合约未绑定数据产品：任务在沙箱内没有可读的授权数据',
+   586	            )}
+   587	          />
+   588	        )}
+   589	        {contract?.product_ids && (products.data?.omitted ?? 0) > 0 ? (
+   590	          <Text className="t24-table-foot">
+   591	            授权清单 {contract.product_ids.length} 项，超出单次解析上限 {CONTRACT_DATA_RESOLVE_LIMIT} 项的部分未取回
+   592	            （{products.data?.omitted} 项），不假装已全部展示。
+   593	          </Text>
+   594	        ) : null}
+   595	      </Card>
+   596	
+   597	      {/* G 运行记录 */}
+   598	      <TaskRunRecords notebook={notebook} debugRecords={debugRecords.map((record, index) => ({ ...record, key: `page:${index}` }))} />
+   599	
+   600	      {/* H 结果集 */}
+   601	      <Card
+   602	        className="t24-card"
+   603	        size="small"
+   604	        title={
+   605	          <span className="t24-ht">
+   606	            <span className="t24-bar" />
+   607	            <Tooltip title={RESULT_SET_SCOPE_HINT}>
+   608	              <span>结果集</span>
+   609	            </Tooltip>
+   610	            <ExportOutlined className="t24-hicon" />
+   611	            <span className="t24-hnote">{RESULT_SET_NOTE}</span>
+   612	          </span>
+   613	        }
+   614	        extra={<Link to={`/deliveries?contract=${encodeURIComponent(contractId ?? '')}`}>前往我的结果集<span className="t24-arrow">&gt;</span></Link>}
+   615	      >
+   616	        <Table<DatasetBundleRow>
+   617	          className="t24-table"
+   618	          rowKey="bundle_id"
+   619	          size="small"
+   620	          columns={bundleColumns}
+   621	          dataSource={bundles.data?.items ?? []}
+   622	          loading={bundles.isPending}
+   623	          pagination={false}
+   624	          locale={tableEmpty(bundleTotal ? '已有成果包但本页未取到' : '该合约还没有产出成果包')}
+   625	        />
+   626	        {bundleTotal !== null && (bundles.data?.items.length ?? 0) < bundleTotal ? (
+   627	          <Text className="t24-table-foot">
+   628	            后端共 {bundleTotal} 个成果包，本页一次取回 {bundles.data?.items.length ?? 0} 个（单次上限 {FULL_PAGE_SIZE}）；
+   629	            图上无分页器，差额部分不去翻页假装已列全。
+   630	          </Text>
+   631	        ) : null}
+   632	      </Card>
+   633	
+   634	      <Modal
+   635	        className="cds-t24-modal"
+   636	        open={detailProduct !== null}
+   637	        title="数据产品详情"
+   638	        footer={<Button onClick={() => setDetailProduct(null)}>关闭</Button>}
+   639	        onCancel={() => setDetailProduct(null)}
+   640	      >
+   641	        {detailProduct?.product ? (
+   642	          <Descriptions column={1} size="small" bordered>
+   643	            <Descriptions.Item label="数据产品名称">{detailProduct.product.name}</Descriptions.Item>
+   644	            <Descriptions.Item label="产品简介">{detailProduct.product.description ?? UNKNOWN_TEXT}</Descriptions.Item>
+   645	            <Descriptions.Item label="产品类型">{productTypeLabel(detailProduct.product.product_type)}</Descriptions.Item>
+   646	            <Descriptions.Item label="行业">{detailProduct.product.industry ?? UNKNOWN_TEXT}</Descriptions.Item>
+   647	            <Descriptions.Item label="版本">
+   648	              {(detailProduct.product as unknown as { version?: string | null }).version ?? UNKNOWN_TEXT}
+   649	            </Descriptions.Item>
+   650	            <Descriptions.Item label="数据行数">{detailProduct.product.row_count ?? UNKNOWN_TEXT}</Descriptions.Item>
+   651	            <Descriptions.Item label="安全等级">{detailProduct.product.security_level ?? UNKNOWN_TEXT}</Descriptions.Item>
+   652	            <Descriptions.Item label="交付方式">
+   653	              {contract?.delivery_methods?.length ? contract.delivery_methods.map(describeDeliveryMethod).join('、') : NO_SOURCE_TEXT}
+   654	            </Descriptions.Item>
+   655	            <Descriptions.Item label="交付的使用场景">{contract?.purpose ?? NO_SOURCE_TEXT}</Descriptions.Item>
+   656	            <Descriptions.Item label="组织名称">{organizationOf(detailProduct)}</Descriptions.Item>
+   657	            <Descriptions.Item label="状态">{detailProduct.product.status}</Descriptions.Item>
+   658	            <Descriptions.Item label="数据资源 id">{detailProduct.product.resource_id ?? UNKNOWN_TEXT}</Descriptions.Item>
+   659	            <Descriptions.Item label="供应方 id">{detailProduct.product.provider_id}</Descriptions.Item>
+   660	            <Descriptions.Item label="创建时间">{formatDateTime(detailProduct.product.created_at)}</Descriptions.Item>
+   661	          </Descriptions>
+   662	        ) : (
+   663	          <Alert
+   664	            type="warning"
+   665	            showIcon
+   666	            message={`这份授权数据没有取回（未发布或本账号无权查看），只有 id：${detailProduct?.id ?? UNKNOWN_TEXT}`}
+   667	          />
+   668	        )}
+   669	      </Modal>
+   670	    </Space>
+   671	  );
+   672	}

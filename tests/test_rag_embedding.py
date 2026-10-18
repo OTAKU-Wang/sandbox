@@ -8,6 +8,8 @@ import math
 import pytest
 
 from app.services.rag_embedding import (
+    EmbeddingResult,
+    EngineUnavailable,
     RAGEmbedder,
     RAGEmbeddingEngine,
     regex_embed,
@@ -78,3 +80,72 @@ def test_cosine_between_normalized_vectors():
     c = embedder.embed("今天天气不错").vector
     assert embedder.cosine(a, b) == pytest.approx(1.0, abs=1e-6)
     assert embedder.cosine(a, c) < embedder.cosine(a, b)
+
+
+# ---------------------------------------------------------------------------
+# A129 — 维度不得拿空文本去探，维度不一致不得静默归零
+# ---------------------------------------------------------------------------
+
+def _patch_transformers_model(monkeypatch, hidden_size=32):
+    class _Cfg:
+        pass
+
+    cfg = _Cfg()
+    cfg.hidden_size = hidden_size
+    model = _Cfg()
+    model.config = cfg
+    monkeypatch.setattr(RAGEmbedder, "_load_transformers", lambda self: (object(), model))
+    return RAGEmbedder(backend="transformers", model_name="fake/model")
+
+
+def test_transformers_engine_reports_the_model_dimension_for_empty_text(monkeypatch):
+    """空文本不得回一个写死 512 的零向量：引擎真实维度是 384/768 时索引 dim 会错。"""
+    embedder = _patch_transformers_model(monkeypatch, hidden_size=32)
+
+    result = embedder.embed("")
+
+    assert result.engine == RAGEmbeddingEngine.TRANSFORMERS
+    assert result.dim == 32
+    assert len(result.vector) == 32
+    assert set(result.vector) == {0.0}
+
+
+def test_transformers_engine_fails_closed_when_the_model_cannot_be_resolved(monkeypatch):
+    """模型加载不了 ⇒ 如实不可用，不能交一个可能错误的 dim 让索引落盘。"""
+    def _no_model(self):
+        raise EngineUnavailable("embedding model unavailable (test)")
+
+    monkeypatch.setattr(RAGEmbedder, "_load_transformers", _no_model)
+    embedder = RAGEmbedder(backend="transformers", model_name="fake/model")
+
+    with pytest.raises(EngineUnavailable):
+        embedder.embed("")
+
+    with pytest.raises(EngineUnavailable):
+        embedder.engine_dimension()
+
+
+def test_engine_dimension_agrees_with_the_vectors_the_engine_produces():
+    for backend in (RAGEmbeddingEngine.TF, RAGEmbeddingEngine.REGEX):
+        embedder = RAGEmbedder(backend=backend)
+        assert embedder.engine_dimension() == 512
+        assert embedder.embed("合同 结算 周期").dim == embedder.engine_dimension()
+        assert embedder.embed("").dim == embedder.engine_dimension()
+
+
+def test_cosine_rejects_dimension_mismatch_instead_of_scoring_zero():
+    """返回 0 把「索引与模型维度不一致」伪装成「这条不相关」。"""
+    embedder = RAGEmbedder(backend="tf")
+    with pytest.raises(ValueError, match="dimension"):
+        embedder.cosine([0.1] * 512, [0.1] * 384)
+
+
+def test_cosine_rejects_empty_vectors():
+    embedder = RAGEmbedder(backend="tf")
+    with pytest.raises(ValueError):
+        embedder.cosine([], [])
+
+
+def test_embedding_result_dimension_must_match_its_vector():
+    with pytest.raises(ValueError):
+        EmbeddingResult(vector=[0.0] * 4, engine=RAGEmbeddingEngine.TRANSFORMERS, dim=512)

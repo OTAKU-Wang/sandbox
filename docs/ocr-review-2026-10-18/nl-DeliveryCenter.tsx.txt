@@ -1,0 +1,2317 @@
+     1	import { useEffect, useState, type ReactNode } from 'react';
+     2	import { useLocation } from 'react-router-dom';
+     3	import { useCrumbStackStore } from '../../stores/crumbStackStore';
+     4	import BundlePreviewModal from './BundlePreviewModal';
+     5	import { useCrumbSegments } from '../../components/Layout/useCrumbSegments';
+     6	import {
+     7	  Alert,
+     8	  Button,
+     9	  Card,
+    10	  Col,
+    11	  Collapse,
+    12	  Descriptions,
+    13	  DatePicker,
+    14	  Drawer,
+    15	  Form,
+    16	  Input,
+    17	  InputNumber,
+    18	  Modal,
+    19	  Popconfirm,
+    20	  Radio,
+    21	  Row,
+    22	  Select,
+    23	  Space,
+    24	  Statistic,
+    25	  Switch,
+    26	  Table,
+    27	  Tag,
+    28	  Tooltip,
+    29	  Typography,
+    30	  message,
+    31	} from 'antd';
+    32	import {
+    33	  BugOutlined,
+    34	  CheckCircleOutlined,
+    35	  CopyOutlined,
+    36	  DashboardOutlined,
+    37	  DeleteOutlined,
+    38	  EditOutlined,
+    39	  EyeOutlined,
+    40	  FieldTimeOutlined,
+    41	  InfoCircleOutlined,
+    42	  DownloadOutlined,
+    43	  KeyOutlined,
+    44	  LeftOutlined,
+    45	  LinkOutlined,
+    46	  LockOutlined,
+    47	  PlusOutlined,
+    48	  ReloadOutlined,
+    49	  SendOutlined,
+    50	  SwapOutlined,
+    51	} from '@ant-design/icons';
+    52	import { useQuery, useQueryClient } from '@tanstack/react-query';
+    53	import type { ColumnsType } from 'antd/es/table';
+    54	import { sandboxApi } from '../../services/sandboxApi';
+    55	import {
+    56	  OPEN_API_DEBUG_BODY_LIMIT,
+    57	  OPEN_API_DEBUG_KEY_SCOPES,
+    58	  OPENAPI_CALLS_WINDOW,
+    59	  UNKNOWN_TEXT,
+    60	  WEBHOOK_EVENT_OPTIONS,
+    61	  buildCurlExample,
+    62	  buildRequestExample,
+    63	  callOpenApiWithApiKey,
+    64	  computeEndpointCallMetrics,
+    65	  describeFlowError,
+    66	  flattenOpenApiOperations,
+    67	  flowApi,
+    68	  flowKeys,
+    69	  formatBytes,
+    70	  formatDateTime,
+    71	  useApiEndpoints,
+    72	  useBuildDatasetBundle,
+    73	  useContractOpenApiDoc,
+    74	  useCreateEndpoint,
+    75	  useCreateWebhook,
+    76	  useDatasetBundles,
+    77	  useDeleteEndpoint,
+    78	  useDeleteWebhook,
+    79	  useEndpointCalls,
+    80	  useRedeliver,
+    81	  useRotateWebhookSecret,
+    82	  useTestWebhook,
+    83	  useUpdateEndpoint,
+    84	  useUpdateWebhook,
+    85	  useWebhookDeliveries,
+    86	  useWebhooks,
+    87	  useWorkload,
+    88	  useWorkloads,
+    89	} from '../../services/flow';
+    90	import type {
+    91	  ApiEndpoint,
+    92	  ApiEndpointCall,
+    93	  ApiEndpointCreatePayload,
+    94	  ApiEndpointUpdatePayload,
+    95	  DatasetBundle,
+    96	  DatasetBundleRow,
+    97	  OpenApiDebugAttempt,
+    98	  OpenApiDoc,
+    99	  WebhookDelivery,
+   100	  WebhookSubscription,
+   101	} from '../../services/flow';
+   102	import { apiKeysApi } from '../../services/apiKeysApi';
+   103	import type { ApiKeyCreated } from '../../services/apiKeysApi';
+   104	import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+   105	import {
+   106	  DELIVERY_STATUS_META,
+   107	  WEBHOOK_STATUS_META,
+   108	  attemptLabel,
+   109	  bundleReviewMeta,
+   110	  bundleWatermarkMeta,
+   111	  openApiPathForSlug,
+   112	  responseStatusColor,
+   113	  statusMeta,
+   114	formatMinute,
+   115	} from './display';
+   116	import type { StatusMeta } from './display';
+   117	import { useContractOptions } from './useContractOptions';
+   118	import { copyText } from './copyText';
+   119	import './deliveryOpenapi.css';
+   120	
+   121	const { Text, Title, Paragraph, Link } = Typography;
+   122	
+   123	function CopyButton({ text, label = '复制' }: { text: string; label?: string }) {
+   124	  const [copied, setCopied] = useState(false);
+   125	  const handleCopy = async () => {
+   126	    const ok = await copyText(text);
+   127	    if (ok) {
+   128	      setCopied(true);
+   129	      window.setTimeout(() => setCopied(false), 2000);
+   130	    } else {
+   131	      message.error('复制失败，请手动选择文本复制');
+   132	    }
+   133	  };
+   134	  return (
+   135	    <Button size="small" icon={<CopyOutlined />} onClick={() => { void handleCopy(); }}>
+   136	      {copied ? '已复制' : label}
+   137	    </Button>
+   138	  );
+   139	}
+   140	
+   141	function SecretReveal({ secret, onClose }: { secret: string; onClose: () => void }) {
+   142	  return (
+   143	    <Alert
+   144	      type="warning"
+   145	      showIcon
+   146	      icon={<LockOutlined />}
+   147	      message="签名密钥仅此一次可见"
+   148	      description={
+   149	        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+   150	          <Text type="secondary" style={{ fontSize: 12 }}>
+   151	            后端只在创建/轮转时返回一次 secret，关闭后无法再次查看；如遗失请轮转密钥。请先复制并写入接收端的密钥管理，再关闭本提示。
+   152	          </Text>
+   153	          <Paragraph code copyable={{ text: secret }} style={{ marginBottom: 0, wordBreak: 'break-all' }}>
+   154	            {secret}
+   155	          </Paragraph>
+   156	          <Space>
+   157	            <CopyButton text={secret} label="复制密钥" />
+   158	            <Button size="small" onClick={onClose}>
+   159	              我已保存，关闭
+   160	            </Button>
+   161	          </Space>
+   162	        </Space>
+   163	      }
+   164	    />
+   165	  );
+   166	}
+   167	
+   168	async function describeDownloadError(error: unknown): Promise<string> {
+   169	  const data = (error as { response?: { data?: unknown } } | null)?.response?.data;
+   170	  if (data instanceof Blob) {
+   171	    try {
+   172	      return describeFlowError(JSON.parse(await data.text()), '成果下载失败');
+   173	    } catch {
+   174	      return '成果下载失败：后端返回了无法解析的错误内容';
+   175	    }
+   176	  }
+   177	  return describeFlowError(error, '成果下载失败');
+   178	}
+   179	
+   180	async function saveBundleFile(bundleId: string, blob: Blob) {
+   181	  const url = URL.createObjectURL(blob);
+   182	  const anchor = document.createElement('a');
+   183	  anchor.href = url;
+   184	  anchor.download = `cds-bundle-${bundleId}.zip`;
+   185	  document.body.appendChild(anchor);
+   186	  anchor.click();
+   187	  document.body.removeChild(anchor);
+   188	  URL.revokeObjectURL(url);
+   189	}
+   190	
+   191	function DatasetBundleTab({ contractId }: { contractId: string | null }) {
+   192	  const [form] = Form.useForm();
+   193	  const [bundle, setBundle] = useState<DatasetBundle | null>(null);
+   194	  const [historyPage, setHistoryPage] = useState(1);
+   195	  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+   196	  const { data: contracts } = useContractOptions();
+   197	  const sessionsQuery = useQuery({
+   198	    queryKey: ['sandbox-sessions', 'delivery-bundle', 1, 50],
+   199	    queryFn: () => sandboxApi.list({ page: 1, page_size: 50 }),
+   200	  });
+   201	  const bundleMutation = useBuildDatasetBundle();
+   202	  const bundlesQuery = useDatasetBundles(contractId, historyPage, 10);
+   203	
+   204	  const build = () => {
+   205	    void form
+   206	      .validateFields()
+   207	      .then((values: { session_id: string; contract_id: string }) => {
+   208	        bundleMutation.mutate(
+   209	          { session_id: values.session_id, contract_id: values.contract_id },
+   210	          {
+   211	            onSuccess: (result) => {
+   212	              setBundle(result);
+   213	              setHistoryPage(1);
+   214	              void bundlesQuery.refetch();
+   215	              message.success(`打包完成：${result.files?.length ?? 0} 个文件，${formatBytes(result.size_bytes)}`);
+   216	            },
+   217	            onError: (err) => message.error(describeFlowError(err, '打包失败')),
+   218	          },
+   219	        );
+   220	      })
+   221	      .catch(() => undefined);
+   222	  };
+   223	
+   224	  /** 下载走同一条已有通道（flowApi.downloadBundle → 浏览器落盘），历史行与新包共用。 */
+   225	  const downloadById = (bundleId: string) => {
+   226	    setDownloadingId(bundleId);
+   227	    void flowApi
+   228	      .downloadBundle(bundleId)
+   229	      .then(
+   230	        (blob) => {
+   231	          void saveBundleFile(bundleId, blob);
+   232	          message.success('已开始下载');
+   233	        },
+   234	        (err: unknown) => {
+   235	          void describeDownloadError(err).then((text) => message.error(text));
+   236	        },
+   237	      )
+   238	      .finally(() => setDownloadingId(null));
+   239	  };
+   240	
+   241	  const download = () => {
+   242	    if (!bundle) return;
+   243	    downloadById(bundle.bundle_id);
+   244	  };
+   245	
+   246	  const [previewBundleId, setPreviewBundleId] = useState<string | null>(null);
+   247	
+   248	  const historyColumns: ColumnsType<DatasetBundleRow> = [
+   249	    {
+   250	      title: '成果包',
+   251	      dataIndex: 'bundle_id',
+   252	      render: (bundleId: string, record) => (
+   253	        <Space direction="vertical" size={0}>
+   254	          <Text code copyable={{ text: bundleId }}>
+   255	            {bundleId.slice(0, 8)}…
+   256	          </Text>
+   257	          <Text type="secondary" style={{ fontSize: 12 }}>
+   258	            {record.contract_no}
+   259	          </Text>
+   260	        </Space>
+   261	      ),
+   262	    },
+   263	    { title: '文件数', dataIndex: 'file_count', width: 80 },
+   264	    {
+   265	      title: '数据行数',
+   266	      dataIndex: 'row_count',
+   267	      width: 100,
+   268	      render: (value: number | null | undefined) =>
+   269	        typeof value === 'number' ? value : (
+   270	          <Tooltip title="行数只统计包内数据表文件（.csv/.tsv/.jsonl）；无数据表或该列上线前打的包不记行数。">
+   271	            <Tag>未记录</Tag>
+   272	          </Tooltip>
+   273	        ),
+   274	    },
+   275	    { title: '大小', dataIndex: 'size_bytes', width: 100, render: (size: number) => formatBytes(size) },
+   276	    { title: '生成时间', dataIndex: 'created_at', width: 170, render: (value: string | null) => formatDateTime(value) },
+   277	    {
+   278	      title: 'T5 审查',
+   279	      key: 't5_review',
+   280	      width: 150,
+   281	      render: (_: unknown, record) => {
+   282	        const meta = bundleReviewMeta(record.t5_review_status);
+   283	        return record.t5_review_status ? (
+   284	          <Tag color={meta.color}>{meta.label}</Tag>
+   285	        ) : (
+   286	          <Tooltip title="T5 审查状态是打包时落在交付包行上的结论；该列上线前打的包不回溯反推。">
+   287	            <Tag>{meta.label}</Tag>
+   288	          </Tooltip>
+   289	        );
+   290	      },
+   291	    },
+   292	    {
+   293	      title: '水印',
+   294	      key: 'watermark',
+   295	      width: 130,
+   296	      render: (_: unknown, record) => {
+   297	        const meta = bundleWatermarkMeta(record.watermark_status);
+   298	        return record.watermark_status ? (
+   299	          <Tag color={meta.color}>{meta.label}</Tag>
+   300	        ) : (
+   301	          <Tooltip title="水印状态与打包时写进包内 MANIFEST.json 的逐文件结论同源；该列上线前打的包不作推定。">
+   302	            <Tag>{meta.label}</Tag>
+   303	          </Tooltip>
+   304	        );
+   305	      },
+   306	    },
+   307	    {
+   308	      title: '操作',
+   309	      key: 'actions',
+   310	      width: 180,
+   311	      render: (_: unknown, record) => (
+   312	        <Space>
+   313	          <Button
+   314	            size="small"
+   315	            icon={<EyeOutlined />}
+   316	            onClick={() => setPreviewBundleId(record.bundle_id)}
+   317	          >
+   318	            预览
+   319	          </Button>
+   320	          <Button
+   321	            size="small"
+   322	            icon={<DownloadOutlined />}
+   323	            loading={downloadingId === record.bundle_id}
+   324	            onClick={() => downloadById(record.bundle_id)}
+   325	          >
+   326	            下载
+   327	          </Button>
+   328	        </Space>
+   329	      ),
+   330	    },
+   331	  ];
+   332	
+   333	  return (
+   334	    <Row gutter={16}>
+   335	      <Col xs={24} lg={10}>
+   336	        <Card size="small" title="选择来源会话与合约">
+   337	          <Form form={form} layout="vertical">
+   338	            <Form.Item name="session_id" label="沙箱会话" rules={[{ required: true, message: '请选择会话' }]} extra="仅列出当前账号可见的会话">
+   339	              <Select
+   340	                showSearch
+   341	                optionFilterProp="label"
+   342	                placeholder="选择产出成果的会话"
+   343	                loading={sessionsQuery.isLoading}
+   344	                notFoundContent={sessionsQuery.isError ? '会话列表加载失败' : '暂无会话'}
+   345	                options={(sessionsQuery.data?.items ?? []).map((session) => ({
+   346	                  label: `${session.id.slice(0, 8)}… · ${session.status}`,
+   347	                  value: session.id,
+   348	                }))}
+   349	              />
+   350	            </Form.Item>
+   351	            <Form.Item name="contract_id" label="关联合约" rules={[{ required: true, message: '请选择合约' }]} extra="水印与输出管控按合约策略执行">
+   352	              <Select
+   353	                showSearch
+   354	                optionFilterProp="label"
+   355	                placeholder="选择合约"
+   356	                options={(contracts ?? []).map((contract) => ({ label: `${contract.title}（${contract.contract_no}）`, value: contract.id }))}
+   357	              />
+   358	            </Form.Item>
+   359	            <Button type="primary" block loading={bundleMutation.isPending} onClick={build}>
+   360	              生成成果包
+   361	            </Button>
+   362	          </Form>
+   363	        </Card>
+   364	      </Col>
+   365	      <Col xs={24} lg={14}>
+   366	        {!bundle && (
+   367	          <Card size="small">
+   368	            <Text type="secondary">生成后此处显示文件清单与下载入口；未经打包不会有可下载内容。</Text>
+   369	          </Card>
+   370	        )}
+   371	        {bundle && (
+   372	          <Card
+   373	            size="small"
+   374	            title="成果包"
+   375	            extra={
+   376	              <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={download}>
+   377	                下载
+   378	              </Button>
+   379	            }
+   380	          >
+   381	            <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
+   382	              <Descriptions.Item label="成果包 ID">{bundle.bundle_id}</Descriptions.Item>
+   383	              <Descriptions.Item label="总大小">{formatBytes(bundle.size_bytes)}</Descriptions.Item>
+   384	              <Descriptions.Item label="水印">
+   385	                {bundle.watermark_applied ? <Tag color="green">已嵌入水印</Tag> : <Tag color="orange">后端报告未加水印</Tag>}
+   386	              </Descriptions.Item>
+   387	              <Descriptions.Item label="文件数">{bundle.files?.length ?? 0}</Descriptions.Item>
+   388	            </Descriptions>
+   389	            <Table<{ name: string; size_bytes: number }>
+   390	              rowKey="name"
+   391	              size="small"
+   392	              pagination={false}
+   393	              dataSource={bundle.files ?? []}
+   394	              locale={tableEmpty('成果包内没有文件')}
+   395	              columns={[
+   396	                { title: '文件', dataIndex: 'name' },
+   397	                { title: '大小', dataIndex: 'size_bytes', width: 120, render: (size: number) => formatBytes(size) },
+   398	              ]}
+   399	            />
+   400	            {!bundle.watermark_applied && (
+   401	              <Alert
+   402	                type="warning"
+   403	                showIcon
+   404	                style={{ marginTop: 12 }}
+   405	                message="该成果包未嵌入水印：请按合规要求确认是否允许外发，必要时重新打包。"
+   406	              />
+   407	            )}
+   408	          </Card>
+   409	        )}
+   410	      </Col>
+   411	      <Col xs={24}>
+   412	        <Card
+   413	          size="small"
+   414	          title="成果包历史"
+   415	          extra={
+   416	            <Button
+   417	              size="small"
+   418	              icon={<ReloadOutlined />}
+   419	              onClick={() => {
+   420	                void bundlesQuery.refetch();
+   421	              }}
+   422	            >
+   423	              刷新
+   424	            </Button>
+   425	          }
+   426	        >
+   427	          {bundlesQuery.isError && (
+   428	            <QueryErrorAlert
+   429	              error={bundlesQuery.error}
+   430	              message="成果包历史加载失败"
+   431	              onRetry={() => {
+   432	                void bundlesQuery.refetch();
+   433	              }}
+   434	            />
+   435	          )}
+   436	          <Table<DatasetBundleRow>
+   437	            rowKey="bundle_id"
+   438	            size="small"
+   439	            columns={historyColumns}
+   440	            dataSource={bundlesQuery.data?.items ?? []}
+   441	            loading={bundlesQuery.isLoading}
+   442	            locale={tableEmpty(contractId ? '该合约还没有生成过成果包' : '还没有生成过成果包（选择合约可只看它的历史）')}
+   443	            pagination={{
+   444	              current: historyPage,
+   445	              pageSize: 10,
+   446	              total: bundlesQuery.data?.total ?? 0,
+   447	              size: 'small',
+   448	              showSizeChanger: false,
+   449	              onChange: (next) => setHistoryPage(next),
+   450	            }}
+   451	          />
+   452	          <Text type="secondary" style={{ fontSize: 12 }}>
+   453	            列表来自交付包归属表{contractId ? '，已按所选合约过滤' : ''}：只看得见自己作为买方/提供方的合约下的包。下载仍会逐次按合约当事方鉴权，
+   454	            加固前生成的旧包会被以“未经出口审查”拦下。
+   455	          </Text>
+   456	          <BundlePreviewModal bundleId={previewBundleId} onClose={() => setPreviewBundleId(null)} />
+   457	        </Card>
+   458	      </Col>
+   459	    </Row>
+   460	  );
+   461	}
+   462	
+   463	function OpenApiPreview({ doc, endpoints }: { doc: OpenApiDoc | null; endpoints: ApiEndpoint[] }) {
+   464	  const rows = flattenOpenApiOperations(doc);
+   465	  const firstSlug = endpoints[0]?.slug;
+   466	  const firstRow = rows[0];
+   467	  const curl = firstSlug ? buildCurlExample(firstSlug, buildRequestExample(firstRow, endpoints[0])) : '';
+   468	
+   469	  if (!doc) {
+   470	    return (
+   471	      <Alert
+   472	        type="info"
+   473	        showIcon
+   474	        message="该合约还没有可展示的 OpenAPI 文档"
+   475	        description="端点创建后，后端会按合约与负载生成 OpenAPI 3.1 文档；未生成时此处保持空白，不做示例伪造。"
+   476	      />
+   477	    );
+   478	  }
+   479	
+   480	  return (
+   481	    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+   482	      <Descriptions size="small" column={3}>
+   483	        <Descriptions.Item label="文档标题">{doc.info?.title ?? '后端未提供 info.title'}</Descriptions.Item>
+   484	        <Descriptions.Item label="版本">{doc.info?.version ?? '-'}</Descriptions.Item>
+   485	        <Descriptions.Item label="OpenAPI">{doc.openapi ?? '-'}</Descriptions.Item>
+   486	      </Descriptions>
+   487	
+   488	      {rows.length ? (
+   489	        <Table
+   490	          rowKey="key"
+   491	          size="small"
+   492	          pagination={false}
+   493	          dataSource={rows}
+   494	          columns={[
+   495	            { title: '方法', dataIndex: 'method', width: 80, render: (method: string) => <Tag color="blue">{method}</Tag> },
+   496	            { title: '路径', dataIndex: 'path' },
+   497	            { title: '说明', dataIndex: 'summary', render: (summary: string) => summary || <Text type="secondary">文档未提供 summary</Text> },
+   498	            {
+   499	              title: '参数',
+   500	              dataIndex: 'parameters',
+   501	              render: (parameters: string[]) =>
+   502	                parameters.length ? parameters.join('，') : <Text type="secondary">无</Text>,
+   503	            },
+   504	            {
+   505	              title: '请求体字段',
+   506	              dataIndex: 'bodyFields',
+   507	              render: (fields: { name: string; type: string; required: boolean }[], record) =>
+   508	                fields.length ? (
+   509	                  <Space size={4} wrap>
+   510	                    {fields.map((field) => (
+   511	                      <Tag key={field.name} color={field.required ? 'red' : 'default'}>
+   512	                        {field.name}: {field.type}
+   513	                      </Tag>
+   514	                    ))}
+   515	                  </Space>
+   516	                ) : record.requestBodyRequired ? (
+   517	                  <Text type="secondary">需请求体，但文档未声明字段</Text>
+   518	                ) : (
+   519	                  <Text type="secondary">无</Text>
+   520	                ),
+   521	            },
+   522	            {
+   523	              title: '响应码',
+   524	              dataIndex: 'responseCodes',
+   525	              width: 140,
+   526	              render: (codes: string[]) => codes.join(' / ') || '-',
+   527	            },
+   528	          ]}
+   529	        />
+   530	      ) : (
+   531	        <Text type="secondary">文档内没有任何接口定义</Text>
+   532	      )}
+   533	
+   534	      {curl && (
+   535	        <div>
+   536	          <Space style={{ marginBottom: 6 }}>
+   537	            <Text type="secondary" style={{ fontSize: 12 }}>
+   538	              调用示例（外部路径固定 POST {openApiPathForSlug(firstSlug ?? '')}，使用平台 API Key 鉴权）
+   539	            </Text>
+   540	            <CopyButton text={curl} label="复制 curl" />
+   541	          </Space>
+   542	          <pre className="cds-json-block">{curl}</pre>
+   543	        </div>
+   544	      )}
+   545	
+   546	      <Collapse
+   547	        size="small"
+   548	        items={[
+   549	          {
+   550	            key: 'raw',
+   551	            label: '查看后端返回的原始 OpenAPI JSON',
+   552	            children: <pre className="cds-json-block">{JSON.stringify(doc, null, 2)}</pre>,
+   553	          },
+   554	        ]}
+   555	      />
+   556	    </Space>
+   557	  );
+   558	}
+   559	
+   560	const CDS_PRIMARY = '#1b6ef3';
+   561	const CDS_TEXT_GRAY = 'rgba(0, 0, 0, 0.45)';
+   562	const CDS_OK = '#52c41a';
+   563	const CDS_FAIL = '#ff4d4f';
+   564	
+   565	const NO_EXPIRY_HINT =
+   566	  '后端端点记录没有有效期字段：到期自动下线未实现，接口长期有效，需要停止对外服务时在列表里下线。';
+   567	const ONLINE_DERIVED_HINT =
+   568	  '后端没有独立的上下线字段：上线/离线由 status 与 published_at 推导——status=enabled 且已发布即对外开放调用（网关对已停用端点直接返回 ENDPOINT_DISABLED）。';
+   569	const CLIENT_FILTER_HINT =
+   570	  '接口列表来自 GET /deliveries/openapi/endpoints；查询与重置在已取回的列表内筛选（后端列表接口只按合约过滤，没有名称/状态/上下线参数）。';
+   571	/** 图上「接口描述」是必填红星，但后端创建载荷与 api_endpoints 都没有这个字段：填了不会被存，必须写明。 */
+   572	const NO_DESCRIPTION_HINT =
+   573	  '后端端点记录没有描述字段：此处填写不会落库，列表的「接口描述」因此记未记录（需先给 api_endpoints 加列）。';
+   574	
+   575	
+   576	/**
+   577	 * 图 3-2 底部固定句的后半段宣称「可在列表中修改……安全白名单与查询范围」，但 `api_endpoints`
+   578	 * 没有这两个字段（见 R-2）：上屏只写实际能改的，差异说明留在 Tooltip（禁伪造铁律）。
+   579	 */
+   580	const CREATED_FOOT_TEXT = '接口创建后默认按「上线」状态发布，可在列表中修改状态（安全白名单与查询范围暂不可配置）';
+   581	const CREATED_FOOT_NOTE =
+   582	  '原型此处原句为「接口创建后默认按「上线」状态发布，可在列表中修改状态、安全白名单与查询范围」：后端端点记录没有安全白名单与查询范围字段，网关按 API Key 与合约授权放行，这两项在列表与编辑里都改不了，故此处只写实际可改的状态。';
+   583	
+   584	const RESULT_SET_EMPTY = '后端未下发结果集字段结构（端点 response_schema 为空），不用原型示例数据填充';
+   585	
+   586	/** 图 3-1 的状态与「是否在线」是两列彩色纯文字（无底色徽标）；带底色 chip 只出现在 3-3 监控页。 */
+   587	const ENDPOINT_TEXT_STATUS: Record<string, { color: string; label: string }> = {
+   588	  enabled: { color: CDS_OK, label: '正常' },
+   589	  disabled: { color: CDS_TEXT_GRAY, label: '已停用' },
+   590	};
+   591	
+   592	function endpointTextStatus(status: string | null | undefined) {
+   593	  if (!status) return { color: CDS_TEXT_GRAY, label: UNKNOWN_TEXT };
+   594	  return ENDPOINT_TEXT_STATUS[status] ?? { color: CDS_TEXT_GRAY, label: status };
+   595	}
+   596	
+   597	function endpointOnline(endpoint: ApiEndpoint) {
+   598	  if (endpoint.status !== 'enabled') return false;
+   599	  return typeof endpoint.published_at === 'string' ? endpoint.published_at.length > 0 : true;
+   600	}
+   601	
+   602	/** apiUrl 两段都来自后端：合约文档 servers[0].url + 端点 path；文档没下发就只给路径，不编主机名。 */
+   603	function endpointApiUrl(endpoint: ApiEndpoint, doc: OpenApiDoc | null) {
+   604	  const path = endpoint.path ?? openApiPathForSlug(endpoint.slug);
+   605	  const server = doc?.servers?.[0]?.url;
+   606	  const base = typeof server === 'string' ? server.replace(/\/+$/, '') : '';
+   607	  return { path, url: base ? `${base}${path}` : null };
+   608	}
+   609	
+   610	function truncateUrl(value: string, keep = 38) {
+   611	  return value.length > keep ? `${value.slice(0, keep)}…` : value;
+   612	}
+   613	
+   614	const CRUMB_LIST = ['OpenAPI导出', '接口列表'];
+   615	const CRUMB_CREATE = ['OpenAPI导出', '新建API'];
+   616	const CRUMB_MONITOR = ['OpenAPI导出', '接口监控'];
+   617	
+   618	/** 页内钻取段交给壳层 PageCrumb 统一渲染（2026-10-17 面包屑全面化定稿），本页不再自绘面包屑。 */
+   619	function CrumbAnchor({ segs }: { segs: string[] }) {
+   620	  useCrumbSegments(segs);
+   621	  return null;
+   622	}
+   623	
+   624	function SectionHead({ text, extra }: { text: string; extra?: ReactNode }) {
+   625	  return (
+   626	    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+   627	      <Space size={8}>
+   628	        <span style={{ width: 8, height: 8, borderRadius: 8, background: CDS_PRIMARY, display: 'inline-block' }} />
+   629	        <Text strong>{text}</Text>
+   630	      </Space>
+   631	      {extra ?? null}
+   632	    </div>
+   633	  );
+   634	}
+   635	
+   636	function PlainStatusText({ meta, hint }: { meta: { color: string; label: string }; hint?: string }) {
+   637	  // audit-C 1-02/1-03（G-05）：图 3-1 状态/是否在线两列 = 纯色文字，文字就是列首（绿墨簇 x1095 = 列左沿）。
+   638	  // 曾经多一个前导实心圆图标，整列彩色墨右移 ≈22px，已删。
+   639	  const text = <span style={{ color: meta.color, whiteSpace: 'nowrap' }}>{meta.label}</span>;
+   640	  return hint ? <Tooltip title={hint}>{text}</Tooltip> : text;
+   641	}
+   642	
+   643	function OpenApiEndpointListView({
+   644	  contractId,
+   645	  doc,
+   646	  docFailed,
+   647	  onCreate,
+   648	  onMonitor,
+   649	  onEdit,
+   650	}: {
+   651	  contractId: string | null;
+   652	  doc: OpenApiDoc | null;
+   653	  docFailed: boolean;
+   654	  onCreate: () => void;
+   655	  onMonitor: (endpoint: ApiEndpoint) => void;
+   656	  onEdit: (endpoint: ApiEndpoint) => void;
+   657	}) {
+   658	  const [nameInput, setNameInput] = useState('');
+   659	  const [statusInput, setStatusInput] = useState<string | undefined>(undefined);
+   660	  const [onlineInput, setOnlineInput] = useState<string | undefined>(undefined);
+   661	  const [applied, setApplied] = useState<{ name: string; status?: string; online?: string }>({ name: '' });
+   662	  const [tablePage, setTablePage] = useState(1);
+   663	  const endpointsQuery = useApiEndpoints(contractId);
+   664	  const deleteMutation = useDeleteEndpoint();
+   665	  const all = endpointsQuery.data ?? [];
+   666	
+   667	  const matched = all.filter((endpoint) => {
+   668	    if (applied.name.trim() && !endpoint.name.includes(applied.name.trim())) return false;
+   669	    if (applied.status && endpoint.status !== applied.status) return false;
+   670	    if (applied.online && endpointOnline(endpoint) !== (applied.online === 'online')) return false;
+   671	    return true;
+   672	  });
+   673	
+   674	  // 列宽按图 3-1 列簇照图：墨迹左界 284/454/644/804/904/1094/1164/1244 在「盒左 + 单元格左内边距 20」下
+   675	  // 唯一对应盒宽 170/190/160/100/190/70/80；第八列（操作）取到**列宽合计 = 容器宽 = 1130**，
+   676	  // 因为 `tableLayout="fixed"` 下只要合计不等于容器宽，浏览器就会把富余按比例摊给每一列（实测 22px 富余
+   677	  // 逐列摊 +2…4px，到第 8 列累计偏 15px）——所以合计必须钉死，短量只能落在最右列。
+   678	  const columns: ColumnsType<ApiEndpoint> = [
+   679	    { title: '接口名称', dataIndex: 'name', width: 170, render: (name: string) => <Text>{name}</Text> },
+   680	    {
+   681	      title: 'API ID',
+   682	      dataIndex: 'id',
+   683	      width: 190,
+   684	      render: (id: string) => (
+   685	        <Text style={{ fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={id}>
+   686	          {id}
+   687	        </Text>
+   688	      ),
+   689	    },
+   690	    {
+   691	      title: '接口描述',
+   692	      dataIndex: 'description',
+   693	      width: 160,
+   694	      render: (description: string | null | undefined) =>
+   695	        description ? (
+   696	          <Text>{description}</Text>
+   697	        ) : (
+   698	          <Tooltip title={NO_DESCRIPTION_HINT}>
+   699	            <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>
+   700	          </Tooltip>
+   701	        ),
+   702	    },
+   703	    {
+   704	      title: '有效期',
+   705	      key: 'expiry',
+   706	      width: 100,
+   707	      render: () => <PlainStatusText meta={{ color: CDS_TEXT_GRAY, label: '永不过期' }} hint={NO_EXPIRY_HINT} />,
+   708	    },
+   709	    {
+   710	      title: 'apiUrl',
+   711	      key: 'apiUrl',
+   712	      width: 190,
+   713	      render: (_: unknown, record) => {
+   714	        const { path, url } = endpointApiUrl(record, doc);
+   715	        if (!url) {
+   716	          return (
+   717	            <Tooltip
+   718	              title={
+   719	                docFailed
+   720	                  ? '合约 OpenAPI 文档加载失败，取不到后端下发的 servers，只展示调用路径。'
+   721	                  : '未选择合约或文档未下发 servers：完整地址要后端 servers 字段，这里只展示调用路径。'
+   722	              }
+   723	            >
+   724	              <Link style={{ fontSize: 12 }}>{path}</Link>
+   725	            </Tooltip>
+   726	          );
+   727	        }
+   728	        return (
+   729	          <Tooltip title={url}>
+   730	            <Link href={url} style={{ fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+   731	              {truncateUrl(url)}
+   732	            </Link>
+   733	          </Tooltip>
+   734	        );
+   735	      },
+   736	    },
+   737	    {
+   738	      title: '状态',
+   739	      dataIndex: 'status',
+   740	      width: 70,
+   741	      render: (status: string) => <PlainStatusText meta={endpointTextStatus(status)} />,
+   742	    },
+   743	    {
+   744	      title: '是否在线',
+   745	      key: 'online',
+   746	      width: 80,
+   747	      render: (_: unknown, record) => (
+   748	        <PlainStatusText
+   749	          meta={endpointOnline(record) ? { color: CDS_OK, label: '上线' } : { color: CDS_TEXT_GRAY, label: '离线' }}
+   750	          hint={ONLINE_DERIVED_HINT}
+   751	        />
+   752	      ),
+   753	    },
+   754	    {
+   755	      title: '操作',
+   756	      key: 'actions',
+   757	      width: 170,
+   758	      render: (_: unknown, record) => (
+   759	        <Space size={12} style={{ whiteSpace: 'nowrap' }}>
+   760	          <Link onClick={() => onEdit(record)}>编辑</Link>
+   761	          <Popconfirm
+   762	            title="删除该接口？"
+   763	            description="删除后外部调用立即失效，历史调用日志保留。"
+   764	            okText="确认删除"
+   765	            cancelText="取消"
+   766	            onConfirm={() =>
+   767	              deleteMutation.mutate(record.id, {
+   768	                onSuccess: () => message.success('接口已删除'),
+   769	                onError: (err) => message.error(describeFlowError(err, '删除失败')),
+   770	              })
+   771	            }
+   772	          >
+   773	            <Link style={{ color: CDS_FAIL }}>删除</Link>
+   774	          </Popconfirm>
+   775	          <Link onClick={() => onMonitor(record)}>接口监控</Link>
+   776	        </Space>
+   777	      ),
+   778	    },
+   779	  ];
+   780	
+   781	  return (
+   782	    <div>
+   783	      <CrumbAnchor segs={CRUMB_LIST} />
+   784	      <Card size="small" className="cds-openapi-filter" style={{ marginBottom: 16 }}>
+   785	        <div className="cds-filter-row">
+   786	          <div className="cds-filter-field">
+   787	            <span className="cds-filter-label">接口名称：</span>
+   788	            <Input
+   789	              style={{ width: 200 }}
+   790	              placeholder="请输入接口名称"
+   791	              value={nameInput}
+   792	              onChange={(event) => setNameInput(event.target.value)}
+   793	            />
+   794	          </div>
+   795	          <div className="cds-filter-field">
+   796	            <span className="cds-filter-label">状态：</span>
+   797	            <Select
+   798	              style={{ width: 140 }}
+   799	              placeholder="全部"
+   800	              allowClear
+   801	              value={statusInput}
+   802	              onChange={(value?: string) => setStatusInput(value)}
+   803	              options={[
+   804	                { label: '正常', value: 'enabled' },
+   805	                { label: '已停用', value: 'disabled' },
+   806	              ]}
+   807	            />
+   808	          </div>
+   809	          <div className="cds-filter-field">
+   810	            <span className="cds-filter-label">是否在线：</span>
+   811	            <Select
+   812	              style={{ width: 140 }}
+   813	              placeholder="全部"
+   814	              allowClear
+   815	              value={onlineInput}
+   816	              onChange={(value?: string) => setOnlineInput(value)}
+   817	              options={[
+   818	                { label: '上线', value: 'online' },
+   819	                { label: '离线', value: 'offline' },
+   820	              ]}
+   821	            />
+   822	          </div>
+   823	          {/* 图上本带只有三个筛选条件与两个按钮，没有第四行说明：取数口径收进「查询」的 Tooltip。 */}
+   824	          <div className="cds-filter-actions">
+   825	            <Tooltip title={CLIENT_FILTER_HINT}>
+   826	              <Button
+   827	                type="primary"
+   828	                onClick={() => {
+   829	                  setApplied({ name: nameInput, status: statusInput, online: onlineInput });
+   830	                  setTablePage(1);
+   831	                }}
+   832	              >
+   833	                查询
+   834	              </Button>
+   835	            </Tooltip>
+   836	            <Button
+   837	              onClick={() => {
+   838	                setNameInput('');
+   839	                setStatusInput(undefined);
+   840	                setOnlineInput(undefined);
+   841	                setApplied({ name: '' });
+   842	                setTablePage(1);
+   843	              }}
+   844	            >
+   845	              重置
+   846	            </Button>
+   847	          </div>
+   848	        </div>
+   849	      </Card>
+   850	
+   851	      {/* 图 3-1：新建入口、表体、分页同属一张白卡（2026-10-17 复量：卡内无横向滚动条） */}
+   852	      <Card size="small">
+   853	      <div style={{ marginBottom: 16 }}>
+   854	        <Button type="primary" size="large" style={{ minWidth: 120 }} icon={<PlusOutlined />} onClick={onCreate}>
+   855	          新建接口
+   856	        </Button>
+   857	      </div>
+   858	
+   859	      <Table<ApiEndpoint>
+   860	        rowKey="id"
+   861	        columns={columns}
+   862	        dataSource={matched}
+   863	        loading={endpointsQuery.isPending}
+   864	        scroll={{ x: 1130 }}
+   865	        tableLayout="fixed"
+   866	        className="cds-openapi-table"
+   867	        pagination={{
+   868	          current: tablePage,
+   869	          pageSize: 10,
+   870	          total: matched.length,
+   871	          onChange: setTablePage,
+   872	          className: 'cds-openapi-pag',
+   873	          showTotal: (total) => `共 ${total} 个接口`,
+   874	          locale: { jump_to: '前往' },
+   875	          showSizeChanger: true,
+   876	          showQuickJumper: true,
+   877	          pageSizeOptions: [10, 20, 50],
+   878	          hideOnSinglePage: false,
+   879	        }}
+   880	        locale={tableEmpty(contractId ? '该合约还没有 OpenAPI 接口' : '当前账号还没有 OpenAPI 接口')}
+   881	      />
+   882	      </Card>
+   883	      {endpointsQuery.isError && (
+   884	        <QueryErrorAlert
+   885	          error={endpointsQuery.error}
+   886	          message="接口列表加载失败"
+   887	          onRetry={() => {
+   888	            void endpointsQuery.refetch();
+   889	          }}
+   890	        />
+   891	      )}
+   892	    </div>
+   893	  );
+   894	}
+   895	
+   896	function ResultSetFieldTable() {
+   897	  return (
+   898	    <Table<{ name: string; type: string }>
+   899	      rowKey="name"
+   900	      size="small"
+   901	      pagination={false}
+   902	      dataSource={[]}
+   903	      columns={[
+   904	        { title: '字段名', dataIndex: 'name', width: 200 },
+   905	        { title: '字段类型', dataIndex: 'type', width: 200 },
+   906	        {
+   907	          title: '算子',
+   908	          key: 'operator',
+   909	          render: () => (
+   910	            <Tooltip title="后端结果集结构里没有字段级算子配置，此处不编取值。">
+   911	              <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>
+   912	            </Tooltip>
+   913	          ),
+   914	        },
+   915	      ]}
+   916	      locale={tableEmpty(RESULT_SET_EMPTY)}
+   917	    />
+   918	  );
+   919	}
+   920	
+   921	async function createEndpointWithStatus(
+   922	  create: (payload: ApiEndpointCreatePayload) => Promise<ApiEndpoint>,
+   923	  update: (vars: { id: string; payload: ApiEndpointUpdatePayload }) => Promise<ApiEndpoint>,
+   924	  payload: ApiEndpointCreatePayload,
+   925	  online: boolean,
+   926	) {
+   927	  const endpoint = await create(payload);
+   928	  if (online) return { endpoint, offlineWritten: true };
+   929	  try {
+   930	    return { endpoint, offlineWritten: (await update({ id: endpoint.id, payload: { status: 'disabled' } })).status !== 'enabled' };
+   931	  } catch {
+   932	    return { endpoint, offlineWritten: false };
+   933	  }
+   934	}
+   935	
+   936	function OpenApiCreateView({
+   937	  contractId,
+   938	  onCancel,
+   939	  onCreated,
+   940	}: {
+   941	  contractId: string | null;
+   942	  onCancel: () => void;
+   943	  onCreated: () => void;
+   944	}) {
+   945	  const [form] = Form.useForm();
+   946	  const [online, setOnline] = useState(true);
+   947	  const [expiry, setExpiry] = useState('never');
+   948	  const workloadsQuery = useWorkloads({ contractId, env: 'production', status: 'published' });
+   949	  const createMutation = useCreateEndpoint();
+   950	  const updateMutation = useUpdateEndpoint();
+   951	  const queryClient = useQueryClient();
+   952	  const workloads = (workloadsQuery.data?.items ?? []).filter((workload) => workload.contract_id);
+   953	
+   954	  const submit = async () => {
+   955	    let values: { name: string; workload_id: string; description: string };
+   956	    try {
+   957	      values = await form.validateFields();
+   958	    } catch {
+   959	      return;
+   960	    }
+   961	    const workload = workloads.find((candidate) => candidate.id === values.workload_id);
+   962	    const targetContract = workload?.contract_id ?? contractId;
+   963	    if (!targetContract) {
+   964	      message.error('关联任务未绑定合约，后端无法创建接口');
+   965	      return;
+   966	    }
+   967	    try {
+   968	      const { endpoint, offlineWritten } = await createEndpointWithStatus(
+   969	        (payload) => createMutation.mutateAsync(payload),
+   970	        (vars) => updateMutation.mutateAsync(vars),
+   971	        {
+   972	          contract_id: targetContract,
+   973	          workload_id: workload?.id ?? null,
+   974	          name: values.name.trim(),
+   975	          description: values.description.trim(),
+   976	        },
+   977	        online,
+   978	      );
+   979	      await queryClient.invalidateQueries({ queryKey: flowKeys.openapi(targetContract) });
+   980	      message.success(`接口已创建：${openApiPathForSlug(endpoint.slug)}`);
+   981	      if (!offlineWritten) {
+   982	        message.warning('接口已创建，但下线状态未写入：列表里仍是上线，可在「编辑」里重试');
+   983	      }
+   984	      onCreated();
+   985	    } catch (err) {
+   986	      message.error(describeFlowError(err, '创建接口失败'));
+   987	    }
+   988	  };
+   989	
+   990	  return (
+   991	    <div>
+   992	      <CrumbAnchor segs={CRUMB_CREATE} />
+   993	      <div className="cds-api-create-form">
+   994	        <Form form={form} layout="vertical">
+   995	          {/* 图 3-2 第 1 字段带是三列栅格：接口名称 / 关联任务 / 接口状态 同一行（接口状态不再是整行）。 */}
+   996	          <Row gutter={0} className="cds-row3">
+   997	            <Col xs={24} md={8}>
+   998	              <Form.Item name="name" label="接口名称" rules={[{ required: true, message: '请输入接口名称' }]}>
+   999	                <Input placeholder="请输入接口名称" maxLength={128} />
+  1000	              </Form.Item>
+  1001	            </Col>
+  1002	            <Col xs={24} md={8}>
+  1003	              <Form.Item name="workload_id" label="关联任务" rules={[{ required: true, message: '请选择关联任务' }]}>
+  1004	                <Select
+  1005	                  showSearch
+  1006	                  optionFilterProp="label"
+  1007	                  placeholder="请选择已发布的生产任务"
+  1008	                  loading={workloadsQuery.isPending}
+  1009	                  notFoundContent={workloadsQuery.isPending ? '加载中…' : '后端没有可绑定的已发布生产任务'}
+  1010	                  options={workloads.map((workload) => ({ label: workload.name, value: workload.id }))}
+  1011	                />
+  1012	              </Form.Item>
+  1013	            </Col>
+  1014	            <Col xs={24} md={8}>
+  1015	              <Form.Item label="接口状态">
+  1016	                <Space align="center">
+  1017	                  <Switch checkedChildren="上线" unCheckedChildren="离线" checked={online} onChange={setOnline} />
+  1018	                  <Text type="secondary" style={{ fontSize: 12 }}>
+  1019	                    关闭后接口不可被外部调用
+  1020	                  </Text>
+  1021	                </Space>
+  1022	              </Form.Item>
+  1023	            </Col>
+  1024	          </Row>
+  1025	          {/* 图 3-2 第 2 字段带 y238–370 同是三列：描述 / 有效期 / 保障（单选圆点像素簇 650,270 与 1030,270）。 */}
+  1026	          <Row gutter={0} className="cds-row3">
+  1027	            <Col xs={24} md={8}>
+  1028	              <Form.Item
+  1029	                name="description"
+  1030	                label="接口描述"
+  1031	                rules={[{ required: true, message: '请输入接口描述' }]}
+  1032	                extra={NO_DESCRIPTION_HINT}
+  1033	              >
+  1034	                <Input.TextArea rows={3} placeholder="请输入接口描述" maxLength={500} />
+  1035	              </Form.Item>
+  1036	            </Col>
+  1037	            <Col xs={24} md={8}>
+  1038	              <Form.Item label="接口有效期">
+  1039	            <Space direction="vertical" size={4}>
+  1040	              <Radio.Group
+  1041	                name="endpoint-expiry"
+  1042	                value={expiry}
+  1043	                onChange={(event) => setExpiry(event.target.value)}
+  1044	                options={[
+  1045	                  { label: '永不过期', value: 'never' },
+  1046	                  { label: '选择日期', value: 'date' },
+  1047	                ]}
+  1048	              />
+  1049	              {expiry === 'date' ? <DatePicker disabled placeholder="选择日期" /> : null}
+  1050	              <Text type="secondary" style={{ fontSize: 12 }}>
+  1051	                {NO_EXPIRY_HINT}
+  1052	              </Text>
+  1053	              </Space>
+  1054	              </Form.Item>
+  1055	            </Col>
+  1056	            <Col xs={24} md={8}>
+  1057	              <Form.Item label="安全保障">
+  1058	            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+  1059	              <Radio.Group
+  1060	                name="endpoint-security"
+  1061	                disabled
+  1062	                value="unrestricted"
+  1063	                options={[
+  1064	                  { label: '白名单', value: 'whitelist' },
+  1065	                  { label: '不限制', value: 'unrestricted' },
+  1066	                ]}
+  1067	              />
+  1068	              <Input.TextArea
+  1069	                disabled
+  1070	                rows={2}
+  1071	                placeholder="支持输入IP地址，多个IP地址用逗号隔开，例如192.168.22.20,192.168.22.21；支持输入网段，例如 36.110.223.0/24"
+  1072	              />
+  1073	              <Text type="secondary" style={{ fontSize: 12 }}>
+  1074	                后端端点记录没有 IP 白名单字段，网关按 API Key 与合约授权放行：此处不可配置，平台实际行为是不限制来源。
+  1075	              </Text>
+  1076	            </Space>
+  1077	              </Form.Item>
+  1078	            </Col>
+  1079	          </Row>
+  1080	          <Row gutter={24}>
+  1081	            <Col xs={24} md={12}>
+  1082	              <Form.Item label="查询模式">
+  1083	                <Radio.Group
+  1084	                  name="endpoint-query-mode"
+  1085	                  disabled
+  1086	                  value="open"
+  1087	                  options={[
+  1088	                    { label: '开放查询', value: 'open' },
+  1089	                    { label: '限定查询', value: 'limited' },
+  1090	                  ]}
+  1091	                />
+  1092	                <div>
+  1093	                  <Text type="secondary" style={{ fontSize: 12 }}>
+  1094	                    网关把请求体原样交给已发布负载执行，不做请求 Schema 校验：此处不可配置，平台实际行为是开放查询。
+  1095	                  </Text>
+  1096	                </div>
+  1097	              </Form.Item>
+  1098	            </Col>
+  1099	            <Col xs={24} md={12}>
+  1100	              <Form.Item label="查询范围">
+  1101	                <Radio.Group
+  1102	                  name="endpoint-query-scope"
+  1103	                  disabled
+  1104	                  value="latest"
+  1105	                  options={[
+  1106	                    { label: '最新结果集', value: 'latest' },
+  1107	                    { label: '历史所有结果集', value: 'history' },
+  1108	                  ]}
+  1109	                />
+  1110	                <div>
+  1111	                  <Text type="secondary" style={{ fontSize: 12 }}>
+  1112	                    每次调用即时执行已发布负载并返回本次输出，后端没有历史结果集查询接口：此处不可配置。
+  1113	                  </Text>
+  1114	                </div>
+  1115	              </Form.Item>
+  1116	            </Col>
+  1117	          </Row>
+  1118	          <div style={{ marginTop: 8 }}>
+  1119	            <Space size={6}>
+  1120	              <Text strong>结果集字段</Text>
+  1121	              <Text type="secondary" style={{ fontSize: 12 }}>
+  1122	                （来自关联合约的结果集结构）
+  1123	              </Text>
+  1124	            </Space>
+  1125	            <div style={{ marginTop: 8 }}>
+  1126	              <ResultSetFieldTable />
+  1127	            </div>
+  1128	          </div>
+  1129	        </Form>
+  1130	      </div>
+  1131	
+  1132	      <div
+  1133	        style={{
+  1134	          display: 'flex',
+  1135	          alignItems: 'center',
+  1136	          justifyContent: 'space-between',
+  1137	          gap: 16,
+  1138	          marginTop: 16,
+  1139	          paddingTop: 16,
+  1140	          borderTop: '1px solid #f1f2f4',
+  1141	        }}
+  1142	      >
+  1143	        {/* 原型原句后半段「、安全白名单与查询范围」宣称了产品没有的能力（无白名单/查询范围字段），
+  1144	            按禁伪造改成诚实版；与原型原句的差异写进 Tooltip。 */}
+  1145	        <Tooltip title={CREATED_FOOT_NOTE}>
+  1146	          <Text type="secondary" style={{ fontSize: 12 }}>
+  1147	            <InfoCircleOutlined style={{ marginRight: 6 }} />
+  1148	            {CREATED_FOOT_TEXT}
+  1149	          </Text>
+  1150	        </Tooltip>
+  1151	        <Space>
+  1152	          <Button onClick={onCancel}>取消</Button>
+  1153	          <Button
+  1154	            type="primary"
+  1155	            size="large"
+  1156	            style={{ paddingInline: 22 }}
+  1157	            loading={createMutation.isPending || updateMutation.isPending}
+  1158	            onClick={() => void submit()}
+  1159	          >
+  1160	            新增接口
+  1161	          </Button>
+  1162	        </Space>
+  1163	      </div>
+  1164	    </div>
+  1165	  );
+  1166	}
+  1167	
+  1168	function EditEndpointModal({ endpoint, onClose }: { endpoint: ApiEndpoint; onClose: () => void }) {
+  1169	  const [online, setOnline] = useState(endpointOnline(endpoint));
+  1170	  const [rate, setRate] = useState<number | null>(endpoint.rate_limit_per_minute ?? null);
+  1171	  const [quota, setQuota] = useState<number | null>(endpoint.quota_total ?? null);
+  1172	  const queryClient = useQueryClient();
+  1173	  const updateMutation = useUpdateEndpoint();
+  1174	
+  1175	  const save = () => {
+  1176	    updateMutation.mutate(
+  1177	      {
+  1178	        id: endpoint.id,
+  1179	        payload: { status: online ? 'enabled' : 'disabled', rate_limit_per_minute: rate, quota_total: quota },
+  1180	      },
+  1181	      {
+  1182	        onSuccess: () => {
+  1183	          void queryClient.invalidateQueries({ queryKey: flowKeys.openapi(endpoint.contract_id) });
+  1184	          message.success('接口已更新');
+  1185	          onClose();
+  1186	        },
+  1187	        onError: (err) => message.error(describeFlowError(err, '更新失败')),
+  1188	      },
+  1189	    );
+  1190	  };
+  1191	
+  1192	  return (
+  1193	    <Modal
+  1194	      title={`编辑接口 · ${endpoint.name}`}
+  1195	      open
+  1196	      onCancel={onClose}
+  1197	      onOk={save}
+  1198	      okText="保存"
+  1199	      confirmLoading={updateMutation.isPending}
+  1200	      width={520}
+  1201	    >
+  1202	      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+  1203	        <div>
+  1204	          <Text>接口状态</Text>
+  1205	          <div style={{ marginTop: 8 }}>
+  1206	            <Space align="center">
+  1207	              <Switch checkedChildren="上线" unCheckedChildren="离线" checked={online} onChange={setOnline} />
+  1208	              <Text type="secondary" style={{ fontSize: 12 }}>
+  1209	                关闭后接口不可被外部调用
+  1210	              </Text>
+  1211	            </Space>
+  1212	          </div>
+  1213	        </div>
+  1214	        <div>
+  1215	          <Text>每分钟限流</Text>
+  1216	          <div style={{ marginTop: 8 }}>
+  1217	            <InputNumber
+  1218	              style={{ width: '100%' }}
+  1219	              min={1}
+  1220	              max={10000}
+  1221	              precision={0}
+  1222	              value={rate}
+  1223	              onChange={(value) => setRate(value)}
+  1224	            />
+  1225	          </div>
+  1226	        </div>
+  1227	        <div>
+  1228	          <Text>总配额（调用次数）</Text>
+  1229	          <div style={{ marginTop: 8 }}>
+  1230	            <InputNumber
+  1231	              style={{ width: '100%' }}
+  1232	              min={1}
+  1233	              precision={0}
+  1234	              placeholder="留空为不限"
+  1235	              value={quota}
+  1236	              onChange={(value) => setQuota(value)}
+  1237	            />
+  1238	          </div>
+  1239	        </div>
+  1240	        <Text type="secondary" style={{ fontSize: 12 }}>
+  1241	          后端 PATCH 只接受状态、每分钟限流与总配额：接口名称、调用路径与有效期创建后不可修改。
+  1242	        </Text>
+  1243	      </Space>
+  1244	    </Modal>
+  1245	  );
+  1246	}
+  1247	
+  1248	const MONITOR_TABLE_PAGE_SIZE = 10;
+  1249	
+  1250	const CALL_STATUS_META: Record<string, StatusMeta> = {
+  1251	  succeeded: { color: 'green', label: '调用成功' },
+  1252	  failed: { color: 'red', label: '调用失败' },
+  1253	};
+  1254	
+  1255	const CALL_FAILURE_CODE_META: Record<string, StatusMeta> = {
+  1256	  RATE_LIMITED: { color: 'orange', label: '限流阻断' },
+  1257	  QUOTA_EXCEEDED: { color: 'orange', label: '配额用尽' },
+  1258	  ENDPOINT_DISABLED: { color: 'default', label: '端点已停用' },
+  1259	  WORKLOAD_UNAVAILABLE: { color: 'red', label: '负载不可用' },
+  1260	  CALLER_UNKNOWN: { color: 'red', label: '调用方不存在' },
+  1261	  WORKLOAD_FAILED: { color: 'red', label: '负载执行失败' },
+  1262	  OUTPUT_BLOCKED: { color: 'red', label: '输出被拦截' },
+  1263	};
+  1264	
+  1265	function CallStatusTag({ call }: { call: ApiEndpointCall }) {
+  1266	  if (!call.status) return <Tag>{UNKNOWN_TEXT}</Tag>;
+  1267	  const base = statusMeta(CALL_STATUS_META, call.status);
+  1268	  if (call.status === 'succeeded') return <Tag color={base.color}>{base.label}</Tag>;
+  1269	  const known = call.code ? statusMeta(CALL_FAILURE_CODE_META, call.code) : null;
+  1270	  const useCode = Boolean(call.code && known && known.label !== call.code);
+  1271	  const tag = <Tag color={useCode ? known!.color : base.color}>{useCode ? known!.label : base.label}</Tag>;
+  1272	  return call.message ? <Tooltip title={call.message}>{tag}</Tooltip> : tag;
+  1273	}
+  1274	
+  1275	function MetricTile({
+  1276	  testId,
+  1277	  title,
+  1278	  hint,
+  1279	  value,
+  1280	  note,
+  1281	  icon,
+  1282	  divider,
+  1283	}: {
+  1284	  testId: string;
+  1285	  title: string;
+  1286	  hint: string;
+  1287	  value: string;
+  1288	  note: string;
+  1289	  icon: ReactNode;
+  1290	  /** 图 3-3 三张 KPI 卡无独立底色，卡间靠一条 1px 细竖线分隔。 */
+  1291	  divider?: boolean;
+  1292	}) {
+  1293	  return (
+  1294	    <Col xs={24} sm={8}>
+  1295	      <div
+  1296	        className={divider ? 'cds-kpi-divider' : undefined}
+  1297	        style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}
+  1298	      >
+  1299	        <span
+  1300	          style={{
+  1301	            width: 40,
+  1302	            height: 40,
+  1303	            borderRadius: 8,
+  1304	            background: '#f0f5ff',
+  1305	            color: CDS_PRIMARY,
+  1306	            display: 'inline-flex',
+  1307	            alignItems: 'center',
+  1308	            justifyContent: 'center',
+  1309	            fontSize: 18,
+  1310	          }}
+  1311	        >
+  1312	          {icon}
+  1313	        </span>
+  1314	        <div data-testid={testId} style={{ minWidth: 0 }}>
+  1315	          <Statistic
+  1316	            title={
+  1317	              <Tooltip title={hint}>
+  1318	                <span>{title}</span>
+  1319	              </Tooltip>
+  1320	            }
+  1321	            value={value}
+  1322	            valueStyle={{ fontSize: 20, color: CDS_PRIMARY }}
+  1323	          />
+  1324	          <Text type="secondary" style={{ fontSize: 12 }}>
+  1325	            {note}
+  1326	          </Text>
+  1327	        </div>
+  1328	      </div>
+  1329	    </Col>
+  1330	  );
+  1331	}
+  1332	
+  1333	export function OpenApiMonitorView({
+  1334	  endpoint,
+  1335	  onClose,
+  1336	  onEdit,
+  1337	}: {
+  1338	  endpoint: ApiEndpoint | null;
+  1339	  onClose: () => void;
+  1340	  onEdit?: (endpoint: ApiEndpoint) => void;
+  1341	}) {
+  1342	  const [tablePage, setTablePage] = useState(1);
+  1343	  const callsQuery = useEndpointCalls(endpoint?.id ?? null);
+  1344	  const workloadQuery = useWorkload(endpoint?.workload_id ?? null);
+  1345	  const payload = callsQuery.data ?? null;
+  1346	  const metrics = computeEndpointCallMetrics(payload);
+  1347	  const rows = payload?.items ?? [];
+  1348	  const online = endpoint ? endpointOnline(endpoint) : false;
+  1349	  const enabled = endpoint?.status === 'enabled';
+  1350	
+  1351	  const columns: ColumnsType<ApiEndpointCall> = [
+  1352	    {
+  1353	      title: '序号',
+  1354	      key: 'index',
+  1355	      width: 80,
+  1356	      render: (_: unknown, __: ApiEndpointCall, index: number) => (tablePage - 1) * MONITOR_TABLE_PAGE_SIZE + index + 1,
+  1357	    },
+  1358	    {
+  1359	      title: '调用ID',
+  1360	      dataIndex: 'id',
+  1361	      render: (id: string | null | undefined) =>
+  1362	        id ? <Text style={{ fontSize: 12 }}>{id}</Text> : <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>,
+  1363	    },
+  1364	    {
+  1365	      title: '调用时间',
+  1366	      dataIndex: 'created_at',
+  1367	      width: 230,
+  1368	      render: (value: string | null | undefined) =>
+  1369	        value ? formatMinute(value) : <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>,
+  1370	    },
+  1371	    { title: '调用状态', key: 'status', width: 140, render: (_: unknown, record) => <CallStatusTag call={record} /> },
+  1372	  ];
+  1373	
+  1374	  return (
+  1375	    <div>
+  1376	      <CrumbAnchor segs={CRUMB_MONITOR} />
+  1377	      {/* 图 3-3（2026-10-17 复量）：标题区是一整块白卡，chip 与三按钮都在卡内，不落灰底。 */}
+  1378	      <Card size="small" style={{ marginBottom: 16 }}>
+  1379	      <div
+  1380	        style={{
+  1381	          display: 'flex',
+  1382	          alignItems: 'flex-start',
+  1383	          justifyContent: 'space-between',
+  1384	          gap: 16,
+  1385	        }}
+  1386	      >
+  1387	        <div style={{ minWidth: 0 }}>
+  1388	          <Space size={8} align="center" wrap>
+  1389	            <Title level={4} style={{ margin: 0 }}>
+  1390	              {endpoint?.name ?? UNKNOWN_TEXT}
+  1391	            </Title>
+  1392	            <Tag color={enabled ? 'green' : 'default'}>
+  1393	              {enabled ? <CheckCircleOutlined /> : null}
+  1394	              {enabled ? '接口正常' : endpoint ? `接口${endpointTextStatus(endpoint.status).label}` : UNKNOWN_TEXT}
+  1395	            </Tag>
+  1396	            <Tag color={online ? 'blue' : 'default'}>{online ? <LinkOutlined /> : null}{online ? '已上线' : '已离线'}</Tag>
+  1397	          </Space>
+  1398	          <div style={{ marginTop: 4 }}>
+  1399	            <Text type="secondary" style={{ fontSize: 12 }}>
+  1400	              {`API ID：${endpoint?.id ?? UNKNOWN_TEXT} · 关联任务：${workloadQuery.data?.name ?? UNKNOWN_TEXT} · 有效期：永不过期`}
+  1401	            </Text>
+  1402	          </div>
+  1403	        </div>
+  1404	        <Space>
+  1405	          <Button size="large" style={{ minWidth: 125 }} icon={<LeftOutlined />} onClick={onClose}>
+  1406	            返回列表
+  1407	          </Button>
+  1408	          <Button
+  1409	            size="large"
+  1410	            style={{ minWidth: 125 }}
+  1411	            icon={<ReloadOutlined />}
+  1412	            onClick={() => {
+  1413	              void callsQuery.refetch();
+  1414	            }}
+  1415	          >
+  1416	            刷新数据
+  1417	          </Button>
+  1418	          <Button type="primary" size="large" style={{ minWidth: 125 }} icon={<EditOutlined />} disabled={!onEdit} onClick={() => endpoint && onEdit?.(endpoint)}>
+  1419	            编辑接口
+  1420	          </Button>
+  1421	        </Space>
+  1422	      </div>
+  1423	      </Card>
+  1424	
+  1425	      <Card size="small" className="cds-kpi-band" style={{ marginBottom: 16 }}>
+  1426	        <SectionHead text="使用调用详情" />
+  1427	        <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
+  1428	          <MetricTile
+  1429	            testId="monitor-total"
+  1430	            icon={<DashboardOutlined />}
+  1431	            title="调用总次数（次）"
+  1432	            hint="取后端下发的调用总数（数据源为带 Merkle 锚定的审计日志计数），不是本页行数。"
+  1433	            value={metrics.total != null ? String(metrics.total) : UNKNOWN_TEXT}
+  1434	            note={
+  1435	              metrics.total == null
+  1436	                ? '后端未下发调用总数'
+  1437	                : metrics.totalIsFallback
+  1438	                  ? `后端未下发总数，按本次返回的 ${metrics.windowCount} 条计`
+  1439	                  : metrics.windowCount < metrics.total
+  1440	                    ? `明细取最近 ${metrics.windowCount} 条`
+  1441	                    : '后端下发的调用总数'
+  1442	            }
+  1443	          />
+  1444	          <MetricTile
+  1445	            testId="monitor-latest"
+  1446	            divider
+  1447	            icon={<FieldTimeOutlined />}
+  1448	            title="最新调用时间"
+  1449	            hint="取本次返回明细里最晚一条的调用时间（后端按时间倒序返回），不用当前时间推算。"
+  1450	            value={metrics.latestAt ? formatDateTime(metrics.latestAt) : UNKNOWN_TEXT}
+  1451	            note={metrics.latestAt ? '明细里最近一次调用时间' : '明细为空，无从取到最近时间'}
+  1452	          />
+  1453	          <MetricTile
+  1454	            testId="monitor-rate"
+  1455	            divider
+  1456	            icon={<CheckCircleOutlined />}
+  1457	            title="调用成功率"
+  1458	            hint="只按后端下发的成功/失败判定计算；一条判定都没有时记「未记录」，不按全成功推算。"
+  1459	            value={metrics.successRate != null ? `${metrics.successRate}%` : UNKNOWN_TEXT}
+  1460	            note={metrics.rateNote}
+  1461	          />
+  1462	        </Row>
+  1463	      </Card>
+  1464	
+  1465	      <Card
+  1466	        size="small"
+  1467	        title={
+  1468	          <SectionHead
+  1469	            text="使用调用详情"
+  1470	            extra={
+  1471	              <Space size={12}>
+  1472	                <Text type="secondary" style={{ fontSize: 12 }}>
+  1473	                  数据更新至 {metrics.latestAt ? formatMinute(metrics.latestAt) : UNKNOWN_TEXT}
+  1474	                </Text>
+  1475	                <Button
+  1476	                  type="link"
+  1477	                  size="small"
+  1478	                  icon={<ReloadOutlined />}
+  1479	                  style={{ padding: 0 }}
+  1480	                  onClick={() => {
+  1481	                    void callsQuery.refetch();
+  1482	                  }}
+  1483	                >
+  1484	                  刷新
+  1485	                </Button>
+  1486	              </Space>
+  1487	            }
+  1488	          />
+  1489	        }
+  1490	      >
+  1491	        <div style={{ marginBottom: 8 }}>
+  1492	          <Text type="secondary" style={{ fontSize: 12 }}>
+  1493	            指标与明细读同一个窗口：最多取最近 {OPENAPI_CALLS_WINDOW} 条调用（后端单页上界）
+  1494	            {metrics.total != null && metrics.total > metrics.windowCount ? `，后端共 ${metrics.total} 次调用` : ''}
+  1495	          </Text>
+  1496	        </div>
+  1497	        {callsQuery.isError && (
+  1498	          <QueryErrorAlert
+  1499	            error={callsQuery.error}
+  1500	            message="调用明细加载失败"
+  1501	            onRetry={() => {
+  1502	              void callsQuery.refetch();
+  1503	            }}
+  1504	          />
+  1505	        )}
+  1506	        <Table<ApiEndpointCall>
+  1507	          rowKey="id"
+  1508	          size="small"
+  1509	          columns={columns}
+  1510	          dataSource={rows}
+  1511	          loading={callsQuery.isLoading}
+  1512	          pagination={{
+  1513	            current: tablePage,
+  1514	            pageSize: MONITOR_TABLE_PAGE_SIZE,
+  1515	            total: rows.length,
+  1516	            onChange: setTablePage,
+  1517	            className: 'cds-openapi-pag',
+  1518	            showTotal: (total) => `共 ${total} 条`,
+  1519	          locale: { jump_to: '前往' },
+  1520	            showSizeChanger: true,
+  1521	            showQuickJumper: true,
+  1522	            pageSizeOptions: [10, 20, 50],
+  1523	            hideOnSinglePage: false,
+  1524	          }}
+  1525	          locale={tableEmpty('该端点还没有调用明细')}
+  1526	        />
+  1527	      </Card>
+  1528	    </div>
+  1529	  );
+  1530	}
+  1531	
+  1532	export function OpenApiExportTab({ contractId }: { contractId: string | null }) {
+  1533	  const [view, setView] = useState<'list' | 'create'>('list');
+  1534	  const [monitorEndpointId, setMonitorEndpointId] = useState<string | null>(null);
+  1535	  const [editEndpoint, setEditEndpoint] = useState<ApiEndpoint | null>(null);
+  1536	  const [debugPick, setDebugPick] = useState<string | null>(null);
+  1537	  const [debugEndpointId, setDebugEndpointId] = useState<string | null>(null);
+  1538	  const endpointsQuery = useApiEndpoints(contractId);
+  1539	  const docQuery = useContractOpenApiDoc(contractId);
+  1540	  const endpoints = endpointsQuery.data ?? [];
+  1541	  const docRows = flattenOpenApiOperations(docQuery.data ?? null);
+  1542	  const monitorEndpoint = endpoints.find((candidate) => candidate.id === monitorEndpointId) ?? null;
+  1543	
+  1544	  const bodyFor = (endpoint: ApiEndpoint) => {
+  1545	    const row = docRows.find((candidate) => candidate.path.includes(endpoint.slug));
+  1546	    return JSON.stringify(buildRequestExample(row, endpoint), null, 2);
+  1547	  };
+  1548	
+  1549	  if (view === 'create') {
+  1550	    return <OpenApiCreateView contractId={contractId} onCancel={() => setView('list')} onCreated={() => setView('list')} />;
+  1551	  }
+  1552	
+  1553	  if (monitorEndpointId) {
+  1554	    return (
+  1555	      <>
+  1556	        <OpenApiMonitorView
+  1557	          endpoint={monitorEndpoint}
+  1558	          onClose={() => setMonitorEndpointId(null)}
+  1559	          onEdit={(endpoint) => setEditEndpoint(endpoint)}
+  1560	        />
+  1561	        {editEndpoint && <EditEndpointModal endpoint={editEndpoint} onClose={() => setEditEndpoint(null)} />}
+  1562	      </>
+  1563	    );
+  1564	  }
+  1565	
+  1566	  return (
+  1567	    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+  1568	      <OpenApiEndpointListView
+  1569	        contractId={contractId}
+  1570	        doc={docQuery.data ?? null}
+  1571	        docFailed={docQuery.isError}
+  1572	        onCreate={() => setView('create')}
+  1573	        onMonitor={(endpoint) => setMonitorEndpointId(endpoint.id)}
+  1574	        onEdit={(endpoint) => setEditEndpoint(endpoint)}
+  1575	      />
+  1576	      <Card size="small">
+  1577	        <Collapse
+  1578	          size="small"
+  1579	          items={[
+  1580	            {
+  1581	              key: 'doc',
+  1582	              label: 'OpenAPI 文档预览与在线调试（原型三屏之外的既有能力）',
+  1583	              children: (
+  1584	                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+  1585	                  {!contractId && <Alert type="info" showIcon message="OpenAPI 文档按合约返回：列表页未选合约时仅展示调用路径；合约范围文档请在「数据集打包 / 结果推送」视图选定合约后查看。" />}
+  1586	                  {contractId && docQuery.isLoading && <Text type="secondary">文档加载中…</Text>}
+  1587	                  {contractId && docQuery.isError && (
+  1588	                    <QueryErrorAlert
+  1589	                      error={docQuery.error}
+  1590	                      message="OpenAPI 文档加载失败"
+  1591	                      onRetry={() => {
+  1592	                        void docQuery.refetch();
+  1593	                      }}
+  1594	                    />
+  1595	                  )}
+  1596	                  {contractId && !docQuery.isLoading && !docQuery.isError && (
+  1597	                    <OpenApiPreview doc={docQuery.data ?? null} endpoints={endpoints} />
+  1598	                  )}
+  1599	                  <Space wrap>
+  1600	                    <Select
+  1601	                      style={{ width: 260 }}
+  1602	                      placeholder="选择接口做在线试调用"
+  1603	                      value={debugPick ?? undefined}
+  1604	                      onChange={(value?: string) => setDebugPick(value ?? null)}
+  1605	                      options={endpoints.map((endpoint) => ({ label: endpoint.name, value: endpoint.id }))}
+  1606	                    />
+  1607	                    <Button
+  1608	                      size="small"
+  1609	                      icon={<BugOutlined />}
+  1610	                      disabled={!debugPick}
+  1611	                      onClick={() => setDebugEndpointId(debugPick)}
+  1612	                    >
+  1613	                      调试
+  1614	                    </Button>
+  1615	                  </Space>
+  1616	                </Space>
+  1617	              ),
+  1618	            },
+  1619	          ]}
+  1620	        />
+  1621	      </Card>
+  1622	      {editEndpoint && <EditEndpointModal endpoint={editEndpoint} onClose={() => setEditEndpoint(null)} />}
+  1623	      {debugEndpointId && (
+  1624	        <ApiDebugModal
+  1625	          open
+  1626	          onClose={() => setDebugEndpointId(null)}
+  1627	          endpoints={endpoints}
+  1628	          initialEndpointId={debugEndpointId}
+  1629	          bodyForEndpoint={bodyFor}
+  1630	        />
+  1631	      )}
+  1632	    </Space>
+  1633	  );
+  1634	}
+  1635	
+  1636	/**
+  1637	 * SS-17 在线试调用：选一个已发布的端点 → 拿一把真实的网关作用域 API Key →
+  1638	 * 直接 `POST /open/v1/{slug}` 看真实响应。
+  1639	 *
+  1640	 * 凭据不是模拟的：密钥由 `POST /api/v1/api-keys`（preset=custom + gateway:write）签发，
+  1641	 * 裸密钥后端只回一次。创建需要 ADMIN（该路由 human-only + ADMIN 门），非管理员可以
+  1642	 * 粘贴管理员已发的 `cds_ak_…` 走同一条调用——两种路径都不会伪装成“密钥可用”。
+  1643	 */
+  1644	function ApiDebugModal({
+  1645	  open,
+  1646	  onClose,
+  1647	  endpoints,
+  1648	  initialEndpointId,
+  1649	  bodyForEndpoint,
+  1650	}: {
+  1651	  open: boolean;
+  1652	  onClose: () => void;
+  1653	  endpoints: ApiEndpoint[];
+  1654	  initialEndpointId: string | null;
+  1655	  bodyForEndpoint: (endpoint: ApiEndpoint) => string;
+  1656	}) {
+  1657	  const [endpointId, setEndpointId] = useState<string | null>(initialEndpointId ?? endpoints[0]?.id ?? null);
+  1658	  const [bodyByEndpoint, setBodyByEndpoint] = useState<Record<string, string>>({});
+  1659	  const [keyCreated, setKeyCreated] = useState<ApiKeyCreated | null>(null);
+  1660	  const [pastedKey, setPastedKey] = useState('');
+  1661	  const [keyError, setKeyError] = useState<string | null>(null);
+  1662	  const [creatingKey, setCreatingKey] = useState(false);
+  1663	  const [revoking, setRevoking] = useState(false);
+  1664	  const [attempt, setAttempt] = useState<OpenApiDebugAttempt | null>(null);
+  1665	  const [calling, setCalling] = useState(false);
+  1666	
+  1667	  const endpoint = endpoints.find((item) => item.id === endpointId) ?? null;
+  1668	  const apiKey = pastedKey.trim() || keyCreated?.key || '';
+  1669	  const bodyText = endpoint ? bodyByEndpoint[endpoint.id] ?? bodyForEndpoint(endpoint) : '';
+  1670	
+  1671	  const createKey = () => {
+  1672	    if (!endpoint) {
+  1673	      message.error('请先选择要调试的端点');
+  1674	      return;
+  1675	    }
+  1676	    setKeyError(null);
+  1677	    setCreatingKey(true);
+  1678	    void apiKeysApi
+  1679	      .create({
+  1680	        name: `openapi-debug-${endpoint.slug}`.slice(0, 64),
+  1681	        description: '成果交付页在线试调用创建（仅 gateway:write，30 天有效）',
+  1682	        preset: 'custom',
+  1683	        scopes: [...OPEN_API_DEBUG_KEY_SCOPES],
+  1684	        expires_in_days: 30,
+  1685	        rate_limit: 60,
+  1686	      })
+  1687	      .then((created) => {
+  1688	        setKeyCreated(created);
+  1689	        setPastedKey('');
+  1690	        setAttempt(null);
+  1691	        message.warning('调试密钥已创建：裸密钥只显示这一次，请立即复制保存');
+  1692	      })
+  1693	      .catch((err: unknown) => {
+  1694	        setKeyError(describeFlowError(err, '创建调试密钥失败'));
+  1695	      })
+  1696	      .finally(() => setCreatingKey(false));
+  1697	  };
+  1698	
+  1699	  const revokeKey = () => {
+  1700	    if (!keyCreated) return;
+  1701	    setRevoking(true);
+  1702	    void apiKeysApi
+  1703	      .revoke(keyCreated.id)
+  1704	      .then(() => {
+  1705	        setKeyCreated(null);
+  1706	        setAttempt(null);
+  1707	        message.success('调试密钥已吊销');
+  1708	      })
+  1709	      .catch((err: unknown) => message.error(describeFlowError(err, '吊销密钥失败')))
+  1710	      .finally(() => setRevoking(false));
+  1711	  };
+  1712	
+  1713	  const call = () => {
+  1714	    if (!endpoint) {
+  1715	      message.error('请先选择要调试的端点');
+  1716	      return;
+  1717	    }
+  1718	    let parsed: unknown;
+  1719	    try {
+  1720	      parsed = bodyText.trim() ? (JSON.parse(bodyText) as unknown) : {};
+  1721	    } catch {
+  1722	      message.error('请求体不是合法 JSON，未发起调用');
+  1723	      return;
+  1724	    }
+  1725	    setCalling(true);
+  1726	    setAttempt(null);
+  1727	    void callOpenApiWithApiKey(endpoint.slug, apiKey, parsed)
+  1728	      .then((result) => setAttempt(result))
+  1729	      .finally(() => setCalling(false));
+  1730	  };
+  1731	
+  1732	  const failureCopy = attempt
+  1733	    ? [
+  1734	        attempt.errorInfo?.detail,
+  1735	        attempt.errorInfo?.message,
+  1736	        attempt.errorInfo?.code ? `错误码 ${attempt.errorInfo.code}` : null,
+  1737	        attempt.errorInfo?.requestId ? `request_id ${attempt.errorInfo.requestId}` : null,
+  1738	      ]
+  1739	        .filter((part): part is string => !!part)
+  1740	        .join(' · ')
+  1741	    : '';
+  1742	
+  1743	  return (
+  1744	    <Modal
+  1745	      title="在线试调用 OpenAPI 端点"
+  1746	      open={open}
+  1747	      onCancel={onClose}
+  1748	      width={780}
+  1749	      footer={[
+  1750	        attempt?.bodyText ? <CopyButton key="copy" text={attempt.bodyText} label="复制响应体" /> : null,
+  1751	        <Button key="close" onClick={onClose}>
+  1752	          关闭
+  1753	        </Button>,
+  1754	      ]}
+  1755	    >
+  1756	      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+  1757	        {!endpoints.length && <Alert type="warning" showIcon message="当前合约下没有可调试的端点：请先在上方新建端点。" />}
+  1758	        {endpoints.length > 0 && (
+  1759	          <Select
+  1760	            style={{ width: '100%' }}
+  1761	            value={endpointId ?? undefined}
+  1762	            placeholder="选择要调试的端点"
+  1763	            onChange={(value: string) => {
+  1764	              setEndpointId(value);
+  1765	              setAttempt(null);
+  1766	            }}
+  1767	            options={endpoints.map((item) => ({
+  1768	              label: `${item.name}（POST ${openApiPathForSlug(item.slug)}）`,
+  1769	              value: item.id,
+  1770	            }))}
+  1771	          />
+  1772	        )}
+  1773	        {endpoint && endpoint.status !== 'enabled' && (
+  1774	          <Alert
+  1775	            type="warning"
+  1776	            showIcon
+  1777	            message={`端点当前状态为 ${endpoint.status}，网关会按后端口径拒绝调用；本页面只如实展示后端返回，不伪装成功。`}
+  1778	          />
+  1779	        )}
+  1780	
+  1781	        <div>
+  1782	          <Text type="secondary" style={{ fontSize: 12 }}>
+  1783	            请求体（JSON，已按 OpenAPI 文档预填，可改）
+  1784	          </Text>
+  1785	          <Input.TextArea
+  1786	            rows={5}
+  1787	            style={{ marginTop: 4, fontFamily: 'monospace' }}
+  1788	            value={bodyText}
+  1789	            onChange={(event) => {
+  1790	              if (!endpoint) return;
+  1791	              setBodyByEndpoint((prev) => ({ ...prev, [endpoint.id]: event.target.value }));
+  1792	            }}
+  1793	          />
+  1794	        </div>
+  1795	
+  1796	        <Card size="small" title="调用凭据（平台 API Key）">
+  1797	          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+  1798	            <Text type="secondary" style={{ fontSize: 12 }}>
+  1799	              密钥走后端真实签发：POST /api/v1/api-keys，作用域仅为 {OPEN_API_DEBUG_KEY_SCOPES.join('、')}（网关组写动词 ={' '}
+  1800	              {'POST /open/v1/{slug}'}），30 天过期。创建需要 ADMIN 账号；已有密钥可直接粘贴使用。
+  1801	            </Text>
+  1802	            {keyCreated && (
+  1803	              <Alert
+  1804	                type="warning"
+  1805	                showIcon
+  1806	                icon={<KeyOutlined />}
+  1807	                message="裸密钥仅此一次可见"
+  1808	                description={
+  1809	                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+  1810	                    <Paragraph code copyable={{ text: keyCreated.key }} style={{ marginBottom: 0, wordBreak: 'break-all' }}>
+  1811	                      {keyCreated.key}
+  1812	                    </Paragraph>
+  1813	                    <Space wrap>
+  1814	                      <CopyButton text={keyCreated.key} label="复制密钥" />
+  1815	                      <Button size="small" danger loading={revoking} onClick={revokeKey}>
+  1816	                        吊销此密钥
+  1817	                      </Button>
+  1818	                      <Text type="secondary" style={{ fontSize: 12 }}>
+  1819	                        前缀 {keyCreated.key_prefix} · 作域 {(keyCreated.scopes ?? []).join('，')}
+  1820	                      </Text>
+  1821	                    </Space>
+  1822	                  </Space>
+  1823	                }
+  1824	              />
+  1825	            )}
+  1826	            <Space wrap>
+  1827	              {!keyCreated && (
+  1828	                <Button size="small" icon={<KeyOutlined />} loading={creatingKey} onClick={createKey}>
+  1829	                  创建网关调试密钥
+  1830	                </Button>
+  1831	              )}
+  1832	              <Input.Password
+  1833	                style={{ width: 320 }}
+  1834	                placeholder="或粘贴已有的 cds_ak_… 密钥"
+  1835	                value={pastedKey}
+  1836	                onChange={(event) => setPastedKey(event.target.value)}
+  1837	              />
+  1838	            </Space>
+  1839	            {keyError && (
+  1840	              <Alert
+  1841	                type="error"
+  1842	                showIcon
+  1843	                message="拿不到可用的 API Key"
+  1844	                description={`${keyError}——创建平台 API Key 需要 ADMIN（该路由 human-only），非管理员请粘贴管理员签发的密钥。未拿到密钥前不会发起调用。`}
+  1845	              />
+  1846	            )}
+  1847	          </Space>
+  1848	        </Card>
+  1849	
+  1850	        <Space wrap>
+  1851	          <Tooltip title={apiKey ? '' : '先创建或粘贴一把 API Key'}>
+  1852	            <Button type="primary" icon={<BugOutlined />} disabled={!apiKey || !endpoint} loading={calling} onClick={call}>
+  1853	              发起调用
+  1854	            </Button>
+  1855	          </Tooltip>
+  1856	          <Text type="secondary" style={{ fontSize: 12 }}>
+  1857	            每次试调用都会被审计并计入端点配额/限流。
+  1858	          </Text>
+  1859	        </Space>
+  1860	
+  1861	        {attempt && (
+  1862	          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+  1863	            <Descriptions size="small" column={3}>
+  1864	              <Descriptions.Item label="HTTP 状态">
+  1865	                {attempt.httpStatus === 0 ? (
+  1866	                  <Tag>未送达</Tag>
+  1867	                ) : (
+  1868	                  <Tag color={attempt.ok ? 'green' : responseStatusColor(attempt.httpStatus)}>
+  1869	                    {attempt.httpStatus}
+  1870	                    {attempt.statusText ? ` ${attempt.statusText}` : ''}
+  1871	                  </Tag>
+  1872	                )}
+  1873	              </Descriptions.Item>
+  1874	              <Descriptions.Item label="耗时">{attempt.latencyMs} ms</Descriptions.Item>
+  1875	              <Descriptions.Item label="Content-Type">{attempt.contentType ?? '-'}</Descriptions.Item>
+  1876	            </Descriptions>
+  1877	            {attempt.transportError && (
+  1878	              <Alert type="error" showIcon message="请求没有拿到 HTTP 响应" description={attempt.transportError} />
+  1879	            )}
+  1880	            {!attempt.ok && !attempt.transportError && (
+  1881	              <Alert
+  1882	                type="error"
+  1883	                showIcon
+  1884	                message={`网关返回 ${attempt.httpStatus}`}
+  1885	                description={failureCopy || '后端未返回可解析的 W2 错误体，原文见下方响应体。'}
+  1886	              />
+  1887	            )}
+  1888	            <Text type="secondary" style={{ fontSize: 12 }}>
+  1889	              响应体
+  1890	              {attempt.bodyTruncated
+  1891	                ? `（共 ${attempt.bodyChars} 字符，仅展示前 ${OPEN_API_DEBUG_BODY_LIMIT} 字符）`
+  1892	                : attempt.bodyChars
+  1893	                  ? `（${attempt.bodyChars} 字符）`
+  1894	                  : '为空'}
+  1895	            </Text>
+  1896	            <pre className="cds-json-block">{attempt.bodyText || '（空响应体）'}</pre>
+  1897	          </Space>
+  1898	        )}
+  1899	      </Space>
+  1900	    </Modal>
+  1901	  );
+  1902	}
+  1903	
+  1904	function DeliveriesDrawer({ webhook, onClose }: { webhook: WebhookSubscription; onClose: () => void }) {
+  1905	  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  1906	  const deliveriesQuery = useWebhookDeliveries(webhook.id, { status: statusFilter ?? undefined });
+  1907	  const redeliverMutation = useRedeliver();
+  1908	
+  1909	  const columns: ColumnsType<WebhookDelivery> = [
+  1910	    { title: '事件', dataIndex: 'event_type', width: 190 },
+  1911	    {
+  1912	      title: '状态',
+  1913	      dataIndex: 'status',
+  1914	      width: 150,
+  1915	      render: (status: string) => (
+  1916	        <Tag color={statusMeta(DELIVERY_STATUS_META, status).color}>{statusMeta(DELIVERY_STATUS_META, status).label}</Tag>
+  1917	      ),
+  1918	    },
+  1919	    {
+  1920	      title: '尝试',
+  1921	      key: 'attempt',
+  1922	      width: 80,
+  1923	      render: (_: unknown, record) => attemptLabel(record.attempt, record.max_attempts),
+  1924	    },
+  1925	    {
+  1926	      title: '响应码',
+  1927	      dataIndex: 'response_status',
+  1928	      width: 90,
+  1929	      render: (status: number | null) => (typeof status === 'number' ? <Tag color={responseStatusColor(status)}>{status}</Tag> : <Text type="secondary">无响应</Text>),
+  1930	    },
+  1931	    {
+  1932	      title: '错误',
+  1933	      dataIndex: 'last_error',
+  1934	      render: (error: string | null) => error || <Text type="secondary">-</Text>,
+  1935	    },
+  1936	    { title: '创建时间', dataIndex: 'created_at', width: 170, render: (value: string) => formatDateTime(value) },
+  1937	    { title: '送达时间', dataIndex: 'delivered_at', width: 170, render: (value: string | null) => formatDateTime(value) },
+  1938	    {
+  1939	      title: '重投',
+  1940	      key: 'redeliver',
+  1941	      width: 80,
+  1942	      render: (_: unknown, record) => (
+  1943	        <Button
+  1944	          size="small"
+  1945	          icon={<SwapOutlined />}
+  1946	          loading={redeliverMutation.isPending && redeliverMutation.variables?.deliveryId === record.id}
+  1947	          onClick={() =>
+  1948	            redeliverMutation.mutate(
+  1949	              { id: webhook.id, deliveryId: record.id },
+  1950	              {
+  1951	                onSuccess: (result) => message.success(`已重新投递（状态 ${result.status}）`),
+  1952	                onError: (err) => message.error(describeFlowError(err, '重投失败')),
+  1953	              },
+  1954	            )
+  1955	          }
+  1956	        >
+  1957	          重投
+  1958	        </Button>
+  1959	      ),
+  1960	    },
+  1961	  ];
+  1962	
+  1963	  return (
+  1964	    <Drawer title={`投递日志 · ${webhook.name}`} width={960} open onClose={onClose}>
+  1965	      <Space style={{ marginBottom: 12 }} wrap>
+  1966	        <Select
+  1967	          allowClear
+  1968	          style={{ width: 160 }}
+  1969	          placeholder="全部状态"
+  1970	          value={statusFilter ?? undefined}
+  1971	          onChange={(value?: string) => setStatusFilter(value ?? null)}
+  1972	          options={Object.entries(DELIVERY_STATUS_META).map(([value, meta]) => ({ label: meta.label, value }))}
+  1973	        />
+  1974	        <Button
+  1975	          size="small"
+  1976	          icon={<ReloadOutlined />}
+  1977	          onClick={() => {
+  1978	            void deliveriesQuery.refetch();
+  1979	          }}
+  1980	        >
+  1981	          刷新
+  1982	        </Button>
+  1983	      </Space>
+  1984	      {deliveriesQuery.isError && (
+  1985	        <QueryErrorAlert
+  1986	          error={deliveriesQuery.error}
+  1987	          message="投递日志加载失败"
+  1988	          onRetry={() => {
+  1989	            void deliveriesQuery.refetch();
+  1990	          }}
+  1991	        />
+  1992	      )}
+  1993	      <Table<WebhookDelivery>
+  1994	        rowKey="id"
+  1995	        size="small"
+  1996	        columns={columns}
+  1997	        dataSource={deliveriesQuery.data?.items ?? []}
+  1998	        loading={deliveriesQuery.isLoading}
+  1999	        pagination={{ pageSize: 20 }}
+  2000	        locale={tableEmpty('还没有投递记录')}
+  2001	        scroll={{ x: 1100 }}
+  2002	      />
+  2003	    </Drawer>
+  2004	  );
+  2005	}
+  2006	
+  2007	function CreateWebhookModal({
+  2008	  open,
+  2009	  onClose,
+  2010	  contractId,
+  2011	  onCreated,
+  2012	}: {
+  2013	  open: boolean;
+  2014	  onClose: () => void;
+  2015	  contractId: string | null;
+  2016	  onCreated: (webhook: WebhookSubscription) => void;
+  2017	}) {
+  2018	  const [form] = Form.useForm();
+  2019	  const createMutation = useCreateWebhook();
+  2020	
+  2021	  const submit = () => {
+  2022	    void form
+  2023	      .validateFields()
+  2024	      .then((values: { name: string; url: string; events: string[] }) => {
+  2025	        createMutation.mutate(
+  2026	          { name: values.name.trim(), url: values.url.trim(), events: values.events, contract_id: contractId },
+  2027	          {
+  2028	            onSuccess: (webhook) => {
+  2029	              onCreated(webhook);
+  2030	              form.resetFields();
+  2031	              onClose();
+  2032	            },
+  2033	            onError: (err) => message.error(describeFlowError(err, '创建订阅失败')),
+  2034	          },
+  2035	        );
+  2036	      })
+  2037	      .catch(() => undefined);
+  2038	  };
+  2039	
+  2040	  return (
+  2041	    <Modal title="新建结果推送订阅" open={open} onCancel={onClose} onOk={submit} confirmLoading={createMutation.isPending} okText="创建" width={560}>
+  2042	      <Form form={form} layout="vertical">
+  2043	        <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+  2044	          <Input placeholder="风控结果回调" maxLength={80} />
+  2045	        </Form.Item>
+  2046	        <Form.Item
+  2047	          name="url"
+  2048	          label="接收地址"
+  2049	          rules={[
+  2050	            { required: true, message: '请输入接收地址' },
+  2051	            { pattern: /^https?:\/\/.+/, message: '必须是 http(s) 绝对地址' },
+  2052	          ]}
+  2053	        >
+  2054	          <Input placeholder="https://partner.example.com/cds/callback" />
+  2055	        </Form.Item>
+  2056	        <Form.Item name="events" label="订阅事件" rules={[{ required: true, message: '至少选择一个事件' }]}>
+  2057	          <Select mode="multiple" options={WEBHOOK_EVENT_OPTIONS} placeholder="选择需要接收的事件" />
+  2058	        </Form.Item>
+  2059	      </Form>
+  2060	    </Modal>
+  2061	  );
+  2062	}
+  2063	
+  2064	function ResultPushTab({ contractId }: { contractId: string | null }) {
+  2065	  const [createOpen, setCreateOpen] = useState(false);
+  2066	  const [secretState, setSecretState] = useState<{ value: string | null } | null>(null);
+  2067	  const [logWebhook, setLogWebhook] = useState<WebhookSubscription | null>(null);
+  2068	  const webhooksQuery = useWebhooks(contractId);
+  2069	  const updateMutation = useUpdateWebhook();
+  2070	  const deleteMutation = useDeleteWebhook();
+  2071	  const rotateMutation = useRotateWebhookSecret();
+  2072	  const testMutation = useTestWebhook();
+  2073	
+  2074	  const columns: ColumnsType<WebhookSubscription> = [
+  2075	    { title: '名称', dataIndex: 'name', width: 160 },
+  2076	    {
+  2077	      title: '接收地址',
+  2078	      dataIndex: 'url',
+  2079	      render: (url: string) => (
+  2080	        <Text code copyable={{ text: url }}>
+  2081	          {url}
+  2082	        </Text>
+  2083	      ),
+  2084	    },
+  2085	    {
+  2086	      title: '事件',
+  2087	      dataIndex: 'events',
+  2088	      width: 260,
+  2089	      render: (events: string[]) => (
+  2090	        <Space size={4} wrap>
+  2091	          {(events ?? []).map((event) => (
+  2092	            <Tag key={event}>{event}</Tag>
+  2093	          ))}
+  2094	        </Space>
+  2095	      ),
+  2096	    },
+  2097	    {
+  2098	      title: '状态',
+  2099	      dataIndex: 'status',
+  2100	      width: 110,
+  2101	      render: (status: string) => (
+  2102	        <Tag color={statusMeta(WEBHOOK_STATUS_META, status).color}>{statusMeta(WEBHOOK_STATUS_META, status).label}</Tag>
+  2103	      ),
+  2104	    },
+  2105	    {
+  2106	      title: '操作',
+  2107	      key: 'actions',
+  2108	      width: 320,
+  2109	      render: (_: unknown, record) => (
+  2110	        <Space size={4} wrap>
+  2111	          <Button
+  2112	            size="small"
+  2113	            icon={<SendOutlined />}
+  2114	            loading={testMutation.isPending && testMutation.variables === record.id}
+  2115	            onClick={() =>
+  2116	              testMutation.mutate(record.id, {
+  2117	                onSuccess: (result) => {
+  2118	                  if (result.delivered) message.success(`测试事件已送达（${result.response_status ?? '无响应码'}）`);
+  2119	                  else message.error(`测试事件未送达：${result.detail ?? `响应码 ${result.response_status ?? '无'}`}`);
+  2120	                },
+  2121	                onError: (err) => message.error(describeFlowError(err, '发送测试失败')),
+  2122	              })
+  2123	            }
+  2124	          >
+  2125	            发送测试
+  2126	          </Button>
+  2127	          <Button size="small" onClick={() => setLogWebhook(record)}>
+  2128	            投递日志
+  2129	          </Button>
+  2130	          <Switch
+  2131	            size="small"
+  2132	            checked={record.status === 'active'}
+  2133	            loading={updateMutation.isPending && updateMutation.variables?.id === record.id}
+  2134	            onChange={(checked) =>
+  2135	              updateMutation.mutate(
+  2136	                { id: record.id, payload: { status: checked ? 'active' : 'paused' } },
+  2137	                {
+  2138	                  onSuccess: () => message.success(checked ? '已启用' : '已暂停'),
+  2139	                  onError: (err) => message.error(describeFlowError(err, '状态更新失败')),
+  2140	                },
+  2141	              )
+  2142	            }
+  2143	            checkedChildren="启"
+  2144	            unCheckedChildren="停"
+  2145	          />
+  2146	          <Tooltip title="轮转后旧密钥立刻失效，接收端必须同步更新">
+  2147	            <Button
+  2148	              size="small"
+  2149	              icon={<LockOutlined />}
+  2150	              onClick={() =>
+  2151	                rotateMutation.mutate(record.id, {
+  2152	                  onSuccess: (result) => {
+  2153	                    setSecretState({ value: result.secret ?? null });
+  2154	                    message.warning('密钥已轮转，请立刻更新接收端配置');
+  2155	                  },
+  2156	                  onError: (err) => message.error(describeFlowError(err, '轮转密钥失败')),
+  2157	                })
+  2158	              }
+  2159	            >
+  2160	              轮转密钥
+  2161	            </Button>
+  2162	          </Tooltip>
+  2163	          <Popconfirm
+  2164	            title="删除该订阅？"
+  2165	            description="删除后不再推送新事件，历史投递日志保留。"
+  2166	            okText="确认删除"
+  2167	            cancelText="取消"
+  2168	            onConfirm={() =>
+  2169	              deleteMutation.mutate(record.id, {
+  2170	                onSuccess: () => message.success('订阅已删除'),
+  2171	                onError: (err) => message.error(describeFlowError(err, '删除失败')),
+  2172	              })
+  2173	            }
+  2174	          >
+  2175	            <Button size="small" danger type="text" icon={<DeleteOutlined />} />
+  2176	          </Popconfirm>
+  2177	        </Space>
+  2178	      ),
+  2179	    },
+  2180	  ];
+  2181	
+  2182	  return (
+  2183	    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+  2184	      {secretState?.value && <SecretReveal secret={secretState.value} onClose={() => setSecretState(null)} />}
+  2185	      {secretState && !secretState.value && (
+  2186	        <Alert
+  2187	          type="info"
+  2188	          showIcon
+  2189	          closable
+  2190	          message="后端本次未返回 secret"
+  2191	          description="为不伪装可用密钥，此处不展示任何示例值；如需密钥请使“轮转密钥”重新下发。"
+  2192	          onClose={() => setSecretState(null)}
+  2193	        />
+  2194	      )}
+  2195	      <Card
+  2196	        size="small"
+  2197	        title="推送订阅"
+  2198	        extra={
+  2199	          <Space>
+  2200	            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+  2201	              新建订阅
+  2202	            </Button>
+  2203	            <Button
+  2204	              size="small"
+  2205	              icon={<ReloadOutlined />}
+  2206	              onClick={() => {
+  2207	                void webhooksQuery.refetch();
+  2208	              }}
+  2209	            >
+  2210	              刷新
+  2211	            </Button>
+  2212	          </Space>
+  2213	        }
+  2214	      >
+  2215	        {webhooksQuery.isError && (
+  2216	          <QueryErrorAlert
+  2217	            error={webhooksQuery.error}
+  2218	            message="订阅列表加载失败"
+  2219	            onRetry={() => {
+  2220	              void webhooksQuery.refetch();
+  2221	            }}
+  2222	          />
+  2223	        )}
+  2224	        <Table<WebhookSubscription>
+  2225	          rowKey="id"
+  2226	          size="small"
+  2227	          columns={columns}
+  2228	          dataSource={webhooksQuery.data ?? []}
+  2229	          loading={webhooksQuery.isLoading}
+  2230	          pagination={false}
+  2231	          locale={tableEmpty('还没有推送订阅')}
+  2232	          scroll={{ x: 1100 }}
+  2233	        />
+  2234	      </Card>
+  2235	
+  2236	      {createOpen && <CreateWebhookModal open onClose={() => setCreateOpen(false)} contractId={contractId} onCreated={(webhook) => setSecretState({ value: webhook.secret ?? null })} />}
+  2237	      {logWebhook && <DeliveriesDrawer webhook={logWebhook} onClose={() => setLogWebhook(null)} />}
+  2238	    </Space>
+  2239	  );
+  2240	}
+  2241	
+  2242	export default function DeliveryCenter() {
+  2243	  const { pathname } = useLocation();
+  2244	  // PNG 真值（3-1/3-2/3-3）：「我的结果集」落地页就是 OpenAPI 接口列表，没有「成果交付」头卡也没有页签条；
+  2245	  // 数据集打包/结果推送保留为兄弟路由，入口在侧栏「我的结果集」子项（导航原则 2026-10-17 定稿）。
+  2246	  const view: 'api' | 'dataset' | 'push' = pathname.startsWith('/deliveries/dataset')
+  2247	    ? 'dataset'
+  2248	    : pathname.startsWith('/deliveries/push')
+  2249	      ? 'push'
+  2250	      : 'api';
+  2251	  const [contractId, setContractId] = useState<string | null>(null);
+  2252	  const setStack = useCrumbStackStore((s) => s.setStack);
+  2253	  const { data: contracts } = useContractOptions();
+  2254	  const selectedContract = (contracts ?? []).find((contract) => contract.id === contractId);
+  2255	  const configuredMethods = selectedContract?.delivery_methods ?? null;
+  2256	
+  2257	  useEffect(() => {
+  2258	    // dataset/push 的段名已在注册表静态给出，不能再往钻取栈里 push（否则段重复）；
+  2259	    // 本容器只负责卸载时清栈，把面包屑还给下一个页面。
+  2260	    return () => setStack([]);
+  2261	  }, [setStack]);
+  2262	
+  2263	  if (view === 'api') {
+  2264	    // 列表/新建/监控的页内段由各视图的 CrumbAnchor 写入；新建提交时从关联负载反推合约。
+  2265	    return <OpenApiExportTab contractId={contractId} />;
+  2266	  }
+  2267	
+  2268	  return (
+  2269	    <div>
+  2270	      <div className="cds-page-toolbar">
+  2271	        <div>
+  2272	          <Title level={4} style={{ margin: 0 }}>
+  2273	            {view === 'dataset' ? '数据集打包' : '结果推送'}
+  2274	          </Title>
+  2275	          <Text type="secondary">
+  2276	            {view === 'dataset' ? '结果集打包与下载：水印、审查状态以后端返回为准。' : '结果推送订阅：投递状态与密钥可用性以后端返回为准。'}
+  2277	          </Text>
+  2278	        </div>
+  2279	        <Space wrap>
+  2280	          <Select
+  2281	            allowClear
+  2282	            showSearch
+  2283	            optionFilterProp="label"
+  2284	            style={{ width: 280 }}
+  2285	            placeholder="全部合约"
+  2286	            value={contractId ?? undefined}
+  2287	            onChange={(value?: string) => setContractId(value ?? null)}
+  2288	            options={(contracts ?? []).map((contract) => ({ label: `${contract.title}（${contract.contract_no}）`, value: contract.id }))}
+  2289	          />
+  2290	        </Space>
+  2291	      </div>
+  2292	
+  2293	      {contractId && configuredMethods !== null && configuredMethods.length === 0 && (
+  2294	        <Alert
+  2295	          type="warning"
+  2296	          showIcon
+  2297	          style={{ marginBottom: 16 }}
+  2298	          message="该合约尚未在合约详情里配置交付方式"
+  2299	          description="可以先在此页操作，但交付方式与自动计算配置需要在合约详情的「交付与计算配置」中确认后才会纳入排程。"
+  2300	        />
+  2301	      )}
+  2302	      {contractId && configuredMethods === null && (
+  2303	        <Alert
+  2304	          type="info"
+  2305	          showIcon
+  2306	          style={{ marginBottom: 16 }}
+  2307	          message="合约列表未下发 delivery_methods，无法判定交付方式是否已配置"
+  2308	          description="请前往合约详情查看「交付与计算配置」。"
+  2309	        />
+  2310	      )}
+  2311	
+  2312	      <Card size="small" className="cds-delivery-tabs-card">
+  2313	        {view === 'dataset' ? <DatasetBundleTab contractId={contractId} /> : <ResultPushTab contractId={contractId} />}
+  2314	      </Card>
+  2315	    </div>
+  2316	  );
+  2317	}

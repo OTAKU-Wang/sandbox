@@ -1,0 +1,96 @@
+.FFFsFFFFs                                                               [100%]
+================================== FAILURES ===================================
+_________ test_tee_capability_detector_detects_sgx_device_and_runtime _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD4DEAC260>
+
+    def test_tee_capability_detector_detects_sgx_device_and_runtime(monkeypatch):
+>       monkeypatch.setattr(tc, "_is_hardware_device", lambda p: str(p) == "/dev/sgx_enclave")
+E       AttributeError: <module 'app.services.tee_capability' from 'D:\\workspace\\sandbox\\app\\services\\tee_capability.py'> has no attribute '_is_hardware_device'
+
+tests\test_tee_capability.py:37: AttributeError
+_________ test_tee_capability_detector_auto_falls_back_when_no_signal _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD4F733B60>
+
+    def test_tee_capability_detector_auto_falls_back_when_no_signal(monkeypatch):
+>       monkeypatch.setattr(tc, "_is_hardware_device", lambda p: False)
+E       AttributeError: <module 'app.services.tee_capability' from 'D:\\workspace\\sandbox\\app\\services\\tee_capability.py'> has no attribute '_is_hardware_device'
+
+tests\test_tee_capability.py:53: AttributeError
+_______________ test_plain_file_is_not_device_hardware_evidence _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD4F8298B0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-79/test_plain_file_is_not_device_0')
+
+    def test_plain_file_is_not_device_hardware_evidence(monkeypatch, tmp_path):
+        """A162: a regular file where a /dev node is expected must not count."""
+        fake_device = tmp_path / "sgx_enclave"
+        fake_device.write_bytes(b"")  # st_mode 0o100644 — a plain file
+        assert not stat.S_ISCHR(fake_device.stat().st_mode)
+        providers = {"sgx": {"devices": (str(fake_device),), "commands": ()}}
+        monkeypatch.setattr(TEECapabilityDetector, "_PROVIDERS", providers)
+    
+        capability = TEECapabilityDetector().detect("sgx")
+    
+>       assert capability.hardware_available is False
+E       AssertionError: assert True is False
+E        +  where True = TEECapability(provider='sgx', hardware_available=True, evidence=['device:C:\\Users\\清彧\\AppData\\Local\\Temp\\pytest-of-清彧\\pytest-79\\test_plain_file_is_not_device_0\\sgx_enclave'], reason='sgx hardware/runtime signal detected').hardware_available
+
+tests\test_tee_capability.py:73: AssertionError
+______ test_command_found_by_which_outside_trusted_dirs_is_not_evidence _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD4F829AF0>
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-79/test_command_found_by_which_ou0')
+
+    def test_command_found_by_which_outside_trusted_dirs_is_not_evidence(monkeypatch, tmp_path):
+        fake = tmp_path / "gramine-sgx"
+        fake.write_text("")
+        which = _fake_which({"gramine-sgx": str(fake)})
+        monkeypatch.setattr("app.services.tee_capability.shutil.which", which)
+>       monkeypatch.setattr(tc, "_is_hardware_device", lambda p: False)
+E       AttributeError: <module 'app.services.tee_capability' from 'D:\\workspace\\sandbox\\app\\services\\tee_capability.py'> has no attribute '_is_hardware_device'
+
+tests\test_tee_capability.py:97: AttributeError
+_____________ test_runtime_tools_without_device_are_not_hardware ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD4F829B20>
+
+    def test_runtime_tools_without_device_are_not_hardware(monkeypatch):
+        """A162: trusted tooling alone is a runtime signal, never `hardware_available`."""
+>       monkeypatch.setattr(tc, "_is_hardware_device", lambda p: False)
+E       AttributeError: <module 'app.services.tee_capability' from 'D:\\workspace\\sandbox\\app\\services\\tee_capability.py'> has no attribute '_is_hardware_device'
+
+tests\test_tee_capability.py:107: AttributeError
+__________________ test_unknown_mode_discloses_config_error ___________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD4F829F10>
+
+    def test_unknown_mode_discloses_config_error(monkeypatch):
+        """A162: a TEE_MODE typo must surface as an unknown-mode config error."""
+>       monkeypatch.setattr(tc, "_is_hardware_device", lambda p: False)
+E       AttributeError: <module 'app.services.tee_capability' from 'D:\\workspace\\sandbox\\app\\services\\tee_capability.py'> has no attribute '_is_hardware_device'
+
+tests\test_tee_capability.py:121: AttributeError
+______________ test_is_trusted_command_rejects_untrusted_shapes _______________
+
+tmp_path = WindowsPath('C:/Users/清彧/AppData/Local/Temp/pytest-of-清彧/pytest-79/test_is_trusted_command_reject0')
+
+    def test_is_trusted_command_rejects_untrusted_shapes(tmp_path):
+        inside = tmp_path / "tool"
+        inside.write_text("")
+        inside.chmod(0o755)
+>       assert tc._is_trusted_command(str(inside)) is False          # not under a trusted dir
+               ^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'app.services.tee_capability' has no attribute '_is_trusted_command'
+
+tests\test_tee_capability.py:136: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_tee_capability.py::test_tee_capability_detector_detects_sgx_device_and_runtime
+FAILED tests/test_tee_capability.py::test_tee_capability_detector_auto_falls_back_when_no_signal
+FAILED tests/test_tee_capability.py::test_plain_file_is_not_device_hardware_evidence
+FAILED tests/test_tee_capability.py::test_command_found_by_which_outside_trusted_dirs_is_not_evidence
+FAILED tests/test_tee_capability.py::test_runtime_tools_without_device_are_not_hardware
+FAILED tests/test_tee_capability.py::test_unknown_mode_discloses_config_error
+FAILED tests/test_tee_capability.py::test_is_trusted_command_rejects_untrusted_shapes
+7 failed, 1 passed, 2 skipped in 2.66s

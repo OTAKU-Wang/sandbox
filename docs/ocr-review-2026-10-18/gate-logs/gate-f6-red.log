@@ -1,0 +1,244 @@
+(node:35780) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15852) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27412) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27412) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:33472) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13132) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23088) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts (0 test)
+ ❯ src/utils/__tests__/csvPreview.test.ts (15 tests | 6 failed) 23ms
+     × 引号里的换行属于字段内容，不拆成两行 7ms
+     × 引号里的空行不被“空行过滤”吃掉 1ms
+     × 表头重名时给出可区分的键，后一列不覆盖前一列 2ms
+     × CRLF 在引号内归一为 
+（行尾归一不按引号内外区分） 2ms
+     × 引号未闭合时按字面透出到行尾，不报异常（诚实降级口径） 1ms
+     × splitCsvRecords 把整段文本切成记录，引号内的换行/逗号不算分隔 1ms
+ ❯ src/components/Layout/__tests__/MainLayout.test.tsx (10 tests | 4 failed) 504ms
+     × 渲染 /monitoring 后标签页标题是当前页 + 产品名 29ms
+     × 首页标题是首页，不是运营概览 20ms
+     × 未映射路径诚实显示未知页面（旧兜底会写成运营概览） 32ms
+     × 纯函数侧：documentTitleFor 与 getRouteCrumb 同源 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Layout/__tests__/routeCrumb.test.ts [ src/components/Layout/__tests__/routeCrumb.test.ts ]
+TypeError: The URL must be of scheme file
+ ❯ src/components/Layout/__tests__/routeCrumb.test.ts:21:17
+     19| const FALLBACK_LABEL = '运营概览';
+     20|
+     21| const APP_TSX = fileURLToPath(new URL('../../../App.tsx', import.meta.…
+       |                 ^
+     22| const appSrc = readFileSync(APP_TSX, 'utf8');
+     23|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/utils/__tests__/csvPreview.test.ts > parseCsvPreview 带引号字段（RFC4180） > 引号里的换行属于字段内容，不拆成两行
+AssertionError: expected 3 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 3
+
+ ❯ src/utils/__tests__/csvPreview.test.ts:64:25
+     62|     const r = parseCsvPreview('name,note\n"a\nb",1\n"c",2\n');
+     63|     expect(r.columns).toEqual(['name', 'note']);
+     64|     expect(r.totalRows).toBe(2);
+       |                         ^
+     65|     expect(r.rows).toEqual([
+     66|       { name: 'a\nb', note: '1' },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  src/utils/__tests__/csvPreview.test.ts > parseCsvPreview 带引号字段（RFC4180） > 引号里的空行不被“空行过滤”吃掉
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/utils/__tests__/csvPreview.test.ts:73:25
+     71|   it('引号里的空行不被“空行过滤”吃掉', () => {
+     72|     const r = parseCsvPreview('a,b\n"line1\n\nline2",x\n');
+     73|     expect(r.totalRows).toBe(1);
+       |                         ^
+     74|     expect(r.rows).toEqual([{ a: 'line1\n\nline2', b: 'x' }]);
+     75|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  src/utils/__tests__/csvPreview.test.ts > parseCsvPreview 带引号字段（RFC4180） > 表头重名时给出可区分的键，后一列不覆盖前一列
+AssertionError: expected [ 'id', 'name', 'name' ] to deeply equal [ 'id', 'name', 'name#2' ]
+
+- Expected
++ Received
+
+  [
+    "id",
+    "name",
+-   "name#2",
++   "name",
+  ]
+
+ ❯ src/utils/__tests__/csvPreview.test.ts:85:23
+     83|   it('表头重名时给出可区分的键，后一列不覆盖前一列', () => {
+     84|     const r = parseCsvPreview('id,name,name\n1,a,b');
+     85|     expect(r.columns).toEqual(['id', 'name', 'name#2']);
+       |                       ^
+     86|     expect(r.rows).toEqual([{ id: '1', name: 'a', 'name#2': 'b' }]);
+     87|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  src/utils/__tests__/csvPreview.test.ts > parseCsvPreview 带引号字段（RFC4180） > CRLF 在引号内归一为 
+（行尾归一不按引号内外区分）
+AssertionError: expected [ { a: 'p', b: '' }, …(1) ] to deeply equal [ { a: 'p\nq', b: 'z' } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "a": "p
+- q",
+-     "b": "z",
++     "a": "p",
++     "b": "",
++   },
++   {
++     "a": "q,z",
++     "b": "",
+    },
+  ]
+
+ ❯ src/utils/__tests__/csvPreview.test.ts:110:20
+    108|   it('CRLF 在引号内归一为 \n（行尾归一不按引号内外区分）', () => {
+    109|     const r = parseCsvPreview('a,b\r\n"p\r\nq",z');
+    110|     expect(r.rows).toEqual([{ a: 'p\nq', b: 'z' }]);
+       |                    ^
+    111|   });
+    112|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  src/utils/__tests__/csvPreview.test.ts > parseCsvPreview 带引号字段（RFC4180） > 引号未闭合时按字面透出到行尾，不报异常（诚实降级口径）
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/utils/__tests__/csvPreview.test.ts:121:25
+    119|   it('引号未闭合时按字面透出到行尾，不报异常（诚实降级口径）', () => {
+    120|     const r = parseCsvPreview('a,b\n"unclosed,1\n2,3');
+    121|     expect(r.totalRows).toBe(1);
+       |                         ^
+    122|     expect(r.rows[0].a).toBe('unclosed,1\n2,3');
+    123|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  src/utils/__tests__/csvPreview.test.ts > parseCsvPreview 带引号字段（RFC4180） > splitCsvRecords 把整段文本切成记录，引号内的换行/逗号不算分隔
+TypeError: splitCsvRecords is not a function
+ ❯ src/utils/__tests__/csvPreview.test.ts:126:12
+    124|
+    125|   it('splitCsvRecords 把整段文本切成记录，引号内的换行/逗号不算分隔', () => {
+    126|     expect(splitCsvRecords('a,b\n"x\n,y",z')).toEqual([
+       |            ^
+    127|       ['a', 'b'],
+    128|       ['x\n,y', 'z'],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+ FAIL  src/components/Layout/__tests__/MainLayout.test.tsx > document.title 由布局按面包屑设置 > 渲染 /monitoring 后标签页标题是当前页 + 产品名
+AssertionError: expected '' to be '监控中心 · 密态沙箱系统 CDS' // Object.is equality
+
+- Expected
++ Received
+
+- 监控中心 · 密态沙箱系统 CDS
+
+ ❯ src/components/Layout/__tests__/MainLayout.test.tsx:99:28
+     97|   it('渲染 /monitoring 后标签页标题是当前页 + 产品名', () => {
+     98|     renderLayout('/monitoring');
+     99|     expect(document.title).toBe('监控中心 · 密态沙箱系统 CDS');
+       |                            ^
+    100|   });
+    101|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/11]⎯
+
+ FAIL  src/components/Layout/__tests__/MainLayout.test.tsx > document.title 由布局按面包屑设置 > 首页标题是首页，不是运营概览
+AssertionError: expected '' to be '首页 · 密态沙箱系统 CDS' // Object.is equality
+
+- Expected
++ Received
+
+- 首页 · 密态沙箱系统 CDS
+
+ ❯ src/components/Layout/__tests__/MainLayout.test.tsx:104:28
+    102|   it('首页标题是首页，不是运营概览', () => {
+    103|     renderLayout('/');
+    104|     expect(document.title).toBe('首页 · 密态沙箱系统 CDS');
+       |                            ^
+    105|   });
+    106|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/11]⎯
+
+ FAIL  src/components/Layout/__tests__/MainLayout.test.tsx > document.title 由布局按面包屑设置 > 未映射路径诚实显示未知页面（旧兜底会写成运营概览）
+AssertionError: expected '' to be '未知页面 · 密态沙箱系统 CDS' // Object.is equality
+
+- Expected
++ Received
+
+- 未知页面 · 密态沙箱系统 CDS
+
+ ❯ src/components/Layout/__tests__/MainLayout.test.tsx:109:28
+    107|   it('未映射路径诚实显示未知页面（旧兜底会写成运营概览）', () => {
+    108|     renderLayout('/no-such-page');
+    109|     expect(document.title).toBe('未知页面 · 密态沙箱系统 CDS');
+       |                            ^
+    110|   });
+    111|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/11]⎯
+
+ FAIL  src/components/Layout/__tests__/MainLayout.test.tsx > document.title 由布局按面包屑设置 > 纯函数侧：documentTitleFor 与 getRouteCrumb 同源
+TypeError: documentTitleFor is not a function
+ ❯ src/components/Layout/__tests__/MainLayout.test.tsx:113:12
+    111|
+    112|   it('纯函数侧：documentTitleFor 与 getRouteCrumb 同源', () => {
+    113|     expect(documentTitleFor('/ops/logs')).toBe('日志 · 密态沙箱系统 CDS');
+       |            ^
+    114|     expect(documentTitleFor('/flow/tasks/new')).toBe('新增开发任务 · 密态沙箱系统 …
+    115|     expect(documentTitleFor('/')).toBe('首页 · 密态沙箱系统 CDS');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/11]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  10 failed | 15 passed (25)
+   Start at  21:50:41
+   Duration  12.59s (transform 273ms, setup 688ms, import 9.55s, tests 527ms, environment 5.90s)
+

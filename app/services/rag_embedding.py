@@ -55,6 +55,16 @@ class EmbeddingResult:
     engine: str  # the engine that ACTUALLY produced the vector
     dim: int
 
+    def __post_init__(self) -> None:
+        # A dim that disagrees with the vector is exactly the lie that built a
+        # broken index (A129): RagIndex.validate drops every chunk whose
+        # vector length differs from dim, and the runner does the same.
+        if len(self.vector) != self.dim:
+            raise ValueError(
+                f"EmbeddingResult dim={self.dim} does not match the vector length "
+                f"{len(self.vector)} produced by engine {self.engine!r}"
+            )
+
     def to_dict(self) -> dict:
         return {"vector": self.vector, "engine": self.engine, "dim": self.dim}
 
@@ -129,6 +139,7 @@ class RAGEmbedder:
             )
         self._model_name = model_name or settings.RAG_EMBEDDING_MODEL
         self._transformers = None  # lazy-loaded (tokenizer, model)
+        self._dim: int | None = None  # lazy-probed output dimension (A129)
 
     # ── public API ─────────────────────────────────────────────
 
@@ -142,20 +153,45 @@ class RAGEmbedder:
             return RAGEmbeddingEngine.TF
         return self._configured
 
+    def engine_dimension(self, engine: str | None = None) -> int:
+        """The dimension this engine REALLY produces — never a guess (A129).
+
+        ``embed("")`` used to answer with a hardcoded 512-dim zero vector for
+        every engine, and ``build_corpus`` derives the index dimension from
+        exactly that call: a 384/768-dim transformers corpus was written with
+        ``dim=512``, so the runner rejected every chunk ("vector dimension does
+        not match index dim") and host-side retrieval returned 0.0 for all of
+        them. Ask this instead of probing with an empty string.
+        """
+        engine = engine or self.resolve_engine()
+        if engine in (RAGEmbeddingEngine.TF, RAGEmbeddingEngine.REGEX):
+            return TF_DIM
+        if engine == RAGEmbeddingEngine.TRANSFORMERS:
+            return self._transformers_dimension()
+        raise EngineUnavailable(f"Embedding engine {engine!r} cannot run here")
+
     def embed(self, text: str) -> EmbeddingResult:
         engine = self.resolve_engine()
+        # Resolve the dimension BEFORE the empty-text shortcut: an empty input
+        # must report the same dimension the engine yields for real text.
+        dim = self.engine_dimension(engine)
         text = (text or "").strip()
         if not text:
-            # Degenerate input → honest zero vector from the resolved engine.
-            return EmbeddingResult(vector=[0.0] * TF_DIM, engine=engine, dim=TF_DIM)
+            # Degenerate input → honest zero vector in the engine's real dim.
+            return EmbeddingResult(vector=[0.0] * dim, engine=engine, dim=dim)
 
         if engine == RAGEmbeddingEngine.TF:
-            return EmbeddingResult(vector=tf_embed(text), engine=engine, dim=TF_DIM)
+            return EmbeddingResult(vector=tf_embed(text, dim), engine=engine, dim=dim)
         if engine == RAGEmbeddingEngine.REGEX:
-            return EmbeddingResult(vector=regex_embed(text), engine=engine, dim=TF_DIM)
+            return EmbeddingResult(vector=regex_embed(text, dim), engine=engine, dim=dim)
         if engine == RAGEmbeddingEngine.TRANSFORMERS:
             vec = self._transformers_embed(text)
-            return EmbeddingResult(vector=vec, engine=engine, dim=len(vec))
+            if len(vec) != dim:
+                raise EngineUnavailable(
+                    f"model {self._model_name!r} produced a {len(vec)}-dim vector but "
+                    f"reports hidden_size={dim}; refusing to label the corpus with either"
+                )
+            return EmbeddingResult(vector=vec, engine=engine, dim=dim)
         raise EngineUnavailable(f"Embedding engine {engine!r} cannot run here")
 
     def embed_batch(self, texts: list[str]) -> list[EmbeddingResult]:
@@ -163,12 +199,35 @@ class RAGEmbedder:
 
     @staticmethod
     def cosine(a: list[float], b: list[float]) -> float:
-        if not a or not b or len(a) != len(b):
-            return 0.0
-        dot = sum(x * y for x, y in zip(a, b))
-        return float(dot)  # vectors are L2-normalized
+        """Dot product of two L2-normalized vectors of the SAME dimension.
+
+        Differing lengths mean the index and the embedding engine disagree —
+        that is a broken pairing, not "not relevant". Returning 0.0 (A129) made
+        every chunk score zero and the retrieval look merely unimpressive.
+        """
+        if not a or not b:
+            raise ValueError("cosine needs two non-empty vectors")
+        if len(a) != len(b):
+            raise ValueError(
+                f"cosine dimension mismatch: {len(a)} vs {len(b)} — the index and the "
+                "embedding engine do not agree; refusing to score everything as 0.0"
+            )
+        return float(sum(x * y for x, y in zip(a, b)))  # vectors are L2-normalized
 
     # ── transformers backend (host-side; phase 2 path) ─────────
+
+    def _transformers_dimension(self) -> int:
+        """Read the model's real output dimension; fail closed without a model."""
+        if self._dim is None:
+            _, model = self._load_transformers()
+            hidden = getattr(getattr(model, "config", None), "hidden_size", None)
+            if not isinstance(hidden, int) or hidden <= 0:
+                raise EngineUnavailable(
+                    f"cannot determine the output dimension of embedding model "
+                    f"{self._model_name!r} (config.hidden_size missing)"
+                )
+            self._dim = hidden
+        return self._dim
 
     def _load_transformers(self):
         if self._transformers is not None:

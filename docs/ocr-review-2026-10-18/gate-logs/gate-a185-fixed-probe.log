@@ -1,0 +1,8 @@
+A185 numpy  : success=True  weights_changed=True  fingerprint=cf1c1d9ea2f47c5c kdf=sm3-ctr-v1
+A185 verify : passed=True match_ratio=1.000
+A185 nested : every recorded position carries its bit (no wrong-leaf writes); changed leaves=1
+A187 dup layers: refused -> duplicate layer names in embed request: ['layer.weight'] (bits would o
+A187 empty bits: embed refused -> watermark_bits must not be empty: there is nothing to embed
+A187 no positions: passed=False match_ratio=0.000 reason='no watermark positions recorded in metadata -- n'
+A187 num_bits=0: refused -> num_bits must be positive (got 0)
+RC=0

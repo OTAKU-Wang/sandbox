@@ -5,6 +5,7 @@ import { screen } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { renderWithProviders } from '../../../test/test-utils';
 import MainLayout from '../MainLayout';
+import { documentTitleFor } from '../routeCrumb';
 import { useAuthStore } from '../../../stores/authStore';
 import { useWorkspaceStore } from '../../../stores/workspaceStore';
 import type { User } from '../../../types/models';
@@ -82,5 +83,35 @@ describe('MainLayout 布局骨架', () => {
     expect(screen.getByText('内容页')).toBeInTheDocument();
     expect(document.querySelector('.cds-content-inner > *')).not.toBeNull();
     expect(screen.queryByText('首页内容')).not.toBeInTheDocument();
+  });
+});
+
+// 浏览器标签页标题：全站唯一设置点 = MainLayout（面包屑同源，见 routeCrumb.ts）。
+// 缺陷：`grep -rn document.title src` = 0 命中，标签页永远停在 index.html 的静态标题。
+describe('document.title 由布局按面包屑设置', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ user: operatorUser });
+    useWorkspaceStore.setState({ workspace: null });
+  });
+
+  it('渲染 /monitoring 后标签页标题是当前页 + 产品名', () => {
+    renderLayout('/monitoring');
+    expect(document.title).toBe('监控中心 · 密态沙箱系统 CDS');
+  });
+
+  it('首页标题是首页，不是运营概览', () => {
+    renderLayout('/');
+    expect(document.title).toBe('首页 · 密态沙箱系统 CDS');
+  });
+
+  it('未映射路径诚实显示未知页面（旧兜底会写成运营概览）', () => {
+    renderLayout('/no-such-page');
+    expect(document.title).toBe('未知页面 · 密态沙箱系统 CDS');
+  });
+
+  it('纯函数侧：documentTitleFor 与 getRouteCrumb 同源', () => {
+    expect(documentTitleFor('/ops/logs')).toBe('日志 · 密态沙箱系统 CDS');
+    expect(documentTitleFor('/flow/tasks/new')).toBe('新增开发任务 · 密态沙箱系统 CDS');
+    expect(documentTitleFor('/')).toBe('首页 · 密态沙箱系统 CDS');
   });
 });

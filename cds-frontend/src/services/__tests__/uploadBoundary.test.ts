@@ -37,6 +37,13 @@ describe('multipart 上传不得手写 Content-Type', () => {
     expect(headersOf(call)?.['Content-Type']).toBeUndefined();
   });
 
+  it('数据资源上传逐调用放宽超时（A311：后端上限 500MB，全局 30s 必先把请求掐了）', async () => {
+    await dataResourceApi.upload({ file: csv(), name: '订单' });
+
+    const config = post.mock.calls[0][2] as { timeout?: number } | undefined;
+    expect(config?.timeout).toBeGreaterThanOrEqual(300_000);
+  });
+
   it('会话文件上传同样不带手写 Content-Type', async () => {
     await sandboxApi.uploadFile('sess-1', csv());
 

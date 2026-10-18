@@ -1,0 +1,208 @@
+.............FFFFF......................F............................... [ 75%]
+...............F.......                                                  [100%]
+================================== FAILURES ===================================
+_________ TestSM3GlobalReplacement.test_no_sha256_in_security_modules _________
+
+self = <tests.test_p0_security_gaps.TestSM3GlobalReplacement object at 0x000002011D814BF0>
+
+    def test_no_sha256_in_security_modules(self):
+        """安全模块核心路径不应有 hashlib.sha256 调用（gmssl fallback 除外）"""
+        import glob
+    
+        # These files should use SM3 for all primary crypto paths
+        security_files = glob.glob("app/services/field_acl.py") + \
+                        glob.glob("app/services/gateway_service.py") + \
+                        glob.glob("app/services/merkle_service.py")
+    
+        for fpath in security_files:
+>           content = Path(fpath).read_text()
+                      ^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/field_acl.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 29: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+_________ Test128SecurityAuditFixes.test_session_id_attribute_exists __________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000002011D815B50>
+
+    def test_session_id_attribute_exists(self):
+        """audit_service.py 应使用 self.session_id 而非 self._session_id"""
+>       source = Path("app/services/audit_service.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/audit_service.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 27: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+___________ Test128SecurityAuditFixes.test_code_file_path_whitelist ___________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000002011D815F40>
+
+    def test_code_file_path_whitelist(self):
+        """code_file 路径应有白名单校验"""
+>       source = Path("app/services/secure_duckdb.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:337: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/secure_duckdb.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 26: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+_________ Test128SecurityAuditFixes.test_firecracker_rootfs_readonly __________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000002011D816330>
+
+    def test_firecracker_rootfs_readonly(self):
+        """Firecracker rootfs 应设为只读"""
+>       source = Path("app/services/firecracker_runtime.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:346: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/firecracker_runtime.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 41: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+_____________ Test128SecurityAuditFixes.test_seccomp_fail_closed ______________
+
+self = <tests.test_p0_security_gaps.Test128SecurityAuditFixes object at 0x000002011D816720>
+
+    def test_seccomp_fail_closed(self):
+        """seccomp 默认应为 fail-closed"""
+>       source = Path("app/services/sandbox_security.py").read_text()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_p0_security_gaps.py:354: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('app/services/sandbox_security.py'), encoding = 'locale'
+errors = None
+
+    def read_text(self, encoding=None, errors=None):
+        """
+        Open the file in text mode, read it, and close the file.
+        """
+        encoding = io.text_encoding(encoding)
+        with self.open(mode='r', encoding=encoding, errors=errors) as f:
+>           return f.read()
+                   ^^^^^^^^
+E           UnicodeDecodeError: 'gbk' codec can't decode byte 0x94 in position 32: illegal multibyte sequence
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:1028: UnicodeDecodeError
+______________________ test_user_scope_keyed_by_jwt_sub _______________________
+
+limited_app = <fastapi.applications.FastAPI object at 0x000002013D09D850>
+
+    @pytest.mark.asyncio
+    async def test_user_scope_keyed_by_jwt_sub(limited_app):
+        async with _client(limited_app) as ac:
+            headers_a = {"Authorization": _bearer("11111111-1111-1111-1111-111111111111")}
+            headers_b = {"Authorization": _bearer("22222222-2222-2222-2222-222222222222")}
+            for _ in range(600):
+                resp = await ac.get("/ping", headers=headers_a)
+>           assert resp.status_code == 200
+E           assert 429 == 200
+E            +  where 429 = <Response [429 Too Many Requests]>.status_code
+
+tests\test_rate_limit_distributed.py:104: AssertionError
+_______ TestBwrapFallback.test_fallback_disabled_returns_security_error _______
+
+self = <tests.test_security_hardening.TestBwrapFallback object at 0x000002013BCEBD40>
+
+    @pytest.mark.asyncio
+    async def test_fallback_disabled_returns_security_error(self):
+        """When bwrap is missing and fallback disabled, should return security error."""
+        from app.services.sandbox_runtime import BwrapAdapter
+        import uuid
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-hardening", allow_unsandboxed_fallback=False)
+        session_id = str(uuid.uuid4())
+>       prov = adapter.provision(session_id, "", timeout=60)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_security_hardening.py:104: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening — production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+=========================== short test summary info ===========================
+FAILED tests/test_p0_security_gaps.py::TestSM3GlobalReplacement::test_no_sha256_in_security_modules
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_session_id_attribute_exists
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_code_file_path_whitelist
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_firecracker_rootfs_readonly
+FAILED tests/test_p0_security_gaps.py::Test128SecurityAuditFixes::test_seccomp_fail_closed
+FAILED tests/test_rate_limit_distributed.py::test_user_scope_keyed_by_jwt_sub
+FAILED tests/test_security_hardening.py::TestBwrapFallback::test_fallback_disabled_returns_security_error
+7 failed, 88 passed in 78.29s (0:01:18)
+A045G2_RC=1

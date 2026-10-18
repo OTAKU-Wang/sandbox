@@ -66,7 +66,8 @@ export function simulationStateForValue(value: string | null | undefined): Simul
   const key = String(value).trim().toLowerCase();
   const known = DISCLOSURE_VALUE_STATES[key];
   if (known) return known;
-  if (key.includes('sim')) return 'simulated';
+  // 否定/禁用族先判：not_simulated 这类披露值含 'sim' 子串，先判 sim 会把「未模拟」标成「模拟」。
   if (key.includes('not_') || key.includes('none') || key.includes('disabled')) return 'unsupported';
+  if (key.includes('sim')) return 'simulated';
   return 'real';
 }

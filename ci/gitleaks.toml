@@ -1,0 +1,22 @@
+# gitleaks config for the `secrets` job (full-history scan, pinned binary).
+# [extend] keeps the upstream default rules; this file adds ONLY an allowlist
+# of exact secret VALUES that the 2026-10-18 ops review verified to be fake
+# test / documentation fixtures, never live credentials:
+#   - tests/test_admin_auth.py + tests/test_security_config_matrix.py:
+#     monkeypatched COLUMN ENCRYPTION KEY dev literals
+#   - app/services/rag_embedding.py: prose inside a regex_embed docstring
+#   - specs/data-security-spec.md: MinIO SSE example key in the spec
+# Matching is on the secret value (regexTarget=secret), not on paths or rules:
+# the same string appearing anywhere else - or any real credential - still
+# fires. Adding a value here requires written proof it is not live.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "verified fake fixture values (2026-10-18 ops review)"
+regexTarget = "secret"
+regexes = [
+  '''00112233445566778899aabbccddeeff''',
+  '''0123456789abcdef0123456789abcdef''',
+  '''L2-normalized\.''',
+]

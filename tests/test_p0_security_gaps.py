@@ -102,6 +102,12 @@ class TestSM2SignatureNoFallback:
         contract.buyer_id = uuid.uuid4()
         contract.provider_signature = None
         contract.buyer_signature = None
+        # OCR-A110 后的测试替身修正：MagicMock 会为任何未指定的属性自动生成一个
+        # mock 对象，而 contract_sign_data 现在会先校验参与拼装的每个字段（mock 的
+        # repr 既越宽又不像合法 purpose）⇒ 抢在证书检查之前拒签。本用例测的是
+        # P0-3（无证书必须拒验），所以把与本用例无关的 purpose 字段显式置空。
+        contract.purpose = None
+        contract.purpose_scope = None
 
         user = MagicMock()
         user.sm2_certificate = None

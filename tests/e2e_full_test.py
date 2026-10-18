@@ -14,6 +14,17 @@ BASE_URL = os.environ.get("BASE_URL", "http://172.21.0.2:30080")
 ADMIN_USER = "qatest"
 ADMIN_PASS = "QaTest123!"
 
+# 本文件打的是已部署环境（默认 172.21.0.2:30080 + 固定账号），不是内存态 ASGI。
+# pytest 默认 `python_files` 包含 `*_test.py`，所以 `pytest tests/` 会把本文件的 12 个
+# 用例一起采集、对真实集群发请求并以 time.sleep 退避 —— 手动跑的脚本必须显式开关才跑。
+import pytest
+
+if os.environ.get("CDS_LIVE_E2E") != "1":
+    pytest.skip(
+        "live-infrastructure E2E: requires a deployed CDS; run manually with CDS_LIVE_E2E=1",
+        allow_module_level=True,
+    )
+
 # Test results tracking
 results = {"passed": 0, "failed": 0, "errors": []}
 

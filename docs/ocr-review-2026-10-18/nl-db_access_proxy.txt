@@ -1,0 +1,431 @@
+     1	"""DB Access Proxy — SQL interception, RLS injection, and column encryption.
+     2	
+     3	Intercepts database queries, evaluates RLS policies, injects WHERE clauses,
+     4	and transparently encrypts/decrypts column-level sensitive data.
+     5	"""
+     6	import logging
+     7	import re
+     8	import uuid
+     9	from dataclasses import dataclass, field
+    10	from datetime import datetime, timezone
+    11	from enum import Enum
+    12	from typing import Any
+    13	
+    14	from sqlalchemy import text
+    15	from sqlalchemy.ext.asyncio import AsyncSession
+    16	
+    17	from app.services.rls_engine import rls_engine, RLSContext, RLSPolicy, PolicyType
+    18	from app.services.column_encryption import column_encryption, EncryptionMode, EncryptedColumn
+    19	from app.services.audit_service import audit_service
+    20	
+    21	logger = logging.getLogger(__name__)
+    22	
+    23	
+    24	class ProxyAction(str, Enum):
+    25	    ALLOW = "allow"
+    26	    DENY = "deny"
+    27	    REWRITE = "rewrite"
+    28	
+    29	
+    30	@dataclass
+    31	class ProxyResult:
+    32	    """Result of SQL proxy evaluation."""
+    33	    action: ProxyAction
+    34	    original_sql: str
+    35	    rewritten_sql: str | None = None
+    36	    applied_policies: list[str] = field(default_factory=list)
+    37	    encrypted_columns: list[str] = field(default_factory=list)
+    38	    reason: str = ""
+    39	
+    40	
+    41	@dataclass
+    42	class ColumnEncryptionRule:
+    43	    """Defines which columns to encrypt and how."""
+    44	    table_name: str
+    45	    column_name: str
+    46	    mode: EncryptionMode = EncryptionMode.DETERMINISTIC
+    47	    key_id: str = "default"
+    48	
+    49	
+    50	class DBAccessProxy:
+    51	    """SQL interception proxy for RLS and column encryption.
+    52	
+    53	    Intercepts SQL queries to:
+    54	    1. Evaluate RLS policies and inject WHERE clauses
+    55	    2. Encrypt plaintext values in INSERT/UPDATE statements
+    56	    3. Decrypt ciphertext values in SELECT results
+    57	    4. Log all access patterns for audit
+    58	    """
+    59	
+    60	    def __init__(self, max_rows: int = 10000):
+    61	        self._encryption_rules: dict[tuple[str, str], ColumnEncryptionRule] = {}
+    62	        self._blocked_patterns: list[re.Pattern] = []
+    63	        self._query_count: int = 0
+    64	        self._denied_count: int = 0
+    65	        self._max_rows = max_rows
+    66	        self._query_log: list[dict[str, Any]] = []
+    67	        # Default blocked patterns
+    68	        self._default_blocked = [
+    69	            re.compile(r"DROP\s+TABLE", re.IGNORECASE),
+    70	            re.compile(r"TRUNCATE", re.IGNORECASE),
+    71	            re.compile(r"ALTER\s+TABLE", re.IGNORECASE),
+    72	            re.compile(r"DELETE\s+FROM\s+\w+\s*$", re.IGNORECASE),  # DELETE without WHERE
+    73	            re.compile(r"DELETE\s+FROM\s+\w+\s+WHERE\s+1\s*=\s*1", re.IGNORECASE),  # DELETE all
+    74	        ]
+    75	
+    76	    def register_encryption_rule(
+    77	        self,
+    78	        table_name: str,
+    79	        column_name: str,
+    80	        mode: EncryptionMode = EncryptionMode.DETERMINISTIC,
+    81	        key_id: str = "default",
+    82	    ) -> None:
+    83	        """Register a column for transparent encryption/decryption."""
+    84	        rule = ColumnEncryptionRule(
+    85	            table_name=table_name,
+    86	            column_name=column_name,
+    87	            mode=mode,
+    88	            key_id=key_id,
+    89	        )
+    90	        self._encryption_rules[(table_name, column_name)] = rule
+    91	        logger.info(f"Registered encryption rule: {table_name}.{column_name} ({mode.value})")
+    92	
+    93	    def add_blocked_pattern(self, pattern: str) -> None:
+    94	        """Add a SQL pattern to block (e.g., DROP TABLE, TRUNCATE)."""
+    95	        self._blocked_patterns.append(re.compile(pattern, re.IGNORECASE))
+    96	
+    97	    def evaluate_sql(
+    98	        self,
+    99	        sql: str,
+   100	        context: RLSContext,
+   101	        params: dict[str, Any] | None = None,
+   102	    ) -> ProxyResult:
+   103	        """Evaluate a SQL query against policies and security rules.
+   104	
+   105	        Returns ProxyResult with action (allow/deny/rewrite) and modified SQL.
+   106	        """
+   107	        self._query_count += 1
+   108	
+   109	        # 1. Check blocked patterns
+   110	        for pattern in self._blocked_patterns:
+   111	            if pattern.search(sql):
+   112	                self._denied_count += 1
+   113	                return ProxyResult(
+   114	                    action=ProxyAction.DENY,
+   115	                    original_sql=sql,
+   116	                    reason=f"Blocked by pattern: {pattern.pattern}",
+   117	                )
+   118	
+   119	        # 2. Evaluate RLS policies
+   120	        rls_where = rls_engine.evaluate_sql(context)
+   121	
+   122	        # 3. Rewrite SQL with RLS injection
+   123	        rewritten = sql
+   124	        applied_policies = []
+   125	
+   126	        if rls_where:
+   127	            rewritten = rls_engine.inject_rls_where(sql, rls_where)
+   128	            applied_policies.append("rls")
+   129	
+   130	        # 4. Encrypt column values in INSERT/UPDATE
+   131	        encrypted_columns = []
+   132	        if params:
+   133	            rewritten, encrypted_columns = self._encrypt_params(
+   134	                rewritten, params
+   135	            )
+   136	
+   137	        action = ProxyAction.REWRITE if (rls_where or encrypted_columns) else ProxyAction.ALLOW
+   138	
+   139	        return ProxyResult(
+   140	            action=action,
+   141	            original_sql=sql,
+   142	            rewritten_sql=rewritten,
+   143	            applied_policies=applied_policies,
+   144	            encrypted_columns=encrypted_columns,
+   145	        )
+   146	
+   147	    def _encrypt_params(
+   148	        self,
+   149	        sql: str,
+   150	        params: dict[str, Any],
+   151	    ) -> tuple[str, list[str]]:
+   152	        """Encrypt column values in query parameters."""
+   153	        encrypted_columns = []
+   154	
+   155	        for key, value in params.items():
+   156	            # Check if this param maps to an encrypted column
+   157	            # Simple heuristic: param name matches column name
+   158	            for (table, col), rule in self._encryption_rules.items():
+   159	                if col == key and isinstance(value, str) and value:
+   160	                    enc = column_encryption.encrypt_column(value, col, rule.mode)
+   161	                    params[key] = enc.ciphertext.hex()
+   162	                    encrypted_columns.append(f"{table}.{col}")
+   163	                    break
+   164	
+   165	        return sql, encrypted_columns
+   166	
+   167	    def decrypt_result_row(
+   168	        self,
+   169	        table_name: str,
+   170	        row: dict[str, Any],
+   171	    ) -> dict[str, Any]:
+   172	        """Decrypt encrypted columns in a result row."""
+   173	        decrypted = dict(row)
+   174	
+   175	        for (table, col), rule in self._encryption_rules.items():
+   176	            if table == table_name and col in decrypted:
+   177	                value = decrypted[col]
+   178	                if isinstance(value, (bytes, str)):
+   179	                    try:
+   180	                        if isinstance(value, str):
+   181	                            value = bytes.fromhex(value)
+   182	                        enc = EncryptedColumn(
+   183	                            ciphertext=value,
+   184	                            mode=rule.mode,
+   185	                            column_name=col,
+   186	                            key_id=rule.key_id,
+   187	                        )
+   188	                        decrypted[col] = column_encryption.decrypt_column(enc)
+   189	                    except Exception as e:
+   190	                        logger.debug(f"Decrypt failed for {table}.{col}: {e}")
+   191	
+   192	        return decrypted
+   193	
+   194	    async def execute_with_rls(
+   195	        self,
+   196	        db: AsyncSession,
+   197	        sql: str,
+   198	        context: RLSContext,
+   199	        params: dict[str, Any] | None = None,
+   200	        user_id: uuid.UUID | None = None,
+   201	    ) -> Any:
+   202	        """Execute a SQL query with RLS evaluation and column encryption.
+   203	
+   204	        This is the main entry point for proxied database access.
+   205	        """
+   206	        result = self.evaluate_sql(sql, context, params)
+   207	
+   208	        if result.action == ProxyAction.DENY:
+   209	            # Audit the denied access
+   210	            try:
+   211	                await audit_service.log(
+   212	                    db,
+   213	                    action="db_access.denied",
+   214	                    resource_type="database",
+   215	                    user_id=user_id,
+   216	                    detail={"sql": sql[:500], "reason": result.reason},
+   217	                )
+   218	            except Exception:
+   219	                pass
+   220	            raise PermissionError(f"Access denied: {result.reason}")
+   221	
+   222	        # Use rewritten SQL if available
+   223	        final_sql = result.rewritten_sql or sql
+   224	        final_params = params or {}
+   225	
+   226	        # Execute the query
+   227	        stmt = text(final_sql)
+   228	        proxy_result = await db.execute(stmt, final_params)
+   229	
+   230	        # Audit successful access
+   231	        try:
+   232	            await audit_service.log(
+   233	                db,
+   234	                action="db_access.execute",
+   235	                resource_type="database",
+   236	                user_id=user_id,
+   237	                detail={
+   238	                    "sql": final_sql[:500],
+   239	                    "policies_applied": result.applied_policies,
+   240	                    "encrypted_columns": result.encrypted_columns,
+   241	                },
+   242	            )
+   243	        except Exception:
+   244	            pass
+   245	
+   246	        return proxy_result
+   247	
+   248	    def get_encryption_rules(self) -> list[dict[str, Any]]:
+   249	        """List all registered encryption rules."""
+   250	        return [
+   251	            {
+   252	                "table": table,
+   253	                "column": col,
+   254	                "mode": rule.mode.value,
+   255	                "key_id": rule.key_id,
+   256	            }
+   257	            for (table, col), rule in self._encryption_rules.items()
+   258	        ]
+   259	
+   260	    def get_metrics(self) -> dict[str, Any]:
+   261	        """Get proxy metrics."""
+   262	        return {
+   263	            "total_queries": self._query_count,
+   264	            "denied_queries": self._denied_count,
+   265	            "encryption_rules": len(self._encryption_rules),
+   266	            "blocked_patterns": len(self._blocked_patterns),
+   267	        }
+   268	
+   269	    # ── Simplified API for test compatibility ──────────────────
+   270	
+   271	    def parse_sql(self, sql: str) -> dict[str, Any]:
+   272	        """Parse SQL query and extract type, tables, columns.
+   273	
+   274	        Simple regex-based parser for query analysis.
+   275	        """
+   276	        sql_stripped = sql.strip()
+   277	        sql_upper = sql_stripped.upper()
+   278	
+   279	        # Determine query type
+   280	        query_type = "UNKNOWN"
+   281	        for qtype in ("SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER"):
+   282	            if sql_upper.startswith(qtype):
+   283	                query_type = qtype
+   284	                break
+   285	
+   286	        # Extract tables
+   287	        tables = []
+   288	        # FROM clause
+   289	        from_match = re.search(r"FROM\s+(\w+)", sql_stripped, re.IGNORECASE)
+   290	        if from_match:
+   291	            tables.append(from_match.group(1))
+   292	        # INTO clause (INSERT)
+   293	        into_match = re.search(r"INTO\s+(\w+)", sql_stripped, re.IGNORECASE)
+   294	        if into_match:
+   295	            tables.append(into_match.group(1))
+   296	        # UPDATE clause
+   297	        update_match = re.search(r"UPDATE\s+(\w+)", sql_stripped, re.IGNORECASE)
+   298	        if update_match:
+   299	            tables.append(update_match.group(1))
+   300	
+   301	        # Extract columns
+   302	        columns = []
+   303	        if query_type == "SELECT":
+   304	            # Extract columns between SELECT and FROM
+   305	            select_match = re.search(r"SELECT\s+(.+?)\s+FROM", sql_stripped, re.IGNORECASE | re.DOTALL)
+   306	            if select_match:
+   307	                cols_str = select_match.group(1).strip()
+   308	                if cols_str != "*":
+   309	                    columns = [c.strip().split(".")[-1].split(" AS ")[0].strip() for c in cols_str.split(",")]
+   310	        elif query_type == "INSERT":
+   311	            # Extract columns from INSERT INTO table (col1, col2)
+   312	            col_match = re.search(r"\(([^)]+)\)\s*VALUES", sql_stripped, re.IGNORECASE)
+   313	            if col_match:
+   314	                columns = [c.strip() for c in col_match.group(1).split(",")]
+   315	
+   316	        return {
+   317	            "type": query_type,
+   318	            "tables": tables,
+   319	            "columns": columns,
+   320	            "raw": sql_stripped,
+   321	        }
+   322	
+   323	    def validate_sql(self, sql: str) -> dict[str, Any]:
+   324	        """Validate SQL against security rules. Raises on violations.
+   325	
+   326	        Rules:
+   327	        - Block DROP, TRUNCATE, ALTER
+   328	        - Block DELETE without WHERE
+   329	        - Block SELECT *
+   330	        """
+   331	        sql_upper = sql.strip().upper()
+   332	
+   333	        # Check blocked patterns
+   334	        for pattern in self._default_blocked + self._blocked_patterns:
+   335	            if pattern.search(sql):
+   336	                raise PermissionError(f"Query blocked: forbidden operation ({pattern.pattern})")
+   337	
+   338	        # Block SELECT *
+   339	        if re.search(r"SELECT\s+\*", sql, re.IGNORECASE):
+   340	            raise PermissionError("SELECT * blocked: specific columns required")
+   341	
+   342	        # Block DELETE without WHERE
+   343	        if sql_upper.startswith("DELETE") and "WHERE" not in sql_upper:
+   344	            raise PermissionError("DELETE without WHERE blocked: dangerous operation")
+   345	
+   346	        return {"allowed": True}
+   347	
+   348	    def inject_limit(self, sql: str) -> str:
+   349	        """Inject or cap LIMIT clause to prevent bulk extraction."""
+   350	        sql_upper = sql.strip().upper()
+   351	
+   352	        # Check if LIMIT already exists
+   353	        limit_match = re.search(r"LIMIT\s+(\d+)", sql, re.IGNORECASE)
+   354	        if limit_match:
+   355	            existing_limit = int(limit_match.group(1))
+   356	            if existing_limit > self._max_rows:
+   357	                return sql[:limit_match.start()] + f"LIMIT {self._max_rows}" + sql[limit_match.end():]
+   358	            return sql
+   359	
+   360	        # Add LIMIT if missing (only for SELECT)
+   361	        if sql_upper.startswith("SELECT"):
+   362	            return f"{sql.rstrip()} LIMIT {self._max_rows}"
+   363	
+   364	        return sql
+   365	
+   366	    def evaluate_query(
+   367	        self,
+   368	        sql: str,
+   369	        policies: list[dict[str, Any]] | None = None,
+   370	        user_region: str | None = None,
+   371	        user_clearance: str | None = None,
+   372	    ) -> dict[str, Any]:
+   373	        """Evaluate a query against RLS policies.
+   374	
+   375	        Returns dict with 'allowed' boolean and optionally 'rewritten_sql'.
+   376	        """
+   377	        policies = policies or []
+   378	        rewritten = sql
+   379	
+   380	        for policy in policies:
+   381	            if policy.get("type") == "region":
+   382	                allowed_regions = policy.get("allowed_regions", [])
+   383	                column = policy.get("column", "region")
+   384	                if user_region and user_region in allowed_regions:
+   385	                    # Inject region filter
+   386	                    if "WHERE" in rewritten.upper():
+   387	                        rewritten = re.sub(
+   388	                            r"(WHERE)",
+   389	                            f"\\1 {column} = '{user_region}' AND",
+   390	                            rewritten,
+   391	                            count=1,
+   392	                            flags=re.IGNORECASE,
+   393	                        )
+   394	                    else:
+   395	                        # Add WHERE clause before GROUP BY/ORDER BY/LIMIT
+   396	                        for keyword in ("GROUP BY", "ORDER BY", "LIMIT"):
+   397	                            m = re.search(keyword, rewritten, re.IGNORECASE)
+   398	                            if m:
+   399	                                rewritten = rewritten[:m.start()] + f"WHERE {column} = '{user_region}' " + rewritten[m.start():]
+   400	                                break
+   401	                        else:
+   402	                            rewritten = f"{rewritten} WHERE {column} = '{user_region}'"
+   403	
+   404	        return {
+   405	            "allowed": True,
+   406	            "rewritten_sql": rewritten,
+   407	        }
+   408	
+   409	    def log_query(
+   410	        self,
+   411	        sql: str,
+   412	        user_id: str | None = None,
+   413	        allowed: bool = True,
+   414	        reason: str | None = None,
+   415	    ) -> None:
+   416	        """Log a query for audit trail."""
+   417	        self._query_log.append({
+   418	            "sql": sql,
+   419	            "user_id": user_id,
+   420	            "allowed": allowed,
+   421	            "reason": reason,
+   422	            "timestamp": datetime.now(timezone.utc).isoformat(),
+   423	        })
+   424	
+   425	    def get_query_log(self) -> list[dict[str, Any]]:
+   426	        """Get the query audit log."""
+   427	        return self._query_log
+   428	
+   429	
+   430	# Singleton
+   431	db_access_proxy = DBAccessProxy()

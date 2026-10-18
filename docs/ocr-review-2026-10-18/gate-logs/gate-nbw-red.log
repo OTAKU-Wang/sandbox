@@ -1,0 +1,82 @@
+(node:27464) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:36204) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31836) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31836) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:28420) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts (24 tests | 3 failed) 22ms
+     × A265 detail 走白名单：内容型字段（命令原文/SQL/路径/参数）绝不拼进正文 6ms
+     × A265 全字段都被隐藏时仍写清「有内容但没展示」，不是只剩动作名 1ms
+     × A267 created_at 缺失/不可解析的执行绝不排到「最近一次」前面 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts > 审计流 → 日志正文与执行态（图 1 §3.3） > A265 detail 走白名单：内容型字段（命令原文/SQL/路径/参数）绝不拼进正文
+AssertionError: expected '命令执行 · command_preview=cat /workspace…' not to contain 'customer_pii'
+
+Expected: "customer_pii"
+Received: "命令执行 · command_preview=cat /workspace/customer_pii.csv · command_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa · sql=SELECT id_card FROM guests · query=hunter2 · path=/etc/cds/db.dsn · error=connection refused at 10.20.30.40:5432/cds"
+
+ ❯ src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts:206:27
+    204|       }),
+    205|     );
+    206|     expect(line.text).not.toContain('customer_pii');
+       |                           ^
+    207|     expect(line.text).not.toContain('SELECT');
+    208|     expect(line.text).not.toContain('hunter2');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts > 审计流 → 日志正文与执行态（图 1 §3.3） > A265 全字段都被隐藏时仍写清「有内容但没展示」，不是只剩动作名
+AssertionError: expected '命令执行 · command_preview=ls -l' not to contain 'ls -l'
+
+Expected: "ls -l"
+Received: "命令执行 · command_preview=ls -l"
+
+ ❯ src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts:220:27
+    218|   it('A265 全字段都被隐藏时仍写清「有内容但没展示」，不是只剩动作名', () => {
+    219|     const line = logLineFromAudit(audit('l-11', 'sandbox.exec', '2026-…
+    220|     expect(line.text).not.toContain('ls -l');
+       |                           ^
+    221|     expect(line.text).toMatch(/未展示/);
+    222|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts > 审计流 → 日志正文与执行态（图 1 §3.3） > A267 created_at 缺失/不可解析的执行绝不排到「最近一次」前面
+AssertionError: expected { ok: false, at: null, …(2) } to match object { Object (ok, at) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "at": "2026-10-17T08:00:00Z",
+-   "ok": true,
++   "at": null,
++   "ok": false,
+  }
+
+ ❯ src/pages/Flow/__tests__/notebookWorkbenchModel.test.ts:267:52
+    265|     const garbage = audit('l-22', 'sandbox.execute', '刚刚', { exit_code…
+    266|     // 无时间行排在哪一档都不该赢过一条带真时间的行
+    267|     expect(lastExecutionFromLogs([timed, noTime])).toMatchObject({ ok:…
+       |                                                    ^
+    268|     expect(lastExecutionFromLogs([noTime, timed])).toMatchObject({ at:…
+    269|     expect(lastExecutionFromLogs([timed, garbage])).toMatchObject({ at…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 21 passed (24)
+   Start at  23:07:07
+   Duration  2.60s (transform 155ms, setup 212ms, import 386ms, tests 22ms, environment 1.67s)
+

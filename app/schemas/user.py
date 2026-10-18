@@ -53,7 +53,7 @@ class UserCreate(BaseModel):
     @field_validator("username")
     @classmethod
     def username_alphanumeric(cls, v: str) -> str:
-        if not re.match(r"^[a-zA-Z0-9_]+$", v):
+        if not re.match(r"^[a-zA-Z0-9_]+\Z", v):
             raise ValueError("Username must be alphanumeric (letters, digits, underscore)")
         if len(v) < 3:
             raise ValueError("Username must be at least 3 characters")

@@ -1,0 +1,11 @@
+Preparing worktree (detached HEAD 452ffc6)
+HEAD is now at 452ffc6 chore: CI 门清单纳入两枚安全锁；gitignore 排除本机验证工件（shots/、.gate.txt）
+WT_RC=0
+0
+�ļ�����Ŀ¼��������﷨����ȷ��
+LINK_RC=1
+VITEST_RC=1
+BASE2B_DONE
+PY_RC=0
+BASE2_DONE
+BASE2C_DONE

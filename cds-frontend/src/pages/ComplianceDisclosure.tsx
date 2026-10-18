@@ -141,15 +141,21 @@ export default function ComplianceDisclosure() {
       ) : report ? (
         <>
           <Card size="small" title="链锚定披露" style={{ marginBottom: 16 }}>
-            <Space size={12} wrap>
-              <Text>{report.anchoring.backend_label}</Text>
-              {report.anchoring.is_consortium_chain ? (
-                <Tag color="green">联盟链锚定</Tag>
-              ) : (
-                <Tag>本地防篡改日志（非上链）</Tag>
-              )}
-              <Text type="secondary">后端: {report.anchoring.backend}</Text>
-            </Space>
+            {report.anchoring ? (
+              <Space size={12} wrap>
+                <Text>{report.anchoring.backend_label}</Text>
+                {report.anchoring.is_consortium_chain ? (
+                  <Tag color="green">联盟链锚定</Tag>
+                ) : (
+                  <Tag>本地防篡改日志（非上链）</Tag>
+                )}
+                <Text type="secondary">后端: {report.anchoring.backend}</Text>
+              </Space>
+            ) : (
+              // 后端 app/schemas/compliance.py 把 anchoring 声明为 `AnchoringDisclosure | None`：
+              // 没披露就诚实写「未配置/未知」，不得拿「本地防篡改日志」这类看着像真值的默认值顶替（禁伪造铁律）。
+              <Text type="secondary">链锚定：未配置/未知（后端未下发 anchoring 披露字段）</Text>
+            )}
           </Card>
 
           <Card size="small" title="合规状态（近 30 天 · TC609）">

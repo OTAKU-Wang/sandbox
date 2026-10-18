@@ -1,0 +1,10 @@
+src/components/Feedback/ErrorBoundary.tsx(27,36): error TS2686: 'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+src/services/__tests__/federationApi.test.ts(11,25): error TS2305: Module '"../federationApi"' has no exported member 'CATALOG_ENTRY_LIMIT'.
+src/services/__tests__/federationApi.test.ts(12,32): error TS2307: Cannot find module '../../utils/unwrapList' or its corresponding type declarations.
+src/services/__tests__/federationApi.test.ts(56,16): error TS2339: Property 'items' does not exist on type 'CatalogSyncEntry[]'.
+src/services/__tests__/federationApi.test.ts(57,16): error TS2339: Property 'limit' does not exist on type 'CatalogSyncEntry[]'.
+src/services/__tests__/federationApi.test.ts(58,16): error TS2339: Property 'possiblyTruncated' does not exist on type 'CatalogSyncEntry[]'.
+src/services/__tests__/federationApi.test.ts(64,16): error TS2339: Property 'possiblyTruncated' does not exist on type 'CatalogSyncEntry[]'.
+src/services/__tests__/federationApi.test.ts(70,16): error TS2339: Property 'possiblyTruncated' does not exist on type 'CatalogSyncEntry[]'.
+src/services/__tests__/federationApi.test.ts(75,54): error TS2339: Property 'items' does not exist on type 'CatalogSyncEntry[]'.
+src/services/__tests__/identityApi.test.ts(12,32): error TS2307: Cannot find module '../../utils/unwrapList' or its corresponding type declarations.

@@ -56,20 +56,20 @@ async function loadKeys() {
             if (k.status === 'active') active++;
             if (k.status === 'revoked' || k.status === 'destroyed') revoked++;
             return `<tr>
-                <td><code>${truncate(k.key_id, 30)}</code></td>
-                <td>${k.product_id || '-'}</td>
-                <td>${k.algorithm || 'SM4-GCM'}</td>
+                <td><code>${esc(truncate(k.key_id, 30))}</code></td>
+                <td>${esc(k.product_id || '-')}</td>
+                <td>${esc(k.algorithm || 'SM4-GCM')}</td>
                 <td>${statusBadge(k.status)}</td>
-                <td>${k.usage_count || 0}/${k.max_usage || 10000}</td>
+                <td>${esc(k.usage_count || 0)}/${esc(k.max_usage || 10000)}</td>
                 <td>${formatDate(k.created_at)}</td>
-                <td><button class="btn btn-danger btn-sm" onclick="destroyKey('${k.key_id}')">销毁</button></td>
+                <td><button class="btn btn-danger btn-sm" onclick="destroyKey('${escAttr(k.key_id)}')">销毁</button></td>
             </tr>`;
         }).join('');
         $('#total-keys').textContent = list.length;
         $('#active-keys').textContent = active;
         $('#revoked-keys').textContent = revoked;
     } catch (e) {
-        $('#keys-table').innerHTML = `<tr><td colspan="7" class="empty">加载失败: ${e.message}</td></tr>`;
+        $('#keys-table').innerHTML = `<tr><td colspan="7" class="empty">加载失败: ${esc(e.message)}</td></tr>`;
     }
 }
 
@@ -79,8 +79,8 @@ async function generateKey() {
     try {
         const result = await API.post('/api/v1/kms/keys', { product_id: productId });
         $('#key-result').innerHTML = `<div class="card" style="background:var(--bg);">
-            <p><strong>Key ID:</strong> <code>${result.key_id}</code></p>
-            <p><strong>Key (hex):</strong> <code style="word-break:break-all;">${result.key_bytes || '(stored in KMS)'}</code></p>
+            <p><strong>Key ID:</strong> <code>${esc(result.key_id)}</code></p>
+            <p><strong>Key (hex):</strong> <code style="word-break:break-all;">${esc(result.key_bytes || '(stored in KMS)')}</code></p>
         </div>`;
         loadKeys();
     } catch (e) { alert('生成失败: ' + e.message); }

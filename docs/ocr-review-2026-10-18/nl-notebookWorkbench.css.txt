@@ -1,0 +1,331 @@
+     1	/* SS-23 /notebooks「调试环境」外框专用样式（原型图 1 · 2-3）。
+     2	   只服务 NotebookWorkbench 这一页；全局样式在 src/index.css，本文件不碰它。
+     3	   类名统一 nbw- 前缀，避免与 .cds-* 全局类相互影响。 */
+     4	
+     5	.nbw-root {
+     6	  --nbw-border: #eceff4;
+     7	  --nbw-muted: #8c8c8c;
+     8	  --nbw-ink: #1f2937;
+     9	  --nbw-blue: #1b6ef3;
+    10	  --nbw-green: #2e9e5b;
+    11	  display: flex;
+    12	  flex-direction: column;
+    13	  gap: 16px;
+    14	}
+    15	
+    16	/* ---------- 标题卡（图 1 §2：标题 + 副标题 + 仅 1 个按钮，卡内无状态徽标） ---------- */
+    17	.nbw-titlecard {
+    18	  display: flex;
+    19	  align-items: center;
+    20	  justify-content: space-between;
+    21	  gap: 16px;
+    22	  background: #fff;
+    23	  border: 1px solid var(--nbw-border);
+    24	  border-radius: 8px;
+    25	  padding: 14px 20px;
+    26	  /* PNG 2-3：页头卡 y138..231（h93）。antd reset 已开 border-box，
+    27	     直接锁 min-height=93（含 1px 边框），实测由 h72 → h93。 */
+    28	  min-height: 93px;
+    29	  box-sizing: border-box;
+    30	}
+    31	.nbw-titlecard-title {
+    32	  font-size: 17px;
+    33	  font-weight: 600;
+    34	  color: var(--nbw-ink);
+    35	  line-height: 1.4;
+    36	}
+    37	.nbw-titlecard-sub {
+    38	  font-size: 12px;
+    39	  color: var(--nbw-muted);
+    40	  margin-top: 2px;
+    41	}
+    42	
+    43	/* ---------- 两栏：左 250 固定 + 右栏吃满，左右等高 ---------- */
+    44	.nbw-columns {
+    45	  display: flex;
+    46	  align-items: stretch;
+    47	  gap: 24px;
+    48	  height: calc(100vh - 250px);
+    49	  min-height: 700px;
+    50	}
+    51	.nbw-left {
+    52	  flex: 0 0 250px;
+    53	  width: 250px;
+    54	  display: flex;
+    55	  flex-direction: column;
+    56	  background: #fff;
+    57	  border: 1px solid var(--nbw-border);
+    58	  border-radius: 8px;
+    59	  min-height: 0;
+    60	  overflow: hidden;
+    61	}
+    62	.nbw-right {
+    63	  flex: 1 1 auto;
+    64	  min-width: 0;
+    65	  display: flex;
+    66	  flex-direction: column;
+    67	  gap: 24px;
+    68	}
+    69	
+    70	.nbw-card {
+    71	  display: flex;
+    72	  flex-direction: column;
+    73	  background: #fff;
+    74	  border: 1px solid var(--nbw-border);
+    75	  border-radius: 8px;
+    76	  min-height: 0;
+    77	  overflow: hidden;
+    78	}
+    79	.nbw-card-grow { flex: 1 1 auto; }
+    80	.nbw-card-fixed { flex: 0 0 auto; height: 320px; }
+    81	
+    82	.nbw-card-head {
+    83	  display: flex;
+    84	  align-items: center;
+    85	  justify-content: space-between;
+    86	  gap: 12px;
+    87	  padding: 10px 16px;
+    88	  border-bottom: 1px solid var(--nbw-border);
+    89	  flex: 0 0 auto;
+    90	}
+    91	.nbw-card-title {
+    92	  font-size: 14px;
+    93	  font-weight: 600;
+    94	  color: var(--nbw-ink);
+    95	}
+    96	.nbw-card-body {
+    97	  flex: 1 1 auto;
+    98	  min-height: 0;
+    99	  overflow: auto;
+   100	  padding: 10px 12px;
+   101	}
+   102	
+   103	/* ---------- 左栏文件树（行距 44、勾选框 + 文件图标 + 名称） ---------- */
+   104	.nbw-file-row {
+   105	  display: flex;
+   106	  align-items: center;
+   107	  gap: 6px;
+   108	  height: 44px;
+   109	  min-width: 0;
+   110	  padding-right: 8px;
+   111	  border-radius: 4px;
+   112	}
+   113	.nbw-file-row:hover { background: #f7f9fc; }
+   114	.nbw-file-name {
+   115	  min-width: 0;
+   116	  overflow: hidden;
+   117	  text-overflow: ellipsis;
+   118	  white-space: nowrap;
+   119	  font-size: 13px;
+   120	  color: var(--nbw-ink);
+   121	}
+   122	.nbw-folder-toggle {
+   123	  width: 18px;
+   124	  min-width: 18px;
+   125	  padding: 0;
+   126	  height: 18px;
+   127	  line-height: 1;
+   128	  color: #8c8c8c;
+   129	  background: transparent;
+   130	  border: 0;
+   131	  cursor: pointer;
+   132	}
+   133	.nbw-tree-error {
+   134	  padding: 0 8px 6px 30px;
+   135	  font-size: 12px;
+   136	  color: #c0392b;
+   137	}
+   138	
+   139	.nbw-panel-foot {
+   140	  flex: 0 0 auto;
+   141	  border-top: 1px solid var(--nbw-border);
+   142	  padding: 8px 12px;
+   143	  font-size: 12px;
+   144	  color: var(--nbw-muted);
+   145	  line-height: 1.7;
+   146	}
+   147	.nbw-panel-foot-action {
+   148	  margin-top: 2px;
+   149	}
+   150	
+   151	/* ---------- 编辑器卡片头 ---------- */
+   152	.nbw-editor-name {
+   153	  display: inline-flex;
+   154	  align-items: center;
+   155	  gap: 4px;
+   156	  font-weight: 600;
+   157	  color: var(--nbw-ink);
+   158	  cursor: pointer;
+   159	}
+   160	.nbw-editor-meta {
+   161	  display: flex;
+   162	  align-items: center;
+   163	  gap: 10px;
+   164	  flex-wrap: wrap;
+   165	  font-size: 12px;
+   166	  color: var(--nbw-muted);
+   167	  font-weight: 400;
+   168	  margin-top: 2px;
+   169	}
+   170	.nbw-saved-ok { color: var(--nbw-green); }
+   171	.nbw-lang-pick {
+   172	  color: var(--nbw-blue);
+   173	  cursor: pointer;
+   174	  white-space: nowrap;
+   175	  font-size: 13px;
+   176	}
+   177	
+   178	/* ---------- 工具条（左 5 项纯文字菜单 / 右 3 项） ---------- */
+   179	.nbw-toolbar {
+   180	  display: flex;
+   181	  align-items: center;
+   182	  justify-content: space-between;
+   183	  gap: 12px;
+   184	  padding: 5px 12px;
+   185	  border-bottom: 1px solid var(--nbw-border);
+   186	  flex: 0 0 auto;
+   187	  flex-wrap: wrap;
+   188	}
+   189	.nbw-toolbar-left { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+   190	.nbw-toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+   191	.nbw-menu-label {
+   192	  color: #4b5563;
+   193	  font-size: 13px;
+   194	  padding: 3px 9px;
+   195	  border-radius: 4px;
+   196	  cursor: pointer;
+   197	  user-select: none;
+   198	}
+   199	.nbw-menu-label:hover { background: #f2f6fd; color: var(--nbw-blue); }
+   200	.nbw-tool-item {
+   201	  font-size: 12px;
+   202	  color: #66707f;
+   203	  white-space: nowrap;
+   204	}
+   205	.nbw-chip {
+   206	  display: inline-flex;
+   207	  align-items: center;
+   208	  gap: 4px;
+   209	  font-size: 12px;
+   210	  padding: 2px 9px;
+   211	  border-radius: 10px;
+   212	  white-space: nowrap;
+   213	}
+   214	.nbw-chip-ok { color: var(--nbw-green); background: #f0f9f2; }
+   215	.nbw-chip-warn { color: #ad6800; background: #fff7e6; }
+   216	.nbw-chip-off { color: #8c8c8c; background: #f5f5f5; }
+   217	.nbw-chip-unknown { color: #8c8c8c; background: #f5f5f5; }
+   218	
+   219	/* ---------- 代码区 ---------- */
+   220	.nbw-code-area {
+   221	  flex: 1 1 auto;
+   222	  min-height: 0;
+   223	  overflow: auto;
+   224	  padding: 10px 12px;
+   225	  display: flex;
+   226	  flex-direction: column;
+   227	  gap: 10px;
+   228	}
+   229	
+   230	/* ---------- 编辑器底部状态条 ---------- */
+   231	.nbw-statusbar {
+   232	  display: flex;
+   233	  align-items: center;
+   234	  justify-content: space-between;
+   235	  gap: 12px;
+   236	  flex-wrap: wrap;
+   237	  background: #fafafa;
+   238	  border-top: 1px solid var(--nbw-border);
+   239	  padding: 5px 16px;
+   240	  font-size: 12px;
+   241	  color: #66707f;
+   242	  flex: 0 0 auto;
+   243	}
+   244	.nbw-statusbar-group { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+   245	
+   246	/* ---------- 输出/日志卡片 ---------- */
+   247	.nbw-tabbar {
+   248	  display: flex;
+   249	  align-items: center;
+   250	  justify-content: space-between;
+   251	  gap: 12px;
+   252	  padding: 0 12px 0 16px;
+   253	  border-bottom: 1px solid var(--nbw-border);
+   254	  flex: 0 0 auto;
+   255	}
+   256	.nbw-tabs { display: flex; align-items: center; gap: 20px; }
+   257	.nbw-tab {
+   258	  background: transparent;
+   259	  border: 0;
+   260	  padding: 11px 0 9px;
+   261	  font-size: 13px;
+   262	  color: var(--nbw-muted);
+   263	  cursor: pointer;
+   264	  border-bottom: 2px solid transparent;
+   265	}
+   266	.nbw-tab[aria-selected='true'] {
+   267	  color: var(--nbw-blue);
+   268	  border-bottom-color: var(--nbw-blue);
+   269	  font-weight: 500;
+   270	}
+   271	.nbw-tab-actions { display: flex; align-items: center; gap: 8px; }
+   272	.nbw-run-status { font-size: 12px; white-space: nowrap; }
+   273	.nbw-run-ok { color: var(--nbw-green); }
+   274	.nbw-run-error { color: #cf1322; }
+   275	.nbw-run-warn { color: #ad6800; }
+   276	.nbw-run-idle { color: var(--nbw-muted); }
+   277	.nbw-icon-btn {
+   278	  border: 0;
+   279	  background: transparent;
+   280	  color: #7b8ba3;
+   281	  cursor: pointer;
+   282	  padding: 4px;
+   283	  line-height: 1;
+   284	  border-radius: 4px;
+   285	  display: inline-flex;
+   286	  align-items: center;
+   287	}
+   288	.nbw-icon-btn:hover:not(:disabled) { background: #eef3fa; color: #4a6a94; }
+   289	.nbw-icon-btn:disabled { color: #c4c9d1; cursor: not-allowed; }
+   290	
+   291	.nbw-log {
+   292	  font-family: ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
+   293	  font-size: 12px;
+   294	  line-height: 1.8;
+   295	  white-space: pre-wrap;
+   296	  word-break: break-all;
+   297	}
+   298	.nbw-log-line { display: flex; gap: 8px; }
+   299	.nbw-log-clock { color: #98a2b3; flex: 0 0 auto; }
+   300	.nbw-log-text { min-width: 0; }
+   301	.nbw-log-ok .nbw-log-text { color: var(--nbw-green); }
+   302	.nbw-log-warn .nbw-log-text { color: #ad6800; }
+   303	.nbw-log-error .nbw-log-text { color: #cf1322; }
+   304	
+   305	.nbw-output-foot {
+   306	  display: flex;
+   307	  align-items: center;
+   308	  justify-content: space-between;
+   309	  gap: 12px;
+   310	  flex-wrap: wrap;
+   311	  border-top: 1px solid var(--nbw-border);
+   312	  padding: 6px 16px;
+   313	  font-size: 12px;
+   314	  color: var(--nbw-muted);
+   315	  flex: 0 0 auto;
+   316	}
+   317	
+   318	.nbw-cell-block {
+   319	  border: 1px solid #dfe6ee;
+   320	  border-radius: 6px;
+   321	  overflow: hidden;
+   322	}
+   323	.nbw-cell-bar {
+   324	  display: flex;
+   325	  align-items: center;
+   326	  justify-content: space-between;
+   327	  gap: 8px;
+   328	  padding: 4px 8px;
+   329	  background: #fafbfd;
+   330	  border-bottom: 1px solid #eef1f6;
+   331	}

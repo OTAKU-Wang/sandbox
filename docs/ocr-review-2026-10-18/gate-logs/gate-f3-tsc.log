@@ -1,0 +1,2 @@
+src/pages/__tests__/ComplianceDisclosure.test.tsx(84,73): error TS2322: Type 'null' is not assignable to type 'AnchoringDisclosure | undefined'.
+src/pages/Auth/__tests__/Login.test.tsx(11,17): error TS2614: Module '"../Login"' has no exported member 'describeLoginError'. Did you mean to use 'import describeLoginError from "../Login"' instead?

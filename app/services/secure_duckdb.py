@@ -57,6 +57,73 @@ class TableInfo:
     columns: list[dict] = field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# 合约策略状态机 — 数据出域门的 fail-closed 前提（A48）
+#
+# 「这个会话有没有治理合约」由 API 层（app/api/sandbox_db.py）在建好引擎、执行
+# 任何一条 SQL 之前解析并登记在引擎上；引擎只忠实记录，绝不「没策略就放行」：
+#   unset         引擎由调用方自建、从未经过策略解析（进程内/测试用法）→ 不施加策略
+#   not_required  已解析：会话没有治理合约 → 合法无策略路径，放行
+#   required      已解析：会话受合约治理，但策略尚未挂上 → 拒绝执行任何查询
+#   attached      已挂编译后的策略 → 逐条按策略判定
+# 状态只能单向推进：已 attached 的引擎不得被 not_required/required 回填，否则并发
+# 解析会把已经挂上的门重新打开。
+# ---------------------------------------------------------------------------
+POLICY_UNSET = "unset"
+POLICY_NOT_REQUIRED = "not_required"
+POLICY_REQUIRED = "required"
+POLICY_ATTACHED = "attached"
+
+POLICY_MISSING_REASON = (
+    "contract policy is required for this session but was never attached "
+    "(fail-closed: refusing to run SQL without the governing policy)"
+)
+
+# 合约 allowed_operations 词表里「在沙箱里跑一条只读 SQL」的等价说法。与
+# app/api/sandbox_sessions._operation_allowed_by_contract 对 structured_query 的
+# 映射同源：合约写 read / query / analyze 都表示放行数据读取；train / build /
+# export / api_call 不在其列 —— 只准训练数据的合约不能把明细查出去。
+CONTRACT_READ_OPERATIONS = ("read", "query", "analyze")
+
+# 导入路径白名单（A50）：json_path / parquet_path 来自请求体，属于调用者可控输入。
+# 平台自己写数据只落在下面这些目录里，因此它们就是导入根；/app/.env、
+# /proc/self/environ 之类的路径一律拒绝 —— 那等于「中权限任意文件读 + /query 导出」。
+DEFAULT_IMPORT_ROOTS: tuple[str, ...] = (
+    "/tmp/cds-uploads",      # data_pipeline 上传根
+    "/tmp/cds-sandbox",      # L3 会话工作区（含 data-load / input / output）
+    "/tmp/cds-sandbox-l0",   # L0 会话工作区
+    "/tmp/cds-storage",      # 对象存储本地回退
+    "/tmp/cds-pipeline",     # 非结构化流水线
+    "/tmp/cds-duckdb",       # 本引擎的 tmpfs 目录
+)
+IMPORT_ROOTS_ENV = "CDS_SANDBOX_IMPORT_ROOTS"  # os.pathsep 分隔的**追加**根（部署/测试）
+MAX_IMPORT_BYTES = 64 * 1024 * 1024  # 单个导入文件的读入上限（旧实现无上限全量缓冲）
+
+
+def allowed_import_roots() -> list[Path]:
+    """导入根白名单：平台自有数据目录 + 环境变量追加根 + Cube 结果目录。
+
+    解析失败（权限/挂载异常）的根直接丢弃：宁可少一个可用根，不能多一个越界根。
+    """
+    raw = list(DEFAULT_IMPORT_ROOTS)
+    raw += [p for p in os.environ.get(IMPORT_ROOTS_ENV, "").split(os.pathsep) if p.strip()]
+    try:
+        from app.core.config import get_settings
+        cube_dir = get_settings().CUBE_RESULTS_DIR
+        if cube_dir:
+            raw.append(cube_dir)
+    except Exception as e:  # 配置读不到就退回默认根（更严，不是更松）
+        logger.debug("[secure-duckdb] CUBE_RESULTS_DIR unavailable for import roots: %s", e)
+
+    roots: list[Path] = []
+    for item in raw:
+        try:
+            roots.append(Path(item).resolve())
+        except OSError:
+            continue
+    return roots
+
+
 class SecureDuckDBEngine:
     """TEE 内的 DuckDB 实例，对外提供安全 SQL 执行接口。
 
@@ -80,7 +147,12 @@ class SecureDuckDBEngine:
         self._dek = dek  # SM4-GCM key for disk-level encryption
         self._created_at = datetime.now(timezone.utc)
         self._policy = None  # PolicyBundle for query-time policy enforcement (P1-3)
+        self._policy_state = POLICY_UNSET  # A48 fail-closed 执行门，见模块常量
+        self._policy_note = ""
         self._sandbox_level = "L3"  # Overridden by session context
+        # A56: 会话归属随引擎生命周期走（旧的 _engine_owners 平行字典没人清扫）。
+        self.owner_user_id: str | None = None
+        self.max_import_bytes = MAX_IMPORT_BYTES
 
         if mode == "memory":
             self._conn = duckdb.connect(":memory:")
@@ -120,28 +192,71 @@ class SecureDuckDBEngine:
         except Exception as e:
             logger.info(f"[secure-duckdb] SM3 UDF unavailable ({e}), masking uses built-in sha256()")
 
-    def set_policy(self, policy_bundle) -> None:
-        """Set an active policy bundle for query-time enforcement (P1-3).
+    @property
+    def policy_state(self) -> str:
+        """当前策略状态：unset / not_required / required / attached（可观测，便于诚实披露）。"""
+        return self._policy_state
 
-        When set, execute_query() will check the request against the policy
-        before executing SQL.
+    @property
+    def policy_contract_id(self) -> str | None:
+        """已挂策略所属的合约 ID；未挂策略时为 None。"""
+        return getattr(self._policy, "contract_id", None) if self._policy is not None else None
+
+    def set_policy(self, policy_bundle) -> None:
+        """挂接编译后的合约策略；此后每条 SQL 都受它约束（P1-3）。
+
+        传 None 过去过去等价于「策略缺失即放行」，现在直接拒绝：无策略要么是
+        not_required（显式登记），要么是 required（拒绝执行），不存在第三种。
         """
+        if policy_bundle is None:
+            raise ValueError(
+                "set_policy(None) would open the execution gate — "
+                "call mark_policy_not_required() instead when the session has no contract"
+            )
         self._policy = policy_bundle
+        self._policy_state = POLICY_ATTACHED
+        self._policy_note = ""
+
+    def mark_policy_not_required(self, reason: str = "") -> None:
+        """登记「本会话无治理合约」—— 合法无策略路径，与「策略缺失」不是一回事（A48）。"""
+        if self._policy_state in (POLICY_UNSET, POLICY_NOT_REQUIRED):
+            self._policy_state = POLICY_NOT_REQUIRED
+            self._policy_note = reason
+
+    def require_contract_policy(self) -> None:
+        """登记「本会话受合约治理」：策略挂上之前拒绝执行任何查询（fail-closed，A48）。"""
+        if self._policy_state != POLICY_ATTACHED:
+            self._policy_state = POLICY_REQUIRED
+
+    def set_sandbox_level(self, sandbox_level: str | None) -> None:
+        """用会话上下文覆盖策略判定用的沙箱等级（合约 sandbox_levels 判定用）。"""
+        if sandbox_level:
+            self._sandbox_level = sandbox_level
 
     def _check_policy(self, sql: str, row_count: int) -> tuple[bool, str]:
-        """Check query against active policy. Returns (allowed, reason)."""
-        if not self._policy:
+        """Check query against active policy. Returns (allowed, reason).
+
+        A48：这里曾经是 `if not self._policy: return True` —— 合约策略没挂上就
+        直接放行，整个合约限制链路等于不存在。现在会话被登记为「受合约治理」而
+        策略缺席 ⇒ 拒绝执行。
+        """
+        if self._policy is None:
+            if self._policy_state == POLICY_REQUIRED:
+                return False, POLICY_MISSING_REASON
             return True, "No policy set"
 
         from app.services.policy_compiler import policy_evaluator
-        request = {
+        base = {
             "sandbox_level": self._sandbox_level,
-            "operation": "query",
             "row_count": row_count,
             "field": self._extract_select_fields(sql),
         }
-        result = policy_evaluator.evaluate(self._policy, request)
-        return result["allowed"], result["reason"]
+        result = {"allowed": False, "reason": "policy evaluation returned no decision"}
+        for operation in CONTRACT_READ_OPERATIONS:
+            result = policy_evaluator.evaluate(self._policy, {**base, "operation": operation})
+            if result["allowed"]:
+                return True, result["reason"]
+        return False, result["reason"]
 
     @staticmethod
     def _extract_select_fields(sql: str) -> str:
@@ -303,7 +418,10 @@ class SecureDuckDBEngine:
             # Policy enforcement (P1-3)
             allowed, reason = self._check_policy(sql, max_rows)
             if not allowed:
-                return QueryResult(success=False, error=f"Policy denied: {reason}")
+                # 拦截必须留痕：被策略挡掉的查询与被放行的查询走同一套数据访问审计
+                duration = int((datetime.now() - start).total_seconds() * 1000)
+                self._audit_query(sql, 0, duration, success=False, error=f"Policy denied: {reason}")
+                return QueryResult(success=False, error=f"Policy denied: {reason}", duration_ms=duration)
 
             # Execute with limit
             result = self._conn.execute(sql).fetchmany(max_rows + 1)
@@ -506,6 +624,49 @@ class SecureDuckDBEngine:
                     f"{len(encrypted_columns)} encrypted columns, {len(data)} rows")
         return info
 
+    def _confine_import_path(self, raw_path: str, *, kind: str) -> Path:
+        """把导入路径关进平台导入根（A50）。
+
+        请求体里的 json_path / parquet_path 是调用者可控输入：旧实现直接
+        open() / read_parquet(?)，等于任何能调 /import/* 的角色（DATA_PROVIDER 就
+        够）都能把 /app/.env、/proc/self/environ 这类文件读成一张表，再用 /query
+        把内容导出。
+
+        规则：拒绝 glob 通配符（read_parquet 的 glob = 目录枚举）；resolve() 之后再
+        判定（符号链接指向根外也算越界）；必须落在 allowed_import_roots() 内。
+        越界 ⇒ PermissionError，由端点映射成 403。
+        """
+        raw = (raw_path or "").strip()
+        if not raw:
+            raise ValueError(f"{kind} is required")
+        if any(ch in raw for ch in "*?["):
+            self._audit_import_denied(kind, raw, "glob wildcard")
+            raise PermissionError(f"{kind} must not contain glob wildcards")
+        try:
+            resolved = Path(raw).resolve()
+        except OSError as e:
+            self._audit_import_denied(kind, raw, f"resolve failed: {e}")
+            raise PermissionError(f"{kind} could not be resolved: {e}") from e
+        roots = allowed_import_roots()
+        if not any(resolved == root or resolved.is_relative_to(root) for root in roots):
+            self._audit_import_denied(kind, raw, "outside import root")
+            logger.warning(
+                "[secure-duckdb] session=%s refused %s outside the import roots: %s",
+                self.session_id, kind, raw,
+            )
+            raise PermissionError(
+                f"{kind} must live inside a platform import root "
+                f"(allowed: {', '.join(str(r) for r in roots)})"
+            )
+        return resolved
+
+    def _audit_import_denied(self, kind: str, raw_path: str, reason: str) -> None:
+        """越界导入尝试同样进数据访问审计。"""
+        self._audit_table_event(
+            "import_denied", f"<{kind}>",
+            detail_extra={"path": raw_path[:500], "reason": reason},
+        )
+
     def register_json(
         self,
         table_name: str,
@@ -517,12 +678,19 @@ class SecureDuckDBEngine:
         """Import a JSON file into DuckDB with optional column encryption.
 
         Supports both JSON array and newline-delimited JSON (NDJSON).
+
+        A50: 路径先过 _confine_import_path（只允许平台导入根），再限幅读入。
         """
         safe_name = self._sanitize_identifier(table_name)
 
-        # Read JSON data
-        with open(json_path) as f:
-            content = f.read().strip()
+        # Read JSON data（A50：越界路径 ⇒ PermissionError；整文件读入有上限）
+        safe_path = self._confine_import_path(json_path, kind="json_path")
+        with safe_path.open(encoding="utf-8") as f:
+            content = f.read(self.max_import_bytes + 1).strip()
+        if len(content) > self.max_import_bytes:
+            raise ValueError(
+                f"JSON file exceeds the {self.max_import_bytes} byte import limit: {safe_path}"
+            )
 
         if content.startswith("["):
             data = json.loads(content)
@@ -542,7 +710,7 @@ class SecureDuckDBEngine:
         self._conn.execute(f"DROP TABLE IF EXISTS {safe_name}")
         self._conn.execute(
             f"CREATE TABLE {safe_name} AS SELECT * FROM read_json_auto(?)",
-            [json_path],
+            [str(safe_path)],
         )
 
         count = self._conn.execute(f"SELECT COUNT(*) FROM {safe_name}").fetchone()[0]
@@ -567,8 +735,14 @@ class SecureDuckDBEngine:
         dek: bytes | None = None,
         source: str = "parquet",
     ) -> TableInfo:
-        """Import a Parquet file into DuckDB with optional column encryption."""
+        """Import a Parquet file into DuckDB with optional column encryption.
+
+        A50: parquet_path 与 json_path 同形 —— 越界或带 glob 一律拒绝（read_parquet
+        的通配符等于目录枚举）。
+        """
         safe_name = self._sanitize_identifier(table_name)
+        safe_path = self._confine_import_path(parquet_path, kind="parquet_path")
+        parquet_path = str(safe_path)
 
         if encrypted_columns:
             # Load via DuckDB, then encrypt columns
@@ -991,7 +1165,12 @@ def _decrypt_db_file(enc_path: Path, db_path: Path, dek: bytes) -> None:
 
 def cleanup_expired_engines(engines: dict[str, SecureDuckDBEngine],
                             max_age_seconds: int = 3600) -> int:
-    """Clean up expired DuckDB engines. Returns count of cleaned sessions."""
+    """Clean up expired DuckDB engines. Returns count of cleaned sessions.
+
+    A56: 会话归属（engine.owner_user_id）与明文表、_table_deks 一起随引擎消失，
+    所以清掉这一个字典就够了 —— 调用方（app/api/sandbox_db.py）现在每个端点入口
+    都扫一次，不再只挂在 /query 上；「只建表不查询」的会话不会再把引擎永久留在内存里。
+    """
     now = datetime.now(timezone.utc)
     expired = []
     for sid, engine in engines.items():

@@ -29,12 +29,23 @@ interface Verdict {
 }
 
 /**
+ * Merkle 路径这一路对结论的影响面，三选一都不许把结论点亮成绿色：
+ * error=接口失败；pending=还没取回（不能先下结论再等材料）；
+ * incompletePath=取回了但路径不闭合（多叶批次回空路径，见调用处注释）。
+ */
+interface ProofSignal {
+  error: unknown;
+  pending: boolean;
+  incompletePath: boolean;
+}
+
+/**
  * 判定验真结论。铁律：只有「后端重算比对通过」且「锚定后端确为联盟链」才是成功态；
  * 本地 PG 追加日志、模拟链、任何降级路径一律降级为 warning，绝不显示绿色「验证通过」。
  */
 function deriveVerdict(
   data: Awaited<ReturnType<typeof auditApi.verify>> | undefined,
-  proofError: unknown,
+  proof: ProofSignal,
 ): Verdict {
   if (!data) {
     return { level: 'failed', title: '暂无法判定', description: '后端未返回验真结果，请勿据此认定存证有效。' };
@@ -70,12 +81,26 @@ function deriveVerdict(
         '重算的 Merkle root 与本地存证记录一致，但锚定后端不是联盟链：这只是平台自身的追加式防篡改日志，不构成第三方/链上证据。存证后端见下方披露。',
     };
   }
-  if (proofError) {
+  if (proof.error) {
     return {
       level: 'degraded',
       title: 'root 比对一致，但 Merkle 路径获取失败',
       description:
-        `${getErrorMessage(proofError, 'Merkle 路径接口调用失败')} —— 无法出具可离线复核的审计路径，验真结论不完整，不作成功结论。`,
+        `${getErrorMessage(proof.error, 'Merkle 路径接口调用失败')} —— 无法出具可离线复核的审计路径，验真结论不完整，不作成功结论。`,
+    };
+  }
+  if (proof.pending) {
+    return {
+      level: 'degraded',
+      title: 'root 比对一致，但 Merkle 路径尚未取回',
+      description: '可离线复核的审计路径还在获取途中（或尚未发起）：材料没齐就先不下结论。',
+    };
+  }
+  if (proof.incompletePath) {
+    return {
+      level: 'degraded',
+      title: 'root 比对一致，但 Merkle 路径不完整',
+      description: '后端报出的批次叶子数与下发的兄弟节点对不上（多叶批次回空路径）：路径不闭合，无法离线复核该叶子是否被此 root 覆盖，不作成功结论。',
     };
   }
   return {
@@ -174,16 +199,30 @@ export default function AuditVerifyModal({ recordId, open, onClose }: AuditVerif
     retry: 0,
   });
 
-  const verdict = deriveVerdict(verifyQuery.data, proofQuery.isError ? proofQuery.error : null);
   const verifyData = verifyQuery.data;
   const proofData = proofQuery.data;
-  const backend = verifyData?.backend ?? proofData?.backend ?? null;
-  const blockNumber = verifyData?.block_number ?? proofData?.block_number ?? null;
-  const anchorId = verifyData?.anchor_id ?? proofData?.anchor_id ?? null;
-  const confirmed = verifyData?.confirmed ?? proofData?.confirmed ?? false;
-  const txHash = verifyData?.tx_hash ?? proofData?.tx_hash ?? null;
+  // 判定只读 /verify，披露行也必须同源：两个接口对同一字段给不同值是真实存在的
+  // （/verify 找不到匹配锚定行时 backend/anchor_id/block_number 全为 null，
+  // /merkle-proof 却会按「当前配置的后端」回一份披露）。拿后者兜前者的空值，
+  // 就会出现「判定说存证后端未知」而下方却亮出「联盟链」的同屏打脸。
+  const backend = verifyData?.backend ?? null;
+  const blockNumber = verifyData?.block_number ?? null;
+  const anchorId = verifyData?.anchor_id ?? null;
+  const confirmed = verifyData?.confirmed ?? false;
+  const txHash = verifyData?.tx_hash ?? null;
+  const root = verifyData?.merkle_root ?? null;
+  // 叶子哈希只有 /merkle-proof 下发，没有同源可比的对象
   const leafHash = proofData?.record_hash ?? null;
-  const root = verifyData?.merkle_root ?? proofData?.merkle_root ?? null;
+  // 单叶批次的空路径是正常形态（total_leaves===1）；批次里不止一片叶子却回空路径，
+  // 说明路径不闭合（audit.py::get_merkle_proof 在目标叶子不在批次里时同样回 []）
+  const incompletePath =
+    !!proofData && proofData.proof_path.length === 0 && proofData.total_leaves !== 1;
+
+  const verdict = deriveVerdict(verifyQuery.data, {
+    error: proofQuery.isError ? proofQuery.error : null,
+    pending: anchored && !proofData && !proofQuery.isError,
+    incompletePath,
+  });
 
   return (
     <Modal
@@ -205,7 +244,9 @@ export default function AuditVerifyModal({ recordId, open, onClose }: AuditVerif
         <QueryErrorAlert error={verifyQuery.error} message="验真请求失败" onRetry={() => verifyQuery.refetch()} />
       ) : null}
 
-      {verifyData ? (
+      {/* 请求失败时只留错误态：react-query 在重取失败后仍保留上一轮的 data，
+          两块并排就会「验真请求失败」+ 上一轮的绿色判定同屏。 */}
+      {!verifyQuery.isError && verifyData ? (
         <>
           <Alert
             type={VERDICT_ALERT_TYPE[verdict.level]}
@@ -291,11 +332,20 @@ export default function AuditVerifyModal({ recordId, open, onClose }: AuditVerif
                     叶子序号 {proofQuery.data.leaf_index}（自 0 起），本批次共 {proofQuery.data.total_leaves} 片叶子
                   </Text>
                   {proofQuery.data.proof_path.length === 0 ? (
-                    <Alert
-                      type="info"
-                      showIcon
-                      message="本批次仅此一条记录，Merkle root 即叶子哈希本身，无需兄弟节点。"
-                    />
+                    proofQuery.data.total_leaves === 1 ? (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="本批次仅此一条记录，Merkle root 即叶子哈希本身，无需兄弟节点。"
+                      />
+                    ) : (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message="Merkle 路径不完整，无法离线复核"
+                        description={`后端报本批次共 ${proofQuery.data.total_leaves} 片叶子，却没有下发任何兄弟节点：路径不闭合，不能据此认定该叶子被此 root 覆盖，不作验真通过结论。`}
+                      />
+                    )
                   ) : (
                     <Table<MerkleProofStep>
                       rowKey={(_, index) => String(index)}

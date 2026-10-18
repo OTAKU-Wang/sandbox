@@ -1,0 +1,8 @@
+Vault authentication failed — falling back to software HSM
+No VM backend available; running in simulation mode
+PyTorch not installed. CPU trainer will fall back to simulation. Install with: pip install torch>=2.0.0
+ERROR: file or directory not found: tests/test_cache.py
+
+
+no tests ran in 0.00s
+A184G2_RC=4

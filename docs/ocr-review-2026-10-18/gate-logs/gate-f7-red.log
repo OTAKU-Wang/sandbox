@@ -1,0 +1,57 @@
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+ ❯ src/pages/Auth/__tests__/Register.test.tsx (4 tests | 2 failed) 1449ms
+     × 空密码提示「请输入密码」，不得串成「密码至少8位」 890ms
+     × detail 是结构化对象时，提示只含 code 与 message 170ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  21:56:30
+   Duration  14.36s (transform 145ms, setup 244ms, import 10.53s, tests 1.45s, environment 1.76s)
+
+(node:26316) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38904) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:35268) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:35268) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15684) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pages/Auth/__tests__/Register.test.tsx > 注册页密码校验文案 > 空密码提示「请输入密码」，不得串成「密码至少8位」
+AssertionError: expected '请输入用户名 请输入有效邮箱 密码至少8位' to contain '请输入密码'
+
+Expected: "请输入密码"
+Received: "请输入用户名 请输入有效邮箱 密码至少8位"
+
+ ❯ src/pages/Auth/__tests__/Register.test.tsx:63:30
+     61|     await submitForm();
+     62|     const errors = visibleFormErrors();
+     63|     expect(errors.join(' ')).toContain('请输入密码');
+       |                              ^
+     64|     expect(errors.join(' ')).not.toContain('密码至少8位');
+     65|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pages/Auth/__tests__/Register.test.tsx > 注册失败提示不外泄内部结构 > detail 是结构化对象时，提示只含 code 与 message
+AssertionError: expected '[object Object]' to contain '用户名已存在'
+
+Expected: "用户名已存在"
+Received: "[object Object]"
+
+ ❯ src/pages/Auth/__tests__/Register.test.tsx:90:18
+     88|     await waitFor(() => expect(message.error).toHaveBeenCalled());
+     89|     const text = String(vi.mocked(message.error).mock.calls[0][0]);
+     90|     expect(text).toContain('用户名已存在');
+       |                  ^
+     91|     expect(text).toContain('USERNAME_TAKEN');
+     92|     expect(text).not.toContain('alice');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+

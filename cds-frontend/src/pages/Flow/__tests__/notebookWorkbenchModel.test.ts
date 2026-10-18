@@ -181,10 +181,44 @@ describe('审计流 → 日志正文与执行态（图 1 §3.3）', () => {
       }),
     );
     expect(line.clock).toBe('12:00:00');
-    expect(line.text).toBe('执行 · language=python · exit_code=0 · duration_ms=200');
+    expect(line.text).toContain('language=python');
+    expect(line.text).toContain('exit_code=0');
+    expect(line.text).toContain('duration_ms=200');
     expect(line.text).not.toContain('deadbeef');
     expect(line.tone).toBe('ok');
     expect(line.problem).toBe(false);
+  });
+
+  it('A265 detail 走白名单：内容型字段（命令原文/SQL/路径/参数）绝不拼进正文', () => {
+    const line = logLineFromAudit(
+      audit('l-10', 'sandbox.exec', '2026-10-17T12:00:10', {
+        command_preview: 'cat /workspace/customer_pii.csv',
+        command_sha256: 'a'.repeat(64),
+        sql: 'SELECT id_card FROM guests',
+        query: 'hunter2',
+        path: '/etc/cds/db.dsn',
+        params: { inline: 'plain-secret' },
+        error: 'connection refused at 10.20.30.40:5432/cds',
+        timeout_seconds: 30,
+        exit_code: 0,
+      }),
+    );
+    expect(line.text).not.toContain('customer_pii');
+    expect(line.text).not.toContain('SELECT');
+    expect(line.text).not.toContain('hunter2');
+    expect(line.text).not.toContain('db.dsn');
+    expect(line.text).not.toContain('plain-secret');
+    expect(line.text).not.toContain('10.20.30.40');
+    // 展示字段照常可见，隐藏的东西必须说出来（不静默当成「detail 是空的」）
+    expect(line.text).toContain('exit_code=0');
+    expect(line.text).toContain('timeout_seconds=30');
+    expect(line.text).toMatch(/未展示/);
+  });
+
+  it('A265 全字段都被隐藏时仍写清「有内容但没展示」，不是只剩动作名', () => {
+    const line = logLineFromAudit(audit('l-11', 'sandbox.exec', '2026-10-17T12:00:11', { command_preview: 'ls -l' }));
+    expect(line.text).not.toContain('ls -l');
+    expect(line.text).toMatch(/未展示/);
   });
 
   it('退出码非 0 是 error 且计入「问题」页签；未登记的动作名原样透出', () => {
@@ -223,6 +257,19 @@ describe('审计流 → 日志正文与执行态（图 1 §3.3）', () => {
     expect(runStatusView({ ok: false, at: null, durationMs: 900, blocked: false }, null).text).toBe('执行失败 · 0.9s');
     expect(runStatusView({ ok: true, at: null, durationMs: null, blocked: true }, null).text).toBe('输出被阻断 · 耗时未记录');
     expect(lastExecutionFromLogs([audit('l-9', 'sandbox.create', '2026-10-17T08:00:00Z')])).toBeNull();
+  });
+
+  it('A267 created_at 缺失/不可解析的执行绝不排到「最近一次」前面', () => {
+    const timed = audit('l-20', 'sandbox.execute', '2026-10-17T08:00:00Z', { exit_code: 0, duration_ms: 100 });
+    const noTime = audit('l-21', 'sandbox.execute', undefined as unknown as string, { exit_code: 3, duration_ms: 200 });
+    const garbage = audit('l-22', 'sandbox.execute', '刚刚', { exit_code: 4, duration_ms: 300 });
+    // 无时间行排在哪一档都不该赢过一条带真时间的行
+    expect(lastExecutionFromLogs([timed, noTime])).toMatchObject({ ok: true, at: '2026-10-17T08:00:00Z' });
+    expect(lastExecutionFromLogs([noTime, timed])).toMatchObject({ at: '2026-10-17T08:00:00Z' });
+    expect(lastExecutionFromLogs([timed, garbage])).toMatchObject({ at: '2026-10-17T08:00:00Z' });
+    // 一条时间都没有时仍然如实报这条执行（at=null → 界面写「时间未记录」），但不编时间
+    expect(lastExecutionFromLogs([noTime])).toEqual({ ok: false, at: null, durationMs: 200, blocked: false });
+    expect(runStatusView(lastExecutionFromLogs([noTime]), null).hint).toContain('时间未记录');
   });
 
   it('没有后端记录时用本页真实回调兜底；回调也没结果就写「结果未记录」', () => {

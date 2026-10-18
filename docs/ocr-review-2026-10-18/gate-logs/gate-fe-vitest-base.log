@@ -1,0 +1,40 @@
+
+⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯
+Error: Failed to load custom Reporter from basic
+    at loadCustomReporterModule (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:11346:9)
+    at file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:11362:23
+    ... 3 lines matching cause stack trace ...
+    at _createServer (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/chunks/node.js:26440:84)
+    at createViteServer (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:8819:17)
+    at createVitest (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:14205:18)
+    at prepareVitest (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:14572:14)
+    at startVitest (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:14515:14) {
+  [cause]: Error: Failed to load url basic (resolved id: basic). Does the file exist?
+      at reviveInvokeError (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:546:14)
+      at Object.invoke (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:562:33)
+      at ServerModuleRunner.getModuleInformation (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:1199:7)
+      at ServerModuleRunner.import (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:1119:23)
+      at loadCustomReporterModule (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:11344:26)
+      at file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:11362:23
+      at async Promise.all (index 0)
+      at Vitest._setServer (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:13161:138)
+      at BasicMinimalPluginContext.handler (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:14175:5)
+      at _createServer (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/chunks/node.js:26440:84) {
+    code: 'ERR_LOAD_URL',
+    runnerError: Error: RunnerError
+        at reviveInvokeError (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:547:64)
+        at Object.invoke (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:562:33)
+        at ServerModuleRunner.getModuleInformation (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:1199:7)
+        at ServerModuleRunner.import (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/module-runner.js:1119:23)
+        at loadCustomReporterModule (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:11344:26)
+        at file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:11362:23
+        at async Promise.all (index 0)
+        at Vitest._setServer (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:13161:138)
+        at BasicMinimalPluginContext.handler (file:///D:/workspace/sandbox/cds-frontend/node_modules/vitest/dist/chunks/cli-api.BfdDOPPI.js:14175:5)
+        at _createServer (file:///D:/workspace/sandbox/cds-frontend/node_modules/vite/dist/node/chunks/node.js:26440:84)
+  }
+}
+
+
+
+VITEST_RC=1

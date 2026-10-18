@@ -37,8 +37,21 @@ export default function ResourceList() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => dataResourceApi.delete(id),
-    onSuccess: () => {
-      message.success('删除成功');
+    onSuccess: (result) => {
+      // A312：200 只意味着“这条记录没了”。密文对象与 DEK 是否真的销毁，响应体
+      // 逐字段如实回了（storage_service.delete 会回 False，KMS 销毁也会失败）：
+      // 有残留就不能报「删除成功」，那等于告诉数商数据已经清干净了。
+      if (!result?.deleted) {
+        message.error('删除失败');
+      } else if (!result.storage_deleted || !result.key_destroyed) {
+        const leftover = [
+          !result.storage_deleted && '密文对象',
+          !result.key_destroyed && '数据加密密钥',
+        ].filter(Boolean).join('、');
+        message.warning(`资源记录已删除，但${leftover}未能删除，请联系管理员处理`, 6);
+      } else {
+        message.success('删除成功');
+      }
       queryClient.invalidateQueries({ queryKey: ['data-resources'] });
     },
     onError: () => message.error('删除失败'),

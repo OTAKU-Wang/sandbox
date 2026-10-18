@@ -1,0 +1,8 @@
+..............                                                           [100%]
+============================== warnings summary ===============================
+tests/test_frontend_api_contract.py::test_frontend_calls_resolve_to_real_routes
+  C:\Users\«Âè™\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID proxy_api_jupyter__path__post for function proxy at D:\workspace\sandbox\app\api\jupyter_proxy.py
+    warnings.warn(message, stacklevel=1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+14 passed, 1 warning in 5.75s

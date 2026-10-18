@@ -268,15 +268,20 @@ def create_hsm_adapter() -> HSMAdapter:
                 )
             else:
                 logger.info("Vault configured but unreachable")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            f"Vault HSM probe raised ({e.__class__.__name__}: {e}) — evaluating software fallback"
+        )
 
-    fallback_allowed = True
+    fallback_allowed = False
     try:
         from app.core.config import get_settings as _gs
         fallback_allowed = bool(_gs().HSM_SOFTWARE_FALLBACK_ALLOWED)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(
+            f"Cannot read HSM_SOFTWARE_FALLBACK_ALLOWED ({e.__class__.__name__}: {e}) — "
+            "treating software fallback as disallowed (fail-closed)"
+        )
     if not fallback_allowed:
         raise RuntimeError(
             "HSM/Vault unavailable and HSM_SOFTWARE_FALLBACK_ALLOWED=false — "

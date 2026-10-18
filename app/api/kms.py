@@ -4,13 +4,14 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.deps import get_current_user, verify_service_token
-from app.models.user import User
+from app.core.deps import require_roles, verify_service_token
+from app.core.errors import CDSError
+from app.models.user import User, UserRole
 from app.models.kms import DataEncryptionKey, DEKStatus, KeyAuditLog
 from app.models.volume_key import VolumeKey, VolumeKeyStatus
 from app.schemas.high_risk_operation import HighRiskOperationRequest
@@ -48,6 +49,17 @@ def _volume_cipher_label(declared: str | None) -> str:
     return declared[:32]
 
 
+def _wrapped_key_bytes(key_id: str) -> bytes | None:
+    """KEK-wrapped DEK blob, or None when nothing durable exists for this key.
+
+    The blob is the only representation that may leave the process, and it is the
+    only thing boot recovery can reload — so it doubles as the durability gate:
+    ``None`` means this key cannot outlive the request and must not be persisted as
+    an ACTIVE row (OCR-A161).
+    """
+    return kms_service.export_wrapped(key_id)
+
+
 def _wrapped_key_hex(key_id: str) -> str | None:
     """Return the KEK-wrapped DEK blob as hex for persistence.
 
@@ -56,26 +68,57 @@ def _wrapped_key_hex(key_id: str) -> str | None:
     representation. Fixes the previous behaviour where ``encrypted_key``
     stored the raw DEK plaintext at rest.
     """
-    wrapped = kms_service.export_wrapped(key_id)
+    wrapped = _wrapped_key_bytes(key_id)
     return wrapped.hex() if wrapped is not None else None
+
+
+def _undurable_key_error(key_id: str) -> CDSError:
+    """Fail-closed error for a DEK whose wrapped blob could not be produced.
+
+    Writing an ACTIVE row without the blob is exactly the "静默只存 key_id" failure
+    of OCR-A161: the create succeeds, every byte later encrypted under the key_id is
+    doomed, and the operator finds out only when a download raises. Refuse instead.
+    """
+    return CDSError(
+        "密管服务产不出可持久化的 KEK-wrapped 密钥块，DEK 未创建："
+        "落一行无块的 ACTIVE 记录等于把后续密文判为永久不可解",
+        code="KMS_UNAVAILABLE", http_status=503,
+        detail={"reason": "wrapped key blob unavailable", "key_id": key_id},
+    )
 
 
 @router.post("/keys", status_code=status.HTTP_201_CREATED)
 async def create_dek(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.ADMIN)),
 ):
-    """Create a new Data Encryption Key for a product."""
+    """Create a new Data Encryption Key for a product.
+
+    OCR-A13: DEK custody is a platform key-management operation. It used to hang on
+    ``get_current_user`` alone, so any logged-in buyer or data provider could mint
+    platform DEKs for arbitrary product ids; the shipped console only reaches this
+    through the identity-management page (operator/admin).
+    """
     # Generate DEK (wrapped with KEK inside kms_service)
     result = kms_service.generate_data_key(str(product_id))
     key_id = result["key_id"]
+    wrapped = _wrapped_key_bytes(key_id)
+    if wrapped is None:
+        kms_service.destroy_key(key_id)
+        raise _undurable_key_error(key_id)
 
     # Store DEK metadata — persist the KEK-wrapped blob, never the plaintext key
     dek = DataEncryptionKey(
         key_id=key_id,
         product_id=product_id,
-        encrypted_key=_wrapped_key_hex(key_id),
+        encrypted_key=wrapped.hex(),
+        # OCR-A161: ``wrapped_payload`` is the ONLY column kms_recovery reads at
+        # boot. An ACTIVE row without it survives the restart while the key does
+        # not — which is precisely how at-rest ciphertext becomes permanently
+        # unreadable, with the write path still reporting 201.
+        wrapped_payload=wrapped,
+        sm2_encrypted_payload=kms_service.export_sm2_ciphertext(key_id),
         status=DEKStatus.ACTIVE.value,
     )
     db.add(dek)
@@ -91,6 +134,7 @@ async def create_dek(
 
     await db.flush()
     await db.refresh(dek)
+    kms_service.mark_persisted(key_id)
 
     await audit_service.log(
         db, action="kms.create_key", resource_type="key",
@@ -105,24 +149,51 @@ async def create_dek(
 async def list_deks(
     product_id: uuid.UUID | None = None,
     status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.ADMIN)),
 ):
-    """List DEKs, optionally filtered by product or status."""
-    query = select(DataEncryptionKey)
-    if product_id:
-        query = query.where(DataEncryptionKey.product_id == product_id)
-    if status_filter:
-        query = query.where(DataEncryptionKey.status == status_filter)
+    """List DEK metadata (canonical envelope: {items, total, limit, offset}).
 
-    result = await db.execute(query)
+    OCR-A13: the platform key ledger is not readable by every logged-in account, and
+    it must not dump the whole table either — the window is bounded and ``total``
+    makes any truncation visible instead of silently short.
+    OCR-A271 (backend half): each item carries the real ``algorithm`` / ``key_type``
+    and the ``persisted`` verdict, so no client has to invent a value for a field
+    that simply was not sent.
+    """
+    conditions = []
+    if product_id:
+        conditions.append(DataEncryptionKey.product_id == product_id)
+    if status_filter:
+        conditions.append(DataEncryptionKey.status == status_filter)
+
+    total = (await db.execute(
+        select(func.count(DataEncryptionKey.id)).where(*conditions)
+    )).scalar_one()
+
+    result = await db.execute(
+        select(DataEncryptionKey).where(*conditions)
+        .order_by(DataEncryptionKey.created_at.desc())
+        .limit(limit).offset(offset)
+    )
     keys = result.scalars().all()
     return {
         "items": [
-            {"key_id": k.key_id, "product_id": str(k.product_id), "status": k.status,
-             "key_version": k.key_version, "usage_count": k.usage_count, "max_usage": k.max_usage}
+            {"key_id": k.key_id, "product_id": str(k.product_id) if k.product_id else None,
+             "key_type": k.key_type, "algorithm": k.algorithm, "status": k.status,
+             "key_version": k.key_version, "usage_count": k.usage_count, "max_usage": k.max_usage,
+             "created_at": k.created_at.isoformat() if k.created_at else None,
+             "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+             # OCR-A161: can this key still be recovered after a restart? Ground
+             # truth is the persisted blob, never the in-memory store.
+             "persisted": k.wrapped_payload is not None}
             for k in keys
-        ]
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -130,18 +201,24 @@ async def list_deks(
 async def get_dek(
     key_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.ADMIN)),
 ):
-    """Get DEK details (metadata only, not key material)."""
+    """Get DEK details (metadata only, not key material).
+
+    OCR-A13: version/usage/algorithm/expiry of a platform key is not something any
+    logged-in account may read for an arbitrary key_id.
+    """
     result = await db.execute(select(DataEncryptionKey).where(DataEncryptionKey.key_id == key_id))
     dek = result.scalar_one_or_none()
     if not dek:
         raise HTTPException(status_code=404, detail="Key not found")
     return {
-        "key_id": dek.key_id, "product_id": str(dek.product_id), "status": dek.status,
+        "key_id": dek.key_id, "product_id": str(dek.product_id) if dek.product_id else None,
+        "key_type": dek.key_type, "status": dek.status,
         "key_version": dek.key_version, "algorithm": dek.algorithm,
         "usage_count": dek.usage_count, "max_usage": dek.max_usage,
         "created_at": dek.created_at.isoformat(),
+        "persisted": dek.wrapped_payload is not None,
     }
 
 
@@ -149,7 +226,7 @@ async def get_dek(
 async def rotate_dek(
     key_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.ADMIN)),
 ):
     """Rotate a DEK — create new version and mark old as rotated."""
     result = await db.execute(select(DataEncryptionKey).where(DataEncryptionKey.key_id == key_id))
@@ -162,13 +239,21 @@ async def rotate_dek(
     # Generate new DEK
     new_result = kms_service.generate_data_key(str(dek.product_id))
     new_key_id = new_result["key_id"]
+    # OCR-A161 fail-closed, and it must happen BEFORE the old key is touched: an
+    # un-persistable new version may not rotate away the one key that still works.
+    new_wrapped = _wrapped_key_bytes(new_key_id)
+    if new_wrapped is None:
+        kms_service.destroy_key(new_key_id)
+        raise _undurable_key_error(new_key_id)
 
     # Create new version
     new_dek = DataEncryptionKey(
         key_id=new_key_id,
         product_id=dek.product_id,
         key_version=dek.key_version + 1,
-        encrypted_key=_wrapped_key_hex(new_key_id),
+        encrypted_key=new_wrapped.hex(),
+        wrapped_payload=new_wrapped,  # OCR-A161: see create_dek
+        sm2_encrypted_payload=kms_service.export_sm2_ciphertext(new_key_id),
         status=DEKStatus.ACTIVE.value,
     )
     db.add(new_dek)
@@ -187,6 +272,7 @@ async def rotate_dek(
     db.add(audit)
 
     await db.flush()
+    kms_service.mark_persisted(new_key_id)
 
     return {"old_key_id": key_id, "new_key_id": new_key_id, "status": "rotated"}
 
@@ -196,9 +282,13 @@ async def revoke_dek(
     key_id: str,
     body: HighRiskOperationRequest = Body(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.ADMIN)),
 ):
-    """Revoke a DEK — marks as revoked, terminates active sessions, data becomes inaccessible."""
+    """Revoke a DEK — marks as revoked, terminates active sessions, data becomes inaccessible.
+
+    OCR-A13: destructive by construction (it drags down every session using the key),
+    so it cannot sit behind a bare "is logged in" check.
+    """
     result = await db.execute(select(DataEncryptionKey).where(DataEncryptionKey.key_id == key_id))
     dek = result.scalar_one_or_none()
     if not dek:
@@ -241,9 +331,11 @@ async def get_key_audit(
     operation: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(
+        UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN,
+    )),
 ):
-    """Get key audit logs."""
+    """Get key audit logs (supervision surface: operator / regulator / admin)."""
     query = select(KeyAuditLog)
     if key_id:
         query = query.where(KeyAuditLog.key_id == key_id)

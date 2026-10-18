@@ -1,0 +1,360 @@
+.....................................................................FFF [ 71%]
+.FFF.F....................F.F                                            [100%]
+================================== FAILURES ===================================
+____________________________ test_bwrap_provision _____________________________
+
+    def test_bwrap_provision():
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-sandbox")
+        session_id = str(uuid.uuid4())
+>       result = adapter.provision(session_id, "", timeout=60)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+__________________________ test_bwrap_execute_python __________________________
+
+    @pytest.mark.asyncio
+    async def test_bwrap_execute_python():
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-sandbox")
+        session_id = str(uuid.uuid4())
+>       prov = adapter.provision(session_id, "", timeout=60)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:102: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+__________________________ test_bwrap_execute_shell ___________________________
+
+    @pytest.mark.asyncio
+    async def test_bwrap_execute_shell():
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-sandbox")
+        session_id = str(uuid.uuid4())
+>       prov = adapter.provision(session_id, "", timeout=60)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:118: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_________________________ test_bwrap_execute_timeout __________________________
+
+    @pytest.mark.asyncio
+    async def test_bwrap_execute_timeout():
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-sandbox")
+        session_id = str(uuid.uuid4())
+>       prov = adapter.provision(session_id, "", timeout=60)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+____________________________ test_bwrap_terminate _____________________________
+
+    def test_bwrap_terminate():
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-sandbox")
+        session_id = str(uuid.uuid4())
+>       prov = adapter.provision(session_id, "", timeout=60)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_______________________ test_bwrap_execute_no_workspace _______________________
+
+    @pytest.mark.asyncio
+    async def test_bwrap_execute_no_workspace():
+        adapter = BwrapAdapter(workspace_root="/tmp/cds-test-sandbox")
+>       result = await adapter.execute("bwrap-nonexistent", "print(1)", "python")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:973: in execute
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+__________________ test_sandbox_runtime_provision_and_status __________________
+
+    def test_sandbox_runtime_provision_and_status():
+        runtime = SandboxRuntime()
+        session_id = uuid.uuid4()
+>       result = runtime.provision(session_id, SandboxLevel.L3.value, "", timeout=60)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:186: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:2217: in provision
+    return adapter.provision(str(session_id), data_path, timeout, user_id=user_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\sandbox_runtime.py:921: in provision
+    from app.services.sandbox_security import (
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+___________ test_l0_process_adapter_fails_closed_when_bwrap_missing ___________
+
+tmp_path = WindowsPath('C:/Users/Çåª/AppData/Local/Temp/pytest-of-Çåª/pytest-115/test_l0_process_adapter_fails_0')
+
+    @pytest.mark.asyncio
+    async def test_l0_process_adapter_fails_closed_when_bwrap_missing(tmp_path):
+        from app.services.sandbox_runtime import ProcessAdapter
+    
+        adapter = ProcessAdapter(workspace_root=str(tmp_path / "l0"))
+        adapter._bwrap_available = False
+        prov = adapter.provision("no-bwrap", "", timeout=60)
+    
+>       result = await adapter.execute(prov["container_id"], "print(1)", "python")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sandbox_runtime.py:778: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\sandbox_runtime.py:312: in execute
+    from app.services.sandbox_security import OutputLimiter
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Sandbox Security Hardening ¡ª production-grade isolation for L3 bwrap.
+    
+    Implements defense-in-depth:
+    1. Namespace isolation (user, PID, mount, network, UTS, IPC)
+    2. Cgroup resource limits (CPU, memory, PID count, file size)
+    3. Seccomp syscall filter
+    4. Read-only root filesystem with minimal writable mounts
+    5. No /proc, /sys, /dev access beyond minimum
+    6. Session key injection via environment (never written to disk)
+    7. Output size limits to prevent data exfiltration via large outputs
+    8. Dynamic timeout enforcement
+    """
+    import ctypes
+    import ctypes.util
+    import os
+    import json
+    import logging
+>   import resource
+E   ModuleNotFoundError: No module named 'resource'
+
+app\services\sandbox_security.py:18: ModuleNotFoundError
+_____________________ test_secure_destroy_full_lifecycle ______________________
+
+    @pytest.mark.asyncio
+    async def test_secure_destroy_full_lifecycle():
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from app.models.sandbox_session import SessionStatus
+    
+        runtime = SandboxRuntime()
+        mock_db = AsyncMock()
+    
+        session = MagicMock()
+        session.id = uuid.uuid4()
+        session.container_id = f"bwrap-{uuid.uuid4()}"
+        session.session_key_id = "key-123"
+        session.user_id = uuid.uuid4()
+    
+        session_result = MagicMock()
+        session_result.scalar_one_or_none.return_value = session
+    
+        key_meta = MagicMock()
+        key_result = MagicMock()
+        key_result.scalar_one_or_none.return_value = key_meta
+    
+        tasks_result = MagicMock()
+        tasks_result.scalars.return_value.all.return_value = []
+    
+        call_count = 0
+        async def mock_execute(query):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return session_result
+            elif call_count == 2:
+                return key_result
+            else:
+                return tasks_result
+    
+        mock_db.execute = mock_execute
+    
+        with patch("app.services.kms_service.kms_service") as mock_kms, \
+             patch("app.services.audit_service.audit_service") as mock_audit:
+            mock_kms.destroy_key = MagicMock()
+            mock_audit.log = AsyncMock()
+    
+            report = await runtime.secure_destroy(session.id, mock_db, "test")
+>           assert report.container_destroyed is True
+E           assert False is True
+E            +  where False = <app.services.sandbox_runtime.DestructionReport object at 0x0000013467F463C0>.container_destroyed
+
+tests\test_sandbox_runtime.py:844: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.services.sandbox_runtime:sandbox_runtime.py:2456 Container destruction failed: No module named 'resource'
+=========================== short test summary info ===========================
+FAILED tests/test_sandbox_runtime.py::test_bwrap_provision - ModuleNotFoundEr...
+FAILED tests/test_sandbox_runtime.py::test_bwrap_execute_python - ModuleNotFo...
+FAILED tests/test_sandbox_runtime.py::test_bwrap_execute_shell - ModuleNotFou...
+FAILED tests/test_sandbox_runtime.py::test_bwrap_execute_timeout - ModuleNotF...
+FAILED tests/test_sandbox_runtime.py::test_bwrap_terminate - ModuleNotFoundEr...
+FAILED tests/test_sandbox_runtime.py::test_bwrap_execute_no_workspace - Modul...
+FAILED tests/test_sandbox_runtime.py::test_sandbox_runtime_provision_and_status
+FAILED tests/test_sandbox_runtime.py::test_l0_process_adapter_fails_closed_when_bwrap_missing
+FAILED tests/test_sandbox_runtime.py::test_secure_destroy_full_lifecycle - as...
+9 failed, 92 passed in 38.57s
+BASEA184_RC=1

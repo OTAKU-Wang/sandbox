@@ -1,0 +1,280 @@
+     1	// SS-18 M2「我的开发 > 任务列表」：任务 = 开发笔记本（notebook），本页是它的卡片读视图。
+     2	//
+     3	// 诚实口径（项目铁律 honest degradation / 禁伪造）：
+     4	// · 后端未下发的字段一律渲染「未记录」，不补示例值、不编统计数；
+     5	// · 存量行（无 task_no / 无任务内存）是列表里正常的一张卡，默认不隐藏；
+     6	// · 列表接口只支持 contract_id / status 服务端过滤，关键词与任务级字段只在已载入的这一页里筛，
+     7	//   页面必须把这层范围说清楚，不自称全量检索。
+     8	// 「新增开发任务」是整页 `/flow/tasks/new`（图 2-2 四卡），建完由服务端回显任务编号。
+     9	import { Button, Card, Col, Input, Pagination, Row, Select, Space, Tag, Tooltip, Typography } from 'antd';
+    10	import { useQuery } from '@tanstack/react-query';
+    11	import { type ReactNode, useMemo, useState } from 'react';
+    12	import { useNavigate } from 'react-router-dom';
+    13	import {
+    14	  ApiOutlined,
+    15	  BugOutlined,
+    16	  CalendarOutlined,
+    17	  CodeOutlined,
+    18	  ExperimentOutlined,
+    19	  FileTextOutlined,
+    20	  PlayCircleOutlined,
+    21	  PlusOutlined,
+    22	  SearchOutlined,
+    23	} from '@ant-design/icons';
+    24	import {
+    25	  TASK_DEBUG_METHOD_OPTIONS,
+    26	  flowApi,
+    27	} from '../../services/flow';
+    28	import { CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+    29	import { RuntimeStatusBanner } from './RuntimeStatusBanner';
+    30	import {
+    31	  DEV_TASK_STATE_OPTIONS,
+    32	  EMPTY_DEV_TASK_FILTERS,
+    33	  devTaskCreateHref,
+    34	  activeDevTaskFilterLabels,
+    35	  buildDevTaskCards,
+    36	  devTaskEmptyDescription,
+    37	  filterDevTaskCards,
+    38	} from './devTasksModel';
+    39	import type { DevTaskCard, DevTaskFilters, DevTaskStateFilter } from './devTasksModel';
+    40	
+    41	const { Text, Title } = Typography;
+    42	
+    43	// 后端 page_size 上限 100（notebooks.py::list_notebooks）；超出部分如实告知，不假装已全部载入。
+    44	const DEV_TASK_PAGE_SIZE = 100;
+    45	
+    46	/** 图 2-1 卡左上角标：按任务真实调试方法推导（禁伪造：没登记方法就给中性灰档，不编彩色图标）。 */
+    47	const DEBUG_ICON: Record<string, { cls: string; icon: ReactNode }> = {
+    48	  web_ide: { cls: 'is-blue', icon: <CodeOutlined /> },
+    49	  local_plugin: { cls: 'is-green', icon: <ApiOutlined /> },
+    50	  jupyter: { cls: 'is-purple', icon: <ExperimentOutlined /> },
+    51	};
+    52	
+    53	/** 图 2-1 卡三带：图标方块 + 名称/裸任务编号 + 状态胶囊 / 带小图标的规格两行 / 三钮。 */
+    54	function DevTaskCardView({ card }: { card: DevTaskCard }) {
+    55	  const navigate = useNavigate();
+    56	  const ico = DEBUG_ICON[card.debug_method ?? ''] ?? { cls: 'is-gray', icon: <FileTextOutlined /> };
+    57	  // 胶囊配色照图：进行中=绿底绿字+环形进度图标，已结束=灰底灰字+减号圆（state_bucket 同口径）。
+    58	  const ended = card.state_bucket === 'ended';
+    59	  // 可执行时就是个普通站内跳转；不可执行时才包 Tooltip 说真原因（无已发布生产版本 / 未关联合约）。
+    60	  const execButton = (
+    61	    <Button className="cds-btn-outline-blue" icon={<PlayCircleOutlined />} disabled={!!card.exec_disabled_reason} onClick={() => navigate(card.exec_path)}>
+    62	      执行
+    63	    </Button>
+    64	  );
+    65	  return (
+    66	    <div className="cds-task-card">
+    67	      <div className="cds-task-card-head">
+    68	        <span className={`cds-task-ico ${ico.cls}`}>{ico.icon}</span>
+    69	        <div className="cds-task-card-titles">
+    70	          <Tooltip title={card.title}>
+    71	            <div className="cds-task-card-title">{card.title}</div>
+    72	          </Tooltip>
+    73	        </div>
+    74	        <span className={`cds-state-chip ${ended ? 'is-gray' : 'is-green'}`}>
+    75	          <span className="cds-state-dot" />
+    76	          {card.state.label}
+    77	        </span>
+    78	      </div>
+    79	
+    80	      <dl className="cds-task-card-specs">
+    81	        <div className="cds-spec-row">
+    82	          <dt><CodeOutlined /> 模型调试方法</dt>
+    83	          <dd><Tag className="cds-tag-plain">{card.debug_method_text}</Tag></dd>
+    84	        </div>
+    85	        <div className="cds-spec-row">
+    86	          <dt><CalendarOutlined /> 创建时间</dt>
+    87	          <dd>{card.created_text}</dd>
+    88	        </div>
+    89	      </dl>
+    90	
+    91	      <div className="cds-task-card-foot">
+    92	        <Button type="primary" icon={<BugOutlined />} onClick={() => navigate(card.workbench_path)}>
+    93	          调试
+    94	        </Button>
+    95	        {card.exec_disabled_reason ? (
+    96	          // 禁用态的 button 不吃鼠标事件，按 antd 文档包一层 span，Tooltip 才说得出真原因。
+    97	          // 包层必须 flex-basis:0px + min-width:0：0% basis 会被 Chromium 拿内容最小宽钉住（实测 82px）。
+    98	          <Tooltip title={card.exec_disabled_reason}>
+    99	            <span className="cds-foot-tip-wrap">{execButton}</span>
+   100	          </Tooltip>
+   101	        ) : (
+   102	          execButton
+   103	        )}
+   104	        <Button icon={<FileTextOutlined />} onClick={() => navigate(card.detail_path)}>
+   105	          详情
+   106	        </Button>
+   107	      </div>
+   108	    </div>
+   109	  );
+   110	}
+   111	
+   112	/** 图 2-1 筛选带：每个条件左侧一个灰字标签（原型逐项给出）。 */
+   113	function FilterField({ label, children }: { label: string; children: ReactNode }) {
+   114	  return (
+   115	    <div className="cds-filter-field">
+   116	      <span className="cds-filter-label">{label}</span>
+   117	      {children}
+   118	    </div>
+   119	  );
+   120	}
+   121	
+   122	export default function FlowDevTasks() {
+   123	  const navigate = useNavigate();
+   124	  const [filters, setFilters] = useState<DevTaskFilters>(EMPTY_DEV_TASK_FILTERS);
+   125	  const goCreate = () => navigate(devTaskCreateHref(filters.contract_id));
+   126	  const [pager, setPager] = useState({ page: 1, pageSize: 10 });
+   127	
+   128	  const notebooksQuery = useQuery({
+   129	    queryKey: ['flow', 'dev-tasks', 'notebooks'],
+   130	    queryFn: () => flowApi.listNotebooks({ page: 1, page_size: DEV_TASK_PAGE_SIZE }),
+   131	  });
+   132	  const workloadsQuery = useQuery({
+   133	    queryKey: ['flow', 'dev-tasks', 'workloads'],
+   134	    queryFn: () => flowApi.listWorkloads({ page: 1, page_size: DEV_TASK_PAGE_SIZE }),
+   135	  });
+   136	
+   137	  const notebooks = useMemo(() => notebooksQuery.data?.items ?? [], [notebooksQuery.data]);
+   138	  const workloads = useMemo(() => workloadsQuery.data?.items ?? [], [workloadsQuery.data]);
+   139	
+   140	  const cards = useMemo(() => buildDevTaskCards(notebooks, workloads), [notebooks, workloads]);
+   141	  const visibleCards = useMemo(() => filterDevTaskCards(cards, filters), [cards, filters]);
+   142	  // 图 2-1 底部「共 N 条 / 10条/页 / 前往 X 页」分页带：在已载入范围内切页（口径写在页头）。
+   143	  const pageCount = Math.max(1, Math.ceil(visibleCards.length / pager.pageSize));
+   144	  const page = Math.min(pager.page, pageCount);
+   145	  const pageCards = useMemo(
+   146	    () => visibleCards.slice((page - 1) * pager.pageSize, page * pager.pageSize),
+   147	    [visibleCards, page, pager.pageSize],
+   148	  );
+   149	
+   150	  const activeFilters = activeDevTaskFilterLabels(filters);
+   151	  const total = notebooksQuery.data?.total ?? 0;
+   152	  const patchFilters = (patch: Partial<DevTaskFilters>) => setFilters((previous) => ({ ...previous, ...patch }));
+   153	  const refetchAll = () => {
+   154	    void notebooksQuery.refetch();
+   155	    void workloadsQuery.refetch();
+   156	  };
+   157	
+   158	  if (notebooksQuery.isPending) return <CenteredLoading tip="加载我的开发" />;
+   159	  if (notebooksQuery.isError || !notebooksQuery.data) {
+   160	    return <QueryErrorAlert error={notebooksQuery.error} message="我的开发加载失败" onRetry={refetchAll} />;
+   161	  }
+   162	
+   163	  return (
+   164	    <div>
+   165	      <div className="cds-page-toolbar">
+   166	        <div>
+   167	          <Title level={4} style={{ margin: 0 }}>我的开发</Title>
+   168	          <Text type="secondary">
+   169	            集中管理数据沙箱开发任务，支持模型调试、任务执行与详情查看
+   170	          </Text>
+   171	          {/* PNG 2-1 的页头只有「标题 + 一句灰字」（标题带 y163..207、卡 h94）；把计数从这一行拿掉才不拆行。
+   172	             诚实披露不丢：只有「确实被分页上限截断」时才多出一行点名（原型没这个场景），
+   173	             正常路径与图逐字一致。 */}
+   174	          {total > cards.length && (
+   175	            <div>
+   176	              <Text type="secondary" style={{ fontSize: 12 }}>
+   177	                共 {total} 个开发任务，本页已载入 {cards.length} 个（后端分页上限 {DEV_TASK_PAGE_SIZE} 条，其余未载入）；筛选只作用于已载入的这些。
+   178	              </Text>
+   179	            </div>
+   180	          )}
+   181	        </div>
+   182	        <Space>
+   183	          {/* 图 2-1 页头只有一个「创建任务」钮（像素簇 135×40 → large 档，4-1 同判据）；刷新不占页头。 */}
+   184	          <Button size="large" type="primary" icon={<PlusOutlined />} onClick={goCreate}>
+   185	            创建任务
+   186	          </Button>
+   187	        </Space>
+   188	      </div>
+   189	
+   190	      <RuntimeStatusBanner />
+   191	
+   192	      <Card size="small" style={{ marginBottom: 16 }}>
+   193	        {/* 图 2-1 筛选带就四项：任务名称 / 任务状态 / 调试方法 / 重置+查询。 */}
+   194	        <Row gutter={[12, 12]} align="middle">
+   195	          <Col xs={24} sm={12} md={8}>
+   196	            <FilterField label="任务名称">
+   197	              {/* 真值输入框 238 宽、无清空按钮；maxWidth 兜住窄视口，不让固定宽撑出横向溢出。 */}
+   198	              <Input
+   199	                placeholder="请输入任务名称"
+   200	                style={{ width: 238, maxWidth: '100%', flex: 'none' }}
+   201	                value={filters.keyword}
+   202	                onChange={(event) => patchFilters({ keyword: event.target.value })}
+   203	              />
+   204	            </FilterField>
+   205	          </Col>
+   206	          <Col xs={12} sm={8} md={5}>
+   207	            <FilterField label="任务状态">
+   208	              <Select
+   209	                allowClear
+   210	                className="cds-filter-state"
+   211	                style={{ width: 148, maxWidth: '100%', flex: 'none' }}
+   212	                placeholder="全部"
+   213	                value={filters.state ?? undefined}
+   214	                onChange={(value?: DevTaskStateFilter) => patchFilters({ state: value ?? null })}
+   215	                options={DEV_TASK_STATE_OPTIONS.map(({ label, value }) => ({ label, value }))}
+   216	              />
+   217	            </FilterField>
+   218	          </Col>
+   219	          <Col xs={12} sm={8} md={5}>
+   220	            <FilterField label="调试方法">
+   221	              <Select
+   222	                allowClear
+   223	                style={{ width: 148, maxWidth: '100%', flex: 'none' }}
+   224	                placeholder="全部"
+   225	                value={filters.debug_method ?? undefined}
+   226	                onChange={(value?: string) => patchFilters({ debug_method: value ?? null })}
+   227	                options={TASK_DEBUG_METHOD_OPTIONS.map(({ label, value }) => ({ label, value }))}
+   228	              />
+   229	            </FilterField>
+   230	          </Col>
+   231	          <Col>
+   232	            <Space size={8}>
+   233	              {/* PRD §3.2.1 筛选栏的「重置」：清空全部筛选条件回默认口径，不重发请求。 */}
+   234	              <Button onClick={() => setFilters(EMPTY_DEV_TASK_FILTERS)}>重置</Button>
+   235	              <Tooltip title="筛选即时生效；这里再向后端拉取一次列表。">
+   236	                <Button type="primary" icon={<SearchOutlined />} onClick={refetchAll}>查询</Button>
+   237	              </Tooltip>
+   238	            </Space>
+   239	          </Col>
+   240	        </Row>
+   241	      </Card>
+   242	
+   243	      {/* strict-2-1.md §2/§5：卡栅格直接坐在页面底色上（3×2，卡 380×218），分页是独立一条
+   244	         244,800,1172,64；因此这里既不再套「开发任务」包装卡，也不在卡上挂「当前显示 x / y 个」。 */}
+   245	      {visibleCards.length === 0 ? (
+   246	        <Card size="small">
+   247	          <EmptyState
+   248	            description={devTaskEmptyDescription(filters, cards.length)}
+   249	            action={activeFilters.length > 0 ? (
+   250	              <Button onClick={() => setFilters(EMPTY_DEV_TASK_FILTERS)}>清空筛选</Button>
+   251	            ) : (
+   252	              <Button type="primary" onClick={goCreate}>新增开发任务</Button>
+   253	            )}
+   254	          />
+   255	        </Card>
+   256	      ) : (
+   257	        <>
+   258	          <div className="cds-task-grid">
+   259	            {pageCards.map((card) => (
+   260	              <DevTaskCardView key={card.key} card={card} />
+   261	            ))}
+   262	          </div>
+   263	          <div className="cds-task-pager-band">
+   264	            <Pagination
+   265	              className="cds-task-pager"
+   266	              size="small"
+   267	              current={page}
+   268	              pageSize={pager.pageSize}
+   269	              total={visibleCards.length}
+   270	              showSizeChanger
+   271	              showQuickJumper
+   272	              showTotal={(value) => `共 ${value} 条`}
+   273	              onChange={(next, size) => setPager({ page: next, pageSize: size })}
+   274	            />
+   275	          </div>
+   276	        </>
+   277	      )}
+   278	    </div>
+   279	  );
+   280	}

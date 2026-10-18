@@ -52,20 +52,21 @@ async function loadConnectors() {
         let active = 0;
         $('#connectors-table').innerHTML = list.map(c => {
             if (c.status === 'active') active++;
+            const actionLabel = c.status === 'suspended' ? '恢复' : '暂停';
             return `<tr>
-                <td>${c.space_name || c.name || '-'}</td>
-                <td>${c.space_type || c.connector_type || '-'}</td>
+                <td>${esc(c.space_name || c.name || '-')}</td>
+                <td>${esc(c.space_type || c.connector_type || '-')}</td>
                 <td>${statusBadge(c.status || 'active')}</td>
                 <td>${formatDate(c.updated_at || c.created_at)}</td>
                 <td>
-                    <button class="btn btn-sm btn-primary" onclick="suspendConnector('${c.id}')">${c.status === 'suspended' ? '恢复' : '暂停'}</button>
+                    <button class="btn btn-sm btn-primary" onclick="suspendConnector('${escAttr(c.id)}')">${actionLabel}</button>
                 </td>
             </tr>`;
         }).join('');
         $('#total-connectors').textContent = list.length;
         $('#active-connectors').textContent = active;
     } catch (e) {
-        $('#connectors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${e.message}</td></tr>`;
+        $('#connectors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${esc(e.message)}</td></tr>`;
     }
 }
 

@@ -1,0 +1,50 @@
+(node:16312) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:7696) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11212) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11212) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.8 D:/workspace/sandbox/cds-frontend
+
+(node:27028) ExperimentalWarning: Support for loading ES Module in require() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/services/__tests__/authApi.test.ts (2 tests | 2 failed) 8ms
+     × 死代码 signData 已删除，其余端点原样在位（防止顺手删多了） 5ms
+     × services/ 全层没有任何请求把私钥放进上行 body 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/authApi.test.ts > authApi 不再把 SM2 私钥发给后端（A258） > 死代码 signData 已删除，其余端点原样在位（防止顺手删多了）
+AssertionError: expected [ Array(6) ] to not include 'signData'
+ ❯ src/services/__tests__/authApi.test.ts:27:38
+     25| describe('authApi 不再把 SM2 私钥发给后端（A258）', () => {
+     26|   it('死代码 signData 已删除，其余端点原样在位（防止顺手删多了）', () => {
+     27|     expect(Object.keys(authApi)).not.toContain('signData');
+       |                                      ^
+     28|     for (const kept of ['login', 'register', 'refresh', 'getMe', 'gene…
+     29|       expect(typeof (authApi as Record<string, unknown>)[kept]).toBe('…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/services/__tests__/authApi.test.ts > authApi 不再把 SM2 私钥发给后端（A258） > services/ 全层没有任何请求把私钥放进上行 body
+TypeError: The URL must be of scheme file
+ ❯ SERVICE_FILES src/services/__tests__/authApi.test.ts:13:24
+     11|
+     12| const SERVICE_FILES = async (): Promise<Array<{ name: string; source: …
+     13|   const names = (await readdir(new URL('../', import.meta.url))).filte…
+       |                        ^
+     14|   return Promise.all(
+     15|     names.map(async (name) => ({
+ ❯ src/services/__tests__/authApi.test.ts:35:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  23:07:12
+   Duration  2.54s (transform 203ms, setup 222ms, import 370ms, tests 8ms, environment 1.63s)
+

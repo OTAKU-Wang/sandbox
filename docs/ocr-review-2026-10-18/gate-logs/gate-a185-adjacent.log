@@ -1,0 +1,49 @@
+
+=================================== ERRORS ====================================
+________________ ERROR collecting tests/test_pz01_sft_real.py _________________
+ImportError while importing test module 'D:\workspace\sandbox\tests\test_pz01_sft_real.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_pz01_sft_real.py:26: in <module>
+    import torch
+E   ModuleNotFoundError: No module named 'torch'
+__________ ERROR collecting tests/test_sandbox_security_hardening.py __________
+ImportError while importing test module 'D:\workspace\sandbox\tests\test_sandbox_security_hardening.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_sandbox_security_hardening.py:10: in <module>
+    from app.services.sandbox_security import build_bwrap_args, SandboxSecurityConfig
+app\services\sandbox_security.py:18: in <module>
+    import resource
+E   ModuleNotFoundError: No module named 'resource'
+_____________ ERROR collecting tests/test_workspace_encryption.py _____________
+ImportError while importing test module 'D:\workspace\sandbox\tests\test_workspace_encryption.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_workspace_encryption.py:6: in <module>
+    from app.services.sandbox_security import (
+app\services\sandbox_security.py:18: in <module>
+    import resource
+E   ModuleNotFoundError: No module named 'resource'
+============================== warnings summary ===============================
+C:\Users\Çåª\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\sqlalchemy\ext\asyncio\session.py:1744
+  C:\Users\Çåª\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\sqlalchemy\ext\asyncio\session.py:1744: PytestCollectionWarning: cannot collect 'test_session_factory' because it is not a function.
+    def __call__(self, **local_kw: Any) -> _AS:
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/test_pz01_sft_real.py
+ERROR tests/test_sandbox_security_hardening.py
+ERROR tests/test_workspace_encryption.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!
+2 skipped, 3169 deselected, 1 warning, 3 errors in 3.09s
+RC=2

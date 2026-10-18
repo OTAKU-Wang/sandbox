@@ -12,13 +12,16 @@ spec ss-13 §2.2（TEE 作为正交属性）+ §四 RT-03：
 用法：
   tee_probe.py [--json] [--capabilities-file PATH]
 
-  --json               stdout 输出完整 JSON（probe 结果）
+  --json               完整 probe JSON 输出到 stderr；stdout 恒为单行 tee=...（机器
+                       消费者读 stderr；preflight 抓的正是 stdout 的 tee= 单行，
+                       改流向会连带打断预检，故文档向实现看齐）
   --capabilities-file  将 {"tee": ...} 合并写入节点 capabilities JSON
                        （SS-10 既暂存位：节点 capabilities 随 bring-up 上报；
                        既有键保留，仅 upsert "tee"；文件缺失则新建）
   默认 stdout：单行 tee=<tdx|sev_snp|none>（供 preflight/verify/runbook 抓取）
 
-退出码：0 = 探测完成（无论结果值）；1 = 参数错误。
+退出码：0 = 探测完成（无论结果值；写 capabilities 失败仅 stderr 告警，不改退出码）；
+  2 = 参数错误（argparse 约定 exit 2，文档旧值 1 与实现不符已订正）。
 """
 from __future__ import annotations
 
@@ -59,6 +62,16 @@ def probe(
     """
     spec = providers or PROVIDERS
     order = ("tdx", "sev_snp")  # spec ss-13 §2.2：先 tdx 后 sev_snp
+    # 归一判断只用字符串：Windows 下 Path("/").is_absolute() 为 False（无盘符的
+    # drive-relative）、str(Path("/")) 又是 "\"——用 Path 判 "/" 会在 Windows 上
+    # 把默认根误判成相对路径（本机门当场爆炸）
+    dev_root = os.fspath(device_root).replace("\\", "/")
+    isolated = dev_root.rstrip("/") != ""
+    if isolated and not os.path.isabs(dev_root):
+        # T5：相对 device_root 让探测结果随 cwd 漂移——fail-fast 拒绝，
+        # 不拿漂动的答案上报节点能力
+        raise ValueError(f"device_root 必须为绝对路径: {device_root!r}")
+    root = Path(dev_root if isolated else "/")
     evidence_map: dict[str, list[str]] = {}
     result = "none"
     for name in order:
@@ -68,13 +81,22 @@ def probe(
         evidence: list[str] = []
         for dev in p.get("devices", ()):
             # 注意：Path.joinpath 遇绝对路径会丢弃根，须剥前导 / 后拼接
-            cands = [Path(device_root) / dev.lstrip("/") if device_root != "/" else Path(dev)]
+            cands = [root / dev.lstrip("/") if isolated else Path(dev)]
             for c in cands:
                 if exists(str(c)):
                     evidence.append(f"device:{dev}")
                     break
         for cmd in p.get("commands", ()):
-            found = which(cmd)
+            if isolated:
+                # T4：非 "/" 时命令也只在 <root>/bin 内找——与设备侧「不兼探真实
+                # /dev」对称：否则宿主机真装的 tdx-attest/snpguest 会把 mock/
+                # fixture 场景探成「有真硬件」（伪造硬件信号，铁律禁止）。
+                # 不走 shutil.which：Windows 下它按 PATHEXT 找 <cmd>.exe，mock 的
+                # 无扩展名 shell 垫片会凭空失踪；直接探 <root>/bin/<cmd> 可执行位
+                cand = root / "bin" / cmd
+                found = str(cand) if os.access(str(cand), os.X_OK) else None
+            else:
+                found = which(cmd)
             if found:
                 evidence.append(f"command:{found}")
         evidence_map[name] = evidence
@@ -93,6 +115,10 @@ def write_capabilities(path: str | Path, result: dict) -> Path:
             loaded = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 doc = loaded
+            else:
+                # 合法 JSON 但顶层非 dict（数组/标量）：与损坏同等对待——直接
+                # 覆盖会把既有节点能力键无声丢掉；recovered 标记让丢失可归因
+                doc = {"_capabilities_file_recovered_from_corrupt": True}
         except (ValueError, OSError):
             doc = {"_capabilities_file_recovered_from_corrupt": True}
     doc["tee"] = result["tee"]
@@ -104,7 +130,11 @@ def write_capabilities(path: str | Path, result: dict) -> Path:
         ]
     doc["tee_probed_at"] = datetime.now(timezone.utc).isoformat()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # 原子替换（tmp + os.replace）：中途失败（ENOSPC/断电）不得留下半截 JSON 把
+    # 其它能力键一起带走；残留的 .tmp 无害，下次写直接覆盖
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, p)
     return p
 
 

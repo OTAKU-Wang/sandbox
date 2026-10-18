@@ -1,8 +1,10 @@
 """Notebook service — 在线 Notebook 文档模型与沙箱内 kernel 执行桥（SS-15）。
 
 执行只有一条策略通路：单元格代码经 app.api.sandbox_sessions.execute_in_sandbox
-（静态扫描 -> KMS 注入 -> 场景运行时 -> 输出 DLP -> 审计），本模块不自行调用 runtime，
-因此 Notebook 不可能成为输出策略的旁路。
+（静态扫描 -> KMS 注入 -> 场景运行时 -> 输出 DLP -> 审计），本模块不自行调用 runtime。
+但会话级输出 DLP 看到的那一层是 base64 信封密文（A111）：run_cell 解开信封后必须对
+解码出的明文（stdout / stderr / repr）再过一次同一套输出策略，否则 Notebook 就是
+输出策略的旁路。
 
 执行后端如实披露（项目铁律：禁伪造）：
 - "cds_kernel"    沙箱内常驻 kernel，跨单元格保留变量状态
@@ -417,7 +419,88 @@ def split_trusted_driver(script: str) -> dict[str, str] | None:
     return {"code": code, "cell_id": str(payload.get("id") or "")}
 
 
-async def run_cell(executor: Executioner, code: str, *, cell_id: str | None = None, prefer_kernel: bool = True) -> dict[str, Any]:
+OUTPUT_DLP_FIELDS = ("stdout", "stderr", "repr")
+OUTPUT_BLOCKED_REASON = "output_inspection_blocked"
+
+
+def _withhold_cell_outputs(result: dict[str, Any], reason: str = OUTPUT_BLOCKED_REASON) -> dict[str, Any]:
+    """整格撤下输出：只清空一半等于把上下文泄一半。
+
+    只动输出字段；backend / stateful / degraded_reason / kernel_error 这些如实披露
+    一律保留（拦截不得顺手抹掉降级事实）。
+    """
+    for field in OUTPUT_DLP_FIELDS:
+        result[field] = ""
+    result["output_blocked"] = True
+    result["blocked_reason"] = reason
+    return result
+
+
+def _inspect_decoded_output(
+    result: dict[str, Any],
+    *,
+    user_id: str = "",
+    session_id: str = "",
+    sandbox_mode: str = "develop",
+) -> dict[str, Any]:
+    """对解码后的单元格真实输出走一次输出策略（A111）。
+
+    会话级检查发生在 execute_in_sandbox 里，那时输出还封在 CDS_CELL_B64:: 信封里，
+    DLP 匹到的是密文；明文随后被原样写进 notebook 文档并回给前端。这里补上对明文
+    的检查，口径与会话级完全一致：命中阻断级 ⇒ 整格输出撤下并如实标记 output_blocked；
+    未阻断 ⇒ 逐字段落 redacted 版（DLP 脱敏 + 零宽水印）。
+    """
+    from app.core.metrics import record_output_inspection
+    from app.services.output_security import (
+        inspect_text_output,
+        inspection_to_report,
+        should_block,
+    )
+
+    reports: dict[str, Any] = {}
+    blocked = False
+    for field in OUTPUT_DLP_FIELDS:
+        text = result.get(field)
+        if not isinstance(text, str) or not text:
+            continue
+        inspection = inspect_text_output(
+            text, user_id=user_id, session_id=session_id, sandbox_mode=sandbox_mode,
+        )
+        reports[field] = inspection_to_report(inspection)
+        if should_block(inspection):
+            blocked = True
+            record_output_inspection("blocked")
+            continue
+        redacted = inspection.redacted_output or ""
+        record_output_inspection("redacted" if redacted != text else "passed")
+        result[field] = redacted
+    if blocked:
+        return _withhold_cell_outputs(result)
+    if reports:
+        # 把审查摘要附在结果里（_clean 不对外回显，留给调用方审计）。
+        result["output_inspection"] = {
+            field: {key: report.get(key) for key in ("passed", "blocked", "findings_count", "severities")}
+            for field, report in reports.items()
+        }
+    return result
+
+
+async def run_cell(
+    executor: Executioner,
+    code: str,
+    *,
+    cell_id: str | None = None,
+    prefer_kernel: bool = True,
+    user_id: str = "",
+    session_id: str = "",
+    sandbox_mode: str = "develop",
+) -> dict[str, Any]:
+    """跑一个单元格，并把解码后的真实输出送过输出 DLP。
+
+    user_id / session_id 只用于输出策略的归属（水印与审计关联）；缺省时
+    inspect_text_output 自己退到 unknown-user/unknown-session，审查本身照跑。
+    sandbox_mode 默认 develop：Notebook 属于开发型沙箱场景。
+    """
     if not code or not code.strip():
         return {"ok": True, "backend": "cds_kernel" if prefer_kernel else "cds_stateless", "stdout": "", "stderr": "", "repr": "", "exit_code": 0, "skipped_empty": True}
     if prefer_kernel:
@@ -437,12 +520,17 @@ async def run_cell(executor: Executioner, code: str, *, cell_id: str | None = No
                 # kernel 应答了，但跨单元格常驻未被证实：照实降级，不因 backend=cds_kernel 就当有状态。
                 result["degraded_reason"] = KERNEL_NOT_RESIDENT_REASON
             if raw.get("output_blocked"):
-                result["output_blocked"] = True
-                result["blocked_reason"] = raw.get("blocked_reason", "output_inspection_blocked")
+                # 会话级已判拦截：解出来的明文必须一起撕下，不能只打个标记。
+                _withhold_cell_outputs(result, str(raw.get("blocked_reason") or OUTPUT_BLOCKED_REASON))
+            else:
+                # A111：会话级 DLP 检的是信封密文，明文在这里必须再过一次同样的策略。
+                _inspect_decoded_output(
+                    result, user_id=user_id, session_id=session_id, sandbox_mode=sandbox_mode,
+                )
             return result
         if raw.get("output_blocked"):
             return {"ok": False, "backend": "cds_kernel", "stdout": "", "stderr": "", "exit_code": -2, "stateful": False,
-                    "output_blocked": True, "blocked_reason": raw.get("blocked_reason", "output_inspection_blocked")}
+                    "output_blocked": True, "blocked_reason": raw.get("blocked_reason", OUTPUT_BLOCKED_REASON)}
         if envelope:
             stateless = await run_stateless(executor, code)
             stateless["kernel_error"] = str(envelope.get("kernel_error") or "")[:2000]

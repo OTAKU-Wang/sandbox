@@ -1,0 +1,106 @@
+FFFF.FF.                                                                 [100%]
+================================== FAILURES ===================================
+______________ test_id_card_in_cell_stdout_is_blocked_end_to_end ______________
+
+    async def test_id_card_in_cell_stdout_is_blocked_end_to_end():
+        """\u7aef\u5230\u7aef\uff1a\u5355\u5143\u683c\u91cc\u6253\u5370\u8eab\u4efd\u8bc1\u53f7 \u21d2 \u8f93\u51fa\u88ab\u62e6\uff0c\u4e14\u4e00\u4e2a\u5b57\u90fd\u4e0d\u8fdb notebook \u6587\u6863\u3002"""
+        executor = _executor(_kernel_output(stdout=f"客户身份证 {ID_CARD}\n"))
+    
+        result = await nb.run_cell(executor, "print(customer_id)", cell_id="c1")
+    
+>       assert result["output_blocked"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'output_blocked'
+
+tests\test_notebook_output_dlp.py:56: KeyError
+_______________________ test_secret_in_repr_is_blocked ________________________
+
+    async def test_secret_in_repr_is_blocked():
+        """execute_result（repr）也是输出：命中同样整格撤下。"""
+        executor = _executor(_kernel_output(repr_=f"'{ID_CARD}'"))
+    
+        result = await nb.run_cell(executor, "customer_id_card", cell_id="c1")
+    
+>       assert result["output_blocked"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'output_blocked'
+
+tests\test_notebook_output_dlp.py:72: KeyError
+______________________ test_secret_in_stderr_is_blocked _______________________
+
+    async def test_secret_in_stderr_is_blocked():
+        executor = _executor(_kernel_output(stderr=f"ValueError: bad id {ID_CARD}"))
+    
+        result = await nb.run_cell(executor, "boom()", cell_id="c1")
+    
+>       assert result["output_blocked"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'output_blocked'
+
+tests\test_notebook_output_dlp.py:81: KeyError
+_________ test_dlp_sees_the_decoded_plaintext_not_the_base64_envelope _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000204536CE090>
+
+    async def test_dlp_sees_the_decoded_plaintext_not_the_base64_envelope(monkeypatch):
+        """修复前 DLP 只看得到信封密文：钉住「检的是明文」这件事本身。"""
+        import app.services.output_security as output_security
+    
+        seen: list[str] = []
+        real = output_security.inspect_text_output
+    
+        def spy(output, **kwargs):
+            seen.append(output)
+            return real(output, **kwargs)
+    
+        monkeypatch.setattr(output_security, "inspect_text_output", spy)
+        executor = _executor(_kernel_output(stdout=f"联系 {PHONE}\n"))
+    
+        result = await nb.run_cell(executor, "print(contact)", cell_id="c1")
+    
+>       assert f"联系 {PHONE}\n" in seen, "DLP never saw the decoded cell output"
+E       AssertionError: DLP never saw the decoded cell output
+E       assert '联系 13800138000\n' in []
+
+tests\test_notebook_output_dlp.py:101: AssertionError
+_____________ test_outer_dlp_block_clears_the_decoded_output_too ______________
+
+    async def test_outer_dlp_block_clears_the_decoded_output_too():
+        """会话级已判拦截时，解码出的明文也必须一起撤下（旧代码只打个标记）。"""
+        executor = _executor(
+            _kernel_output(stdout=f"身份证 {ID_CARD}"),
+            output_blocked=True,
+            blocked_reason="output_inspection_blocked",
+        )
+    
+        result = await nb.run_cell(executor, "print(customer_id)", cell_id="c1")
+    
+        assert result["output_blocked"] is True
+>       assert result["stdout"] == ""
+E       AssertionError: assert '身份证 110105199001011234' == ''
+E         
+E         + 身份证 110105199001011234
+
+tests\test_notebook_output_dlp.py:132: AssertionError
+_________ test_kernel_error_is_still_reported_when_output_is_blocked __________
+
+    async def test_kernel_error_is_still_reported_when_output_is_blocked():
+        """拦截只撤下输出，不得顺手把后端的降级/错误披露也抹掉。"""
+        executor = _executor(_kernel_output(stdout=f"{ID_CARD}\n", kernel_error="kernel exec failed: x"))
+    
+        result = await nb.run_cell(executor, "print(x)", cell_id="c1")
+    
+>       assert result["output_blocked"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'output_blocked'
+
+tests\test_notebook_output_dlp.py:142: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_notebook_output_dlp.py::test_id_card_in_cell_stdout_is_blocked_end_to_end
+FAILED tests/test_notebook_output_dlp.py::test_secret_in_repr_is_blocked - Ke...
+FAILED tests/test_notebook_output_dlp.py::test_secret_in_stderr_is_blocked - ...
+FAILED tests/test_notebook_output_dlp.py::test_dlp_sees_the_decoded_plaintext_not_the_base64_envelope
+FAILED tests/test_notebook_output_dlp.py::test_outer_dlp_block_clears_the_decoded_output_too
+FAILED tests/test_notebook_output_dlp.py::test_kernel_error_is_still_reported_when_output_is_blocked
+6 failed, 2 passed in 2.46s
+RC=1
