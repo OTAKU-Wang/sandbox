@@ -12,6 +12,11 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // 实例默认头里的 application/json 会顶掉浏览器为 multipart 自动生成的 boundary，
+  // FastAPI 解不出 file 部件 → 上传实测 422（数据上传那一屏因此走不完）。
+  if (config.data instanceof FormData) {
+    config.headers.delete('Content-Type');
+  }
   return config;
 });
 

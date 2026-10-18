@@ -54,6 +54,8 @@ export interface Contract {
   max_output_rows: number;
   allowed_output_formats: string | null;
   inspection_rule_set: Record<string, unknown> | null;
+  /** 合约已批准的沙箱规格；memory_mb 是任务内存的硬上限（后端 _memory_ceiling 同一来源）。 */
+  sandbox_resource_spec?: Record<string, unknown> | null;
   provider_signed_at: string | null;
   buyer_signed_at: string | null;
   provider_signature: string | null;

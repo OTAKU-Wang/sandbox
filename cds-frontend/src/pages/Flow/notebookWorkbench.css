@@ -1,0 +1,331 @@
+/* SS-23 /notebooks「调试环境」外框专用样式（原型图 1 · 2-3）。
+   只服务 NotebookWorkbench 这一页；全局样式在 src/index.css，本文件不碰它。
+   类名统一 nbw- 前缀，避免与 .cds-* 全局类相互影响。 */
+
+.nbw-root {
+  --nbw-border: #eceff4;
+  --nbw-muted: #8c8c8c;
+  --nbw-ink: #1f2937;
+  --nbw-blue: #1b6ef3;
+  --nbw-green: #2e9e5b;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---------- 标题卡（图 1 §2：标题 + 副标题 + 仅 1 个按钮，卡内无状态徽标） ---------- */
+.nbw-titlecard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #fff;
+  border: 1px solid var(--nbw-border);
+  border-radius: 8px;
+  padding: 14px 20px;
+  /* PNG 2-3：页头卡 y138..231（h93）。antd reset 已开 border-box，
+     直接锁 min-height=93（含 1px 边框），实测由 h72 → h93。 */
+  min-height: 93px;
+  box-sizing: border-box;
+}
+.nbw-titlecard-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--nbw-ink);
+  line-height: 1.4;
+}
+.nbw-titlecard-sub {
+  font-size: 12px;
+  color: var(--nbw-muted);
+  margin-top: 2px;
+}
+
+/* ---------- 两栏：左 250 固定 + 右栏吃满，左右等高 ---------- */
+.nbw-columns {
+  display: flex;
+  align-items: stretch;
+  gap: 24px;
+  height: calc(100vh - 250px);
+  min-height: 700px;
+}
+.nbw-left {
+  flex: 0 0 250px;
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--nbw-border);
+  border-radius: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+.nbw-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.nbw-card {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--nbw-border);
+  border-radius: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+.nbw-card-grow { flex: 1 1 auto; }
+.nbw-card-fixed { flex: 0 0 auto; height: 320px; }
+
+.nbw-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--nbw-border);
+  flex: 0 0 auto;
+}
+.nbw-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nbw-ink);
+}
+.nbw-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+/* ---------- 左栏文件树（行距 44、勾选框 + 文件图标 + 名称） ---------- */
+.nbw-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  min-width: 0;
+  padding-right: 8px;
+  border-radius: 4px;
+}
+.nbw-file-row:hover { background: #f7f9fc; }
+.nbw-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--nbw-ink);
+}
+.nbw-folder-toggle {
+  width: 18px;
+  min-width: 18px;
+  padding: 0;
+  height: 18px;
+  line-height: 1;
+  color: #8c8c8c;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.nbw-tree-error {
+  padding: 0 8px 6px 30px;
+  font-size: 12px;
+  color: #c0392b;
+}
+
+.nbw-panel-foot {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--nbw-border);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--nbw-muted);
+  line-height: 1.7;
+}
+.nbw-panel-foot-action {
+  margin-top: 2px;
+}
+
+/* ---------- 编辑器卡片头 ---------- */
+.nbw-editor-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--nbw-ink);
+  cursor: pointer;
+}
+.nbw-editor-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--nbw-muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+.nbw-saved-ok { color: var(--nbw-green); }
+.nbw-lang-pick {
+  color: var(--nbw-blue);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* ---------- 工具条（左 5 项纯文字菜单 / 右 3 项） ---------- */
+.nbw-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--nbw-border);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.nbw-toolbar-left { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.nbw-toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nbw-menu-label {
+  color: #4b5563;
+  font-size: 13px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.nbw-menu-label:hover { background: #f2f6fd; color: var(--nbw-blue); }
+.nbw-tool-item {
+  font-size: 12px;
+  color: #66707f;
+  white-space: nowrap;
+}
+.nbw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.nbw-chip-ok { color: var(--nbw-green); background: #f0f9f2; }
+.nbw-chip-warn { color: #ad6800; background: #fff7e6; }
+.nbw-chip-off { color: #8c8c8c; background: #f5f5f5; }
+.nbw-chip-unknown { color: #8c8c8c; background: #f5f5f5; }
+
+/* ---------- 代码区 ---------- */
+.nbw-code-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- 编辑器底部状态条 ---------- */
+.nbw-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #fafafa;
+  border-top: 1px solid var(--nbw-border);
+  padding: 5px 16px;
+  font-size: 12px;
+  color: #66707f;
+  flex: 0 0 auto;
+}
+.nbw-statusbar-group { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+/* ---------- 输出/日志卡片 ---------- */
+.nbw-tabbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--nbw-border);
+  flex: 0 0 auto;
+}
+.nbw-tabs { display: flex; align-items: center; gap: 20px; }
+.nbw-tab {
+  background: transparent;
+  border: 0;
+  padding: 11px 0 9px;
+  font-size: 13px;
+  color: var(--nbw-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.nbw-tab[aria-selected='true'] {
+  color: var(--nbw-blue);
+  border-bottom-color: var(--nbw-blue);
+  font-weight: 500;
+}
+.nbw-tab-actions { display: flex; align-items: center; gap: 8px; }
+.nbw-run-status { font-size: 12px; white-space: nowrap; }
+.nbw-run-ok { color: var(--nbw-green); }
+.nbw-run-error { color: #cf1322; }
+.nbw-run-warn { color: #ad6800; }
+.nbw-run-idle { color: var(--nbw-muted); }
+.nbw-icon-btn {
+  border: 0;
+  background: transparent;
+  color: #7b8ba3;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.nbw-icon-btn:hover:not(:disabled) { background: #eef3fa; color: #4a6a94; }
+.nbw-icon-btn:disabled { color: #c4c9d1; cursor: not-allowed; }
+
+.nbw-log {
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.nbw-log-line { display: flex; gap: 8px; }
+.nbw-log-clock { color: #98a2b3; flex: 0 0 auto; }
+.nbw-log-text { min-width: 0; }
+.nbw-log-ok .nbw-log-text { color: var(--nbw-green); }
+.nbw-log-warn .nbw-log-text { color: #ad6800; }
+.nbw-log-error .nbw-log-text { color: #cf1322; }
+
+.nbw-output-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--nbw-border);
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--nbw-muted);
+  flex: 0 0 auto;
+}
+
+.nbw-cell-block {
+  border: 1px solid #dfe6ee;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.nbw-cell-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #fafbfd;
+  border-bottom: 1px solid #eef1f6;
+}

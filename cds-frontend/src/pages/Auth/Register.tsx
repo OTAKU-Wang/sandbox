@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Form, Input, Button, Card, Typography, Select, message, Space, Tag } from 'antd';
+import { Form, Input, Button, Card, Typography, message, Space, Tag } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined, BankOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { authApi } from '../../services/authApi';
-import { SELF_REGISTER_ROLE_OPTIONS } from '../../utils/roles';
 
 const { Title, Text } = Typography;
 
@@ -13,7 +12,7 @@ export default function Register() {
   const login = useAuthStore((s) => s.login);
   const [loading, setLoading] = useState(false);
 
-  const onFinish = async (values: { username: string; email: string; password: string; role: string; organization?: string }) => {
+  const onFinish = async (values: { username: string; email: string; password: string; organization?: string }) => {
     setLoading(true);
     try {
       const resp = await authApi.register(values);
@@ -34,7 +33,7 @@ export default function Register() {
   return (
     <div className="cds-auth-shell">
       <section className="cds-auth-info">
-        <div className="cds-auth-brandmark">CDS</div>
+        <img className="cds-auth-logo" src="/logo.svg" alt="密态沙箱系统" />
         <div>
           <Title level={1}>可信数据空间</Title>
           <Text>Confidential Data Sandbox</Text>
@@ -45,8 +44,8 @@ export default function Register() {
           <Tag color="green">审计存证</Tag>
         </Space>
         <div className="cds-auth-status">
-          <span>自助角色</span>
-          <strong>数商 / 买方</strong>
+          <span>注册角色</span>
+          <strong>默认买方（数商等角色由管理员指派）</strong>
         </div>
       </section>
 
@@ -71,12 +70,8 @@ export default function Register() {
             <Form.Item name="password" label="密码" rules={[{ required: true, min: 8, message: '密码至少8位' }]}>
               <Input.Password prefix={<LockOutlined />} placeholder="密码" />
             </Form.Item>
-            <Form.Item name="role" label="角色" rules={[{ required: true, message: '请选择角色' }]}>
-              <Select
-                placeholder="选择角色"
-                options={SELF_REGISTER_ROLE_OPTIONS}
-              />
-            </Form.Item>
+            {/* PZ-10：角色不再自助选择（后端只收省略/admin，选数商或买方必 422）——
+                注册后默认买方，其余角色由管理员在用户管理页高风险指派。 */}
             <Form.Item name="organization" label="组织名称">
               <Input prefix={<BankOutlined />} placeholder="组织名称（可选）" />
             </Form.Item>

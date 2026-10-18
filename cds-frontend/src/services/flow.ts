@@ -38,6 +38,55 @@ export const NOTEBOOK_BACKENDS = {
 } as const;
 export type NotebookExecutionBackend = typeof NOTEBOOK_BACKENDS[keyof typeof NOTEBOOK_BACKENDS];
 
+// ---------- 开发任务字段（SS-18 §3 / §8 P0-①，后端 app/models/notebook.py 同名字符串枚举） ----------
+
+/** 诚实缺省位：后端没下发的字段一律渲染成这个，不用示例值、不用 0 充数（禁伪造铁律）。 */
+export const UNKNOWN_TEXT = '未记录';
+
+/** 首页（原型 A-1）的两个默认量：趋势 7 天窗口与两张表的「最近 5 条」（后端 recent_limit 上限 20）。 */
+export const HOME_TREND_DAYS = 7;
+export const HOME_RECENT_ROWS = 5;
+
+/**
+ * 任务调试方法。与后端 TaskDebugMethod 逐字对齐（只登记有真实后端语义的三项）：
+ * 原型第 4 项无后端语义，不登记也不伪造（宁缺不造）。
+ */
+export const TaskDebugMethod = {
+  WebIde: 'web_ide',
+  LocalPlugin: 'local_plugin',
+  Jupyter: 'jupyter',
+} as const;
+export type TaskDebugMethod = typeof TaskDebugMethod[keyof typeof TaskDebugMethod];
+
+export const TASK_DEBUG_METHOD_OPTIONS: { label: string; value: TaskDebugMethod; hint: string }[] = [
+  { label: 'Web IDE 在线调试', value: TaskDebugMethod.WebIde, hint: '本工作台的在线 Notebook 页面，单元格直连沙箱内核' },
+  { label: '本地 IDE 插件', value: TaskDebugMethod.LocalPlugin, hint: '本地开发工具经平台开放接口通道调试' },
+  { label: '原生 Jupyter', value: TaskDebugMethod.Jupyter, hint: '导入导出 .ipynb 文档开发，需沙箱内确实部署 Jupyter 服务' },
+];
+
+/**
+ * 任务级成果导出方式：选的是成果离开开发环的通道，与合约的 DeliveryMethod 白名单不同层。
+ * 原型的「结果推送」在任务级没有对应取值（它属于合约交付白名单），因此不提供该选项。
+ */
+export const TaskExportMode = {
+  Bundle: 'bundle',
+  OpenApi: 'openapi',
+} as const;
+export type TaskExportMode = typeof TaskExportMode[keyof typeof TaskExportMode];
+
+export const TASK_EXPORT_MODE_OPTIONS: { label: string; value: TaskExportMode; hint: string }[] = [
+  { label: '成果集打包导出', value: TaskExportMode.Bundle, hint: '产物进成果包，经成果交付中心审查后交付' },
+  { label: '在线 API 导出', value: TaskExportMode.OpenApi, hint: '发布为 /open/v1/{slug} 在线端供调用' },
+];
+
+// 任务内存档位（GiB，UI 说 GiB、库里存 MB）：与后端 notebooks.py 的 MEMORY_MIN_MB /
+// DEBUG_MEMORY_MAX_MB / EXEC_MEMORY_MAX_MB 同一口径；前端只把提示与前置校验写到这里一份。
+export const TASK_MEMORY_LIMITS = {
+  debug: { min_gib: 2, max_gib: 32, step: 1, precision: 0, label: '调试内存' },
+  exec: { min_gib: 2, max_gib: 64, step: 1, precision: 0, label: '执行内存' },
+} as const;
+export type TaskMemoryKind = keyof typeof TASK_MEMORY_LIMITS;
+
 export const WorkloadStatus = {
   Draft: 'draft',
   Testing: 'testing',
@@ -169,6 +218,16 @@ export interface Notebook {
   last_executed_at: string | null;
   created_at: string;
   updated_at: string;
+  // 以以下五项是 SS-18 P0-① 的开发者任务字段；**存量行全为 null**（迁移只加列不回填业务编号），
+  // 后端未下发时同样当「未记录」处理，不得进筛选默认项。
+  task_no?: string | null;
+  debug_method?: string | null;
+  export_mode?: string | null;
+  debug_memory_mb?: number | null;
+  exec_memory_mb?: number | null;
+  description?: string | null;
+  /** null = 未限定（注入合约授权的全部供数）；数组 = 只注入这些**数据资源** id（[] = 不注入）。 */
+  data_resource_ids?: string[] | null;
 }
 
 export interface NotebookCreatePayload {
@@ -177,6 +236,15 @@ export interface NotebookCreatePayload {
   contract_id?: string | null;
   session_id?: string | null;
   content?: string;
+  language?: string;
+  // 任务级字段：task_no **不在此列**——编号由服务端按当日序号生成，客户端不送也不改。
+  debug_method?: TaskDebugMethod | null;
+  export_mode?: TaskExportMode | null;
+  debug_memory_mb?: number | null;
+  exec_memory_mb?: number | null;
+  description?: string | null;
+  // 图 2-2「已选择数据」：送的是数据资源 id；服务端校在合约授权集内，越权整单 422。
+  data_resource_ids?: string[] | null;
 }
 
 export interface NotebookUpdatePayload {
@@ -185,8 +253,14 @@ export interface NotebookUpdatePayload {
   session_id?: string | null;
 }
 
+/**
+ * 列表只支持服务端过滤 contract_id / status（notebooks.py::list_notebooks）。
+ * 关键词与任务级字段（调试方法/导出方式）没有服务端参数，因此只在已载入的一页内筛（见
+ * pages/Flow/devTasksModel.ts），并如实告诉用户“只筛已载入的 N 条”，不自称全量检索。
+ */
 export interface NotebookListParams {
   contract_id?: string | null;
+  status?: string;
   page?: number;
   page_size?: number;
 }
@@ -228,11 +302,36 @@ export interface NotebookRunResult {
   passed: boolean;
 }
 
+export interface JupyterDevEnv {
+  available: boolean;
+  sandbox_level: string | null;
+  microvm: boolean;
+  reason: string | null;
+}
+
 export interface JupyterStatus {
   jupyter_available: boolean;
   jupyter_path: string | null;
+  // 探测链本身失败时后端给的原因（例：会话密钥分发失败）——与「未安装」是两回事。
+  probe_error?: string | null;
   proxy_enabled: boolean;
   url: string | null;
+  // 开发环（反代后的 JupyterLab）可用性与真实隔离等级：后端不说，前端就不给入口。
+  dev_env?: JupyterDevEnv | null;
+  session_id?: string | null;
+  /** 该笔记当前记录的执行后端（后端 jupyter_status 一并下发，与 NotebookOut.execution_backend 同值）。 */
+  notebook_execution_backend?: string | null;
+}
+
+export interface JupyterEnvTicket {
+  url: string;
+  ttl: number;
+  sandbox_level: string | null;
+  session_id: string;
+  notebook_path: string;
+  injected: string[];
+  /** 供数为何没进来（后端原话）。空数组 = 本合约确实没有已就绪资源。 */
+  inject_errors?: string[];
 }
 
 // ---------- Workloads ----------
@@ -322,6 +421,10 @@ export interface ComputeRun {
   output_rows: number | null;
   output_files: string[] | null;
   error_message: string | null;
+  // 后端 ComputeRunOut 带下列字段；旧用例与老返回可能不含，故全部可缺，缺失处渲染「未记录」。
+  workload_id?: string | null;
+  attempt?: number | null;
+  resource_usage?: Record<string, unknown> | null;
   // 后端在 run 详情里可能附带执行日志；仅在字段存在时渲染，不做缺省伪造。
   output?: string | null;
 }
@@ -430,13 +533,20 @@ export interface ApiEndpoint {
   quota_total: number | null;
   status: string;
   created_at?: string | null;
+  /** 后端 _endpoint_dict 下发的 /open/v1/{slug}，不由前端拼接。 */
+  path?: string | null;
+  published_at?: string | null;
+  /** 端点表尚无描述列：后端下发才展示，否则列表记「未记录」。 */
+  description?: string | null;
 }
 
 export interface ApiEndpointCreatePayload {
   contract_id: string;
   workload_id?: string | null;
   name: string;
-  slug: string;
+  /** 省略时后端按名称生成 slug，前端不再自己拼一个。 */
+  slug?: string;
+  description?: string | null;
   request_schema?: Record<string, unknown> | null;
   rate_limit_per_minute?: number | null;
   quota_total?: number | null;
@@ -454,6 +564,112 @@ export interface OpenApiDoc {
   paths?: Record<string, Record<string, OpenApiOperation>>;
   components?: Record<string, unknown>;
   servers?: { url?: string }[];
+}
+
+export const OPENAPI_CALL_STATUS = {
+  Succeeded: 'succeeded',
+  Failed: 'failed',
+} as const;
+export type ApiEndpointCallStatus = typeof OPENAPI_CALL_STATUS[keyof typeof OPENAPI_CALL_STATUS];
+
+/**
+ * 接口监控（PRD 3-3）的调用明细行：一行 = 后端一条带 Merkle 锚定的审计日志
+ * （app/api/deliveries.py::_call_dict，action=openapi.call / openapi.call_failed）。
+ * 字段逐字镜像后端：失败行只有 code/message，output_rows 与 duration_ms 保持 null，
+ * 前端不按 0 交付；client_ip 取审计日志的 ip_address，没有就如实为 null。
+ */
+export interface ApiEndpointCall {
+  id: string;
+  endpoint_id: string;
+  slug: string;
+  /** 后端只写 succeeded / failed；其他取值原样透出，不并入成功率。 */
+  status?: string | null;
+  /** 仅失败行有值：delivery_service 里真实 raise 的 EndpointUnavailable.code。 */
+  code?: string | null;
+  message?: string | null;
+  output_rows?: number | null;
+  duration_ms?: number | null;
+  request_sha256?: string | null;
+  caller_id?: string | null;
+  client_ip?: string | null;
+  created_at?: string | null;
+}
+
+/** 明细一次取回的窗口条数：与后端 page_size 上界（le=100）对齐，成功率口径就是这最近若干条。 */
+export const OPENAPI_CALLS_WINDOW = 100;
+
+export interface ApiEndpointCallListParams {
+  status?: ApiEndpointCallStatus | '';
+  page?: number;
+  page_size?: number;
+}
+
+export interface EndpointCallMetrics {
+  /** 调用总次数：取响应 total（后端对审计日志做的 count）。 */
+  total: number | null;
+  /** total 缺失时按窗口条数兜底，口径要在界面上说清楚。 */
+  totalIsFallback: boolean;
+  /** 本次返回的明细条数（成功率与最新时间的计算窗口）。 */
+  windowCount: number;
+  /** 最新调用时间：窗口内 created_at 的最大值，不从当前时间推算。 */
+  latestAt: string | null;
+  /** 调用成功率（%）；没有成功/失败判定时为 null，由界面渲染「未记录」。 */
+  successRate: number | null;
+  /** 一句话口径：成功率怎么算的，或者为什么算不出来。 */
+  rateNote: string;
+}
+
+/**
+ * 指标 3 宫格的口径全部收在这一个纯函数里，页面不再自行算数。
+ *
+ * 成功率只认响应里真的带 succeeded/failed 判定的行：一条判定都没有就返回 null
+ * （界面渲染「未记录」+ 原因），绝不用「有明细 ⇒ 全成功」反推成 100%。
+ */
+export function computeEndpointCallMetrics(
+  payload: PaginatedResponse<ApiEndpointCall> | null | undefined,
+): EndpointCallMetrics {
+  if (!payload) {
+    return { total: null, totalIsFallback: false, windowCount: 0, latestAt: null, successRate: null, rateNote: '调用数据尚未返回，不做推算' };
+  }
+  const items = (Array.isArray(payload.items) ? payload.items : []).filter(Boolean);
+  const windowCount = items.length;
+  const backendTotal = typeof payload.total === 'number' && Number.isFinite(payload.total) ? payload.total : null;
+
+  let latestAt: string | null = null;
+  for (const row of items) {
+    const at = row.created_at;
+    if (!at) continue;
+    const stamp = new Date(at).getTime();
+    if (Number.isNaN(stamp)) continue;
+    if (latestAt == null || stamp > new Date(latestAt).getTime()) latestAt = at;
+  }
+
+  const rated = items.filter((row) => row.status === OPENAPI_CALL_STATUS.Succeeded || row.status === OPENAPI_CALL_STATUS.Failed);
+  const windowSuffix = backendTotal != null && backendTotal > windowCount ? `（共 ${backendTotal} 次，只取最近 ${windowCount} 条）` : '';
+
+  if (rated.length === 0) {
+    return {
+      total: backendTotal ?? windowCount,
+      totalIsFallback: backendTotal == null,
+      windowCount,
+      latestAt,
+      successRate: null,
+      rateNote:
+        windowCount === 0
+          ? '该端点暂无调用明细，成功率无从计算'
+          : `返回的 ${windowCount} 条明细未带成功/失败判定，成功率不做推算`,
+    };
+  }
+
+  const succeeded = rated.filter((row) => row.status === OPENAPI_CALL_STATUS.Succeeded).length;
+  return {
+    total: backendTotal ?? windowCount,
+    totalIsFallback: backendTotal == null,
+    windowCount,
+    latestAt,
+    successRate: Math.round((succeeded / rated.length) * 1000) / 10,
+    rateNote: `按 ${rated.length} 条带判定的调用计${windowSuffix}`,
+  };
 }
 
 export interface OpenApiOperation {
@@ -504,7 +720,7 @@ const stringifyDetail = (detail: unknown): string | null => {
 /** detail.reason（机读）→ 用户可读文案；与后端 flow_runtime.REASON_MESSAGES 同一口径。 */
 export const RUNTIME_REASON_COPY: Record<string, string> = {
   dataplane_disabled:
-    '当前部署未启用 MicroVM 沙箱数据面，无法真实执行代码：需先完成 Cube 计算节点部署（节点需 /dev/kvm）并开启 CDS_CUBE_DATAPLANE_ENABLED。',
+    '当前部署未启用 MicroVM 沙箱数据面：MicroVM 档位的在线开发与测试/生产沙箱都无法创建，需先完成 Cube 计算节点部署（节点需 /dev/kvm）并开启 CDS_CUBE_DATAPLANE_ENABLED。',
   no_ready_node:
     'MicroVM 数据面已开启，但当前没有 online 的计算节点，沙箱创建会被直接拒绍：请检查节点心跳与 preflight 结果。',
 };
@@ -714,12 +930,209 @@ export function canonicalizeNotebookContent(content?: unknown): string {
 }
 
 export function defaultNotebookPath(title: string): string {
+  // `/nb/` 是负载元数据命名空间（entrypoint 字符串，随任务落库并参与 admission 的
+  // entrypoint hash）；与平台页面路由 `/notebooks`、与采集口径 `/sandbox/*`
+  // （见 directoryContract.ts）都不同层，互不解析——旧默认值 /notebooks/ 与页面
+  // 路由撞名，易被误读成可点链接。
   const slug = title
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return `/notebooks/${slug || 'untitled'}.ipynb`;
+  return `/nb/${slug || 'untitled'}.ipynb`;
+}
+
+// ---------------------------------------------------------------------------
+// 开发任务表单（SS-18 M2′）：表单值 ↔ 单个 POST 建任务的载荷，以及错误→可读文案
+// 任务编号由服务端生成：前端不开输入框、载荷里永远不出现 task_no（对外口径只能有一份）。
+// ---------------------------------------------------------------------------
+
+export interface DevTaskFieldIssue {
+  /** 归位到表单字段名；null = 无法归位，页面按整体错误展示。 */
+  field: string | null;
+  text: string;
+}
+
+export const DEV_TASK_FIELD_LABELS: Record<string, string> = {
+  title: '任务名称',
+  path: '沙箱内路径',
+  contract_id: '关联合约',
+  debug_method: '调试方法',
+  export_mode: '任务级导出方式',
+  debug_memory_mb: '调试内存',
+  exec_memory_mb: '执行内存',
+  task_no: '任务编号',
+  content: '笔记内容',
+  language: '语言',
+};
+
+/** 任务枚举取值 → 中文标签；null/未下发给「未记录」，未登记取值原样透出（不编中文标签）。 */
+export function taskEnumLabel(
+  options: readonly { label: string; value: string }[],
+  value: string | null | undefined,
+  fallback: string = UNKNOWN_TEXT,
+): string {
+  if (!value) return fallback;
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+export function gibToMib(gib: number): number {
+  return Math.round(gib * 1024);
+}
+
+/** MB → GiB（展示用）；非整数保留一位小数。缺字段返回 null，由页面渲染「未记录」。 */
+export function mibToGib(mib: number | null | undefined): number | null {
+  if (typeof mib !== 'number' || !Number.isFinite(mib) || mib <= 0) return null;
+  return Math.round((mib / 1024) * 10) / 10;
+}
+
+export function formatMemoryGib(mib: number | null | undefined, fallback: string = UNKNOWN_TEXT): string {
+  const gib = mibToGib(mib);
+  return gib === null ? fallback : `${gib} GiB`;
+}
+
+export interface DevTaskFormValues {
+  title: string;
+  path?: string | null;
+  contract_id?: string | null;
+  debug_method?: TaskDebugMethod | null;
+  export_mode?: TaskExportMode | null;
+  /** 不填 = 沿用合约已批准规格（后端两列都留空时沿用合约 spec，不改旧客户端语义）。 */
+  debug_memory_gib?: number | null;
+  /** 「执行内存与调试内存不同」：关上时不送 exec_memory_mb，服务端继承调试值。 */
+  separate_exec_memory?: boolean;
+  exec_memory_gib?: number | null;
+  description?: string | null;
+  /** null = 未限定（全部授权供数）；数组 = 已选数据资源 id（[] = 明确不注入）。 */
+  data_resource_ids?: string[] | null;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+/** 客户端范围校验：与后端 _resolve_task_memory 逐条同口径，避免把 422 留给用户看。 */
+export function validateDevTaskForm(values: DevTaskFormValues): DevTaskFieldIssue[] {
+  const issues: DevTaskFieldIssue[] = [];
+  if (!values.title?.trim()) issues.push({ field: 'title', text: '请输入任务名称' });
+  if (!values.contract_id) issues.push({ field: 'contract_id', text: '请选择关联合约' });
+
+  const path = values.path?.trim();
+  if (path && !path.startsWith('/')) issues.push({ field: 'path', text: '沙箱内路径需以 / 开头' });
+
+  const debug = values.debug_memory_gib;
+  const debugLimit = TASK_MEMORY_LIMITS.debug;
+  if (debug !== null && debug !== undefined) {
+    if (!isPositiveInteger(debug) || debug < debugLimit.min_gib || debug > debugLimit.max_gib) {
+      issues.push({ field: 'debug_memory_gib', text: `调试内存范围为 ${debugLimit.min_gib}–${debugLimit.max_gib} GiB（整数）` });
+    }
+  }
+
+  const exec = values.exec_memory_gib;
+  const execLimit = TASK_MEMORY_LIMITS.exec;
+  if (values.separate_exec_memory) {
+    // 后端铁律：exec_memory_mb 只能与 debug_memory_mb 一起提交。
+    if (debug === null || debug === undefined) {
+      issues.push({ field: 'debug_memory_gib', text: '设置执行内存前需先填写调试内存（服务端要求两项一起提交）' });
+    }
+    if (exec === null || exec === undefined) {
+      issues.push({ field: 'exec_memory_gib', text: '请填写执行内存，或关闭「执行内存与调试内存不同」' });
+    } else if (!isPositiveInteger(exec) || exec < execLimit.min_gib || exec > execLimit.max_gib) {
+      issues.push({ field: 'exec_memory_gib', text: `执行内存范围为 ${execLimit.min_gib}–${execLimit.max_gib} GiB（整数）` });
+    } else if (typeof debug === 'number' && exec < debug) {
+      issues.push({ field: 'exec_memory_gib', text: `执行内存不得低于调试内存（${debug} GiB）` });
+    }
+  }
+
+  return issues;
+}
+
+/** 表单值 → 单个 POST /notebooks 的载荷；未填的任务级字段直接不送（由服务端取默认/沿用合约规格）。 */
+export function buildDevTaskPayload(values: DevTaskFormValues): NotebookCreatePayload {
+  const title = values.title?.trim() ?? '';
+  const payload: NotebookCreatePayload = {
+    title,
+    path: values.path?.trim() || defaultNotebookPath(title),
+    contract_id: values.contract_id || null,
+  };
+  if (values.description?.trim()) payload.description = values.description.trim();
+  // 未碰过已选面板 = 不限定（不送该字段）；碰过就照实送，空数组代表“不注入任何供数”。
+  if (Array.isArray(values.data_resource_ids)) payload.data_resource_ids = values.data_resource_ids;
+  if (values.debug_method) payload.debug_method = values.debug_method;
+  if (values.export_mode) payload.export_mode = values.export_mode;
+
+  const debug = values.debug_memory_gib;
+  if (typeof debug === 'number') payload.debug_memory_mb = gibToMib(debug);
+  const exec = values.exec_memory_gib;
+  if (values.separate_exec_memory && typeof exec === 'number' && typeof debug === 'number') {
+    payload.exec_memory_mb = gibToMib(exec);
+  }
+  return payload;
+}
+
+const unwrapErrorPayload = (error: unknown): Record<string, unknown> => {
+  if (error === null || typeof error !== 'object') return {};
+  const envelope = error as Record<string, unknown>;
+  const response = envelope.response as Record<string, unknown> | undefined;
+  return (response?.data ?? envelope) as Record<string, unknown>;
+};
+
+/** HTTP 状态码在 axios 信封的 response.status 上（W2 体内则自带 status/http_status）。 */
+function httpStatusOf(error: unknown): number | null {
+  if (error === null || typeof error !== 'object') return null;
+  const envelope = error as Record<string, unknown>;
+  const response = envelope.response as Record<string, unknown> | undefined;
+  const candidate = response?.status ?? envelope.status ?? unwrapErrorPayload(error).http_status;
+  return typeof candidate === 'number' ? candidate : null;
+}
+
+/**
+ * 建任务失败 → 可读、可定位到字段的文案（W2 信封）：
+ * - 422 VALIDATION_ERROR：逐条取 detail.errors[] 的字段级 msg；
+ * - 400 RESOURCE_OVERRIDE_EXCEEDED：拼出「超出合约已批准规格（合约内存 X GiB）」；
+ * - 404：合约不存在；其余走 describeFlowError。
+ * 只复述后端下发的字段，不自己编原因（禁伪造铁律）。
+ */
+export function describeNotebookCreateIssues(error: unknown, fallback = '创建开发任务失败'): DevTaskFieldIssue[] {
+  const payload = unwrapErrorPayload(error);
+  const code = typeof payload.code === 'string' ? payload.code : null;
+  const detail = payload.detail;
+  const status = httpStatusOf(error);
+
+  if (code === 'RESOURCE_OVERRIDE_EXCEEDED') {
+    const detailObject = (detail && typeof detail === 'object' ? detail : {}) as Record<string, unknown>;
+    const approved = typeof detailObject.contract_memory_mb === 'number' ? detailObject.contract_memory_mb : null;
+    const ceiling = typeof detailObject.effective_ceiling_mb === 'number' ? detailObject.effective_ceiling_mb : null;
+    const matched = /^(debug_memory_mb|exec_memory_mb)\b/.exec(typeof payload.message === 'string' ? payload.message : '');
+    const field = matched ? matched[1] : null;
+    const scope = field ? DEV_TASK_FIELD_LABELS[field] ?? field : '任务内存';
+    const approvedText = approved === null ? '未下发' : ` ${formatMemoryGib(approved)}`;
+    const ceilingText = ceiling === null ? '' : `，本任务可用上限 ${formatMemoryGib(ceiling)}`;
+    return [{ field, text: `${scope}超出合约已批准规格（合约内存${approvedText}）${ceilingText}：请下调内存，或先调整合约已批准的沙箱规格。` }];
+  }
+
+  if (code === 'VALIDATION_ERROR') {
+    const raw = (detail && typeof detail === 'object' ? (detail as Record<string, unknown>).errors : null) as unknown;
+    const items = Array.isArray(raw) ? raw : [];
+    const issues = items
+      .map((item): DevTaskFieldIssue | null => {
+        const record = (item ?? {}) as Record<string, unknown>;
+        const location = Array.isArray(record.loc) ? (record.loc as unknown[]) : [];
+        const key = location.filter((part): part is string => typeof part === 'string').pop() ?? null;
+        const message = typeof record.msg === 'string' && record.msg.trim() ? record.msg.trim() : null;
+        if (!key && !message) return null;
+        const label = key ? DEV_TASK_FIELD_LABELS[key] ?? key : null;
+        return { field: key, text: label && message ? `${label}：${message}` : (message ?? `字段 ${label ?? '未知'} 取值不合法`) };
+      })
+      .filter((issue): issue is DevTaskFieldIssue => issue !== null);
+    if (issues.length) return issues;
+  }
+
+  if (status === 404 || detail === 'contract not found') {
+    return [{ field: 'contract_id', text: '合约不存在或已不可访问（404 contract not found）' }];
+  }
+
+  return [{ field: null, text: describeFlowError(error, fallback) }];
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,7 +1434,14 @@ export const flowApi = {
   getRuntimeStatus: (): Promise<FlowRuntimeStatus> =>
     api.get('/flow/runtime-status') as unknown as Promise<FlowRuntimeStatus>,
 
+  // ---------- 1.6 首页（原型 A-1）聚合面 ----------
+  getHomeOverview: (params?: { days?: number; recent_limit?: number }): Promise<HomeOverview> =>
+    api.get('/flow/dashboard/home', {
+      params: { days: params?.days ?? HOME_TREND_DAYS, recent_limit: params?.recent_limit ?? HOME_RECENT_ROWS },
+    }) as unknown as Promise<HomeOverview>,
+
   // ---------- 2. Notebooks ----------
+  // 一个 POST 建完整个开发任务（响应回显服务端生成的 task_no）。
   createNotebook: (payload: NotebookCreatePayload): Promise<Notebook> =>
     api.post('/notebooks', payload) as unknown as Promise<Notebook>,
 
@@ -1029,6 +1449,7 @@ export const flowApi = {
     api.get('/notebooks', {
       params: {
         contract_id: params?.contract_id || undefined,
+        status: params?.status || undefined,
         page: params?.page ?? 1,
         page_size: params?.page_size ?? 20,
       },
@@ -1045,6 +1466,12 @@ export const flowApi = {
 
   startDevSession: (id: string): Promise<NotebookDevSession> =>
     api.post(`/notebooks/${id}/dev-session`) as unknown as Promise<NotebookDevSession>,
+
+  // 开发环反代挂在根路径（iframe 带不了 Authorization 头，靠一次性票据换 Cookie，
+  // 见 app/api/jupyter_proxy.py）。这里只逐请求覆盖 baseURL，仍走同一个 axios 实例，
+  // 鉴权与 401 刷新拦截器不变。
+  openJupyterEnv: (id: string): Promise<JupyterEnvTicket> =>
+    api.request({ baseURL: '/', url: '/api/jupyter/tickets', method: 'POST', data: { notebook_id: id } }) as unknown as Promise<JupyterEnvTicket>,
 
   executeCell: (id: string, payload: CellExecutePayload): Promise<CellExecuteResult> =>
     api.post(`/notebooks/${id}/cells/execute`, payload, { timeout: TIMEOUT_CELL }) as unknown as Promise<CellExecuteResult>,
@@ -1190,11 +1617,156 @@ export const flowApi = {
 
   deleteEndpoint: (id: string): Promise<void> =>
     api.delete(`/deliveries/openapi/endpoints/${id}`) as unknown as Promise<void>,
+
+  /**
+   * 端点调用明细（PRD 3-3 / SS-18 §8 P0-③）。数据源是带 Merkle 锚定的审计日志，后端不另建影子表；
+   * 在鉴权层就被拒的请求本来没有日志行，后端不补也不猜，前端同样不补。
+   */
+  listEndpointCalls: (id: string, params?: ApiEndpointCallListParams): Promise<PaginatedResponse<ApiEndpointCall>> =>
+    api.get(`/deliveries/openapi/endpoints/${id}/calls`, {
+      params: {
+        status: params?.status || undefined,
+        page: params?.page ?? 1,
+        page_size: params?.page_size ?? 20,
+      },
+    }) as unknown as Promise<PaginatedResponse<ApiEndpointCall>>,
 };
 
 // ---------------------------------------------------------------------------
 // react-query：query key + hooks
 // ---------------------------------------------------------------------------
+
+/**
+ * 首页（原型 A-1「首页-平台总览」）聚合面—— GET /api/v1/flow/dashboard/home 的响应型。
+ *
+ * 与后端逐字段对齐（app/api/flow_runtime.py::dashboard_home）：口径字段（*_caliber /
+ * visibility / source / not_collected）都在型里，页面直接引用它们写注释文案，
+ * 不在前端重新发明口径。缺数的字段一律 null，渲染成 UNKNOWN_TEXT。
+ */
+export interface HomeOverviewScope {
+  user_id: string;
+  username: string | null;
+  organization: string | null;
+  role: string | null;
+  note: string;
+}
+
+export interface HomeOverviewTaskRow {
+  id: string;
+  task_no: string | null;
+  title: string;
+  status: string;
+  debug_method: string | null;
+  created_at: string | null;
+}
+
+export interface HomeOverviewCountBlock {
+  total: number;
+  active: number;
+  ended: number;
+  status_caliber: Record<string, string>;
+}
+
+export interface HomeOverviewInterfaceBlock {
+  total: number;
+  online: number;
+  offline: number;
+  status_caliber: Record<string, string>;
+}
+
+export interface HomeOverviewCalls {
+  count: number;
+  failures: number;
+  last_called_at: string | null;
+  window: string;
+  actions: string[];
+  source: string;
+}
+
+export interface HomeOverviewOpsLog {
+  count: number;
+  failures: number;
+  visibility: 'self' | 'platform';
+  window: string;
+  source: string;
+  note: string;
+}
+
+export type HomeMemoryState = 'busy' | 'queued' | 'idle';
+
+export interface HomeMemoryPanel {
+  reserved_mb: number;
+  active_sessions: number;
+  state: HomeMemoryState;
+  per_task_ceiling_mb: number;
+  /** 实测占用：后端给不出（无 cgroup/psutil 来源），恒为 null。 */
+  used_mb: number | null;
+  measured: boolean;
+  running_runs?: number;
+  pending_runs?: number;
+}
+
+export interface HomeOverviewMemory {
+  quota_mb: number | null;
+  quota_source: string;
+  debug: HomeMemoryPanel;
+  exec: HomeMemoryPanel;
+}
+
+export interface HomeTrendPoint {
+  date: string;
+  debug: number;
+  exec: number;
+}
+
+export interface HomeOverviewTrend {
+  days: HomeTrendPoint[];
+  window_days: number;
+  series: { debug: string[]; exec: string[] };
+  source: string;
+  note: string;
+}
+
+export type HomeResultSetState = 'normal' | 'abnormal' | null;
+
+export interface HomeResultSetRow {
+  bundle_id: string;
+  contract_id: string;
+  contract_no: string | null;
+  file_name: string | null;
+  file_count: number | null;
+  size_bytes: number | null;
+  row_count: number | null;
+  created_at: string | null;
+  /** 合约下接口累计调用次数；该合约无接口时为 null（口径不适用，不是 0）。 */
+  call_count: number | null;
+  t5_review_status: string | null;
+  watermark_status: string | null;
+  state: HomeResultSetState;
+  state_reason: string | null;
+}
+
+export interface HomeNotCollectedItem {
+  key: string;
+  label: string;
+  reason: string;
+}
+
+export interface HomeOverview {
+  generated_at: string;
+  scope: HomeOverviewScope;
+  dev_tasks: HomeOverviewCountBlock;
+  task_filters: { all: number; active: number; ended: number };
+  recent_tasks: HomeOverviewTaskRow[];
+  export_interfaces: HomeOverviewInterfaceBlock;
+  calls_today: HomeOverviewCalls;
+  ops_log_today: HomeOverviewOpsLog;
+  memory: HomeOverviewMemory;
+  trend: HomeOverviewTrend;
+  latest_result_sets: HomeResultSetRow[];
+  call_count_caliber: string;
+  not_collected: HomeNotCollectedItem[];
+}
 
 export const flowKeys = {
   all: ['flow'] as const,
@@ -1212,9 +1784,13 @@ export const flowKeys = {
   webhooks: (contractId?: string | null) => ['flow', 'delivery', 'webhooks', contractId ?? null] as const,
   deliveries: (id: string, status?: string | null) => ['flow', 'delivery', 'webhook', id, 'deliveries', status ?? null] as const,
   endpoints: (contractId?: string | null) => ['flow', 'delivery', 'endpoints', contractId ?? null] as const,
+  endpointCalls: (id?: string | null, status?: string | null, page?: number | null, pageSize?: number | null) =>
+    ['flow', 'delivery', 'endpoint', id ?? null, 'calls', status ?? null, page ?? 1, pageSize ?? OPENAPI_CALLS_WINDOW] as const,
   openapi: (contractId: string) => ['flow', 'delivery', 'openapi', contractId] as const,
   bundles: (contractId?: string | null, page?: number | null, pageSize?: number | null) =>
     ['flow', 'delivery', 'bundles', contractId ?? null, page ?? 1, pageSize ?? 20] as const,
+  homeOverview: (days?: number | null, recentLimit?: number | null) =>
+    ['flow', 'home-overview', days ?? HOME_TREND_DAYS, recentLimit ?? HOME_RECENT_ROWS] as const,
 };
 
 type FlowMutationOptions<TRes, TVars> = {
@@ -1246,6 +1822,13 @@ function createFlowMutationHook<TVars, TRes>(
 }
 
 const notebookVars = (id: string) => [flowKeys.notebook(id), flowKeys.notebooks()];
+
+export function useHomeOverview(days = HOME_TREND_DAYS, recentLimit = HOME_RECENT_ROWS) {
+  return useQuery({
+    queryKey: flowKeys.homeOverview(days, recentLimit),
+    queryFn: () => flowApi.getHomeOverview({ days, recent_limit: recentLimit }),
+  });
+}
 
 // ---------- Notebook hooks ----------
 
@@ -1293,6 +1876,11 @@ export const useStartDevSession = createFlowMutationHook(
   (id) => notebookVars(id),
 );
 
+export const useOpenJupyterEnv = createFlowMutationHook(
+  (id: string) => flowApi.openJupyterEnv(id),
+  (id) => notebookVars(id),
+);
+
 export const useExecuteCell = createFlowMutationHook(
   (vars: { id: string; payload: CellExecutePayload }) => flowApi.executeCell(vars.id, vars.payload),
   (vars) => [flowKeys.notebook(vars.id)],
@@ -1317,9 +1905,11 @@ export const useSaveFlowConfig = createFlowMutationHook(
 
 // ---------- Workload hooks ----------
 
-export function useWorkloads(params: { contractId?: string | null; env?: WorkloadEnv; status?: string } = {}) {
+export function useWorkloads(params: { contractId?: string | null; env?: WorkloadEnv; status?: string } = {}, enabled = true) {
   return useQuery({
     queryKey: flowKeys.workloads(params.contractId, params.env, params.status),
+    // 上一级维度（如合约）缺失时查询无意义，由调用方关掉，不发无谓请求。
+    enabled,
     queryFn: () =>
       flowApi.listWorkloads({
         contract_id: params.contractId,
@@ -1381,9 +1971,10 @@ export function useComputeSchedule(contractId?: string | null) {
   });
 }
 
-export function useComputeRuns(params: { contractId?: string | null; status?: string } = {}, refetchIntervalMs?: number) {
+export function useComputeRuns(params: { contractId?: string | null; status?: string } = {}, refetchIntervalMs?: number, enabled = true) {
   return useQuery({
     queryKey: flowKeys.runs(params.contractId, params.status),
+    enabled,
     queryFn: () =>
       flowApi.listRuns({
         contract_id: params.contractId,
@@ -1468,13 +2059,12 @@ export function useApiEndpoints(contractId?: string | null) {
   return useQuery({
     queryKey: flowKeys.endpoints(contractId),
     queryFn: () => flowApi.listEndpoints(contractId),
-    enabled: !!contractId,
   });
 }
 
 export const useCreateEndpoint = createFlowMutationHook(
   (payload: ApiEndpointCreatePayload) => flowApi.createEndpoint(payload),
-  () => [flowKeys.endpoints()],
+  (payload) => [flowKeys.endpoints(), flowKeys.openapi(payload.contract_id)],
 );
 
 export const useUpdateEndpoint = createFlowMutationHook(
@@ -1486,6 +2076,25 @@ export const useDeleteEndpoint = createFlowMutationHook(
   (id: string) => flowApi.deleteEndpoint(id),
   () => [flowKeys.endpoints()],
 );
+
+/**
+ * 接口监控明细：一次取回最近 OPENAPI_CALLS_WINDOW 条（后端 page_size 上界），表格分页在前端做，
+ * 这样指标宫格与表格读的是同一个窗口，不会出现"表格翻到第二页、成功率口径却变了"。
+ * 调用明细随每次调用增长且不可变，60s 内重复打开抽屉不重复打后端。
+ */
+export function useEndpointCalls(endpointId: string | null, status?: ApiEndpointCallStatus | null) {
+  return useQuery({
+    queryKey: flowKeys.endpointCalls(endpointId, status, 1, OPENAPI_CALLS_WINDOW),
+    queryFn: () =>
+      flowApi.listEndpointCalls(endpointId as string, {
+        status: status || undefined,
+        page: 1,
+        page_size: OPENAPI_CALLS_WINDOW,
+      }),
+    enabled: !!endpointId,
+    staleTime: 60_000,
+  });
+}
 
 export function useContractOpenApiDoc(contractId: string | null) {
   return useQuery({
@@ -1510,8 +2119,8 @@ export function useFlowRuntimeStatus() {
 /**
  * GET /deliveries/dataset/bundles 的一行。
  *
- * 只列交付包表已落库的字段：水印标志与逐文件出口审查结论写在包内 MANIFEST.json 里、
- * 不在这个行上，后端不下发、前端也不猜（列表里的水印列如实标注"未下发"）。
+ * T5 审查状态 / 水印状态 / 数据表行数都是**打包当时落在交付包行上**的结论（SS-18 P0-②），
+ * 后端直接下发；这两列上线前包的行与无数据表的包为 null，前端按「未记录」展示，不从包体反推。
  */
 export interface DatasetBundleRow {
   bundle_id: string;
@@ -1520,6 +2129,11 @@ export interface DatasetBundleRow {
   session_id: string | null;
   file_count: number;
   size_bytes: number;
+  /** 交付包在对象存储里的文件名（图 2-4「结果集名称」列的唯一真值来源）；旧包可能为 null。 */
+  file_name?: string | null;
+  row_count?: number | null;
+  t5_review_status?: string | null;
+  watermark_status?: string | null;
   created_at: string | null;
   download_url: string | null;
 }

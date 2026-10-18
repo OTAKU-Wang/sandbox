@@ -6,6 +6,7 @@ import {
   DeliveryStatus,
   NOTEBOOK_BACKENDS,
   PUBLISH_GATE_CODES,
+  UNKNOWN_TEXT,
   WorkloadStatus,
   describePublishGateCode,
 } from '../../services/flow';
@@ -225,4 +226,51 @@ export function attemptLabel(attempt: number | null | undefined, maxAttempts: nu
 
 export function openApiPathForSlug(slug: string): string {
   return `/open/v1/${slug}`;
+}
+
+// ---------- 成果包交付列（SS-18 §8 P0-②：后端打包时落在交付包行上） ----------
+
+/** T5 出域审查聚合结论（后端 `_t5_review_status`）。 */
+export const BUNDLE_REVIEW_META: Record<string, StatusMeta> = {
+  passed: { color: 'green', label: 'DLP 审查通过' },
+  passed_with_findings: { color: 'gold', label: '通过（有命中/脉敏）' },
+  partially_reviewed: { color: 'orange', label: '部分未送审' },
+};
+
+/** 内容水印状态（后端 `_watermark_status`）。 */
+export const BUNDLE_WATERMARK_META: Record<string, StatusMeta> = {
+  applied: { color: 'green', label: '已嵌入水印' },
+  partially_applied: { color: 'orange', label: '部分文件未嵌入' },
+  not_applied: { color: 'red', label: '未嵌入水印' },
+  not_requested: { color: 'default', label: '未申请水印' },
+};
+
+/** 这两列上线前打的包为 NULL：如实说「未记录」，不从包体反推。 */
+const BUNDLE_UNRECORDED: StatusMeta = { color: 'default', label: '未记录' };
+
+export function bundleReviewMeta(value: string | null | undefined): StatusMeta {
+  return value ? statusMeta(BUNDLE_REVIEW_META, value) : BUNDLE_UNRECORDED;
+}
+
+export function bundleWatermarkMeta(value: string | null | undefined): StatusMeta {
+  return value ? statusMeta(BUNDLE_WATERMARK_META, value) : BUNDLE_UNRECORDED;
+}
+
+/**
+ * 图 3-3 的「数据更新至」与表体「调用时间」都给到分钟口径（原型到 `2026-08-12 10:42`）。
+ * 只做展示层格式化，服务层字段与 formatDateTime（到秒）都不动。
+ * 放这里而不是页面文件里：页面文件只导出组件，纯格式化归 display.ts。
+ */
+export function formatMinute(value: string | null | undefined): string {
+  if (!value) return UNKNOWN_TEXT;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }

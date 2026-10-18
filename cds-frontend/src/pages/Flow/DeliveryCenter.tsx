@@ -1,25 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useCrumbStackStore } from '../../stores/crumbStackStore';
 import BundlePreviewModal from './BundlePreviewModal';
+import { useCrumbSegments } from '../../components/Layout/useCrumbSegments';
 import {
   Alert,
-  Badge,
   Button,
   Card,
   Col,
   Collapse,
   Descriptions,
+  DatePicker,
   Drawer,
   Form,
   Input,
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Row,
   Select,
   Space,
+  Statistic,
   Switch,
   Table,
-  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -27,34 +31,43 @@ import {
 } from 'antd';
 import {
   BugOutlined,
+  CheckCircleOutlined,
   CopyOutlined,
+  DashboardOutlined,
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
+  FieldTimeOutlined,
+  InfoCircleOutlined,
   DownloadOutlined,
   KeyOutlined,
+  LeftOutlined,
+  LinkOutlined,
   LockOutlined,
   PlusOutlined,
   ReloadOutlined,
   SendOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import { sandboxApi } from '../../services/sandboxApi';
 import {
   OPEN_API_DEBUG_BODY_LIMIT,
   OPEN_API_DEBUG_KEY_SCOPES,
+  OPENAPI_CALLS_WINDOW,
+  UNKNOWN_TEXT,
   WEBHOOK_EVENT_OPTIONS,
   buildCurlExample,
   buildRequestExample,
   callOpenApiWithApiKey,
+  computeEndpointCallMetrics,
   describeFlowError,
   flattenOpenApiOperations,
   flowApi,
+  flowKeys,
   formatBytes,
   formatDateTime,
-  openApiCallPathForSlug,
-  pickCallCount,
   useApiEndpoints,
   useBuildDatasetBundle,
   useContractOpenApiDoc,
@@ -63,6 +76,7 @@ import {
   useDatasetBundles,
   useDeleteEndpoint,
   useDeleteWebhook,
+  useEndpointCalls,
   useRedeliver,
   useRotateWebhookSecret,
   useTestWebhook,
@@ -70,9 +84,14 @@ import {
   useUpdateWebhook,
   useWebhookDeliveries,
   useWebhooks,
+  useWorkload,
+  useWorkloads,
 } from '../../services/flow';
 import type {
   ApiEndpoint,
+  ApiEndpointCall,
+  ApiEndpointCreatePayload,
+  ApiEndpointUpdatePayload,
   DatasetBundle,
   DatasetBundleRow,
   OpenApiDebugAttempt,
@@ -85,17 +104,21 @@ import type { ApiKeyCreated } from '../../services/apiKeysApi';
 import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import {
   DELIVERY_STATUS_META,
-  ENDPOINT_STATUS_META,
   WEBHOOK_STATUS_META,
   attemptLabel,
+  bundleReviewMeta,
+  bundleWatermarkMeta,
   openApiPathForSlug,
   responseStatusColor,
   statusMeta,
+formatMinute,
 } from './display';
+import type { StatusMeta } from './display';
 import { useContractOptions } from './useContractOptions';
 import { copyText } from './copyText';
+import './deliveryOpenapi.css';
 
-const { Text, Title, Paragraph } = Typography;
+const { Text, Title, Paragraph, Link } = Typography;
 
 function CopyButton({ text, label = '复制' }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -238,24 +261,48 @@ function DatasetBundleTab({ contractId }: { contractId: string | null }) {
       ),
     },
     { title: '文件数', dataIndex: 'file_count', width: 80 },
+    {
+      title: '数据行数',
+      dataIndex: 'row_count',
+      width: 100,
+      render: (value: number | null | undefined) =>
+        typeof value === 'number' ? value : (
+          <Tooltip title="行数只统计包内数据表文件（.csv/.tsv/.jsonl）；无数据表或该列上线前打的包不记行数。">
+            <Tag>未记录</Tag>
+          </Tooltip>
+        ),
+    },
     { title: '大小', dataIndex: 'size_bytes', width: 100, render: (size: number) => formatBytes(size) },
     { title: '生成时间', dataIndex: 'created_at', width: 170, render: (value: string | null) => formatDateTime(value) },
+    {
+      title: 'T5 审查',
+      key: 't5_review',
+      width: 150,
+      render: (_: unknown, record) => {
+        const meta = bundleReviewMeta(record.t5_review_status);
+        return record.t5_review_status ? (
+          <Tag color={meta.color}>{meta.label}</Tag>
+        ) : (
+          <Tooltip title="T5 审查状态是打包时落在交付包行上的结论；该列上线前打的包不回溯反推。">
+            <Tag>{meta.label}</Tag>
+          </Tooltip>
+        );
+      },
+    },
     {
       title: '水印',
       key: 'watermark',
       width: 130,
-      render: (_: unknown, record) =>
-        bundle && record.bundle_id === bundle.bundle_id ? (
-          bundle.watermark_applied ? (
-            <Tag color="green">已嵌入水印</Tag>
-          ) : (
-            <Tag color="orange">后端报告未加水印</Tag>
-          )
+      render: (_: unknown, record) => {
+        const meta = bundleWatermarkMeta(record.watermark_status);
+        return record.watermark_status ? (
+          <Tag color={meta.color}>{meta.label}</Tag>
         ) : (
-          <Tooltip title="历史列表不下发水印口径：它只写在包内 MANIFEST.json 的 files[].watermark_applied 里。为不伪造，此处不作推定。">
-            <Tag>未下发</Tag>
+          <Tooltip title="水印状态与打包时写进包内 MANIFEST.json 的逐文件结论同源；该列上线前打的包不作推定。">
+            <Tag>{meta.label}</Tag>
           </Tooltip>
-        ),
+        );
+      },
     },
     {
       title: '操作',
@@ -510,272 +557,1074 @@ function OpenApiPreview({ doc, endpoints }: { doc: OpenApiDoc | null; endpoints:
   );
 }
 
-function CreateEndpointModal({
-  open,
-  onClose,
-  contractId,
-}: {
-  open: boolean;
-  onClose: () => void;
-  contractId: string | null;
-}) {
-  const [form] = Form.useForm();
-  const createMutation = useCreateEndpoint();
-  const { data: contractOptions } = useContractOptions();
+const CDS_PRIMARY = '#1b6ef3';
+const CDS_TEXT_GRAY = 'rgba(0, 0, 0, 0.45)';
+const CDS_OK = '#52c41a';
+const CDS_FAIL = '#ff4d4f';
 
-  const submit = () => {
-    void form
-      .validateFields()
-      .then((values: { contract_id: string; name: string; slug: string; workload_id?: string; rate_limit_per_minute?: number; quota_total?: number; request_schema?: string }) => {
-        let schema: Record<string, unknown> | null = null;
-        const rawSchema = values.request_schema?.trim();
-        if (rawSchema) {
-          try {
-            schema = JSON.parse(rawSchema) as Record<string, unknown>;
-          } catch {
-            message.error('请求 Schema 不是合法 JSON');
-            return;
-          }
-        }
-        createMutation.mutate(
-          {
-            contract_id: values.contract_id,
-            name: values.name.trim(),
-            slug: values.slug.trim(),
-            workload_id: values.workload_id || null,
-            rate_limit_per_minute: values.rate_limit_per_minute ?? null,
-            quota_total: values.quota_total ?? null,
-            request_schema: schema,
-          },
-          {
-            onSuccess: (endpoint) => {
-              message.success(`端点已创建：${openApiPathForSlug(endpoint.slug)}`);
-              form.resetFields();
-              onClose();
-            },
-            onError: (err) => message.error(describeFlowError(err, '创建端点失败')),
-          },
-        );
-      })
-      .catch(() => undefined);
-  };
+const NO_EXPIRY_HINT =
+  '后端端点记录没有有效期字段：到期自动下线未实现，接口长期有效，需要停止对外服务时在列表里下线。';
+const ONLINE_DERIVED_HINT =
+  '后端没有独立的上下线字段：上线/离线由 status 与 published_at 推导——status=enabled 且已发布即对外开放调用（网关对已停用端点直接返回 ENDPOINT_DISABLED）。';
+const CLIENT_FILTER_HINT =
+  '接口列表来自 GET /deliveries/openapi/endpoints；查询与重置在已取回的列表内筛选（后端列表接口只按合约过滤，没有名称/状态/上下线参数）。';
+/** 图上「接口描述」是必填红星，但后端创建载荷与 api_endpoints 都没有这个字段：填了不会被存，必须写明。 */
+const NO_DESCRIPTION_HINT =
+  '后端端点记录没有描述字段：此处填写不会落库，列表的「接口描述」因此记未记录（需先给 api_endpoints 加列）。';
 
+
+/**
+ * 图 3-2 底部固定句的后半段宣称「可在列表中修改……安全白名单与查询范围」，但 `api_endpoints`
+ * 没有这两个字段（见 R-2）：上屏只写实际能改的，差异说明留在 Tooltip（禁伪造铁律）。
+ */
+const CREATED_FOOT_TEXT = '接口创建后默认按「上线」状态发布，可在列表中修改状态（安全白名单与查询范围暂不可配置）';
+const CREATED_FOOT_NOTE =
+  '原型此处原句为「接口创建后默认按「上线」状态发布，可在列表中修改状态、安全白名单与查询范围」：后端端点记录没有安全白名单与查询范围字段，网关按 API Key 与合约授权放行，这两项在列表与编辑里都改不了，故此处只写实际可改的状态。';
+
+const RESULT_SET_EMPTY = '后端未下发结果集字段结构（端点 response_schema 为空），不用原型示例数据填充';
+
+/** 图 3-1 的状态与「是否在线」是两列彩色纯文字（无底色徽标）；带底色 chip 只出现在 3-3 监控页。 */
+const ENDPOINT_TEXT_STATUS: Record<string, { color: string; label: string }> = {
+  enabled: { color: CDS_OK, label: '正常' },
+  disabled: { color: CDS_TEXT_GRAY, label: '已停用' },
+};
+
+function endpointTextStatus(status: string | null | undefined) {
+  if (!status) return { color: CDS_TEXT_GRAY, label: UNKNOWN_TEXT };
+  return ENDPOINT_TEXT_STATUS[status] ?? { color: CDS_TEXT_GRAY, label: status };
+}
+
+function endpointOnline(endpoint: ApiEndpoint) {
+  if (endpoint.status !== 'enabled') return false;
+  return typeof endpoint.published_at === 'string' ? endpoint.published_at.length > 0 : true;
+}
+
+/** apiUrl 两段都来自后端：合约文档 servers[0].url + 端点 path；文档没下发就只给路径，不编主机名。 */
+function endpointApiUrl(endpoint: ApiEndpoint, doc: OpenApiDoc | null) {
+  const path = endpoint.path ?? openApiPathForSlug(endpoint.slug);
+  const server = doc?.servers?.[0]?.url;
+  const base = typeof server === 'string' ? server.replace(/\/+$/, '') : '';
+  return { path, url: base ? `${base}${path}` : null };
+}
+
+function truncateUrl(value: string, keep = 38) {
+  return value.length > keep ? `${value.slice(0, keep)}…` : value;
+}
+
+const CRUMB_LIST = ['OpenAPI导出', '接口列表'];
+const CRUMB_CREATE = ['OpenAPI导出', '新建API'];
+const CRUMB_MONITOR = ['OpenAPI导出', '接口监控'];
+
+/** 页内钻取段交给壳层 PageCrumb 统一渲染（2026-10-17 面包屑全面化定稿），本页不再自绘面包屑。 */
+function CrumbAnchor({ segs }: { segs: string[] }) {
+  useCrumbSegments(segs);
+  return null;
+}
+
+function SectionHead({ text, extra }: { text: string; extra?: ReactNode }) {
   return (
-    <Modal title="新建 API 端点" open={open} onCancel={onClose} onOk={submit} confirmLoading={createMutation.isPending} okText="创建" width={560}>
-      <Form form={form} layout="vertical">
-        <Form.Item name="contract_id" label="合约" rules={[{ required: true, message: '请选择合约' }]} initialValue={contractId ?? undefined}>
-          <Select
-            showSearch
-            optionFilterProp="label"
-            placeholder="选择合约"
-            options={(contractOptions ?? []).map((contract) => ({ label: `${contract.title}（${contract.contract_no}）`, value: contract.id }))}
-          />
-        </Form.Item>
-        <Form.Item name="name" label="端点名称" rules={[{ required: true, message: '请输入名称' }]}>
-          <Input placeholder="流失评分查询" maxLength={80} />
-        </Form.Item>
-        <Form.Item
-          name="slug"
-          label="slug"
-          extra="外部调用路径为 POST /open/v1/{slug}"
-          rules={[
-            { required: true, message: '请输入 slug' },
-            { pattern: /^[a-z0-9][a-z0-9_-]{1,63}$/, message: '仅允许小写字母、数字、下划线与短横线，长度 2~64' },
-          ]}
-        >
-          <Input placeholder="churn-score" />
-        </Form.Item>
-        <Form.Item name="workload_id" label="绑定生产负载 ID" tooltip="必须是已发布的生产版本负载，后端会校验">
-          <Input placeholder="负载 ID" />
-        </Form.Item>
-        <Row gutter={12}>
-          <Col span={12}>
-            <Form.Item name="rate_limit_per_minute" label="每分钟限流">
-              <InputNumber style={{ width: '100%' }} min={1} max={100000} precision={0} placeholder="如 60" />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item name="quota_total" label="总配额（调用次数）">
-              <InputNumber style={{ width: '100%' }} min={1} precision={0} placeholder="留空为不限" />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Form.Item name="request_schema" label="请求 Schema（JSON，可选）">
-          <Input.TextArea rows={4} placeholder='{"type":"object","properties":{"customer_id":{"type":"string"}},"required":["customer_id"]}' />
-        </Form.Item>
-      </Form>
-    </Modal>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <Space size={8}>
+        <span style={{ width: 8, height: 8, borderRadius: 8, background: CDS_PRIMARY, display: 'inline-block' }} />
+        <Text strong>{text}</Text>
+      </Space>
+      {extra ?? null}
+    </div>
   );
 }
 
-function ApiDeliveryTab({ contractId }: { contractId: string | null }) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const [debugEndpointId, setDebugEndpointId] = useState<string | null>(null);
+function PlainStatusText({ meta, hint }: { meta: { color: string; label: string }; hint?: string }) {
+  // audit-C 1-02/1-03（G-05）：图 3-1 状态/是否在线两列 = 纯色文字，文字就是列首（绿墨簇 x1095 = 列左沿）。
+  // 曾经多一个前导实心圆图标，整列彩色墨右移 ≈22px，已删。
+  const text = <span style={{ color: meta.color, whiteSpace: 'nowrap' }}>{meta.label}</span>;
+  return hint ? <Tooltip title={hint}>{text}</Tooltip> : text;
+}
+
+function OpenApiEndpointListView({
+  contractId,
+  doc,
+  docFailed,
+  onCreate,
+  onMonitor,
+  onEdit,
+}: {
+  contractId: string | null;
+  doc: OpenApiDoc | null;
+  docFailed: boolean;
+  onCreate: () => void;
+  onMonitor: (endpoint: ApiEndpoint) => void;
+  onEdit: (endpoint: ApiEndpoint) => void;
+}) {
+  const [nameInput, setNameInput] = useState('');
+  const [statusInput, setStatusInput] = useState<string | undefined>(undefined);
+  const [onlineInput, setOnlineInput] = useState<string | undefined>(undefined);
+  const [applied, setApplied] = useState<{ name: string; status?: string; online?: string }>({ name: '' });
+  const [tablePage, setTablePage] = useState(1);
   const endpointsQuery = useApiEndpoints(contractId);
-  const docQuery = useContractOpenApiDoc(contractId);
-  const updateMutation = useUpdateEndpoint();
   const deleteMutation = useDeleteEndpoint();
-  const docRows = flattenOpenApiOperations(docQuery.data ?? null);
+  const all = endpointsQuery.data ?? [];
 
-  const curlFor = (endpoint: ApiEndpoint) => {
-    const row = docRows.find((candidate) => candidate.path.includes(endpoint.slug));
-    return buildCurlExample(endpoint.slug, buildRequestExample(row, endpoint));
-  };
+  const matched = all.filter((endpoint) => {
+    if (applied.name.trim() && !endpoint.name.includes(applied.name.trim())) return false;
+    if (applied.status && endpoint.status !== applied.status) return false;
+    if (applied.online && endpointOnline(endpoint) !== (applied.online === 'online')) return false;
+    return true;
+  });
 
-  const bodyFor = (endpoint: ApiEndpoint) => {
-    const row = docRows.find((candidate) => candidate.path.includes(endpoint.slug));
-    return JSON.stringify(buildRequestExample(row, endpoint), null, 2);
-  };
-
+  // 列宽按图 3-1 列簇照图：墨迹左界 284/454/644/804/904/1094/1164/1244 在「盒左 + 单元格左内边距 20」下
+  // 唯一对应盒宽 170/190/160/100/190/70/80；第八列（操作）取到**列宽合计 = 容器宽 = 1130**，
+  // 因为 `tableLayout="fixed"` 下只要合计不等于容器宽，浏览器就会把富余按比例摊给每一列（实测 22px 富余
+  // 逐列摊 +2…4px，到第 8 列累计偏 15px）——所以合计必须钉死，短量只能落在最右列。
   const columns: ColumnsType<ApiEndpoint> = [
-    { title: '名称', dataIndex: 'name' },
+    { title: '接口名称', dataIndex: 'name', width: 170, render: (name: string) => <Text>{name}</Text> },
     {
-      title: '调用路径',
-      dataIndex: 'slug',
-      render: (slug: string) => <Text code copyable={{ text: openApiPathForSlug(slug) }}>{openApiPathForSlug(slug)}</Text>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 110,
-      render: (status: string) => (
-        <Tag color={statusMeta(ENDPOINT_STATUS_META, status).color}>{statusMeta(ENDPOINT_STATUS_META, status).label}</Tag>
+      title: 'API ID',
+      dataIndex: 'id',
+      width: 190,
+      render: (id: string) => (
+        <Text style={{ fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={id}>
+          {id}
+        </Text>
       ),
     },
     {
-      title: '限流',
-      dataIndex: 'rate_limit_per_minute',
-      width: 110,
-      render: (value: number | null) => (typeof value === 'number' ? `${value} 次/分` : <Text type="secondary">未设置</Text>),
+      title: '接口描述',
+      dataIndex: 'description',
+      width: 160,
+      render: (description: string | null | undefined) =>
+        description ? (
+          <Text>{description}</Text>
+        ) : (
+          <Tooltip title={NO_DESCRIPTION_HINT}>
+            <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>
+          </Tooltip>
+        ),
     },
     {
-      title: '调用量 / 配额',
-      key: 'usage',
-      width: 160,
+      title: '有效期',
+      key: 'expiry',
+      width: 100,
+      render: () => <PlainStatusText meta={{ color: CDS_TEXT_GRAY, label: '永不过期' }} hint={NO_EXPIRY_HINT} />,
+    },
+    {
+      title: 'apiUrl',
+      key: 'apiUrl',
+      width: 190,
       render: (_: unknown, record) => {
-        const used = pickCallCount(record as unknown as Record<string, unknown>);
-        const quota = record.quota_total;
+        const { path, url } = endpointApiUrl(record, doc);
+        if (!url) {
+          return (
+            <Tooltip
+              title={
+                docFailed
+                  ? '合约 OpenAPI 文档加载失败，取不到后端下发的 servers，只展示调用路径。'
+                  : '未选择合约或文档未下发 servers：完整地址要后端 servers 字段，这里只展示调用路径。'
+              }
+            >
+              <Link style={{ fontSize: 12 }}>{path}</Link>
+            </Tooltip>
+          );
+        }
         return (
-          <Space direction="vertical" size={0}>
-            <Text>{typeof used === 'number' ? `${used} 次` : '后端未下发调用量'}</Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              配额 {typeof quota === 'number' ? quota : '不限'}
-            </Text>
-          </Space>
+          <Tooltip title={url}>
+            <Link href={url} style={{ fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {truncateUrl(url)}
+            </Link>
+          </Tooltip>
         );
       },
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      width: 70,
+      render: (status: string) => <PlainStatusText meta={endpointTextStatus(status)} />,
+    },
+    {
+      title: '是否在线',
+      key: 'online',
+      width: 80,
+      render: (_: unknown, record) => (
+        <PlainStatusText
+          meta={endpointOnline(record) ? { color: CDS_OK, label: '上线' } : { color: CDS_TEXT_GRAY, label: '离线' }}
+          hint={ONLINE_DERIVED_HINT}
+        />
+      ),
+    },
+    {
       title: '操作',
       key: 'actions',
-      width: 340,
+      width: 170,
       render: (_: unknown, record) => (
-        <Space size={4} wrap>
-          <CopyButton text={curlFor(record)} label="调用示例" />
-          <Button size="small" icon={<BugOutlined />} onClick={() => setDebugEndpointId(record.id)}>
-            调试
-          </Button>
-          <Button
-            size="small"
-            onClick={() =>
-              updateMutation.mutate(
-                { id: record.id, payload: { status: record.status === 'enabled' ? 'disabled' : 'enabled' } },
-                {
-                  onSuccess: () => message.success(record.status === 'enabled' ? '端点已停用' : '端点已启用'),
-                  onError: (err) => message.error(describeFlowError(err, '状态更新失败')),
-                },
-              )
-            }
-          >
-            {record.status === 'enabled' ? '停用' : '启用'}
-          </Button>
+        <Space size={12} style={{ whiteSpace: 'nowrap' }}>
+          <Link onClick={() => onEdit(record)}>编辑</Link>
           <Popconfirm
-            title="删除该端点？"
+            title="删除该接口？"
             description="删除后外部调用立即失效，历史调用日志保留。"
             okText="确认删除"
             cancelText="取消"
             onConfirm={() =>
               deleteMutation.mutate(record.id, {
-                onSuccess: () => message.success('端点已删除'),
+                onSuccess: () => message.success('接口已删除'),
                 onError: (err) => message.error(describeFlowError(err, '删除失败')),
               })
             }
           >
-            <Button size="small" danger type="text" icon={<DeleteOutlined />} />
+            <Link style={{ color: CDS_FAIL }}>删除</Link>
           </Popconfirm>
+          <Link onClick={() => onMonitor(record)}>接口监控</Link>
         </Space>
       ),
     },
   ];
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Card
-        size="small"
-        title="端点"
-        extra={
-          <Space>
-            <Button size="small" type="primary" icon={<PlusOutlined />} disabled={!contractId} onClick={() => setCreateOpen(true)}>
-              新建端点
-            </Button>
+    <div>
+      <CrumbAnchor segs={CRUMB_LIST} />
+      <Card size="small" className="cds-openapi-filter" style={{ marginBottom: 16 }}>
+        <div className="cds-filter-row">
+          <div className="cds-filter-field">
+            <span className="cds-filter-label">接口名称：</span>
+            <Input
+              style={{ width: 200 }}
+              placeholder="请输入接口名称"
+              value={nameInput}
+              onChange={(event) => setNameInput(event.target.value)}
+            />
+          </div>
+          <div className="cds-filter-field">
+            <span className="cds-filter-label">状态：</span>
+            <Select
+              style={{ width: 140 }}
+              placeholder="全部"
+              allowClear
+              value={statusInput}
+              onChange={(value?: string) => setStatusInput(value)}
+              options={[
+                { label: '正常', value: 'enabled' },
+                { label: '已停用', value: 'disabled' },
+              ]}
+            />
+          </div>
+          <div className="cds-filter-field">
+            <span className="cds-filter-label">是否在线：</span>
+            <Select
+              style={{ width: 140 }}
+              placeholder="全部"
+              allowClear
+              value={onlineInput}
+              onChange={(value?: string) => setOnlineInput(value)}
+              options={[
+                { label: '上线', value: 'online' },
+                { label: '离线', value: 'offline' },
+              ]}
+            />
+          </div>
+          {/* 图上本带只有三个筛选条件与两个按钮，没有第四行说明：取数口径收进「查询」的 Tooltip。 */}
+          <div className="cds-filter-actions">
+            <Tooltip title={CLIENT_FILTER_HINT}>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setApplied({ name: nameInput, status: statusInput, online: onlineInput });
+                  setTablePage(1);
+                }}
+              >
+                查询
+              </Button>
+            </Tooltip>
             <Button
-              size="small"
-              icon={<ReloadOutlined />}
               onClick={() => {
-                void endpointsQuery.refetch();
-                void docQuery.refetch();
+                setNameInput('');
+                setStatusInput(undefined);
+                setOnlineInput(undefined);
+                setApplied({ name: '' });
+                setTablePage(1);
               }}
             >
-              刷新
+              重置
             </Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* 图 3-1：新建入口、表体、分页同属一张白卡（2026-10-17 复量：卡内无横向滚动条） */}
+      <Card size="small">
+      <div style={{ marginBottom: 16 }}>
+        <Button type="primary" size="large" style={{ minWidth: 120 }} icon={<PlusOutlined />} onClick={onCreate}>
+          新建接口
+        </Button>
+      </div>
+
+      <Table<ApiEndpoint>
+        rowKey="id"
+        columns={columns}
+        dataSource={matched}
+        loading={endpointsQuery.isPending}
+        scroll={{ x: 1130 }}
+        tableLayout="fixed"
+        className="cds-openapi-table"
+        pagination={{
+          current: tablePage,
+          pageSize: 10,
+          total: matched.length,
+          onChange: setTablePage,
+          className: 'cds-openapi-pag',
+          showTotal: (total) => `共 ${total} 个接口`,
+          locale: { jump_to: '前往' },
+          showSizeChanger: true,
+          showQuickJumper: true,
+          pageSizeOptions: [10, 20, 50],
+          hideOnSinglePage: false,
+        }}
+        locale={tableEmpty(contractId ? '该合约还没有 OpenAPI 接口' : '当前账号还没有 OpenAPI 接口')}
+      />
+      </Card>
+      {endpointsQuery.isError && (
+        <QueryErrorAlert
+          error={endpointsQuery.error}
+          message="接口列表加载失败"
+          onRetry={() => {
+            void endpointsQuery.refetch();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ResultSetFieldTable() {
+  return (
+    <Table<{ name: string; type: string }>
+      rowKey="name"
+      size="small"
+      pagination={false}
+      dataSource={[]}
+      columns={[
+        { title: '字段名', dataIndex: 'name', width: 200 },
+        { title: '字段类型', dataIndex: 'type', width: 200 },
+        {
+          title: '算子',
+          key: 'operator',
+          render: () => (
+            <Tooltip title="后端结果集结构里没有字段级算子配置，此处不编取值。">
+              <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>
+            </Tooltip>
+          ),
+        },
+      ]}
+      locale={tableEmpty(RESULT_SET_EMPTY)}
+    />
+  );
+}
+
+async function createEndpointWithStatus(
+  create: (payload: ApiEndpointCreatePayload) => Promise<ApiEndpoint>,
+  update: (vars: { id: string; payload: ApiEndpointUpdatePayload }) => Promise<ApiEndpoint>,
+  payload: ApiEndpointCreatePayload,
+  online: boolean,
+) {
+  const endpoint = await create(payload);
+  if (online) return { endpoint, offlineWritten: true };
+  try {
+    return { endpoint, offlineWritten: (await update({ id: endpoint.id, payload: { status: 'disabled' } })).status !== 'enabled' };
+  } catch {
+    return { endpoint, offlineWritten: false };
+  }
+}
+
+function OpenApiCreateView({
+  contractId,
+  onCancel,
+  onCreated,
+}: {
+  contractId: string | null;
+  onCancel: () => void;
+  onCreated: () => void;
+}) {
+  const [form] = Form.useForm();
+  const [online, setOnline] = useState(true);
+  const [expiry, setExpiry] = useState('never');
+  const workloadsQuery = useWorkloads({ contractId, env: 'production', status: 'published' });
+  const createMutation = useCreateEndpoint();
+  const updateMutation = useUpdateEndpoint();
+  const queryClient = useQueryClient();
+  const workloads = (workloadsQuery.data?.items ?? []).filter((workload) => workload.contract_id);
+
+  const submit = async () => {
+    let values: { name: string; workload_id: string; description: string };
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    const workload = workloads.find((candidate) => candidate.id === values.workload_id);
+    const targetContract = workload?.contract_id ?? contractId;
+    if (!targetContract) {
+      message.error('关联任务未绑定合约，后端无法创建接口');
+      return;
+    }
+    try {
+      const { endpoint, offlineWritten } = await createEndpointWithStatus(
+        (payload) => createMutation.mutateAsync(payload),
+        (vars) => updateMutation.mutateAsync(vars),
+        {
+          contract_id: targetContract,
+          workload_id: workload?.id ?? null,
+          name: values.name.trim(),
+          description: values.description.trim(),
+        },
+        online,
+      );
+      await queryClient.invalidateQueries({ queryKey: flowKeys.openapi(targetContract) });
+      message.success(`接口已创建：${openApiPathForSlug(endpoint.slug)}`);
+      if (!offlineWritten) {
+        message.warning('接口已创建，但下线状态未写入：列表里仍是上线，可在「编辑」里重试');
+      }
+      onCreated();
+    } catch (err) {
+      message.error(describeFlowError(err, '创建接口失败'));
+    }
+  };
+
+  return (
+    <div>
+      <CrumbAnchor segs={CRUMB_CREATE} />
+      <div className="cds-api-create-form">
+        <Form form={form} layout="vertical">
+          {/* 图 3-2 第 1 字段带是三列栅格：接口名称 / 关联任务 / 接口状态 同一行（接口状态不再是整行）。 */}
+          <Row gutter={0} className="cds-row3">
+            <Col xs={24} md={8}>
+              <Form.Item name="name" label="接口名称" rules={[{ required: true, message: '请输入接口名称' }]}>
+                <Input placeholder="请输入接口名称" maxLength={128} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item name="workload_id" label="关联任务" rules={[{ required: true, message: '请选择关联任务' }]}>
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="请选择已发布的生产任务"
+                  loading={workloadsQuery.isPending}
+                  notFoundContent={workloadsQuery.isPending ? '加载中…' : '后端没有可绑定的已发布生产任务'}
+                  options={workloads.map((workload) => ({ label: workload.name, value: workload.id }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item label="接口状态">
+                <Space align="center">
+                  <Switch checkedChildren="上线" unCheckedChildren="离线" checked={online} onChange={setOnline} />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    关闭后接口不可被外部调用
+                  </Text>
+                </Space>
+              </Form.Item>
+            </Col>
+          </Row>
+          {/* 图 3-2 第 2 字段带 y238–370 同是三列：描述 / 有效期 / 保障（单选圆点像素簇 650,270 与 1030,270）。 */}
+          <Row gutter={0} className="cds-row3">
+            <Col xs={24} md={8}>
+              <Form.Item
+                name="description"
+                label="接口描述"
+                rules={[{ required: true, message: '请输入接口描述' }]}
+                extra={NO_DESCRIPTION_HINT}
+              >
+                <Input.TextArea rows={3} placeholder="请输入接口描述" maxLength={500} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item label="接口有效期">
+            <Space direction="vertical" size={4}>
+              <Radio.Group
+                name="endpoint-expiry"
+                value={expiry}
+                onChange={(event) => setExpiry(event.target.value)}
+                options={[
+                  { label: '永不过期', value: 'never' },
+                  { label: '选择日期', value: 'date' },
+                ]}
+              />
+              {expiry === 'date' ? <DatePicker disabled placeholder="选择日期" /> : null}
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {NO_EXPIRY_HINT}
+              </Text>
+              </Space>
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item label="安全保障">
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Radio.Group
+                name="endpoint-security"
+                disabled
+                value="unrestricted"
+                options={[
+                  { label: '白名单', value: 'whitelist' },
+                  { label: '不限制', value: 'unrestricted' },
+                ]}
+              />
+              <Input.TextArea
+                disabled
+                rows={2}
+                placeholder="支持输入IP地址，多个IP地址用逗号隔开，例如192.168.22.20,192.168.22.21；支持输入网段，例如 36.110.223.0/24"
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                后端端点记录没有 IP 白名单字段，网关按 API Key 与合约授权放行：此处不可配置，平台实际行为是不限制来源。
+              </Text>
+            </Space>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={24}>
+            <Col xs={24} md={12}>
+              <Form.Item label="查询模式">
+                <Radio.Group
+                  name="endpoint-query-mode"
+                  disabled
+                  value="open"
+                  options={[
+                    { label: '开放查询', value: 'open' },
+                    { label: '限定查询', value: 'limited' },
+                  ]}
+                />
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    网关把请求体原样交给已发布负载执行，不做请求 Schema 校验：此处不可配置，平台实际行为是开放查询。
+                  </Text>
+                </div>
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="查询范围">
+                <Radio.Group
+                  name="endpoint-query-scope"
+                  disabled
+                  value="latest"
+                  options={[
+                    { label: '最新结果集', value: 'latest' },
+                    { label: '历史所有结果集', value: 'history' },
+                  ]}
+                />
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    每次调用即时执行已发布负载并返回本次输出，后端没有历史结果集查询接口：此处不可配置。
+                  </Text>
+                </div>
+              </Form.Item>
+            </Col>
+          </Row>
+          <div style={{ marginTop: 8 }}>
+            <Space size={6}>
+              <Text strong>结果集字段</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                （来自关联合约的结果集结构）
+              </Text>
+            </Space>
+            <div style={{ marginTop: 8 }}>
+              <ResultSetFieldTable />
+            </div>
+          </div>
+        </Form>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          marginTop: 16,
+          paddingTop: 16,
+          borderTop: '1px solid #f1f2f4',
+        }}
+      >
+        {/* 原型原句后半段「、安全白名单与查询范围」宣称了产品没有的能力（无白名单/查询范围字段），
+            按禁伪造改成诚实版；与原型原句的差异写进 Tooltip。 */}
+        <Tooltip title={CREATED_FOOT_NOTE}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            <InfoCircleOutlined style={{ marginRight: 6 }} />
+            {CREATED_FOOT_TEXT}
+          </Text>
+        </Tooltip>
+        <Space>
+          <Button onClick={onCancel}>取消</Button>
+          <Button
+            type="primary"
+            size="large"
+            style={{ paddingInline: 22 }}
+            loading={createMutation.isPending || updateMutation.isPending}
+            onClick={() => void submit()}
+          >
+            新增接口
+          </Button>
+        </Space>
+      </div>
+    </div>
+  );
+}
+
+function EditEndpointModal({ endpoint, onClose }: { endpoint: ApiEndpoint; onClose: () => void }) {
+  const [online, setOnline] = useState(endpointOnline(endpoint));
+  const [rate, setRate] = useState<number | null>(endpoint.rate_limit_per_minute ?? null);
+  const [quota, setQuota] = useState<number | null>(endpoint.quota_total ?? null);
+  const queryClient = useQueryClient();
+  const updateMutation = useUpdateEndpoint();
+
+  const save = () => {
+    updateMutation.mutate(
+      {
+        id: endpoint.id,
+        payload: { status: online ? 'enabled' : 'disabled', rate_limit_per_minute: rate, quota_total: quota },
+      },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: flowKeys.openapi(endpoint.contract_id) });
+          message.success('接口已更新');
+          onClose();
+        },
+        onError: (err) => message.error(describeFlowError(err, '更新失败')),
+      },
+    );
+  };
+
+  return (
+    <Modal
+      title={`编辑接口 · ${endpoint.name}`}
+      open
+      onCancel={onClose}
+      onOk={save}
+      okText="保存"
+      confirmLoading={updateMutation.isPending}
+      width={520}
+    >
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <div>
+          <Text>接口状态</Text>
+          <div style={{ marginTop: 8 }}>
+            <Space align="center">
+              <Switch checkedChildren="上线" unCheckedChildren="离线" checked={online} onChange={setOnline} />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                关闭后接口不可被外部调用
+              </Text>
+            </Space>
+          </div>
+        </div>
+        <div>
+          <Text>每分钟限流</Text>
+          <div style={{ marginTop: 8 }}>
+            <InputNumber
+              style={{ width: '100%' }}
+              min={1}
+              max={10000}
+              precision={0}
+              value={rate}
+              onChange={(value) => setRate(value)}
+            />
+          </div>
+        </div>
+        <div>
+          <Text>总配额（调用次数）</Text>
+          <div style={{ marginTop: 8 }}>
+            <InputNumber
+              style={{ width: '100%' }}
+              min={1}
+              precision={0}
+              placeholder="留空为不限"
+              value={quota}
+              onChange={(value) => setQuota(value)}
+            />
+          </div>
+        </div>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          后端 PATCH 只接受状态、每分钟限流与总配额：接口名称、调用路径与有效期创建后不可修改。
+        </Text>
+      </Space>
+    </Modal>
+  );
+}
+
+const MONITOR_TABLE_PAGE_SIZE = 10;
+
+const CALL_STATUS_META: Record<string, StatusMeta> = {
+  succeeded: { color: 'green', label: '调用成功' },
+  failed: { color: 'red', label: '调用失败' },
+};
+
+const CALL_FAILURE_CODE_META: Record<string, StatusMeta> = {
+  RATE_LIMITED: { color: 'orange', label: '限流阻断' },
+  QUOTA_EXCEEDED: { color: 'orange', label: '配额用尽' },
+  ENDPOINT_DISABLED: { color: 'default', label: '端点已停用' },
+  WORKLOAD_UNAVAILABLE: { color: 'red', label: '负载不可用' },
+  CALLER_UNKNOWN: { color: 'red', label: '调用方不存在' },
+  WORKLOAD_FAILED: { color: 'red', label: '负载执行失败' },
+  OUTPUT_BLOCKED: { color: 'red', label: '输出被拦截' },
+};
+
+function CallStatusTag({ call }: { call: ApiEndpointCall }) {
+  if (!call.status) return <Tag>{UNKNOWN_TEXT}</Tag>;
+  const base = statusMeta(CALL_STATUS_META, call.status);
+  if (call.status === 'succeeded') return <Tag color={base.color}>{base.label}</Tag>;
+  const known = call.code ? statusMeta(CALL_FAILURE_CODE_META, call.code) : null;
+  const useCode = Boolean(call.code && known && known.label !== call.code);
+  const tag = <Tag color={useCode ? known!.color : base.color}>{useCode ? known!.label : base.label}</Tag>;
+  return call.message ? <Tooltip title={call.message}>{tag}</Tooltip> : tag;
+}
+
+function MetricTile({
+  testId,
+  title,
+  hint,
+  value,
+  note,
+  icon,
+  divider,
+}: {
+  testId: string;
+  title: string;
+  hint: string;
+  value: string;
+  note: string;
+  icon: ReactNode;
+  /** 图 3-3 三张 KPI 卡无独立底色，卡间靠一条 1px 细竖线分隔。 */
+  divider?: boolean;
+}) {
+  return (
+    <Col xs={24} sm={8}>
+      <div
+        className={divider ? 'cds-kpi-divider' : undefined}
+        style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}
+      >
+        <span
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 8,
+            background: '#f0f5ff',
+            color: CDS_PRIMARY,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 18,
+          }}
+        >
+          {icon}
+        </span>
+        <div data-testid={testId} style={{ minWidth: 0 }}>
+          <Statistic
+            title={
+              <Tooltip title={hint}>
+                <span>{title}</span>
+              </Tooltip>
+            }
+            value={value}
+            valueStyle={{ fontSize: 20, color: CDS_PRIMARY }}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {note}
+          </Text>
+        </div>
+      </div>
+    </Col>
+  );
+}
+
+export function OpenApiMonitorView({
+  endpoint,
+  onClose,
+  onEdit,
+}: {
+  endpoint: ApiEndpoint | null;
+  onClose: () => void;
+  onEdit?: (endpoint: ApiEndpoint) => void;
+}) {
+  const [tablePage, setTablePage] = useState(1);
+  const callsQuery = useEndpointCalls(endpoint?.id ?? null);
+  const workloadQuery = useWorkload(endpoint?.workload_id ?? null);
+  const payload = callsQuery.data ?? null;
+  const metrics = computeEndpointCallMetrics(payload);
+  const rows = payload?.items ?? [];
+  const online = endpoint ? endpointOnline(endpoint) : false;
+  const enabled = endpoint?.status === 'enabled';
+
+  const columns: ColumnsType<ApiEndpointCall> = [
+    {
+      title: '序号',
+      key: 'index',
+      width: 80,
+      render: (_: unknown, __: ApiEndpointCall, index: number) => (tablePage - 1) * MONITOR_TABLE_PAGE_SIZE + index + 1,
+    },
+    {
+      title: '调用ID',
+      dataIndex: 'id',
+      render: (id: string | null | undefined) =>
+        id ? <Text style={{ fontSize: 12 }}>{id}</Text> : <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>,
+    },
+    {
+      title: '调用时间',
+      dataIndex: 'created_at',
+      width: 230,
+      render: (value: string | null | undefined) =>
+        value ? formatMinute(value) : <span style={{ color: CDS_TEXT_GRAY }}>{UNKNOWN_TEXT}</span>,
+    },
+    { title: '调用状态', key: 'status', width: 140, render: (_: unknown, record) => <CallStatusTag call={record} /> },
+  ];
+
+  return (
+    <div>
+      <CrumbAnchor segs={CRUMB_MONITOR} />
+      {/* 图 3-3（2026-10-17 复量）：标题区是一整块白卡，chip 与三按钮都在卡内，不落灰底。 */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <Space size={8} align="center" wrap>
+            <Title level={4} style={{ margin: 0 }}>
+              {endpoint?.name ?? UNKNOWN_TEXT}
+            </Title>
+            <Tag color={enabled ? 'green' : 'default'}>
+              {enabled ? <CheckCircleOutlined /> : null}
+              {enabled ? '接口正常' : endpoint ? `接口${endpointTextStatus(endpoint.status).label}` : UNKNOWN_TEXT}
+            </Tag>
+            <Tag color={online ? 'blue' : 'default'}>{online ? <LinkOutlined /> : null}{online ? '已上线' : '已离线'}</Tag>
           </Space>
+          <div style={{ marginTop: 4 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {`API ID：${endpoint?.id ?? UNKNOWN_TEXT} · 关联任务：${workloadQuery.data?.name ?? UNKNOWN_TEXT} · 有效期：永不过期`}
+            </Text>
+          </div>
+        </div>
+        <Space>
+          <Button size="large" style={{ minWidth: 125 }} icon={<LeftOutlined />} onClick={onClose}>
+            返回列表
+          </Button>
+          <Button
+            size="large"
+            style={{ minWidth: 125 }}
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              void callsQuery.refetch();
+            }}
+          >
+            刷新数据
+          </Button>
+          <Button type="primary" size="large" style={{ minWidth: 125 }} icon={<EditOutlined />} disabled={!onEdit} onClick={() => endpoint && onEdit?.(endpoint)}>
+            编辑接口
+          </Button>
+        </Space>
+      </div>
+      </Card>
+
+      <Card size="small" className="cds-kpi-band" style={{ marginBottom: 16 }}>
+        <SectionHead text="使用调用详情" />
+        <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
+          <MetricTile
+            testId="monitor-total"
+            icon={<DashboardOutlined />}
+            title="调用总次数（次）"
+            hint="取后端下发的调用总数（数据源为带 Merkle 锚定的审计日志计数），不是本页行数。"
+            value={metrics.total != null ? String(metrics.total) : UNKNOWN_TEXT}
+            note={
+              metrics.total == null
+                ? '后端未下发调用总数'
+                : metrics.totalIsFallback
+                  ? `后端未下发总数，按本次返回的 ${metrics.windowCount} 条计`
+                  : metrics.windowCount < metrics.total
+                    ? `明细取最近 ${metrics.windowCount} 条`
+                    : '后端下发的调用总数'
+            }
+          />
+          <MetricTile
+            testId="monitor-latest"
+            divider
+            icon={<FieldTimeOutlined />}
+            title="最新调用时间"
+            hint="取本次返回明细里最晚一条的调用时间（后端按时间倒序返回），不用当前时间推算。"
+            value={metrics.latestAt ? formatDateTime(metrics.latestAt) : UNKNOWN_TEXT}
+            note={metrics.latestAt ? '明细里最近一次调用时间' : '明细为空，无从取到最近时间'}
+          />
+          <MetricTile
+            testId="monitor-rate"
+            divider
+            icon={<CheckCircleOutlined />}
+            title="调用成功率"
+            hint="只按后端下发的成功/失败判定计算；一条判定都没有时记「未记录」，不按全成功推算。"
+            value={metrics.successRate != null ? `${metrics.successRate}%` : UNKNOWN_TEXT}
+            note={metrics.rateNote}
+          />
+        </Row>
+      </Card>
+
+      <Card
+        size="small"
+        title={
+          <SectionHead
+            text="使用调用详情"
+            extra={
+              <Space size={12}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  数据更新至 {metrics.latestAt ? formatMinute(metrics.latestAt) : UNKNOWN_TEXT}
+                </Text>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  style={{ padding: 0 }}
+                  onClick={() => {
+                    void callsQuery.refetch();
+                  }}
+                >
+                  刷新
+                </Button>
+              </Space>
+            }
+          />
         }
       >
-        {!contractId && <Alert type="info" showIcon message="请先在上方选择合约：端点与 OpenAPI 文档都按合约维度返回。" />}
-        {contractId && (
-          <Table<ApiEndpoint>
-            rowKey="id"
-            size="small"
-            columns={columns}
-            dataSource={endpointsQuery.data ?? []}
-            loading={endpointsQuery.isLoading}
-            pagination={false}
-            locale={tableEmpty('该合约还没有 API 端点')}
-          />
-        )}
-        {endpointsQuery.isError && (
+        <div style={{ marginBottom: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            指标与明细读同一个窗口：最多取最近 {OPENAPI_CALLS_WINDOW} 条调用（后端单页上界）
+            {metrics.total != null && metrics.total > metrics.windowCount ? `，后端共 ${metrics.total} 次调用` : ''}
+          </Text>
+        </div>
+        {callsQuery.isError && (
           <QueryErrorAlert
-            error={endpointsQuery.error}
-            message="端点列表加载失败"
+            error={callsQuery.error}
+            message="调用明细加载失败"
             onRetry={() => {
-              void endpointsQuery.refetch();
+              void callsQuery.refetch();
             }}
           />
         )}
+        <Table<ApiEndpointCall>
+          rowKey="id"
+          size="small"
+          columns={columns}
+          dataSource={rows}
+          loading={callsQuery.isLoading}
+          pagination={{
+            current: tablePage,
+            pageSize: MONITOR_TABLE_PAGE_SIZE,
+            total: rows.length,
+            onChange: setTablePage,
+            className: 'cds-openapi-pag',
+            showTotal: (total) => `共 ${total} 条`,
+          locale: { jump_to: '前往' },
+            showSizeChanger: true,
+            showQuickJumper: true,
+            pageSizeOptions: [10, 20, 50],
+            hideOnSinglePage: false,
+          }}
+          locale={tableEmpty('该端点还没有调用明细')}
+        />
       </Card>
+    </div>
+  );
+}
 
-      <Card size="small" title="OpenAPI 文档预览">
-        {contractId && docQuery.isLoading && <Text type="secondary">文档加载中…</Text>}
-        {contractId && docQuery.isError && (
-          <QueryErrorAlert
-            error={docQuery.error}
-            message="OpenAPI 文档加载失败"
-            onRetry={() => {
-              void docQuery.refetch();
-            }}
-          />
-        )}
-        {contractId && !docQuery.isLoading && !docQuery.isError && (
-          <OpenApiPreview doc={docQuery.data ?? null} endpoints={endpointsQuery.data ?? []} />
-        )}
+export function OpenApiExportTab({ contractId }: { contractId: string | null }) {
+  const [view, setView] = useState<'list' | 'create'>('list');
+  const [monitorEndpointId, setMonitorEndpointId] = useState<string | null>(null);
+  const [editEndpoint, setEditEndpoint] = useState<ApiEndpoint | null>(null);
+  const [debugPick, setDebugPick] = useState<string | null>(null);
+  const [debugEndpointId, setDebugEndpointId] = useState<string | null>(null);
+  const endpointsQuery = useApiEndpoints(contractId);
+  const docQuery = useContractOpenApiDoc(contractId);
+  const endpoints = endpointsQuery.data ?? [];
+  const docRows = flattenOpenApiOperations(docQuery.data ?? null);
+  const monitorEndpoint = endpoints.find((candidate) => candidate.id === monitorEndpointId) ?? null;
+
+  const bodyFor = (endpoint: ApiEndpoint) => {
+    const row = docRows.find((candidate) => candidate.path.includes(endpoint.slug));
+    return JSON.stringify(buildRequestExample(row, endpoint), null, 2);
+  };
+
+  if (view === 'create') {
+    return <OpenApiCreateView contractId={contractId} onCancel={() => setView('list')} onCreated={() => setView('list')} />;
+  }
+
+  if (monitorEndpointId) {
+    return (
+      <>
+        <OpenApiMonitorView
+          endpoint={monitorEndpoint}
+          onClose={() => setMonitorEndpointId(null)}
+          onEdit={(endpoint) => setEditEndpoint(endpoint)}
+        />
+        {editEndpoint && <EditEndpointModal endpoint={editEndpoint} onClose={() => setEditEndpoint(null)} />}
+      </>
+    );
+  }
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <OpenApiEndpointListView
+        contractId={contractId}
+        doc={docQuery.data ?? null}
+        docFailed={docQuery.isError}
+        onCreate={() => setView('create')}
+        onMonitor={(endpoint) => setMonitorEndpointId(endpoint.id)}
+        onEdit={(endpoint) => setEditEndpoint(endpoint)}
+      />
+      <Card size="small">
+        <Collapse
+          size="small"
+          items={[
+            {
+              key: 'doc',
+              label: 'OpenAPI 文档预览与在线调试（原型三屏之外的既有能力）',
+              children: (
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  {!contractId && <Alert type="info" showIcon message="OpenAPI 文档按合约返回：列表页未选合约时仅展示调用路径；合约范围文档请在「数据集打包 / 结果推送」视图选定合约后查看。" />}
+                  {contractId && docQuery.isLoading && <Text type="secondary">文档加载中…</Text>}
+                  {contractId && docQuery.isError && (
+                    <QueryErrorAlert
+                      error={docQuery.error}
+                      message="OpenAPI 文档加载失败"
+                      onRetry={() => {
+                        void docQuery.refetch();
+                      }}
+                    />
+                  )}
+                  {contractId && !docQuery.isLoading && !docQuery.isError && (
+                    <OpenApiPreview doc={docQuery.data ?? null} endpoints={endpoints} />
+                  )}
+                  <Space wrap>
+                    <Select
+                      style={{ width: 260 }}
+                      placeholder="选择接口做在线试调用"
+                      value={debugPick ?? undefined}
+                      onChange={(value?: string) => setDebugPick(value ?? null)}
+                      options={endpoints.map((endpoint) => ({ label: endpoint.name, value: endpoint.id }))}
+                    />
+                    <Button
+                      size="small"
+                      icon={<BugOutlined />}
+                      disabled={!debugPick}
+                      onClick={() => setDebugEndpointId(debugPick)}
+                    >
+                      调试
+                    </Button>
+                  </Space>
+                </Space>
+              ),
+            },
+          ]}
+        />
       </Card>
-
-      {createOpen && <CreateEndpointModal open onClose={() => setCreateOpen(false)} contractId={contractId} />}
+      {editEndpoint && <EditEndpointModal endpoint={editEndpoint} onClose={() => setEditEndpoint(null)} />}
       {debugEndpointId && (
         <ApiDebugModal
           open
           onClose={() => setDebugEndpointId(null)}
-          endpoints={endpointsQuery.data ?? []}
+          endpoints={endpoints}
           initialEndpointId={debugEndpointId}
           bodyForEndpoint={bodyFor}
         />
@@ -1391,20 +2240,41 @@ function ResultPushTab({ contractId }: { contractId: string | null }) {
 }
 
 export default function DeliveryCenter() {
+  const { pathname } = useLocation();
+  // PNG 真值（3-1/3-2/3-3）：「我的结果集」落地页就是 OpenAPI 接口列表，没有「成果交付」头卡也没有页签条；
+  // 数据集打包/结果推送保留为兄弟路由，入口在侧栏「我的结果集」子项（导航原则 2026-10-17 定稿）。
+  const view: 'api' | 'dataset' | 'push' = pathname.startsWith('/deliveries/dataset')
+    ? 'dataset'
+    : pathname.startsWith('/deliveries/push')
+      ? 'push'
+      : 'api';
   const [contractId, setContractId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('dataset');
+  const setStack = useCrumbStackStore((s) => s.setStack);
   const { data: contracts } = useContractOptions();
   const selectedContract = (contracts ?? []).find((contract) => contract.id === contractId);
   const configuredMethods = selectedContract?.delivery_methods ?? null;
+
+  useEffect(() => {
+    // dataset/push 的段名已在注册表静态给出，不能再往钻取栈里 push（否则段重复）；
+    // 本容器只负责卸载时清栈，把面包屑还给下一个页面。
+    return () => setStack([]);
+  }, [setStack]);
+
+  if (view === 'api') {
+    // 列表/新建/监控的页内段由各视图的 CrumbAnchor 写入；新建提交时从关联负载反推合约。
+    return <OpenApiExportTab contractId={contractId} />;
+  }
 
   return (
     <div>
       <div className="cds-page-toolbar">
         <div>
           <Title level={4} style={{ margin: 0 }}>
-            成果交付
+            {view === 'dataset' ? '数据集打包' : '结果推送'}
           </Title>
-          <Text type="secondary">数据集打包、API 交付与结果推送：水印、配额、投递状态与密钥可用性均以后端返回为准。</Text>
+          <Text type="secondary">
+            {view === 'dataset' ? '结果集打包与下载：水印、审查状态以后端返回为准。' : '结果推送订阅：投递状态与密钥可用性以后端返回为准。'}
+          </Text>
         </div>
         <Space wrap>
           <Select
@@ -1439,33 +2309,8 @@ export default function DeliveryCenter() {
         />
       )}
 
-      <Card size="small">
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={[
-            {
-              key: 'dataset',
-              label: '数据集打包',
-              children: <DatasetBundleTab contractId={contractId} />,
-            },
-            {
-              key: 'api',
-              label: (
-                <Space size={6}>
-                  API 交付
-                  {contractId && configuredMethods?.includes('open_api') ? <Badge status="processing" /> : null}
-                </Space>
-              ),
-              children: <ApiDeliveryTab contractId={contractId} />,
-            },
-            {
-              key: 'push',
-              label: '结果推送',
-              children: <ResultPushTab contractId={contractId} />,
-            },
-          ]}
-        />
+      <Card size="small" className="cds-delivery-tabs-card">
+        {view === 'dataset' ? <DatasetBundleTab contractId={contractId} /> : <ResultPushTab contractId={contractId} />}
       </Card>
     </div>
   );

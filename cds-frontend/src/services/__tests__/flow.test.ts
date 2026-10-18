@@ -345,8 +345,8 @@ describe('notebook 内容解析与回写', () => {
   });
 
   it('按标题生成安全路径', () => {
-    expect(defaultNotebookPath('Churn Explore!')).toBe('/notebooks/churn-explore.ipynb');
-    expect(defaultNotebookPath('   ')).toBe('/notebooks/untitled.ipynb');
+    expect(defaultNotebookPath('Churn Explore!')).toBe('/nb/churn-explore.ipynb');
+    expect(defaultNotebookPath('   ')).toBe('/nb/untitled.ipynb');
   });
 });
 

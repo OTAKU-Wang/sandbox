@@ -1,0 +1,473 @@
+/* 2-4、我的开发-任务详情 —— 逐元素照图（真值图 1440×2039，DPR=1）
+   所有数值来自 pngprobe 实测，探针记录见 D:/workspace/.cds-e2e/img-specs/2-4-measured.md：
+   · 卡左内缩 24（标题蓝条 x268=244+24、主按钮右缘 1391=1415−24）、卡右内缩 24（卡头蓝字 ink 右缘 1391）
+   · 卡头（C–H）：无分隔线，6×18 #1b6ef3 蓝条 + 16px 粗标题（ink x282=268+6+8）+ 12px 灰注（同一行）
+   · 统计小卡 #f8fbff 贴卡上下沿（w269 h112 间距 16）+ 40×40 浅底芯片（圆角 8，x=块左+16）+ 12px 灰标题 / 16px 值
+   · 表：表头底 #f7f9fc（F/G/H 行高 45、D 通栏 37），行高 48，行分隔 #f1f2f4，单元格左内缩 14
+   本文件只服务本屏（根节点 .cds-t24），src/index.css 由编排方持有，未改。 */
+
+.cds-t24 {
+  --t24-ink: #1d2129;
+  --t24-grey: #86909c;
+  --t24-blue: #1b6ef3;
+  --t24-tile: #f8fbff;
+  --t24-box: #f7f8fa;
+  --t24-panel: #f3f8ff;
+  --t24-track: #e3edfb;
+  --t24-th: #f7f9fc;
+  --t24-line: #f1f2f4;
+}
+
+/* ---------- 卡 A：任务标题行（复用编排方的白卡 .cds-page-toolbar，按本屏实测改内缩与高度） ---------- */
+/* 图：卡 y138..249（h112），文字左缘 x268 ⇒ 内缩 24（共享类是 20/24），主按钮右缘 1391 ⇒ 右内缩 24 */
+.cds-t24 .t24-head {
+  min-height: 112px;
+  padding: 24px;
+  margin-bottom: 0; /* 外层 Space gap 16 已给足卡间距，不留 .cds-page-toolbar 自带的 16（否则 32） */
+  align-items: center;
+}
+
+.cds-t24 .t24-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 主标题 20px #1d2129（ink y163..182，h19）；状态标签紧跟其后（ink 间隙 14） */
+.cds-t24 .t24-head-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cds-t24 h4.t24-title {
+  margin: 0;
+  color: var(--t24-ink);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 26px;
+}
+
+/* # TASK-… · 创建时间 … · 最近执行 …：12px 灰（ink y205..215） */
+.cds-t24 .t24-head-sub {
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* 三个按钮按图全部 h38（antd 默认 32），主按钮实心 #1b6ef3；按钮间隙按墨迹 24 */
+.cds-t24 .t24-head-actions .ant-btn {
+  height: 38px;
+  font-size: 14px;
+  /* 图主按钮帧 w123（x1269..1391）：内容 80（图标 14+隙 8+四字 60）+ 两侧 21 ⇒ 122，Δ1 */
+  padding-inline: 21px;
+}
+
+.cds-t24 .t24-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 返回列表：图上白底描边灰字（墨迹核 #6d7683 级），不是 antd 的近黑 */
+.cds-t24 .t24-head-actions .t24-btn-back.ant-btn {
+  color: #4e5969;
+}
+
+.cds-t24 .t24-head-actions .t24-btn-back.ant-btn:hover {
+  color: var(--t24-blue);
+}
+
+/* ---------- 状态标签：浅底 + 同色系深字、无边框（图 进行中 71×21 bg #e8f7ee 字 #00a870） ---------- */
+.cds-t24 .t24-tag.ant-tag {
+  margin: 0;
+  padding: 0 12px;
+  height: 21px;
+  line-height: 19px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.cds-t24 .t24-tag.is-ok.ant-tag {
+  background: #e8f7ee;
+  color: #00a870;
+  border-color: #e8f7ee;
+}
+
+.cds-t24 .t24-tag.is-err.ant-tag {
+  background: #fdecee;
+  color: #f53f3f;
+  border-color: #fdecee;
+}
+
+.cds-t24 .t24-tag.is-run.ant-tag {
+  background: #e8f1ff;
+  color: #1b6ef3;
+  border-color: #e8f1ff;
+}
+
+.cds-t24 .t24-tag.is-idle.ant-tag {
+  background: #f2f3f5;
+  color: #4e5969;
+  border-color: #f2f3f5;
+}
+
+/* ---------- 卡 B：一张白卡里四块浅底小卡（图 268/553/838/1123，w269 h112，间距 16） ---------- */
+.cds-t24 .t24-tiles > .ant-card-body {
+  padding: 0 24px;
+}
+
+.cds-t24 .t24-tile-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.cds-t24 .t24-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 112px;
+  padding: 0 16px;
+  background: var(--t24-tile);
+  border-radius: 2px;
+}
+
+/* 芯片 40×40（vline x286 → 304..339，2px 内缩 2px ⇒ 圆角≈8），浅底 + 同色系 16px 图标 */
+.cds-t24 .t24-tile .ant-statistic {
+  flex: none;
+}
+
+.cds-t24 .t24-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.cds-t24 .t24-chip.is-green { background: #e8f7ee; color: #00a870; }
+.cds-t24 .t24-chip.is-blue { background: #e8f1ff; color: var(--t24-blue); }
+.cds-t24 .t24-chip.is-purple { background: #f1ecff; color: #7f60f8; }
+.cds-t24 .t24-chip.is-orange { background: #fff3e8; color: #f47034; }
+
+/* 标题 12px 灰 y306..316、值 16px 黑 y323..339，文字列在块左 +68（=16 内缩 +40 芯片 +12 间隙） */
+.cds-t24 .t24-tile .ant-statistic-title {
+  margin-bottom: 0;
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.cds-t24 .t24-tile .ant-statistic-content {
+  color: var(--t24-ink);
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.cds-t24 .t24-tile .ant-statistic-content-suffix {
+  color: var(--t24-ink);
+  font-size: 16px;
+}
+
+/* ---------- 卡 C：label 在上 + #f7f8fa 值盒（三列 360/间隙 22；描述整宽 h82） ---------- */
+.cds-t24 .t24-card > .ant-card-head {
+  min-height: 48px;
+  padding: 24px 24px 0;
+  border-bottom: 0;
+}
+
+.cds-t24 .t24-card > .ant-card-head .ant-card-head-title {
+  padding: 0;
+}
+
+.cds-t24 .t24-card > .ant-card-head .ant-card-extra {
+  padding: 24px 0 0;
+}
+
+.cds-t24 .t24-card > .ant-card-body {
+  padding: 0 24px 24px;
+}
+
+/* 卡头：6×18 蓝条 + 8 间隙 + 16px 粗标题（ink x282）+ 12px 灰注同一行 */
+.cds-t24 .t24-ht {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--t24-ink);
+}
+
+.cds-t24 .t24-bar {
+  flex: none;
+  width: 6px;
+  height: 18px;
+  border-radius: 1px;
+  background: var(--t24-blue);
+}
+
+.cds-t24 .t24-hnote {
+  color: var(--t24-grey);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* 块题后的小图标（图：合约/资源 ⓘ，关联数据 🔒，运行记录 🕐，结果集 ⇗）：13px 浅灰，不抖行高 */
+.cds-t24 .t24-hicon {
+  color: #b6bec9;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* 只读盒内的蓝色值图标（图：调试方法 </>、导出方式 ↗）：蓝 15px，与文字隔 8 */
+.cds-t24 .t24-box-ico {
+  color: var(--t24-blue);
+  font-size: 15px;
+  margin-inline-end: 8px;
+}
+
+/* 卡头右侧蓝字（共 N 个数据产品 / 查看全部记录 > / 前往我的结果集 >）：12px #1b6ef3，右缘 1391 */
+.cds-t24 .t24-card > .ant-card-head .ant-card-extra,
+.cds-t24 .t24-extra {
+  color: var(--t24-blue);
+  font-size: 12px;
+}
+
+.cds-t24 .t24-extra-muted {
+  color: var(--t24-grey);
+  font-size: 12px;
+}
+
+.cds-t24 .t24-arrow {
+  margin-left: 6px;
+}
+
+/* 基本信息字段：label 12px 灰（ink y466..477）在上，值盒 42 高在下（y489..530），值 14px 盒内左 +10 */
+.cds-t24 .t24-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 22px;
+  row-gap: 23px; /* 行距按图 23；不能用 + 相邻选择器，网格同行兄弟会被各自 margin 推错位 */
+  margin-top: 23px;
+}
+
+.cds-t24 .t24-field-label {
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.cds-t24 .t24-field-box {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  min-height: 42px;
+  padding: 11px 10px; /* 图值盒 h42：行高 20 + 上下 11（旧 12 得 44） */
+  background: var(--t24-box);
+  border-radius: 6px;
+  color: var(--t24-ink);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.cds-t24 .t24-field-box.is-multiline {
+  align-items: flex-start;
+  min-height: 82px;
+  margin-top: 7px;
+}
+
+.cds-t24 .t24-field-span {
+  grid-column: 1 / -1;
+}
+
+/* ---------- 卡 D：三个灰底只读盒复用 .t24-fields（旧通栏表已按 1:1 裁读拆除） ---------- */
+
+/* ---------- 卡 E：三列（配额 2 + 右侧 #f3f8ff 面板 328 宽，y948..1101） ---------- */
+.cds-t24 .t24-res {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 328px;
+  column-gap: 26px;
+  margin-top: 21px;
+}
+
+.cds-t24 .t24-quota-label {
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* 配额按 1:1 裁读（2-4-contract-zone）：灰底只读盒 h42（同基本信息），值居左 14px，
+   右端白底描边 G 小片；旧「24px 大号数字」是缩放误读，已换只读盒。 */
+.cds-t24 .t24-quota-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  min-height: 42px;
+  padding: 11px 10px;
+  background: var(--t24-box);
+  border-radius: 6px;
+  color: var(--t24-ink);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.cds-t24 .t24-quota-g {
+  padding: 0 9px;
+  line-height: 22px;
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 4px;
+  color: #4e5969;
+  font-size: 12px;
+}
+
+.cds-t24 .t24-quota-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 内嵌面板：#f3f8ff，x1064..1391（w328）y948..1101（h154），标题 14px，行 12px，尾行 12px */
+.cds-t24 .t24-panel {
+  margin-top: 7px;
+  padding: 12px 16px; /* 上下各去 2：总高拼回 PNG h154（ink/行盒余量内） */
+  min-height: 154px;
+  box-sizing: border-box;
+  background: var(--t24-panel);
+  border-radius: 8px;
+}
+
+/* 图面板题是蓝字 + 蓝圆图标（题行 y955..975） */
+.cds-t24 .t24-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t24-blue);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+/* 标签在左、值在同一行右端（值 ink x1316..1382） */
+.cds-t24 .t24-mem-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 10px;
+  color: var(--t24-ink);
+  font-size: 12px;
+  line-height: 20px; /* 图行 ink h20（y994..1014），行盒不多撑 */
+}
+
+.cds-t24 .t24-mem-value {
+  color: var(--t24-grey);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 进度条按图：槽 x1080..1375（=面板内宽 296）y1016..1021（h6），槽底 #e3edfb，填充 #1b6ef3 */
+.cds-t24 .t24-mem-bar .ant-progress,
+.cds-t24 .t24-mem-bar.ant-progress {
+  margin: 0;
+  line-height: 6px;
+}
+
+/* 包住 Progress 的 div 会继承 22 行高，把 6px 槽撑成 22（实测）；PNG 这块只有 8 */
+.cds-t24 .t24-mem-bar {
+  line-height: 8px;
+}
+
+.cds-t24 .t24-mem-bar .ant-progress-inner,
+.cds-t24 .t24-mem-bar.ant-progress .ant-progress-inner {
+  height: 6px !important;
+  background: var(--t24-track);
+  border-radius: 3px;
+}
+
+.cds-t24 .t24-mem-bar .ant-progress-bg,
+.cds-t24 .t24-mem-bar.ant-progress .ant-progress-bg {
+  height: 6px !important;
+  background: var(--t24-blue);
+  border-radius: 3px;
+}
+
+.cds-t24 .t24-mem-gap {
+  height: 2px; /* 分段和拼 PNG 面板 h154（旧 13 实测把面板抬过 200） */
+}
+
+.cds-t24 .t24-panel-foot {
+  display: block;
+  margin-top: 10px;
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 18px; /* 图尾行 ink y1075..1092 = 18 */
+}
+
+/* ---------- F/G/H 三张表：表在卡内缩 24（表头底 267..1391），表头 45，行 48，单元格左内缩 14 ---------- */
+.cds-t24 .t24-table {
+  margin-top: 16px;
+}
+
+.cds-t24 .t24-table.is-f {
+  margin-top: 19px;
+}
+
+.cds-t24 .t24-table .ant-table-thead > tr > th {
+  height: 45px;
+  padding: 0 14px;
+  background: var(--t24-th);
+  color: #5b6472;
+  font-size: 14px;
+  font-weight: 500;
+  border-bottom: 0;
+}
+
+.cds-t24 .t24-table .ant-table-tbody > tr > td {
+  height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--t24-line);
+  color: var(--t24-ink);
+  font-size: 14px;
+}
+
+.cds-t24 .t24-table .ant-table-tbody > tr:last-child > td {
+  border-bottom: 0;
+}
+
+/* 图上数据产品名称与「详情」都是蓝字链接（#1b6ef3），行内普通文字是 #1d2129 */
+.cds-t24 .t24-table a.ant-typography,
+.cds-t24 .t24-table .ant-table-tbody a {
+  color: var(--t24-blue);
+}
+
+/* 表下补的「未取回/差额」说明按图不存在，但铁律要求如实写差额：留 12px 灰，不撑破卡 */
+.cds-t24 .t24-table-foot {
+  display: block;
+  margin-top: 12px;
+  color: var(--t24-grey);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 卡内 Alert（未关联合约等诚实披露）比图多出来，收紧到与表同一内缩 */
+.cds-t24 .ant-alert {
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+/* 详情弹窗按同族 4-2 裁图口径 720 宽（antd 默认 520） */
+.cds-t24-modal.ant-modal {
+  width: 720px !important;
+  top: 64px;
+}
+
+.cds-t24-modal .ant-modal-body {
+  max-height: 62vh;
+  overflow: auto;
+}

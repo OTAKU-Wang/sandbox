@@ -1,0 +1,86 @@
+/* 3-1/3-2/3-3「我的结果集 · OpenAPI导出」按图判据（img-specs/group-C.md C-1..C-3、group-C1.md）：
+   筛选卡内距 24（PNG 卡体 y122–206、控件行 y139–174）；筛选按钮组贴卡内容右缘（查询像素簇 x1220）；
+   主按钮带 h40（新建接口像素 120×40）；外层页签卡内容左缘 268（竖线簇 220–243 + 内距 24）。 */
+
+/* 外层承载 Tabs 的卡：内容左缘按图 268（antd small 卡身内距在别处是 12/16，此屏要 24）。 */
+.cds-delivery-tabs-card > .ant-card-body {
+  padding: 24px;
+}
+
+/* 筛选卡：上下内距 24，字段一行、按钮组贴右。 */
+.cds-openapi-filter > .ant-card-body {
+  padding: 24px;
+}
+
+.cds-openapi-filter .cds-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.cds-openapi-filter .cds-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cds-openapi-filter .cds-filter-label {
+  flex: none;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.cds-openapi-filter .cds-filter-actions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 12px;
+}
+
+/* 主钮「查询」按真值 95×35，「重置」保持默认 64 宽（group-C1.md §4：查询 bluefill
+   1220,140 95×35）。这组是右对齐：卡身右内距 24 ⇒ 组右缘 1391，
+   1391 − 64(重置) − 12(gap) − 95(查询) = 1220 与真值逐字对齐；
+   若把重置也拉到 95，查询左缘会跑到 1208（偏 12px）。高度取 ink 带的 35，不是 antd 的 32。 */
+.cds-openapi-filter .cds-filter-actions > .ant-btn {
+  height: 35px;
+}
+
+.cds-openapi-filter .cds-filter-actions > .ant-btn-primary {
+  min-width: 95px;
+}
+
+/* 1:1（group-C1.md：3-2 字段列簇 x267/651/1035 ⇒ 列宽 360 + 间距 24，step 384）。
+   旧写法是 antd `Row gutter={24}` + `display:grid`：gutter 的**负边距 −12** 与缺失的卡内距 24
+   叠加，使三列整体左漂 36px（实测 231/615/999 vs 真值 267/651/1035），且第三列走 1fr 被拉成 428、
+   右缘 1427 越过内容盒 1415。⇒ gutter 改 0（去掉负边距与列内 12 内边距），三列定宽 360，
+   由表单自带 24 内距对齐真值。窄档按 specs/ss-18 §9 退 2 列/1 列，绝不压缩列宽。 */
+.cds-api-create-form {
+  padding-inline: 24px;
+}
+
+.cds-api-create-form .cds-row3 {
+  display: grid;
+  grid-template-columns: 360px 360px 360px;
+  gap: 0 24px;
+}
+
+@media (max-width: 1439px) {
+  .cds-api-create-form .cds-row3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1023px) {
+  .cds-api-create-form .cds-row3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cds-api-create-form .cds-row3 > .ant-col {
+  flex: none;
+  width: auto;
+  max-width: none;
+}
+
+/* 图 3-2/3-3 钻入视图不渲染工具带/页签卡：靠 `DeliveryCenter.tsx` api 分支提前 return（audit-C E9）；
+   此处曾有一套 `.cds-delivery-fullbleed` 规则，全仓无一处挂该类，已删。 */

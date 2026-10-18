@@ -1,0 +1,434 @@
+/*
+ * 4-1 / 4-2 逐像素对账后的本屏样式（唯一真值：基础版数据沙箱原型/4-1、安全管理-操作日志.png
+ * 与 4-2、安全管理-操作日志详情.png，均 1440×1211 导出、弹窗图 720×643；
+ * 探针 D:/workspace/.cds-e2e/pngprobe.py，逐元素读数见 D:/workspace/.cds-e2e/img-specs/4-1-measured.md）。
+ *
+ * 只允许 .cds-audit-screen / .cds-audit-modal 作用域，别的屏（3-x、1-首页）共用
+ * index.css 的壳层规则，不能被本屏的读数带跑。
+ *
+ * 色值分两档：
+ *  ① 直接取像素的实心件（标签底、图标、表头底）——本屏自测值写成局部令牌；与 index.css
+ *     的全局令牌差 ≤8/255 时在本文件注明（全局令牌是 10 张 PNG 的同源均值，本屏不覆盖它，
+ *     只在被证明本屏取值不同的实心件上用本屏值）。
+ *  ② 细笔画文字（标签、正文、链接）——像素 hex 是抗锯齿均值，不等于 CSS 值，一律用
+ *     PROBE.md 的三档墨色律（ink #1f2a37 / secondary #4e5969 / muted #86909c），
+ *     改完再用同一探针比同坐标的均值，均值不一致才算错。
+ */
+
+/* 本屏实心件实测值 */
+.cds-audit-screen,
+.cds-audit-modal-root {
+  --audit-success: #00a870;   /* 成功图标实心像素 x1040 y462 = #01a871（全局 --cds-success #00b070 差 8/255） */
+  --audit-danger: #e5484d;    /* 失败图标实心像素 x1040 y718 = #e5484d */
+  --audit-tag-green: #e8f7ee; /* 结果集导出标签底 x496 y452 */
+  --audit-tag-purple: #f1ecff;/* 数据调用标签底 x496 y504（--cds-purple-soft #efeaff 差 2/255） */
+  --audit-tag-orange: #fff3e8;/* 进入生产环境标签底 x496 y608 */
+  --audit-head-bg: #f7f9fc;   /* 表头底 x1388 y410 = 灰面板底同色 */
+  --audit-rule: #f1f2f4;      /* 末行下边线 y956、描边按钮边线 x1162 y168 */
+}
+
+/* ── 壳层两处微调（面包屑墨迹与首卡顶；原型 ink y89..101，首卡顶 y122）────────────
+   面包屑在页根之外，只能从 .cds-content-inner 用 :has() 反向选中，改的是本屏选择器，
+   不动 index.css 的通用规则。实现侧墨迹 y93..105 / 首卡顶 y142 ⇒ 各抬 4px、少 20px。 */
+.cds-content-inner:has(> .cds-audit-screen) > .cds-crumb-slash {
+  margin-top: -4px;
+}
+
+.cds-content-inner:has(> .cds-audit-screen) > .cds-crumb-slash + .cds-audit-screen {
+  margin-top: 15px;
+}
+
+/* 面包屑分隔符段间隙：原型 25（前空 10 / 后空 11），通用件 0 8px ⇒ 21.5 */
+.cds-content-inner:has(> .cds-audit-screen) > .cds-crumb-slash .cds-crumb-sep {
+  margin-inline: 10px;
+}
+
+/* 前导图标已升为全局件（index.css `.cds-crumb-lead` 的 mask，4-1/3-1 同坐标同形），
+   本页不再自画 ::before，免得双图标。 */
+
+/* ── 卡1 页头卡（原型 y122..215，h94 = 26+40+26+2）────────────────────────────── */
+.cds-audit-screen .cds-audit-pagehead.ant-card > .ant-card-body {
+  padding: 20px 24px;
+}
+
+.cds-audit-screen .cds-audit-pagehead .cds-audit-title {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  color: #1f2a37;
+}
+
+.cds-audit-screen .cds-audit-pagehead .cds-audit-desc {
+  margin-top: 0;
+  font-size: 13px;
+  line-height: 24px;
+  color: #86909c;
+}
+
+.cds-audit-screen .cds-audit-pagehead .cds-audit-pagehead-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* 原型描边/实心按钮的横向内距 ≈ 22（导出日志 124 / 刷新 95 / 重置 71 / 4-2 关闭 71，
+   内容宽 = 图标 14 + 8 + 字 14/字）；antd large 默认 15 会让每颗按钮窄 8~14px。
+   图上按钮字 13~14px，antd large 的 16 会把四字钮撑宽 10px ⇒ 字阶回到 14。 */
+.cds-audit-screen .ant-btn-lg,
+.cds-audit-modal .ant-modal-footer .ant-btn-lg {
+  padding-inline: 22px;
+  font-size: 14px;
+}
+
+/* 两字钮被 antd 插全角空格（字宽 26→33），逐颗补回盒宽：图 重置 71 / 查询 91 / 刷新 97。 */
+.cds-audit-screen .cds-audit-btn-reset.ant-btn-lg {
+  padding-inline: 18px;
+}
+
+.cds-audit-screen .cds-audit-btn-search.ant-btn-lg {
+  padding-inline: 20px;
+}
+
+.cds-audit-screen .cds-audit-btn-refresh.ant-btn-lg {
+  padding-inline: 23px;
+}
+
+/* ── 卡2 筛选卡（原型 y232..298，h67 = 12+40+12+2；控件盒 y245..284 = 40 ⇒ large 档）─ */
+/* 控件宽度真值 = PNG 边框竖线扫描（不是占位墨反推）：
+   下拉 337..466(130) / 输入 538..717(180) / 结果下拉 803..922(120) / 区间 1008..1187(180)
+   / 重置 1226..1295(70) / 查询 1307..1397(91)。按钮右缘 1397 ⇒ 卡右内距 20（左仍 24）。 */
+.cds-audit-screen .cds-audit-filter.ant-card > .ant-card-body {
+  padding: 12px 20px 12px 24px;
+}
+
+.cds-audit-screen .cds-audit-filter .cds-audit-filter-row {
+  display: flex;
+  align-items: center;
+  /* 字段间隙 16：由真值逐格反推（sel1 右 466 → 标签2 盒左 483；输入右 717 → 标签3 墨 734；
+     sel2 右 922 → 标签4 墨 939），标签→控件仍 13；12 会让 picker 左缘漂到 996（真值 1008）。 */
+  gap: 16px;
+  /* 自适应（specs/ss-18 §9）：真值单行只在 ≳1400 成立，窄档**折行**而不是把控件压扁
+     （2026-10-18 实测：不加这两行时 1024 档下拉被挤到 35px 宽、行不折）。 */
+  flex-wrap: wrap;
+  row-gap: 12px;
+}
+
+/* 标签→控件间隙 13（原型 323→336），标签 font 14（原型字距 14.25）。
+   注意：index.css 的 .cds-filter-field/.cds-filter-label 只挂在 :is(.cds-home,.cds-detail) 下，
+   /audit 不在这两个作域里，所以本屏自己把 flex/标签样式给齐。 */
+.cds-audit-screen .cds-audit-filter .cds-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex: none;
+}
+
+.cds-audit-screen .cds-audit-filter .cds-filter-label {
+  flex: none;
+  font-size: 14px;
+  color: #86909c;
+  white-space: nowrap;
+}
+
+/* 控件宽度逐件取**边框竖线**实测：下拉 130（x337..466）/ 输入 180（x538..717）/ 结果下拉 120（x803..922）/ 区间 180（x1008..1187）*/
+.cds-audit-screen .cds-audit-filter .f-action .ant-select {
+  width: 130px;
+}
+
+.cds-audit-screen .cds-audit-filter .f-keyword .ant-input-affix-wrapper {
+  width: 180px;
+}
+
+.cds-audit-screen .cds-audit-filter .f-outcome .ant-select {
+  width: 120px;
+}
+
+.cds-audit-screen .cds-audit-filter .f-range .ant-picker {
+  width: 180px;
+}
+
+/* 区间分隔符：原型是扁平 `-`（墨 x1079..1083，行垂直中心，5×2 px；`~` 会在上方带波形），
+   且不在几何中心：真值 dash 中心 1081 = 盒左 1008 + 内距 11 + 前字段 55 + 分隔半宽 7。
+   ⇒ 前字段定宽 55、后字段吃剩下（真值 88），分隔符左右内距 5（真值分隔盒 1074..1088）。 */
+.cds-audit-screen .cds-audit-filter .f-range .ant-picker-range-separator {
+  padding-inline: 5px;
+}
+
+.cds-audit-screen .cds-audit-filter .f-range .ant-picker-input:first-child {
+  width: 55px;
+  flex: none;
+}
+
+/* 重置/查询贴右：原型 x1225..1295 / x1307..1397 */
+.cds-audit-screen .cds-audit-filter .cds-audit-actions {
+  margin-inline-start: auto;
+}
+
+/* ── 卡3 记录卡（原型 y316..1044；卡头 72 无下边框；体 0 24 24）──────────────── */
+.cds-audit-screen .cds-audit-records.ant-card > .ant-card-head {
+  min-height: 72px;
+  padding: 0 24px;
+  border-bottom: 0;
+}
+
+.cds-audit-screen .cds-audit-records.ant-card > .ant-card-head .ant-card-head-title {
+  padding: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cds-audit-screen .cds-audit-records.ant-card > .ant-card-body {
+  padding: 0 24px 24px;
+}
+
+/* 类型页签：块 y338..369 = h32，间隙 12，右缘 1389；font 12 + 上下 5 + 1px 边 = 32。
+   背景/字色仍由组件内联 tabStyle 给（用例钉着），这里只管尺寸与间隙。 */
+.cds-audit-screen .cds-audit-records .ant-card-extra {
+  padding: 0;
+}
+
+.cds-audit-screen .cds-audit-records .ant-card-extra .ant-space-gap-col-small {
+  column-gap: 12px;
+}
+
+.cds-audit-screen .cds-audit-records .ant-card-extra button {
+  height: 32px;
+  box-sizing: border-box;
+}
+
+/* 表头行 y388..436 = h49，底 #f7f9fc，字 font 13，单元格内距 16（列文字左缘 284 = 268+16）；
+   图上表头下没有分隔线（437 直接是白的数据行） */
+.cds-audit-screen .cds-audit-records .ant-table-thead > tr > th {
+  height: 49px;
+  padding: 14px 16px;
+  background: var(--audit-head-bg);
+  border-bottom: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5b6472;
+}
+
+/* 数据行 y437 起行距 52，行间无分隔线，末行一条 #f1f2f4（y956..957） */
+.cds-audit-screen .cds-audit-records .ant-table-tbody > tr > td {
+  height: 52px;
+  padding: 14px 16px;
+  border-bottom: 0;
+}
+
+.cds-audit-screen .cds-audit-records .ant-table-tbody > tr:last-child > td {
+  border-bottom: 1px solid var(--audit-rule);
+}
+
+/* 操作类型标签：盒 y451..474 = h24，font 12，四色实心浅底（无描边） */
+.cds-audit-screen .cds-audit-records .ant-tag.cds-audit-tag {
+  height: 24px;
+  margin-inline-end: 0;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 22px;
+  border-width: 1px;
+  border-radius: 4px;
+}
+
+.cds-audit-screen .cds-audit-records .cds-audit-tag.t-green {
+  background: var(--audit-tag-green);
+  border-color: var(--audit-tag-green);
+  color: var(--audit-success);
+}
+
+.cds-audit-screen .cds-audit-records .cds-audit-tag.t-purple {
+  background: var(--audit-tag-purple);
+  border-color: var(--audit-tag-purple);
+  color: var(--cds-purple);
+}
+
+.cds-audit-screen .cds-audit-records .cds-audit-tag.t-blue {
+  background: var(--cds-primary-soft); /* 实测 #e8f1ff，与全局令牌逐位相同 */
+  border-color: var(--cds-primary-soft);
+  color: var(--cds-primary);
+}
+
+.cds-audit-screen .cds-audit-records .cds-audit-tag.t-orange {
+  background: var(--audit-tag-orange);
+  border-color: var(--audit-tag-orange);
+  color: var(--cds-orange);
+}
+
+.cds-audit-screen .cds-audit-records .cds-audit-tag.t-plain {
+  background: #f2f4f7;
+  border-color: #f2f4f7;
+  color: #4e5969;
+}
+
+/* 操作结果列：图标 13×12 + 间隙 7 + 同色文字（原型图标 x1035..1047，文字 x1054 起） */
+.cds-audit-screen .cds-audit-outcome.is-success {
+  color: var(--audit-success);
+}
+
+.cds-audit-screen .cds-audit-outcome.is-failure {
+  color: var(--audit-danger);
+}
+
+.cds-audit-screen .cds-audit-outcome .anticon {
+  margin-inline-end: 7px;
+}
+
+/* 分页带 y977..1008：总数在最左（x268），页码项 32×32，条数选择器在页码之前，
+   快速跳转在最右。antd 把「条数/跳转」包在同一个 options li 里，得先 display:contents
+   拆开才能把条数选择器挪到页码左侧。 */
+.cds-audit-screen .cds-audit-records .ant-table-wrapper .ant-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 原型：末行下边线 y956..957 → 页码盒 y977..1008 ⇒ 上间隙 20；页码盒底 1008 → 卡底 1044
+     ⇒ 下间隙 10 + 卡体下内距 24 + 1px 卡边框 */
+  margin: 20px 0 10px;
+}
+
+.cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-total-text {
+  margin-inline-end: auto;
+  color: #86909c;
+}
+
+.cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-options {
+  display: contents;
+}
+
+.cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-options-size-changer {
+  /* 图：条数选择器在 total 自动间隙后的首位（x860..960），不在行首 */
+  margin-inline-end: 0;
+}
+
+.cds-audit-screen .cds-audit-records .ant-pagination-prev,
+.cds-audit-screen .cds-audit-records .ant-pagination-item,
+.cds-audit-screen .cds-audit-records .ant-pagination-jump-prev,
+.cds-audit-screen .cds-audit-records .ant-pagination-jump-next,
+.cds-audit-screen .cds-audit-records .ant-pagination-next {
+  order: 1;
+}
+
+.cds-audit-screen .cds-audit-records .ant-pagination-options-quick-jumper {
+  order: 2;
+}
+
+/* 图上当前页是实心蓝块白字（#186cf0 探值；主色同源 #1b6ef3），antd 默认白底蓝框不够。 */
+.cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-item-active {
+  background: #1b6ef3;
+  border-color: #1b6ef3;
+}
+
+.cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-item-active a,
+.cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-item-active a:hover {
+  color: #fff;
+}
+
+/* ── 4-2 详情弹窗（720×643）────────────────────────────────────────────────── */
+/* 标题 font 18（原型字距 18.2）；标题右侧标签 font 12 浅橙底 h~20 */
+.cds-audit-modal .ant-modal-title {
+  font-size: 18px;
+}
+
+.cds-audit-modal .cds-audit-modal-tag.ant-tag {
+  height: 20px;
+  margin-inline-start: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  border-width: 1px;
+  border-radius: 4px;
+}
+
+/* 原型 footer 上沿没有分隔线（转录把灰面板下沿 y510 读成了分隔线）；共用件那条收掉。
+   关闭按钮盒 y588..627 = h40 ⇒ large 档。 */
+.cds-audit-modal.cds-detail-modal .ant-modal-footer {
+  border-top: 0;
+}
+
+.cds-audit-modal .ant-modal-footer .ant-btn-lg {
+  min-width: 71px;
+}
+
+/* 分区标题 = 4×16 蓝条（x24..28 #1f70f3）+ 12 间隙 + 16px 墨字，无分隔线 */
+.cds-audit-modal .cds-audit-section {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 24px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2a37;
+}
+
+.cds-audit-modal .cds-audit-section:first-child {
+  margin-top: 0;
+}
+
+.cds-audit-modal .cds-audit-section::before {
+  content: '';
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  background: #1f70f3;
+}
+
+/* 基础信息：竖排（标签上 / 值下），两列左列 x24 右列 x372 ⇒ 各占一半；
+   标签 12px 灰 #86909c（实测均值 #a3aab4），值 14px #4e5969（实测均值 #6e7075），行距 58 */
+.cds-audit-modal .cds-audit-basics.ant-descriptions .ant-descriptions-item-label {
+  font-size: 12px;
+  line-height: 20px;
+  color: #86909c;
+}
+
+.cds-audit-modal .cds-audit-basics.ant-descriptions .ant-descriptions-item-content {
+  font-size: 14px;
+  color: #4e5969;
+}
+
+.cds-audit-modal .cds-audit-basics.ant-descriptions .ant-descriptions-item-content > .ant-typography {
+  font-size: 14px;
+  color: inherit;
+}
+
+.cds-audit-modal .cds-audit-basics.ant-descriptions .ant-descriptions-item-content code {
+  font-size: 13px;
+}
+
+.cds-audit-modal .cds-audit-basics.ant-descriptions .ant-descriptions-row {
+  height: 29px;
+}
+
+/* 操作内容 = #f7f9fc 灰面板（x23..696 y354..511，h158，内距 17），
+   5 行单行「标签左 x40 / 值左 x150」，行距 28 */
+.cds-audit-modal .cds-audit-panel {
+  padding: 9px 16px;
+  background: var(--audit-head-bg);
+  border-radius: 8px;
+}
+
+.cds-audit-modal .cds-audit-panel .ant-descriptions-item-label {
+  width: 110px;
+  font-size: 12px;
+  color: #86909c;
+}
+
+.cds-audit-modal .cds-audit-panel .ant-descriptions-item-content {
+  font-size: 13px;
+  color: #4e5969;
+}
+
+.cds-audit-modal .cds-audit-panel .ant-descriptions-row {
+  height: 28px;
+}
+
+/* 不可篡改存证 = 第三段，同样单行 label/value，但不进灰面板（原型只有一块面板） */
+.cds-audit-modal .cds-audit-proof .ant-descriptions-item-label {
+  font-size: 12px;
+  color: #86909c;
+}
+
+.cds-audit-modal .cds-audit-proof .ant-descriptions-item-content {
+  font-size: 14px;
+  color: #4e5969;
+}

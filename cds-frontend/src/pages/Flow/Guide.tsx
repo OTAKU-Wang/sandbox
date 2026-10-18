@@ -1,5 +1,11 @@
 import { Alert, Card, Collapse, Divider, Space, Steps, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import {
+  SANDBOX_DIRECTORY_ENTRIES,
+  SANDBOX_DIRECTORY_NOTICE_TITLE,
+  SANDBOX_HARVEST_RULE,
+  type SandboxDirectoryEntry,
+} from './directoryContract';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -180,6 +186,16 @@ const WEBHOOK_VERIFY = `# 验签（平台 → 你的接收端）
 expected = hmac_sha256(secret, f"{X-CDS-Timestamp}.{原始请求体字节}").hexdigest()
 accept if hmac.compare_digest(expected, X-CDS-Signature-Sha256)`;
 
+const directoryColumns: ColumnsType<SandboxDirectoryEntry> = [
+  {
+    title: '目录',
+    dataIndex: 'path',
+    width: 190,
+    render: (path: string) => <Text code>{path}</Text>,
+  },
+  { title: '用途', dataIndex: 'purpose' },
+];
+
 const endpointColumns: ColumnsType<Endpoint> = [
   {
     title: '方法',
@@ -211,6 +227,19 @@ export default function FlowGuide() {
         message="先读这一条：沙箱只有 MicroVM 单一路径"
         description="执行面统一是 CubeSandbox 微虚拟机（级别 l2c）。没有可挑选的「更轻的隔离档」：数据面不可用时后端直接拒绝执行（400 RUNTIME_UNAVAILABLE），而不是悄悄降级。执行前用 GET /api/v1/flow/runtime-status 预检。"
       />
+
+      <Card title={SANDBOX_DIRECTORY_NOTICE_TITLE} size="small" style={{ marginBottom: 16 }}>
+        <Table<SandboxDirectoryEntry>
+          size="small"
+          rowKey="path"
+          columns={directoryColumns}
+          dataSource={[...SANDBOX_DIRECTORY_ENTRIES]}
+          pagination={false}
+        />
+        <Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
+          {SANDBOX_HARVEST_RULE}
+        </Paragraph>
+      </Card>
 
       <Card title="鉴权与错误约定" size="small" style={{ marginBottom: 16 }}>
         <ul style={{ margin: 0, paddingLeft: 20 }}>

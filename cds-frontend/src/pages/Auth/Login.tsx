@@ -47,7 +47,7 @@ export default function Login() {
   return (
     <div className="cds-auth-shell">
       <section className="cds-auth-info">
-        <div className="cds-auth-brandmark">CDS</div>
+        <img className="cds-auth-logo" src="/logo.svg" alt="密态沙箱系统" />
         <div>
           <Title level={1}>密态沙箱系统</Title>
           <Text>Confidential Data Sandbox</Text>

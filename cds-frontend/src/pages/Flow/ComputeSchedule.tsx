@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -18,7 +18,7 @@ import {
   message,
 } from 'antd';
 import { FileSearchOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import {
   describeDeliveryMethod,
@@ -103,16 +103,19 @@ const scheduleSpec = (item: ComputeScheduleItem) =>
 
 function ExecuteModal({
   contract,
+  initialWorkloadId,
   onClose,
   onDone,
 }: {
   contract: ComputeScheduleItem;
+  /** 从任务卡「执行」带过来的已发布版本；不带时仍默认「最新已发布版」（空选）。 */
+  initialWorkloadId?: string | null;
   onClose: () => void;
   onDone: (run: ComputeRunView) => void;
 }) {
   const workloadsQuery = useWorkloads({ contractId: contract.contract_id, env: 'production', status: 'published' });
   const workloads = workloadsQuery.data?.items ?? [];
-  const [workloadId, setWorkloadId] = useState<string | null>(null);
+  const [workloadId, setWorkloadId] = useState<string | null>(initialWorkloadId ?? null);
   const [paramsText, setParamsText] = useState('');
   const [override, setOverride] = useState<Record<string, number>>({});
   const trigger = useTriggerComputeRunDetailed();
@@ -324,12 +327,19 @@ function RunLogDrawer({ run, onClose }: { run: ComputeRunView; onClose: () => vo
 
 export default function ComputeSchedule() {
   const navigate = useNavigate();
-  const [contractId, setContractId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  // 开发任务卡的「执行」带 contract/workload 进来：先把调度表与运行记录收到这条合约，
+  // 等调度行到手再自动开执行弹窗并预选版本；不认得的 workload 不往选择里塞。
+  const presetContractId = searchParams.get('contract');
+  const [contractId, setContractId] = useState<string | null>(presetContractId);
+  const [preset, setPreset] = useState<{ contractId: string; workloadId: string | null } | null>(
+    presetContractId ? { contractId: presetContractId, workloadId: searchParams.get('workload') } : null,
+  );
   const { data: contracts } = useContractOptions();
   const scheduleQuery = useComputeSchedule(contractId);
   const runsQuery = useComputeRuns({ contractId }, RUN_POLL_INTERVAL_MS);
   const cancelMutation = useCancelComputeRun();
-  const [executeContract, setExecuteContract] = useState<ComputeScheduleItem | null>(null);
+  const [executeTarget, setExecuteTarget] = useState<{ row: ComputeScheduleItem; workloadId: string | null } | null>(null);
   const [logRun, setLogRun] = useState<ComputeRunView | null>(null);
 
   const contractNo = (id: string) => (contracts ?? []).find((contract) => contract.id === id)?.contract_no ?? `${id.slice(0, 8)}…`;
@@ -393,7 +403,7 @@ export default function ComputeSchedule() {
       key: 'actions',
       width: 130,
       render: (_: unknown, record) => (
-        <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} onClick={() => setExecuteContract(record)}>
+        <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} onClick={() => setExecuteTarget({ row: record, workloadId: null })}>
           执行
         </Button>
       ),
@@ -478,6 +488,15 @@ export default function ComputeSchedule() {
   ];
 
   const scheduleItems = scheduleQuery.data?.items ?? [];
+
+  // 预置的开弹窗要等调度行（弹窗标题与规格上限都取自行内数据，不拿路由参数凑）。
+  useEffect(() => {
+    if (!preset) return;
+    const row = (scheduleQuery.data?.items ?? []).find((item) => item.contract_id === preset.contractId);
+    if (!row) return;
+    setExecuteTarget({ row, workloadId: preset.workloadId });
+    setPreset(null);
+  }, [preset, scheduleQuery.data]);
 
   return (
     <div>
@@ -565,10 +584,11 @@ export default function ComputeSchedule() {
         />
       </Card>
 
-      {executeContract && (
+      {executeTarget && (
         <ExecuteModal
-          contract={executeContract}
-          onClose={() => setExecuteContract(null)}
+          contract={executeTarget.row}
+          initialWorkloadId={executeTarget.workloadId}
+          onClose={() => setExecuteTarget(null)}
           onDone={(run) => {
             if (run.status === 'skipped_overlap') message.warning('上一轮计算尚未结束，本次已跳过');
             else if (run.status === 'succeeded') message.success(`执行完成（${run.id.slice(0, 8)}…）`);

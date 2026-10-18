@@ -47,9 +47,9 @@ export const dataResourceApi = {
     formData.append('file', data.file);
     formData.append('name', data.name);
     if (data.description) formData.append('description', data.description);
-    return api.post('/data-resources/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    // Content-Type 必须留给浏览器：手写 'multipart/form-data' 会顶掉浏览器自动生成的
+    // boundary，后端拿不到 file 部件（实测 422）。
+    return api.post('/data-resources/upload', formData);
   },
 
   delete: (id: string): Promise<void> =>

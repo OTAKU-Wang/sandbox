@@ -1,0 +1,302 @@
+/* 图 2-2「新增开发任务」逐像素判据（group-A.md A-3 + 2026-10-17 PNG 像素探针直读）：
+   真值：卡 y248/552/728/932，底部操作白条 y1484..；卡头 4×14 蓝条 @x268、题字 x281、卡头无分隔线；
+   必填星号在标签**右**侧（深红 245,70,70，6px 距）；输入盒 h41（y343..384）；步进器盒 h41（y823..864，
+   − 在盒内左端、＋ 在盒内右端、G 后缀）；关联数据表右缘 x1096、已选面板分栏线 x1112（题字 x1131、
+   清空蓝链右缘 x1374）；分页带在表区**右对齐**（尾件「页」右缘 x1079），当前页实心 #1b6ff2 30×28；
+   页签药签 h27：选中=实心 #1b6ff2 白字，未选=白底 #f1f2f4 描边。 */
+
+/* —— 卡壳 —— */
+.cds-dev-task-create .ant-card {
+  border-color: #f1f2f4;
+}
+
+/* 列簇真值反推：x268/x666/x1064 ⇒ 前二列 373px + 间隙 25，尾列吃剩余。 */
+.cds-dev-task-create .cds-trio {
+  display: flex;
+  gap: 25px;
+}
+
+.cds-dev-task-create .cds-trio > * {
+  flex: 0 0 373px;
+  min-width: 0;
+}
+
+/* 配额列小字：图字高≈12px（行 20），14px 会在 304px 列宽里折行把卡垫高 23；
+   antd Typography 自带 font-size，需要直接铟子选择器而不是靠继承。 */
+.cds-dev-task-create .cds-trio > *:nth-child(3) {
+  flex: 1 1 auto;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.cds-dev-task-create .cds-trio > *:nth-child(3) .ant-typography {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+@media (max-width: 1280px) {
+  .cds-dev-task-create .cds-trio {
+    flex-wrap: wrap;
+  }
+
+  .cds-dev-task-create .cds-trio > * {
+    flex: 1 1 300px;
+  }
+}
+
+/* 卡头高 56（题心 y283 = 卡顶 248 + 28），体顶内距 16：label 落 y320、盒落 y343。 */
+.cds-dev-task-create .ant-card-head {
+  border-bottom: 0;
+  padding-inline: 24px;
+  min-height: 56px;
+}
+
+.cds-dev-task-create .ant-card-body {
+  padding: 16px 24px 24px;
+}
+
+/* 同排字段间的垂直节奏：由区块间距自身决定；但图 2-2 基本信息卡里三列行→描述行间距 = 24，
+   而末行的卡内距就是 24 ⇒ 只给「后面还有内容」的三列行补 24。 */
+.cds-dev-task-create .cds-trio:not(:last-child) {
+  margin-bottom: 24px;
+}
+
+/* antd 给标签留了冒号位（padding-right），图无冒号 ⇒ 星号紧贴文字尾。 */
+.cds-dev-task-create .ant-form-item-vertical .ant-form-item-label > label {
+  padding-inline-end: 0;
+}
+
+/* 图量 label 顶→盒顶 = 24（antd 默认 pb 8 ⇒ 30）。 */
+.cds-dev-task-create .ant-form-item-vertical .ant-form-item-label {
+  padding-bottom: 2px;
+}
+
+/* 卡内末行与同行各列都不留表单外距：PNG 盒底→卡底 = 24（卡内距本身）；同排字段间的
+   垂直节奏由行高本身决定（antd 每项自带 24mb 会把同排行垫高 24，每张卡级联下移）。 */
+.cds-dev-task-create .cds-trio .ant-form-item,
+.cds-dev-task-create .cds-trio > *:last-child > .ant-form-item:last-child,
+.cds-dev-task-create .ant-card-body > .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+/* 题前 4×14 蓝条：x268 起（卡内容左缘），题字留 9px 间隙。 */
+.cds-dev-task-create .ant-card-head-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.cds-dev-task-create .ant-card-head-title > .cds-card-head-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cds-dev-task-create .ant-card-head-title::before {
+  content: '';
+  flex: none;
+  width: 4px;
+  height: 14px;
+  background: #1b6ff2;
+}
+
+/* —— 必填星号按图放标签右侧（antd 默认在左；antd 竖排也会给 label::after 塞冒号，
+   所以选择器垫到 (0,3,1) 压住它，否则 computed content 变成 ':' 红星失踪）—— */
+.cds-dev-task-create .ant-form-item .ant-form-item-label > label.ant-form-item-required::before {
+  display: none !important;
+}
+
+.cds-dev-task-create .ant-form-item .ant-form-item-label > label.ant-form-item-required::after {
+  content: '*';
+  margin-inline-start: 6px;
+  color: #f54646;
+}
+
+/* —— 控件盒高按图 40（输入盒实测 y343..384）——
+   Select 只钉表单内的（分页条 size-changer 另有小尺寸真值 32）—— */
+.cds-dev-task-create .ant-input:not(textarea),
+.cds-dev-task-create .ant-input-affix-wrapper,
+.cds-dev-task-create .ant-input-number:not(.cds-mem-input) {
+  height: 40px;
+}
+
+.cds-dev-task-create .ant-form-item .ant-select-single,
+.cds-dev-task-create .ant-form-item .ant-select-single .ant-select-selector {
+  height: 40px;
+}
+
+.cds-dev-task-create .ant-form-item .ant-select-single .ant-select-selector .ant-select-selection-item,
+.cds-dev-task-create .ant-form-item .ant-select-single .ant-select-selector .ant-select-selection-placeholder {
+  line-height: 38px;
+}
+
+.cds-dev-task-create .ant-input-number:not(.cds-mem-input) .ant-input-number-input {
+  height: 38px;
+}
+
+/* 描述文本域：图盒 y431..512 = 81 = 3×24 + 内距 8（antd 行高 22 只得 76）。 */
+.cds-dev-task-create textarea.ant-input {
+  line-height: 24px;
+}
+
+/* 屏内主/次按钮 40 高（筛选带、底部操作条同规）；small 与 link 不受牵连。 */
+.cds-dev-task-create .ant-btn:not(.ant-btn-sm):not(.ant-btn-link) {
+  height: 40px;
+  padding-inline: 22px;
+}
+
+/* —— 步进器（图：− 与 ＋ 在盒内两端，G 后缀，整盒 h41 一圈描边）—— */
+/* 旧的全局「框内右侧后缀 G」（index.css `.cds-unit-item`）与步进器自带的 G 叠加 ⇒ 本屏禁用旧画法，
+ *  G 由 .cds-mem-g 画在盒内＋钮前（图：后缀在数字与＋之间）。 */
+body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::after {
+  content: none;
+}
+
+/* 步进器盒比列窄 8（图：盒 272..637 vs 列 268..641）。 */
+.cds-mem-stepper {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  margin-inline: 4px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.cds-mem-stepper:focus-within {
+  border-color: #1b6ef3;
+  box-shadow: 0 0 0 2px rgba(27, 110, 243, 0.1);
+}
+
+.cds-mem-step {
+  flex: none;
+  width: 36px;
+  height: 38px;
+  border: 0;
+  background: transparent;
+  color: #4e5969;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cds-mem-step:hover:not(:disabled) {
+  color: #1b6ef3;
+}
+
+.cds-mem-step:disabled {
+  color: #c9cdd4;
+  cursor: not-allowed;
+}
+
+.cds-mem-stepper .cds-mem-input.ant-input-number {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  box-shadow: none !important;
+  background: transparent;
+}
+
+.cds-mem-stepper .cds-mem-input .ant-input-number-input {
+  height: 38px;
+}
+
+.cds-mem-g {
+  flex: none;
+  margin-inline-end: 6px;
+  padding: 1px 8px;
+  border: 1px solid #e5e6eb;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+/* —— 关联数据：表区 + 已选面板分栏（面板 x1112..1368 = 256 宽，左缘分栏线）—— */
+.cds-picker-side {
+  width: 256px;
+  flex: 0 0 256px;
+  border-left: 1px solid #f1f2f4;
+  padding-left: 19px;
+}
+
+/* 页签药签（选中实心蓝在 JS 内联色）：h28，药签 144 = 8 字 12px + 21px 内距×2 + 描边。 */
+.cds-dev-task-create [data-testid^='task-tab-'] {
+  height: 28px;
+  font-size: 12px;
+  padding-inline: 21px;
+}
+
+/* 分页带：图样只在表区右对齐（「页」右缘 x1079 ≈ 表右缘 1096−17），当前页实心蓝。 */
+.cds-dev-task-create .cds-task-pager.ant-pagination {
+  text-align: right;
+}
+
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item-active {
+  background: #1b6ff2;
+  border-color: #1b6ff2;
+}
+
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item-active a,
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item-active a:hover {
+  color: #fff;
+}
+
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item {
+  min-width: 30px;
+  height: 28px;
+  line-height: 26px;
+}
+
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-options .ant-select-single .ant-select-selector {
+  height: 32px;
+}
+
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-options .ant-select-single .ant-select-selector .ant-select-selection-item,
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-options .ant-select-single .ant-select-selector .ant-select-selection-placeholder {
+  line-height: 30px;
+}
+
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-options-quick-jumper input {
+  height: 32px;
+}
+
+/* 卡题后的 ⓘ（图：我的合约/资源配置/关联数据三块） */
+.cds-dev-task-create .cds-card-head-info {
+  color: #b6bec9;
+  font-size: 13px;
+}
+
+/* 配额使用建议：图上浅蓝 alert 卡（定位图钉蓝标 + 蓝题 + 深灰正文） */
+.cds-quota-advice {
+  height: 100%;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #eef3fb;
+}
+
+.cds-quota-advice-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #1b6ef3;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.cds-quota-advice-body {
+  margin-top: 6px;
+  color: #4e5969;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* 底部操作白条（PNG 白带 y1484..，正文行 y1503..1540；完成钮实心 x1316..1390 = 卡右缘内 2px，
+   尾端几乎顶到卡边，右内距按图压到 3）。 */
+.cds-dev-task-create .cds-dev-task-foot.ant-card {
+  margin-top: 16px;
+}
+
+.cds-dev-task-create .cds-dev-task-foot .ant-card-body {
+  padding: 16px 3px 16px 24px;
+}

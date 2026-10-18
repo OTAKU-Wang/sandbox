@@ -19,10 +19,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   [UserRole.ADMIN]: '系统管理员',
 };
 
-export const SELF_REGISTER_ROLE_OPTIONS = [
-  { label: '数商', value: UserRole.DATA_PROVIDER },
-  { label: '买方', value: UserRole.BUYER },
-];
+// PZ-10：自助注册不可选角色（后端 ALLOWED_SELF_REGISTER_ROLES={admin}，省略即默认买方），
+// 旧的 SELF_REGISTER_ROLE_OPTIONS（数商/买方）与后端契约冲突已删除，勿恢复。
 
 export const ROLE_GROUPS = {
   productReaders: [UserRole.DATA_PROVIDER, UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],

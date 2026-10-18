@@ -71,6 +71,18 @@ export interface SessionUsageResponse {
   };
 }
 
+/** D-e2e-48：状态条 CPU/内存——后端只报 cgroup v2 真读数，读不到就 available:false。 */
+export interface SessionMeteringResponse {
+  available: boolean;
+  reason?: string | null;
+  source?: string | null;
+  cpu_percent: number | null;
+  memory_used_mb: number | null;
+  memory_limit_mb: number | null;
+  pids: number | null;
+  sampled_ms?: number | null;
+}
+
 // ---------- Templates ----------
 
 export interface SessionTemplate {
@@ -331,6 +343,10 @@ export const sandboxApi = {
   getUsage: (id: string): Promise<SessionUsageResponse> =>
     api.get(`/sandbox-sessions/${id}/usage`),
 
+  // D-e2e-48：cgroup v2 真计量（读不到时 available:false，前端继续显示未计量）
+  getMetering: (id: string): Promise<SessionMeteringResponse> =>
+    api.get(`/sandbox-sessions/${id}/metering`),
+
   // Session templates
   getSessionTemplates: (): Promise<SessionTemplatesResponse> =>
     api.get('/sandbox-sessions/session-templates'),
@@ -342,9 +358,7 @@ export const sandboxApi = {
   uploadFile: (id: string, file: File): Promise<SessionFile> => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post(`/sandbox-sessions/${id}/files`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    return api.post(`/sandbox-sessions/${id}/files`, formData);
   },
 
   // Blob download — returns blob plus review status parsed from the

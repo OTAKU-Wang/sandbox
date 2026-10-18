@@ -21,7 +21,9 @@ export interface RegisterRequest {
   username: string;
   email: string;
   password: string;
-  role: string;
+  /** PZ-10：自助注册只能省略（默认 buyer）或 admin（bootstrap，生产被门拒绝）；
+   *  其余角色由管理员在用户管理页指派（PATCH /auth/users/{id}/role）。 */
+  role?: string;
   organization?: string;
 }
 

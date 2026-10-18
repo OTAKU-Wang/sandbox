@@ -1,8 +1,24 @@
+/* 原型实测色板（pngprobe.py 像素探针，10 张 PNG 同源）：主色 #1B6EF3（页眉/当前页签/主按钮同一支蓝，
+   首页 #1b6ef3、其余屏 #1b6ff2，差 1/255 属图内噪声）、成功绿 #00A870、紫 #7A5AF8、橙 #F77335，
+   选中导航/标签的浅底 #E8F1FF，页面底色 #F0F5FB。组件里一律引用这些令牌，不再堆内联十六进制。
+   绿/紫/橙与三档浅底按 strict-1-home.md §3#16-18 + §4 色板校准（strict 优先于 group-A 的 #00B070/
+   #8060F0/#F07030 一档，2026-10-18 复核）。 */
+:root {
+  --cds-primary: #1b6ef3;
+  --cds-success: #00a870;
+  --cds-purple: #7a5af8;
+  --cds-orange: #f77335;
+  --cds-primary-soft: #e8f1ff;
+  --cds-success-soft: #e8f7ee;
+  --cds-purple-soft: #f1ecff;
+  --cds-orange-soft: #fff3e8;
+}
+
 body {
   margin: 0;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #eef2f5;
+  background: #f0f5fb;
   color: #1f2a37;
 }
 
@@ -12,34 +28,48 @@ body {
 
 .cds-app {
   min-height: 100vh;
-  background: #eef2f5;
+  background: #f0f5fb;
 }
 
+/* 左栏：白底直接坐在浅灰页面底上（strict-1-home.md §1「左导航卡片 radius 0、**无边框**」：
+   x=180 一列除激活块外整列皆白，白与 #f0f5fb 在 x219/x220 直接相接，中间没有分隔线）。 */
 .cds-sidebar {
-  border-right: 1px solid #d9e2ea;
-  box-shadow: 1px 0 0 rgba(25, 36, 54, 0.03);
+  background: #ffffff;
 }
 
+/* 左栏行距（PNG 1-首页 clusters：墨行 y=99/151/203/254 ⇒ 行距 ≈52）：
+   项高 46 + 上下各 3 ⇒ 步距 52（旧值 54+6=60 是把旧转录入的 60 当真值）。
+   文字左缘：原型 x56（图标 x25 w16），实现原为 x50 ⇒ 正文再加 6px。*/
+.cds-sidebar .ant-menu .ant-menu-item,
+.cds-sidebar .ant-menu .ant-menu-submenu-title {
+  height: 46px;
+  line-height: 46px;
+  margin-block: 3px;
+}
+
+/* 文字左缘：原型图标 x25..41、文字 x56（间隙 15）；antd 实际把间隙加在正文的
+   margin-inline-start 上（计算值 10px，实测文字只到 x50），并且会赢过同特异规则（运行时注入）。
+   抬不过就显式赢：16px ⇒ 文字落 x56。 */
+.cds-sidebar .ant-menu .ant-menu-item > .ant-menu-title-content {
+  margin-inline-start: 16px !important;
+}
+
+/* 品牌块在顶栏（原型 A-1：蓝条左侧白色 mark + 单行白字），左栏不再有品牌区。
+   真值 strict-1-home.md §8-1：mark ink x41–59、品牌字从 x81 起 ⇒ 顶栏左内缩 40px（antd 给 24）
+   与 mark→文字间隙 22px。 */
 .cds-brand {
-  height: 64px;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 16px;
-  border-bottom: 1px solid #edf1f5;
+  gap: 22px;
+  padding-inline-start: 16px;
 }
 
-.cds-brand-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: linear-gradient(135deg, #0f766e, #2563eb);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
+/* mark 真值 19×20 白色描边盾形，无底板 ⇒ 不再需要 width/height 30 + border-radius 8。 */
+.cds-brand-logo {
+  width: 19px;
+  height: 20px;
+  display: block;
   flex: 0 0 auto;
 }
 
@@ -50,45 +80,71 @@ body {
   line-height: 1.15;
 }
 
+/* 品牌字真值：「星信可信数据空间 · 数据沙箱开发平台」20px 常规白字
+   （strict-1-home.md §1 顶栏品牌字 ink 18-20/pitch 21；2-1 同值）。 */
 .cds-brand-text span {
-  font-size: 15px;
-  font-weight: 700;
-  color: #111827;
+  font-size: 20px;
+  font-weight: 400;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.cds-brand-text small {
-  margin-top: 3px;
-  color: #6b7280;
-  font-size: 11px;
-  letter-spacing: 0;
+/* 弱化菜单项（原型「开发指引文档 / 环境与配额说明」灰字，但仍可点击）：
+   strict-1-home.md §4/§8-10 用「颜色 #a6adb8 + 字号 12px」双重弱化（常规项 14px/#1d2129）。 */
+.cds-menu-muted {
+  color: #a6adb8;
+  font-size: 12px;
 }
 
+/* 顶栏：原型是 1440×65 的主色实心条 + 白字白图标；高取 64 与既有布局对齐。 */
 .cds-header {
   height: 64px;
-  background: rgba(255, 255, 255, 0.96);
+  line-height: 64px;
+  background: var(--cds-primary);
   padding: 0 24px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #dfe6ee;
+  gap: 16px;
+  border-bottom: 0;
   position: sticky;
   top: 0;
   z-index: 10;
-  backdrop-filter: blur(8px);
+  color: #ffffff;
 }
 
-.cds-header-context {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+.cds-crumb-slash {
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 22px;
+  color: #6b7280;
 }
 
-.cds-page-title {
-  margin-top: 2px;
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
+/* 图 4-1/3-1 同源律：斜杠式面包屑前置 14×12 文件夹描边图标（#afb5c0，墨 x245..258），
+   图标右缘→文字左缘 12。形按墨迹逐行读数用 mask 画（2px 描边框 + 左上 1px 矮凸舌）。
+   药丸式（strip）不受影响。 */
+.cds-crumb-slash .cds-crumb-lead {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  margin-inline-start: 2px;
+  margin-inline-end: 12px;
+  vertical-align: -1px;
+  background: #afb5c0;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 12'%3E%3Cpath fill-rule='evenodd' d='M0 0h7v1h7v11H0z'/%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M2 3h10v7.4H2z'/%3E%3C/svg%3E") no-repeat center / 14px 12px;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 12'%3E%3Cpath fill-rule='evenodd' d='M0 0h7v1h7v11H0z'/%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M2 3h10v7.4H2z'/%3E%3C/svg%3E") no-repeat center / 14px 12px;
+}
+
+.cds-crumb-slash .is-current {
+  color: #1d2129;
+}
+
+/* 段间隙按图 25（前段末→斜杠墨 10、斜杠墨→后段 11）；8px 实测只得 21.5。 */
+.cds-crumb-sep {
+  margin: 0 10px;
+  color: #c9cdd4;
 }
 
 .cds-header-actions {
@@ -98,7 +154,7 @@ body {
 }
 
 .cds-header-icon {
-  color: #4b5563;
+  color: #ffffff;
   font-size: 18px;
 }
 
@@ -106,32 +162,62 @@ body {
   cursor: pointer;
   padding: 6px 8px;
   border-radius: 8px;
+  color: #ffffff;
+  line-height: 1.4;
 }
 
 .cds-user-menu:hover {
-  background: #f3f6f9;
+  background: rgba(255, 255, 255, 0.16);
 }
 
+.cds-user-menu .anticon,
+.cds-user-menu .ant-typography {
+  color: #ffffff;
+}
+
+/* 内容区：浅灰底，页面本体是一张圆角 8 的白卡（原型内容卡左边界 x=243）。 */
 .cds-content {
   margin: 0;
-  padding: 24px;
+  /* 原型内容卡左边界 x=243，左栏右边界 x=219 ⇒ 栏距 24px（A-1 bbox） */
+  /* 1440 WebView 定标：innerWidth 1418 / documentElement.clientWidth **1403**（经典滞动条 15px）。
+     PNG 内容右缘 x1415 = 1440−25（静态图无条）。旧值四周 23 ⇒ 1403 下右缘 1380；
+     之前记的「右边距随视口非线性收缩」实为滞动条记账，比较必须同 clientWidth。
+     同宽下旧值 Δ=2 ⇒ 右 padding 抬 25 与 PNG 齐平，左维持 23（x243 实测 Δ0）。 */
+  padding: 23px 25px 23px 23px;
   min-height: 280px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 180px),
-    #eef2f5;
+  background: #f0f5fb;
 }
 
+/* 内容容器只是布局盒，不是一整块白板：原型（2-1 vline x=250）卡间是 #f0f5fb 底色
+   （卡 y138..231 → 底 y232..247 → 下一卡 y248），卡片各自浮在页面底色上。 */
 .cds-content-inner {
   max-width: 1440px;
   margin: 0 auto;
+  padding: 16px 0 0;
 }
 
+/* 面包屑屏（3-x / 4-x，无页签带）：原型里面包屑贴在页底色上（y89..101），
+   第一张白卡顶在 y≈120（3-1 实测 120，4-1 实测 121）。 */
+.cds-content-inner:has(> .cds-crumb-slash) {
+  padding-top: 2px;
+}
+
+.cds-content-inner:has(> .cds-crumb-slash) > .cds-crumb-slash + * {
+  margin-top: 31px;
+}
+
+/* 页头行在原型里是一枚白卡（2-1 探针 vline x=250：白 y138..231，高 94；与下一张卡空 16）。
+   strict-2-1.md §2 C1 244,138,1172,94：无实线边框、radius≈6。 */
 .cds-page-toolbar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   margin-bottom: 16px;
+  /* PNG 2-1/2-3 页头卡 h94：上一步文案回到逐字后实测 h96 ⇒ 上下 padding 20→19。 */
+  padding: 19px 24px;
+  background: #ffffff;
+  border-radius: 6px;
 }
 
 .cds-json-block {
@@ -145,6 +231,174 @@ body {
   color: #263445;
   font-size: 12px;
   line-height: 1.55;
+}
+
+/* 开发任务卡片网格（SS-18 M2）：色值全部取本文件既有调色板，不引入新色。
+   图 2-1 实测：卡 380×218，横向/行间距均 16（640−624=16、566−550=16），卡宽
+   (1172−2×16)/3 = 380 ⇒ 固定 3 列 + gap 16（旧 auto-fill minmax(300px,1fr) + gap 24
+   在 1440 下得 356 宽 / 24 间隙，两值都偏离真值）。 */
+.cds-task-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1023px) {
+  .cds-task-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+}
+
+/* 图 2-1 卡实测 380×218：图标方块三带（头 / 规格两行 / 钮行），钮行等高满宽。
+   strict-2-1.md §2/§8-15：卡无实线边框（只有柔和投影）、radius≈6、卡内边距 20。 */
+.cds-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 20px 20px 18px;
+  border: none;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(25, 36, 54, 0.04);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.cds-task-card:hover {
+  border-color: #bcd4f6;
+  box-shadow: 0 3px 10px rgba(25, 36, 54, 0.08);
+}
+
+.cds-task-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* 卡左上角标：颜色由调试方法推导（web_ide 蓝 / local_plugin 绿 / jupyter 紫 / 未登记灰）。
+   四档色值与盒 radius 8 取 strict-2-1.md §3.3 + §2 卡内栅格实测（底 #e8f1ff/#f1ecff/#e8f7ee/#fff3e8，
+   字形 #1b6ff2/#7a5af8/#00a870），一律走调色板令牌。 */
+.cds-task-ico {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.cds-task-ico.is-blue { background: var(--cds-primary-soft); color: var(--cds-primary); }
+.cds-task-ico.is-purple { background: var(--cds-purple-soft); color: var(--cds-purple); }
+.cds-task-ico.is-green { background: var(--cds-success-soft); color: var(--cds-success); }
+.cds-task-ico.is-gray { background: #f1f3f6; color: #98a2b3; }
+
+.cds-task-card-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 图 2-1 状态胶囊：进行中绿底绿字 / 已结束灰底灰字，带小圆图标。
+   strict-2-1.md §2/§6：药丸 h24（全圆角 r≈12）、圆点与文字间隙 8、左内距 10；
+   进行中底 #e8f7ee 字 #00a870，已结束底 #f2f3f5 字 ≈#86909c。 */
+.cds-state-chip {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.cds-state-chip .anticon { font-size: 12px; }
+/* strict-2-1.md §2/§6：胶囊里是 10×10 实心圆点（跟字色），不是环形进度/减号图标。 */
+.cds-state-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.cds-state-chip.is-green { background: var(--cds-success-soft); color: var(--cds-success); }
+.cds-state-chip.is-gray { background: #f2f3f5; color: #86909c; }
+
+/* 真值任务名 16px/600 #1d2129（pitch 16，strict-2-1.md §4「卡片标题（任务名）」）。 */
+.cds-task-card-title {
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1d2129;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cds-task-card-specs {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin: 0;
+  padding: 16px 0 2px;
+  border-top: 1px solid #f0f3f7;
+}
+
+.cds-task-card-specs .cds-spec-row {
+  display: flex;
+  align-items: center;
+}
+
+.cds-task-card-specs dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #86909c;
+}
+
+.cds-task-card-specs dt .anticon {
+  color: #86909c;
+}
+
+/* 真值元信息：标签 12px / #86909c，时间值 12px / #5b6574（右缘对齐 +359）。 */
+.cds-task-card-specs dd {
+  margin: 0 0 0 auto;
+  font-size: 12px;
+  color: #5b6574;
+}
+
+/* 钮行三铟 108×32、间距 8–9（x264/379/496）。 */
+.cds-task-card-foot {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+/* 图 2-1 三钮等宽满宽、高 36（介于 antd default/large 之间）；
+   钮行用 grid 不用 flex：禁用态包在 Tooltip span 里时，flex basis:0 在部分引擎被内容宽钉住（实测 74-102 不等），grid 1fr 无此问题。 */
+.cds-task-card-foot .ant-btn {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 关联数据看板（SS-18 M2′）：弹窗内限高滚动；色值仍取上面的调色板，不引入新色。 */
+.cds-task-data-board {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid #dfe6ee;
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 .cds-auth-shell {
@@ -193,17 +447,11 @@ body {
   color: #b9c7d8;
 }
 
-.cds-auth-brandmark {
+.cds-auth-logo {
   width: 58px;
   height: 58px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  display: block;
   border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: #ffffff;
-  background: #0f766e;
-  font-weight: 800;
-  letter-spacing: 0;
 }
 
 .cds-auth-tags {
@@ -285,6 +533,24 @@ body {
   border-inline-end: 0;
 }
 
+/* 左栏选中态（原型 A-1 唯一的选中项）：浅蓝底 + 主色蓝字，并去掉 antd 默认的贴边指示条。 */
+.cds-sidebar .ant-menu-light.ant-menu-inline .ant-menu-item-selected {
+  background: var(--cds-primary-soft);
+  color: var(--cds-primary);
+}
+
+.cds-sidebar .ant-menu-light.ant-menu-inline .ant-menu-item-selected .anticon {
+  color: var(--cds-primary);
+}
+
+.cds-sidebar .ant-menu-light.ant-menu-inline .ant-menu-item-selected::after {
+  display: none;
+}
+
+.cds-sidebar .ant-menu-light.ant-menu-inline .ant-menu-submenu-selected > .ant-menu-submenu-title {
+  color: var(--cds-primary);
+}
+
 @media (max-width: 767px) {
   .cds-header {
     height: auto;
@@ -300,8 +566,16 @@ body {
     justify-content: flex-end;
   }
 
+  .cds-brand-text span {
+    white-space: normal;
+  }
+
   .cds-content {
-    padding: 16px;
+    padding: 12px;
+  }
+
+  .cds-content-inner {
+    padding: 12px;
   }
 
   .cds-page-toolbar {
@@ -325,4 +599,385 @@ body {
     padding: 20px;
     align-items: flex-start;
   }
+}
+
+/* ── 界面细节层（A-1 原型：KPI 卡 ≈137 带、表格行距 ≈48、进度条 ≈15、图表带 ≈108）──
+   作用域 = .cds-home（首页）与 .cds-detail（原型逐屏收口的页面根节点）：
+   卡片内距、表头/行分隔、悬浮反馈、进度条粗细、柱高过渡。其余页面不受影响。 */
+:is(.cds-home, .cds-detail) .ant-card {
+  border-color: #e3e9f1;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+:is(.cds-home, .cds-detail) .ant-card:hover {
+  border-color: #d3dded;
+  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.07);
+}
+
+:is(.cds-home, .cds-detail) .ant-card[data-testid^="kpi-"]:hover {
+  transform: translateY(-2px);
+}
+
+:is(.cds-home, .cds-detail) .ant-card-head {
+  min-height: 48px;
+  padding: 0 20px;
+  border-bottom-color: #eef1f6;
+}
+
+:is(.cds-home, .cds-detail) .ant-card-head-title {
+  padding: 12px 0;
+}
+
+:is(.cds-home, .cds-detail) .ant-card-body {
+  padding: 16px 20px;
+}
+
+:is(.cds-home, .cds-detail) .ant-card[data-testid^="kpi-"] .ant-card-body {
+  padding: 26px 20px;
+}
+
+/* 表头：antd 的 small 尺寸规则特异度是 (0,3,2)，这里多绑 .ant-table-wrapper/.ant-table 才能压住 */
+:is(.cds-home, .cds-detail) .ant-table-wrapper .ant-table .ant-table-thead > tr > th {
+  background: #f7f9fc;
+  color: #1d2129;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f2f4;
+}
+
+/* 行间无分隔线：strict-1-home.md §5「行间无分隔线，仅表头上下沿 y522、表底 y762 各 1px
+   #f1f2f4」——旧值给每行 td 各画一条 #f1f4f9（两表共 8 条真值上不存在的行线）。 */
+:is(.cds-home, .cds-detail) .ant-table-wrapper .ant-table .ant-table-tbody > tr > td {
+  padding: 12px;
+  border-bottom: none;
+  transition: background-color 0.15s ease;
+}
+
+:is(.cds-home, .cds-detail) .ant-table-wrapper .ant-table .ant-table-tbody > tr:last-child > td {
+  border-bottom: 1px solid #f1f2f4;
+}
+
+:is(.cds-home, .cds-detail) .ant-table-wrapper .ant-table .ant-table-tbody > tr:hover > td {
+  background: #f5f9ff;
+}
+
+:is(.cds-home, .cds-detail) [data-testid^="task-tab-"] {
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+:is(.cds-home, .cds-detail) [data-testid^="task-tab-"]:hover {
+  box-shadow: inset 0 0 0 1px rgba(32, 112, 240, 0.28);
+}
+
+:is(.cds-home, .cds-detail) [data-testid^="task-tab-"]:focus-visible {
+  outline: 2px solid var(--cds-primary);
+  outline-offset: 1px;
+}
+
+/* 进度条：原型实测填充带高 ≈15px，antd size="small" 的 6px 视觉过细 */
+:is(.cds-home, .cds-detail) .ant-progress-inner,
+:is(.cds-home, .cds-detail) .ant-progress-bg {
+  height: 12px !important;
+}
+
+/* 卡头默认 nowrap：内存卡那句口径披露长 30+ 字，实测撑出卡外 92px。改成卡内换行 */
+:is(.cds-home, .cds-detail) .ant-card-head {
+  align-items: flex-start;
+}
+
+:is(.cds-home, .cds-detail) .ant-card-head-title {
+  white-space: normal;
+  line-height: 1.6;
+  padding: 12px 0;
+}
+
+:is(.cds-home, .cds-detail) .ant-card-head .ant-space {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+/* 状态标签：原型（x1005–1065 y1298–1318 像素探针）是浅底 + 同色字，无边框 */
+:is(.cds-home, .cds-detail) .ant-tag {
+  border: none;
+  border-radius: 6px;
+  padding-inline: 8px;
+  line-height: 20px;
+}
+
+/* 内嵌小卡（只有 .cds-subcard：首页内存两段按 strict-1-home.md §8 直接坐在卡体白底上，
+   不再有 .cds-home-mem 外壳 ⇒ 该选择器已除）。 */
+.cds-subcard {
+  padding: 14px 16px;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  background: #fafcfe;
+}
+
+:is(.cds-home, .cds-detail) [data-bar] {
+  transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:is(.cds-home, .cds-detail) .ant-btn-lg {
+  box-shadow: 0 2px 6px rgba(17, 24, 39, 0.06);
+}
+
+/* ── 首页卡壳与卡头（strict-1-home.md §2 布局栅格 + §8-11）：卡片 #ffffff、radius≈7、
+   **无 1px 实线边框**（只有 ~6px 柔和投影）、卡内边距 24；四张卡头前各一根 6×18 #1b6ef3
+   竖条（x268 / x1068 / x268 / x268）+ 16px/600 #1d2129 题字。只动 .cds-home，
+   .cds-detail（3-x / 4-x 屏）另有各自真值，不跟。 */
+.cds-home .ant-card {
+  border: none;
+  border-radius: 7px;
+}
+
+.cds-home .ant-card-head {
+  min-height: 54px;
+  padding-inline: 24px;
+}
+
+.cds-home .ant-card-body {
+  padding: 16px 24px 24px;
+}
+
+.cds-home .ant-card-head-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.cds-home .ant-card-head-title::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 18px;
+  background: var(--cds-primary);
+}
+
+/* 首页 8px 横向溢出的成因：antd Row 的 gutter 是「行负边距 + 列内边距」的 **inline style**
+   （antd 5.29.3 grid/row.js：marginLeft/marginRight = −gutter/2），gutter 16 ⇒ 行盒比
+   .cds-home 宽 16px，右侧那 8px 就是 .cds-content-inner scrollWidth 1165 vs clientWidth 1157
+   的差额（1157 = 1440 − 15 滞动条 − 220 左栏 − 23 − 25）。修法：外半档不再走行负边距，
+   改成「首/末列不带外内距」，外缘仍与页签带对齐、列间距仍是 8+8=16。两处都得 !important，
+   因为 antd 把 margin/padding 写成 inline style。 */
+.cds-home > .ant-row {
+  margin-inline: 0 !important;
+}
+
+.cds-home > .ant-row > .ant-col:first-child {
+  padding-inline-start: 0 !important;
+}
+
+.cds-home > .ant-row > .ant-col:last-child {
+  padding-inline-end: 0 !important;
+}
+
+
+/* ── 原型筛选带 / 分页带共用件（图 2-1、3-1、4-1 同款）── */
+:is(.cds-home, .cds-detail) .cds-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:is(.cds-home, .cds-detail) .cds-filter-label {
+  flex: none;
+  font-size: 14px;
+  color: #636d7b;
+  white-space: nowrap;
+}
+
+:is(.cds-home, .cds-detail) .cds-filter-field > :not(.cds-filter-label) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 图 2-1 卡内「Python」那种灰底标签：无描边、灰底、圆角 6。 */
+:is(.cds-home, .cds-detail) .cds-tag-plain {
+  margin-inline-end: 0;
+  padding-inline: 8px;
+  background: #f2f3f5;
+  color: #4e5969;
+  border: 0;
+  border-radius: 6px;
+}
+
+/* 图 2-1 卡片第二枚按钮：蓝描边 + 蓝字（既不是实心，也不是灰边）。主色取探针值 #1B6EF3。 */
+:is(.cds-home, .cds-detail) .cds-btn-outline-blue:not(:disabled) {
+  color: var(--cds-primary);
+  border-color: #8cb6f8;
+}
+
+:is(.cds-home, .cds-detail) .cds-btn-outline-blue:not(:disabled):hover {
+  color: #0958d9;
+  border-color: var(--cds-primary);
+}
+
+:is(.cds-home, .cds-detail) .cds-task-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* strict-2-1.md §2 C3：分页不是卡内元素，是独立一条 244,800,1172,64 白带（整体右对齐，
+   末元素右缘 x1390）；控件 h30 ⇒ 上下 17、左右 24。 */
+.cds-task-pager-band {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding: 17px 24px;
+  background: #ffffff;
+  border-radius: 6px;
+}
+
+.cds-task-pager-band .cds-task-pager {
+  margin-top: 0;
+}
+
+/* 原型弹窗（图 4-2 / 3-3 详情态）：footer 上沿一条横向细线（转录像素判「有」），
+   弹窗走 portal，挂在 .cds-detail 之外，所以自己带一个作用域类。 */
+.cds-detail-modal .ant-modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #eef1f6;
+}
+
+.cds-detail-modal .ant-modal-body {
+  padding-top: 16px;
+}
+
+/* 图 3-3：三张 KPI 卡无独立底色，卡间一条 1px 细竖线；窄屏 xs 堆叠态竖线会横在卡上方，收掉。 */
+:is(.cds-home, .cds-detail) .cds-kpi-divider {
+  border-inline-start: 1px solid #eef1f6;
+  padding-inline-start: 16px;
+}
+
+@media (max-width: 575px) {
+  :is(.cds-home, .cds-detail) .cds-kpi-divider {
+    border-inline-start: 0;
+    padding-inline-start: 0;
+  }
+}
+
+/* 图 A-3：内存输入框框内右侧有单位 `G`（label 已有半角 (G)，框内再给一次）。
+   两个坑：① antd 5.29 的 InputNumber 只有 suffix 的**类型**、运行时不渲染（实测 DOM 无后缀节点，
+   写 suffix="G" 是静默空操作）；② 把 InputNumber 包进一层 div 会打断 Form.Item 的值绑定。
+   所以单位画在控件行上：让开 ± 步进按钮（≈24px），不进 DOM、不进载荷。 */
+:is(.cds-home, .cds-detail) .cds-unit-item .ant-form-item-control-input-content {
+  position: relative;
+}
+
+:is(.cds-home, .cds-detail) .cds-unit-item .ant-form-item-control-input-content::after {
+  content: 'G';
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #98a2b3;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* PNG 2-1 主按钮实测：框 x1263..1392（w129），图标簇 x1286（内缩 23）、文字簇 x1311（距框 48）。
+   实测定标：padding-inline 25 ⇒ inset 26 / w139；抬回 22 ⇒ inset≈23、w≈126（三值各 Δ≤3）。
+   范围限在页头工具带的 lg，不动全局按钮。 */
+.cds-page-toolbar .ant-btn-lg {
+  padding-inline: 22px;
+  /* 尺寸四值反解：现文字宽 64（16px）而原型文字簇 60（4 字 ⇒ 15px），
+     抬到 15px 后 w=22×2+14+11+60=129、inset 23、text 距框 48，与 PNG 全对。 */
+  font-size: 15px;
+}
+
+/* 审计详情弹窗（PNG 4-2 实测：弹窗内唯一实心面板 y354..511 = #f7f9fc；分区标题非 Divider；按钮 h40；标题 18px） */
+
+.cds-detail-modal .cds-detail-section {
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.cds-detail-modal .cds-detail-panel {
+  background: #f7f9fc;
+  padding: 16px 20px;
+  border-radius: 6px;
+}
+
+/* 3-3：KPI 三卡坐在一条浅蓝带上（PNG 底色 #E8F1FF→#F7FBFF 竖向渐变），与下方明细卡分层。 */
+/* 首页 C2 指标条（图 1 §5 + 像素探针 c2probe3.py，2026-10-18）：一个 1172×136 面板内 4 列，
+   芯片左缘 x285/570/855/1140 ⇒ 面板左内缩 41、列距 285、右内缩 24，面板内没有分隔线。 */
+.cds-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 285px) minmax(0, 1fr);
+  align-items: center;
+  min-height: 136px;
+  padding: 0 24px 0 41px;
+  margin-bottom: 16px;
+  background: #ffffff;
+  border: 1px solid #f1f2f4;
+  border-radius: 8px;
+}
+
+.cds-kpi-cell {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+
+/* 四列只在参考宽度以上钉死：第 4 格宽 = 可用宽 − 41 − 24 − 855，可用宽≈视口宽−283，
+   要让它不窄到掉内容（≥200）需视口 ≥ 1403（真机 1366 实测 161px、1280 实测 75px ⇒ 芯片旁文字被切）。
+   所以断点定在 1400：≥1400 保持图 1 的 285 列距，以下自适成 2×2（不依赖中间那个“卡得刚刚好”的宽度区间）。 */
+@media (max-width: 1402px) {
+  .cds-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px 24px;
+    row-gap: 16px;
+  }
+}
+
+.cds-kpi-band {
+  background: linear-gradient(180deg, #e8f1ff 0%, #f7fbff 100%);
+  border-color: #d6e6ff;
+}
+
+/* 3-1：分页条「共 N 个接口」贴卡左缘、控件组贴右缘（PNG y633 同一行）。 */
+.cds-openapi-pag.ant-pagination {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-top: 16px;
+}
+.cds-openapi-pag .ant-pagination-total-text {
+  margin-inline-end: auto;
+}
+
+/* 行高 52 照图：全局 .cds-detail 层把 tbody td 压成 12px（特异度 4 类+元素），
+   这里垫一层 .ant-table 凑到同特异度、且本文件后插，稳定胜出，不用 !important。
+   水平内边距 20 不是随手取的：图 3-1 列簇墨迹左界 284/454/644/804/904/1094/1164/1244
+   = 盒左 264/434/624/784/884/1074/1144/1224 + 20（ant-card-body 左右 20 ⇒ 卡左 243+1+20=264）；
+   antd small 默认 16 会把八列墨迹整体左偏 4px。 */
+.cds-openapi-table .ant-table .ant-table-tbody > tr > td.ant-table-cell {
+  padding: 15px 20px;
+}
+.cds-openapi-table .ant-table .ant-table-thead > tr > th.ant-table-cell {
+  padding: 14px 20px;
+  height: 48px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+/* th::before 是 antd 的表头竖分隔细线；图 3-1 表头没有分隔线，同时它在本页把表头撑高到 70，删。 */
+.cds-openapi-table .ant-table .ant-table-thead > tr > th.ant-table-cell::before {
+  display: none;
+}
+/* antd 给跨列单元格（空态与展开行）写了一个**内联** width（按 measure row 测得），在本页它比表体宽 4px，
+   导致 `.ant-table-content{overflow-x:auto}` 白冒 4px 横向滚动条。本页无固定列也无展开行，
+   sticky 定宽用不上，钉回 100% 就能消除，且与容器宽无关（自适应下仍然成立）。 */
+.cds-openapi-table .ant-table .ant-table-tbody > tr > td.ant-table-expanded-row-fixed,
+:is(.cds-home, .cds-detail) .ant-table .ant-table-tbody > tr > td.ant-table-expanded-row-fixed {
+  width: 100% !important;
 }
