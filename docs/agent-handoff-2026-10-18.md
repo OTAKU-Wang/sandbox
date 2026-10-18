@@ -60,6 +60,8 @@
 
 ⇒ 判据：**新增 `tests/` 文件若没有对应的 `RC=0` 门日志，一律当「未验证」**，先跑门再决定保留或改。
 
+另：收尾时杀掉残留子代理进程后又落了一批**同簇的半成品实现**（均已入库，未验证）：`app/api/federation.py`、`app/core/redis.py`、`app/services/catalog_sync.py`、`app/services/federation_connector.py`。它们对应上面那两个红测试簇（A150/A60/A61/A63、A038/A043 等），**改了实现但门仍红 ⇒ 不得当成已修**。
+
 ## 4. 账面进度（`fix-queue.md`，`queue.mjs` 于本轮收尾时重生）
 
 `总条目=319 已修=28 判为非缺陷=8 待修=283`；backend 226 / fe 29 / plugin 23 / infra 4 / deploy 1。

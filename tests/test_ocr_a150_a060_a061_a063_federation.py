@@ -54,6 +54,10 @@ def _ok(self, request, trust):  # patched FederationConnector._execute_remote_re
     return GatewayResponse(request_id=request.request_id, status_code=200, data={"ok": True})
 
 
+def _http_ok(self, request, url, base_url, body, mtls):  # patched _http_post
+    return GatewayResponse(request_id=request.request_id, status_code=200, data={"ok": True})
+
+
 # ── fake persistence (no real DB) ──────────────────────────────────────
 
 class _FakeResult:
@@ -215,7 +219,7 @@ class TestA60EndpointValidation:
             operation="read", resource="/data",
         )
         monkeypatch.setattr(fc, "_resolve_addresses", lambda host: ["93.184.216.34"])
-        with patch.object(FederationConnector, "_http_post", _ok):
+        with patch.object(FederationConnector, "_http_post", _http_ok):
             response = connector._execute_remote_request(request, trust)
         assert response.status_code == 200
 

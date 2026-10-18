@@ -140,7 +140,7 @@ def root_logging():
     root.filters[:] = saved_filters
 
 
-def _emit_and_parse(root, handler_buf: io.StringIO, logger_name: str, message: str) -> dict:
+def _emit_and_parse(handler_buf: io.StringIO, logger_name: str, message: str) -> dict:
     setup_logging(True)
     logging.getLogger(logger_name).warning(message)
     line = handler_buf.getvalue().strip().splitlines()[-1]
@@ -153,7 +153,7 @@ def test_json_mode_emits_structured_json_for_stdlib_loggers(root_logging):
     root_logging.addHandler(handler)
     request_id_var.set("req-abcdef123456")
 
-    doc = _emit_and_parse(root_logging, handler, "app.services.demo", "quota exhausted for %s" % "tenant-7")
+    doc = _emit_and_parse(buf, "app.services.demo", "quota exhausted for %s" % "tenant-7")
 
     assert doc["level"] == "WARNING"
     assert doc["logger"] == "app.services.demo"
