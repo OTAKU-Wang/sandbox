@@ -17,6 +17,13 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
+
+def _read(rel: str) -> str:
+    """Deploy manifests are UTF-8 with Chinese comments; a bare ``read_text()``
+    uses the OS locale codec (GBK on zh-CN Windows) and every gate in this file
+    dies with ``UnicodeDecodeError`` before YAML is even parsed."""
+    return (ROOT / rel).read_text(encoding="utf-8")
+
 # (relative path, multi_document)
 SINGLE_DOC_MANIFESTS = [
     "docker-compose.yml",
@@ -45,30 +52,42 @@ PROD_FAIL_CLOSED_ENV = {
 
 @pytest.mark.parametrize("rel", SINGLE_DOC_MANIFESTS)
 def test_single_doc_manifest_parses(rel):
-    data = yaml.safe_load((ROOT / rel).read_text())
+    data = yaml.safe_load(_read(rel))
     assert data is not None, f"{rel} parsed to empty"
 
 
 @pytest.mark.parametrize("rel", K8S_MULTI_DOC)
 def test_k8s_manifest_parses(rel):
-    docs = list(yaml.safe_load_all((ROOT / rel).read_text()))
+    docs = list(yaml.safe_load_all(_read(rel)))
     assert docs and all(d is not None for d in docs), f"{rel} has an empty document"
 
 
 def test_prod_compose_fail_closed_keys_in_place():
-    data = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text())
+    data = yaml.safe_load(_read("docker-compose.prod.yml"))
     env = data["services"]["cds-api"]["environment"]
     for key, value in PROD_FAIL_CLOSED_ENV.items():
         assert env.get(key) == value, f"prod compose {key!r} expected {value!r}, got {env.get(key)!r}"
 
 
 def test_prod_dev_service_topology_consistent():
-    prod = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text())
-    dev = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
-    assert set(prod["services"]) == set(dev["services"]), (
-        f"dev/prod service topology drifted: "
-        f"only-prod={set(prod['services']) - set(dev['services'])} "
-        f"only-dev={set(dev['services']) - set(prod['services'])}"
+    """dev/prod service sets must not drift silently.
+
+    One asymmetry is intentional and pinned by name: dev ships the shared
+    ``cds-jupyter`` dev-env server (SS-19), while prod compose deliberately
+    carries no such service — without ``CDS_JUPYTER_PROXY_BASE_URL`` the reverse
+    proxy has no upstream, so the feature honestly reports "no entry point"
+    instead of shipping an always-on shared notebook server. The assertion stays
+    closed: any *other* dev-only or prod-only service fails this gate.
+    """
+    dev_only_services = {"cds-jupyter"}
+    prod = yaml.safe_load(_read("docker-compose.prod.yml"))
+    dev = yaml.safe_load(_read("docker-compose.yml"))
+    assert set(prod["services"]) - set(dev["services"]) == set(), (
+        f"prod ships services dev does not have: {set(prod['services']) - set(dev['services'])}"
+    )
+    assert set(dev["services"]) - set(prod["services"]) == dev_only_services, (
+        f"dev-only services drifted: got {set(dev['services']) - set(prod['services'])}, "
+        f"expected exactly {dev_only_services}"
     )
 
 
@@ -79,9 +98,9 @@ def test_prod_compose_has_no_unresolved_env_placeholders():
     we pin that the required placeholders are declared in .env.example — an
     operator diffing .env against .env.example would catch a missing secret.
     """
-    env_example = (ROOT / ".env.example").read_text()
+    env_example = _read(".env.example")
     placeholders = set()
-    text = (ROOT / "docker-compose.prod.yml").read_text()
+    text = _read("docker-compose.prod.yml")
     for line in text.splitlines():
         for tok in line.split():
             if tok.startswith("${") and tok.endswith("}") or "${" in tok and "}" in tok:

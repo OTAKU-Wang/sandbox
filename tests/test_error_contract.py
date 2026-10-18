@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from app.core.errors import CDSError, OperationLocked, SessionTerminated
 from app.core.error_handlers import register_exception_handlers
@@ -16,6 +17,13 @@ from app.core.error_handlers import register_exception_handlers
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sdk"))
 
 from cds_sdk import CDSApiError  # noqa: E402
+
+
+class _Credentials(BaseModel):
+    """校验错误路径用的最小体模型。"""
+
+    username: str
+    password: str
 
 
 def _app_with_routes() -> FastAPI:
@@ -44,6 +52,10 @@ def _app_with_routes() -> FastAPI:
     async def custom_code():
         raise CDSError("denied", code="DENIED", http_status=403)
 
+    @app.post("/needs-json")
+    async def needs_json(payload: _Credentials):
+        return {"ok": True, "who": payload.username}
+
     return app
 
 
@@ -51,7 +63,6 @@ def _app_with_routes() -> FastAPI:
 def fresh_client():
     with TestClient(_app_with_routes(), raise_server_exceptions=False) as c:
         yield c
-
 
 def test_unhandled_exception_returns_internal_error_contract(fresh_client):
     resp = fresh_client.get("/boom")
@@ -89,6 +100,38 @@ def test_custom_code_and_status(fresh_client):
     resp = fresh_client.get("/custom-code")
     assert resp.status_code == 403
     assert resp.json()["code"] == "DENIED"
+
+
+def test_validation_error_with_bytes_input_is_422_not_500(fresh_client):
+    """回归：pydantic v2 把无法解析的请求体原文（bytes）放进 ``errors()["input"]``。
+
+    旧净化器只处理 ``ctx``，于是 ``JSONResponse`` 渲染时抛
+    ``TypeError: Object of type bytes is not JSON serializable``——客户端只是
+    写错 Content-Type，却拿到 500 而不是 422（dev 道实测于
+    ``POST /api/v1/auth/login``，服务端 traceback 里两行都有）。
+    """
+    resp = fresh_client.post(
+        "/needs-json",
+        content=b"username=u&password=p",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["code"] == "VALIDATION_ERROR"
+    assert isinstance(body["detail"], list) and body["detail"]
+    for err in body["detail"]:
+        assert not isinstance(err.get("input"), (bytes, bytearray))
+    assert re_fullmatch16(body["request_id"])
+
+
+def test_validation_error_with_missing_field_stays_422(fresh_client):
+    """JSON 但缺字段：detail 仍是 FastAPI 422 形状，input 原样保留。"""
+    resp = fresh_client.post("/needs-json", json={"username": "u"})
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["code"] == "VALIDATION_ERROR"
+    assert body["detail"][0]["type"] == "missing"
+    assert body["detail"][0]["input"] == {"username": "u"}
 
 
 def re_fullmatch16(value: str) -> bool:

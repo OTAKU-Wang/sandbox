@@ -99,7 +99,13 @@ async def test_logs_fall_back_to_audit_trail(client, db_session, make_user):
     db_session.add(AuditLog(
         session_id=session.id, user_id=uuid.UUID(uid), action="sandbox.exec",
         resource_type="sandbox_session",
-        detail='{"code": "print(1)"}',
+        # 生产形状：audit_service.log 永远写 dict（旧 fixture 传 str 恰好绕过了
+        # dict[slice] 崩溃，真机 2026-10-18 就是被 dict detail 打成 500）。
+        detail={"code": "print(1)", "lang": "py"},
+    ))
+    db_session.add(AuditLog(
+        session_id=session.id, user_id=uuid.UUID(uid), action="sandbox.create",
+        resource_type="sandbox_session", detail=None,
     ))
     await db_session.flush()
 
@@ -108,8 +114,10 @@ async def test_logs_fall_back_to_audit_trail(client, db_session, make_user):
     body = resp.json()
     assert body["source"] == "audit"
     assert body["cluster_available"] is False
-    assert body["count"] >= 1
+    assert body["count"] >= 2
     assert any("sandbox.exec" in ln["line"] for ln in body["logs"])
+    # dict detail 必须被序列化进日志行（不是炸 500、也不是 repr 里的乱码前缀丢失）
+    assert any('"print(1)"' in ln["line"] for ln in body["logs"])
 
 
 @pytest.mark.asyncio

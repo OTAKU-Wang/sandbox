@@ -92,12 +92,18 @@ def test_format_not_allowed_by_policy(gateway, sample_data):
 
 
 def test_empty_data(gateway):
-    """Empty data produces empty output."""
+    """SS-18 §8 P0′ 语义变更：0 行成果不得作为成功放行（旧断言为 success=True/row_count=0）。
+
+    空成果既无从检查也无从交付，旧行为把「什么都没产出」伪装成「检查通过且转换成功」。
+    现在诚实失败并置 empty_output，判据见 specs/ss-18-prototype-alignment.md §8 P0′。
+    """
     policy = OutputPolicy(allowed_output_formats=["csv"])
     result = gateway.process([], "csv", policy)
-    assert result.success is True
+    assert result.success is False
+    assert result.empty_output is True
     assert result.row_count == 0
-    assert result.output_data == ""
+    assert result.output_data is None
+    assert "Empty output" in result.error
 
 
 def test_gateway_redacts_noncritical_findings(gateway):

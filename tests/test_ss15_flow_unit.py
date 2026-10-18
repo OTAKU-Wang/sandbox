@@ -334,3 +334,141 @@ class TestDeliveryFailureReason:
         assert out.status == DeliveryStatus.FAILED.value
         assert out.last_error == "RuntimeError"
         assert sub.last_error == "RuntimeError"
+
+
+class TestPickTestSandboxLevel:
+    """run_test 的隔离档协商（D-e2e-45：写死 l2c 会把 API 交付腿整条 400）。"""
+
+    @staticmethod
+    def _contract(levels):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(allowed_sandbox_levels=levels)
+
+    def test_no_contract_keeps_l2c_default(self):
+        assert wf.pick_test_sandbox_level(None) == "l2c"
+
+    def test_empty_levels_keeps_l2c_default(self):
+        assert wf.pick_test_sandbox_level(self._contract("")) == "l2c"
+
+    def test_l3_only_contract_gets_l3(self):
+        assert wf.pick_test_sandbox_level(self._contract("L3")) == "L3"
+
+    def test_strongest_allowed_wins(self):
+        assert wf.pick_test_sandbox_level(self._contract("L1, L3, l2c")) == "l2c"
+
+    def test_cr_blocker1_never_below_l3(self):
+        # SS-13：隔离下限是平台不变量，不由合约数据决定——只放行低隔离档的合约
+        # 也不能把生产/测试负载降到 L0/L1/L2，选档回 l2c，运行面缺失由建会话处
+        # 诚实报 RUNTIME_UNAVAILABLE（L2 适配器还被 SANDBOX_LEGACY_ENABLED 门控，生产禁开）。
+        assert wf.pick_test_sandbox_level(self._contract("L0")) == "l2c"
+        assert wf.pick_test_sandbox_level(self._contract("L1")) == "l2c"
+        assert wf.pick_test_sandbox_level(self._contract("L2, L1")) == "l2c"
+        assert wf.pick_test_sandbox_level(self._contract("L0, L3")) == "L3"
+
+    def test_l2c_absent_falls_to_l3(self):
+        assert wf.pick_test_sandbox_level(self._contract("L1,L3")) == "L3"
+
+    def test_unmatchable_levels_fall_back_to_l2c_for_honest_400(self):
+        assert wf.pick_test_sandbox_level(self._contract("L9")) == "l2c"
+
+
+class TestOpenApiCallSandboxLevel:
+    """OpenAPI 端点调用的隔离档必须来自合约协商，而不是写死 l2c。
+
+    本机实踩：CDS_CUBE_DATAPLANE_ENABLED=false 时 l2c 恒 RUNTIME_UNAVAILABLE，只放行 L3 的
+    合约连会话都建不起来，F4「建负载→test→publish→建接口→调用→监控」断在最后一步。
+    这里只替掉 create_sandbox_session / execute_in_sandbox 两个入口，不触真实执行链。
+    """
+
+    class _Res:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _Db:
+        """第 1 次 execute 送回调用方 User，其余（SandboxSession 复查）送回 None 以跳过收尾。"""
+
+        def __init__(self, actor, contract):
+            self._actor = actor
+            self._contract = contract
+            self._calls = 0
+
+        async def execute(self, _stmt):
+            self._calls += 1
+            return TestOpenApiCallSandboxLevel._Res(self._actor if self._calls == 1 else None)
+
+        async def get(self, _model, _pk):
+            return self._contract
+
+        async def flush(self):
+            return None
+
+    @staticmethod
+    def _endpoint():
+        from types import SimpleNamespace
+
+        from app.models.api_endpoint import ApiEndpointStatus
+
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            contract_id=uuid.uuid4(),
+            slug="retail-forecast",
+            status=ApiEndpointStatus.ENABLED.value,
+            quota_total=None,
+            calls_used=0,
+            rate_limit_per_minute=60,
+            timeout_seconds=60,
+        )
+
+    @staticmethod
+    def _workload():
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            entrypoint="print(1)",
+            entrypoint_hash="ab" * 16,
+            language="python",
+            data_product_ids=[str(uuid.uuid4())],
+            resource_spec={},
+        )
+
+    async def _call(self, monkeypatch, levels):
+        from types import SimpleNamespace
+
+        import app.api.sandbox_sessions as ss
+
+        captured: dict = {}
+
+        async def fake_create(*, body, db, current_user):
+            captured["level"] = body.sandbox_level
+            return SimpleNamespace(id=uuid.uuid4())
+
+        async def fake_exec(**_kw):
+            return {"exit_code": 0, "output": "ok", "output_rows": 0}
+
+        monkeypatch.setattr(ss, "create_sandbox_session", fake_create)
+        monkeypatch.setattr(ss, "execute_in_sandbox", fake_exec)
+        dv.reset_rate_windows()
+        contract = SimpleNamespace(id=uuid.uuid4(), allowed_sandbox_levels=levels, allowed_sandbox_modes="")
+        out = await dv.execute_endpoint(
+            self._Db(SimpleNamespace(id=uuid.uuid4()), contract),
+            self._endpoint(),
+            {"city": "hz"},
+            caller_id=uuid.uuid4(),
+            workload=self._workload(),
+        )
+        return captured, out
+
+    async def test_l3_only_contract_calls_with_l3(self, monkeypatch):
+        captured, out = await self._call(monkeypatch, "L1,L3")
+        assert captured["level"] == "L3"
+        assert out["sandbox_level"] == "L3"
+
+    async def test_unconstrained_contract_keeps_l2c(self, monkeypatch):
+        captured, out = await self._call(monkeypatch, "")
+        assert captured["level"] == "l2c"
+        assert out["sandbox_level"] == "l2c"

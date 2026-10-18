@@ -66,6 +66,7 @@ def _parse(proc):
 
 
 def test_generative_runner_executes_bundle():
+    pytest.importorskip("onnx", reason="the generative bundle runner executes a real onnx model; a host without onnx skips (CI installs it)")
     from app.services.rag_service import build_corpus, build_rag_runner
 
     runner = build_rag_runner(QUERY, top_k=2, answer_mode="generative", generative_model_id="gen-1")

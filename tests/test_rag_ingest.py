@@ -113,6 +113,7 @@ async def test_ingest_corpus_empty_docs(client, db_session, make_user):
 
 @pytest.mark.asyncio
 async def test_ingest_corpus_rejects_transformers_without_model(client, db_session, make_user, monkeypatch):
+    pytest.importorskip("torch", reason="transformers engine imports torch in rag_embedding; a host without it skips (CI installs it)")
     # N6: transformers corpus build is allowed (model shipped alongside), but
     # still fails closed when the host-side model cannot be resolved — never a
     # silent tf fallback, never a network hang in tests.

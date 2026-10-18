@@ -26,6 +26,8 @@ _SPECIALS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
 
 
 def _build_tiny_bert(model_dir: Path):
+    pytest.importorskip("torch", reason="tiny real BERT needs torch; a host without it skips (CI installs it)")
+    pytest.importorskip("transformers", reason="tiny real BERT needs transformers; a host without it skips (CI installs it)")
     import torch
     from transformers import BertConfig, BertModel, BertTokenizer
 

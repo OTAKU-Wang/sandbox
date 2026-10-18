@@ -13,6 +13,21 @@ async def test_security_headers(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_security_headers_jupyter_embed_exempt(client: AsyncClient):
+    """D-e2e-48: /api/jupyter/* 是唯一允许同源 iframe 的前缀（开发环嵌入），
+    其余路径维持 DENY——两个方向都要钉住，漏任一边都会静默回归。"""
+    resp = await client.get("/api/jupyter/login")  # 无票据：状态码不论，头必到位
+    assert resp.headers.get("x-frame-options") == "SAMEORIGIN"
+    csp = resp.headers.get("content-security-policy", "")
+    assert "frame-ancestors 'self'" in csp
+    # 同源豁免不得泄漏到相邻前缀（tickets 写接口的 405/422 响应同样要 DENY）
+    other = await client.get("/api/jupyter/tickets")
+    assert other.headers.get("x-frame-options") == "SAMEORIGIN"  # 同前缀，豁免按前缀不按方法
+    deny = await client.get("/api/v1/notebooks")
+    assert deny.headers.get("x-frame-options") == "DENY"
+
+
+@pytest.mark.asyncio
 async def test_invalid_product_type(client: AsyncClient, auth_headers: dict):
     """Invalid product_type should be rejected."""
     resp = await client.post("/api/v1/data-products", json={

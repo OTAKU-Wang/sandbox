@@ -50,6 +50,7 @@ def test_build_corpus_transformers_fail_closed_without_shipping():
 
 
 def test_build_corpus_transformers_shipping_requires_model(monkeypatch):
+    pytest.importorskip("torch", reason="transformers engine imports torch in rag_embedding; a host without it skips (CI installs it)")
     # ship_transformers=True allows the engine but still fails closed when the
     # host-side transformers model cannot be resolved (honest — no model, no
     # corpus; never a silent tf fallback).

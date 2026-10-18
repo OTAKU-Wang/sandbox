@@ -124,10 +124,27 @@ def test_training_mode_invalid_save_path():
     assert any(i.code == "INVALID_SAVE_PATH" for i in result.issues)
 
 
-def test_training_mode_save_to_checkpoint():
+def test_training_mode_checkpoint_dir_is_rejected():
+    """SS-18: /sandbox/checkpoints 不在采集面内——放行等于让代码静默丢产物，必须当场拒。"""
     code = 'model.save_pretrained("/sandbox/checkpoints/epoch_1/")'
     result = scanner.scan(code, "python", "llm_sft")
+    assert result.passed is False
+    assert any(i.code == "INVALID_SAVE_PATH" for i in result.issues)
+
+
+def test_training_mode_workspace_dir_is_accepted():
+    """/scratch 在兼容期内仍被采集，所以扫描器不能把它判死。"""
+    code = 'model.save_pretrained("/scratch/run1/")'
+    result = scanner.scan(code, "python", "llm_sft")
     assert result.passed is True
+
+
+def test_allowed_save_paths_equal_harvest_contract():
+    """扫描器认的目录 == 采集面目录：两边漂移要在 CI 变红，而不是在成果包里静默丢文件。"""
+    from app.services.code_scanner import SANDBOX_OUTPUT_PATHS
+    from app.services.cube_runtime_adapter import HARVEST_DIRS
+
+    assert SANDBOX_OUTPUT_PATHS == {directory + "/" for directory, _origin in HARVEST_DIRS}
 
 
 def test_unknown_sandbox_mode():
