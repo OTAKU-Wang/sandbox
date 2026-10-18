@@ -32,6 +32,32 @@ bash scripts/remote-harness/fe_lane.sh            # 前端权威：node:20 里 t
 本地只跑廉价 oracle：`python -m compileall -q app tests`、`python -c "import app.main"`、
 `npx tsc -b --force`。**不要**在本地跑测试来当结论（本地是 Python 3.14 + SQLite，见 §6 第 1 条）。
 
+### 1.1 换机后的验证面（2026-10-16 晚，Windows 本机 —— 用户批准）
+
+上一台机器的远程车道**在这台机器上不可达**（`Permission denied (publickey,password)`，key/口令不随机器迁移）。
+经用户确认改走**本机 py3.12 门**，代价是：**凡未走远程车道的数字都必须显式标注「本机 3.12 口径」**，
+不得写进 `ci/known-failures.md`，也不得据此宣称门层「必须全绿」已满足。
+
+```bash
+# D:/workspace/sandbox/.venv-gate = py3.12 --system-site-packages；跑 CI 门清单前需另装 kubernetes>=29
+cd /d/workspace/sandbox && \
+  TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK=true \
+  .venv-gate/Scripts/python.exe -m pytest <files> -q --timeout=900 -p no:warnings
+```
+
+`TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK=true` 是必需的：vendored gencode 要 protobuf 7.35.1，
+本机装的是 6.33.5（全局 python 还缺 grpcio）。前端门在本机可用且已实测：
+`npx tsc -b` / `NODE_OPTIONS=--experimental-require-module npx vitest run` / `npm run build`（npm，不是 bun）。
+
+**本机恒定红名单**（环境类，别去修，逐条根因见台账「本机 Windows 侧的可复核性」）：
+11× `test_deploy_manifests`（GBK 读 UTF-8 YAML）、`test_migrations::test_schema_parity_script_exits_zero`
+（平价结论 OK，rc=1 来自 tempfile `WinError 32`）、6× `test_rag_*`（缺 torch/onnx）、
+1× `test_rate_limit_distributed`（无 Redis）、3× `test_ss18_guest_paths.py` 与 2× `test_ss15_e2e_flow.py`
+（POSIX `resource` / Windows 路径口径）、`/exec` 系测试恒 skip。
+
+新失败是否本轮引入，用**对照法**：`git stash push -- app/` → 跑同样两条 → `git stash pop`
+（pop 后核对 `git diff --stat` 的 insertions 数与 `git stash list` 清空）。
+
 ## 2. 本机开发面
 
 | 面 | 位置 |
@@ -80,7 +106,20 @@ browser-use < /tmp/bu_nav.py        # 只读探针：URL / 侧栏标签 / 角色
 
 ## 5. 待办（权威清单在 `specs/ss-18-prototype-alignment.md` §8）
 
-- **M2** 任务列表卡片网格 + 筛选栏；**M2'** 新增开发任务全表单（11 字段 + 关联数据双 Tab）——**需要后端先给字段**（§8 P0-③）。
+**状态（2026-10-16 晚，本机轮）**：下面「后端 P0」三条与「空输入」家族里可单独定性的部分**已落地**
+（迁移 0023/0024、`GET /deliveries/openapi/endpoints/{id}/calls` 与 `ip_address` 归源、扫描器目录口径对齐采集面、
+`WorkspaceRoute` 路由门、目录契约常驻文案、M2 卡片列表 + M2′ 新增任务表单 + 运行记录入口），**全部未提交**留在工作区；
+M2′ 落地的是 8 字段单 POST 表单（名称/编号只读说明/合约/沙箱路径/调试方法/导出方式/调试内存/执行内存联动）
++「关联数据」看板 `ContractDataBoard.tsx`。后端承载查清了：唯一真字段是 `Contract.product_ids`
+（`contract_fulfillment.py:221` 校验 `session.data_product_id ∈ contract.product_ids`），**授权作用域是合约而不是任务**，
+所以看板做成只读清单 + 明示「随合约整体授权，任务不单独勾选」，没有做勾选框（有勾选就是后端不执行的假 UI）。
+逐条证据在 `specs/ss-18-prototype-alignment.md` §7「Round 2026-10-16（本机 py3.12 门轮）」与其后的「同轮续」表，
+缺陷与口径在台账 D-17..D-21 与 V-11。**P0′ 真空判据已落地**：成果闸 `output_gateway.process(0 行)` 诚实失败
+（`empty_output=True`、不出载荷），统计量/阶段层只加披露字段（`evaluated` / `not_evaluated` / `degraded`）而**不翻 `passed`**，
+因此钉住「真空为真」的 12 处断言与 DP/合规语义零改动（原判据草案要求同批改语义，实际落地后不需要）。
+**剩余**：M3/M4/M5/M6。
+
+- **M2 / M2′** 已落地（含关联数据看板，见上方状态段）。
 - **M3** 在线 notebook 调试页外壳（沙箱连接灯 / CPU·内存条 / 目录树含 `/sandbox/data` 锁标 / 底部控制台）。
 - **M4** 任务详情页 `/flow/tasks/:id` + 执行确认弹窗 + 运行记录抽屉（T5 五步流水）。
 - **M5** 结果集三通道资产中心 + **新增只读端点 `GET /deliveries/openapi/endpoints/{id}/calls`**

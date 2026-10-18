@@ -36,6 +36,8 @@
 | `SESSION_NOT_FOUND` | 404 | 会话不存在（`sandbox_sessions.py` 各会话 404 点，W2 接线后替代原 legacy 404） | 会话不存在或已删除 | 不要重试；核对会话 ID，必要时重新创建 |
 | `INTERNAL_ERROR` | 500 | 未预期异常（服务端已记录 request_id） | 服务端内部错误 | 携带 request_id 报告；可安全重试一次 |
 | `VALIDATION_ERROR` | 422 | 请求参数校验失败（detail.errors 明细） | 请求参数不合法 | 修正请求，不要重试 |
+| `RESOURCE_OVERRIDE_EXCEEDED` | 400 | 请求的资源规格超出合约已批准的 `sandbox_resource_spec` 上限（`app/api/compute.py` 规格覆盖、`app/api/notebooks.py` 开发任务内存） | 该规格高于合约配额，不能申请放大 | 下调到不超过合约规格；需要更高配额走合约变更，不要重试 |
+| `NOTEBOOK_NO_CELLS` | 409 | Notebook 整本运行时没有任何非空单元格（`app/api/notebooks.py` `/run`）——空跑会白起开发沙箱并自增版本 | 这本 Notebook 没有可执行代码 | 先写代码并保存再运行；不要在运行前重试 |
 | `NOTEBOOK_UNAVAILABLE` | 503 | Notebook 工作台记录暂不可写（`app/api/notebooks.py` dev-session：开发会话已建但记录写回失败） | 开发沙箱暂时不可写，请重试 | 重试一次；仍失败带 request_id 报告（不降级为本地执行） |
 | `SANDBOX_SESSION_MISSING` | 503 | 在线开发沙箱创建后按 ID 取不到会话记录（`notebooks.py` dev-session 后置校验） | 开发会话记录缺失 | 重试或联系管理员；不会静默改用其它运行时 |
 | `SANDBOX_MODE_NOT_PERMITTED` | 400 | 请求的沙箱模式不在合约允许清单内（`app/services/workflow_service.py` 模式门，词表归一后判定，SS-15 §4.9） | 合约未放行该沙箱模式 | 改用在合约允许模式清单内的模式，或请买方调整合约 |

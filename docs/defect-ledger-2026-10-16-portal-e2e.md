@@ -361,6 +361,139 @@ SS-18 把 VM 内目录收敢到 `/sandbox/data` + `/sandbox/output` 后，`GET /
 与原型“开发者只看 4+2”的口径不一致。修法方向（未动）：给路由加一层
 `WorkspaceRoute` 门，按 `resolveWorkspace(role, stored)` 判定，而不是只靠菜单隐藏。
 
+## D-17 扫描器放行的保存目录不在采集面：产物静默丢失（已修）
+
+`app/services/code_scanner.py:103` 原为 `{"/sandbox/output/", "/sandbox/checkpoints/"}`，
+而活路径唯一真值 `cube_runtime_adapter.py:52-59` 的采集面是 `HARVEST_DIRS = (/sandbox/output, /scratch)`。
+`/sandbox/checkpoints` **既不被采集也没有任何读写方**（全仓 grep 只有这条常量与一条测试引用），
+于是训练代码照着扫描器的报错文案存进 checkpoints，AST 检查放行、执行成功，产物却永远进不了成果包——
+属于「检查通过但结果不存在」的静默降级。
+
+修法（fail-closed，取最窄口径）：扫描器允许集改为等于采集面 `{/sandbox/output/, /scratch/}`，
+`/scratch` 此前**会被采集却不被允许**（反向错配）一并修好；报错文案改为 `sorted()` 后的稳定序。
+不引入对 `cube_runtime_adapter` 的运行时依赖（它拖 `app._stubs` protobuf 与 `sandbox_runtime`），
+改用测试钉等式：`tests/test_code_scanner.py::test_allowed_save_paths_equal_harvest_contract`，两边漂移即在 CI 变红。
+
+钉住：`test_training_mode_checkpoint_dir_is_rejected`（checkpoints 现在 INVALID_SAVE_PATH）、
+`test_training_mode_workspace_dir_is_accepted`、上述等式测。`tests/test_code_scanner.py` + `tests/test_p05_code_scanning.py` 合计 **71 passed**。
+
+## D-18 OpenAPI 调用不记来源 IP，端点级调用明细无处可查（已修）
+
+`app/api/open_api.py` 的 `openapi.call` / `openapi.call_failed` 两条审计 detail 只有
+`endpoint_id/slug/output_rows/duration_ms/request_sha256`，**不含来源 IP**（`audit_service.log` 一直支持 `ip_address`，
+只有 auth/deps/cube_egress 传了它）；且 `resource_type="contract"` 使「某端点的调用列表」只能解 JSON 过滤——
+SQLite 无 `->>`，全仓也零 JSON-path 先例。原型的接口监控页因此没有数据源。
+
+修法：两条审计行补 `ip_address=request.client.host`；数据面调用的归源改为资源级
+`resource_type="api_endpoint", resource_id=endpoint.id`（与 `api_keys.py:181`、`training.py:422` 同口径，
+contract_id 保留在 detail），读侧因此能走 `ix_audit_logs_resource(resource_type, resource_id)` 精确分页；
+新增只读端点 `GET /deliveries/openapi/endpoints/{id}/calls`（`status=succeeded|failed` + page/page_size）。
+**不另建影子调用表**：调用明细的唯一真值是带 Merkle 锚定的审计日志，复制一份等于造一份无人锚定的平行事实。
+
+口径边界：改口径之前的历史行仍按 contract 归源，读侧**不认领、不反填**（钉在
+`test_prechange_contract_scoped_rows_are_not_claimed`）；在依赖层就被拒的请求（无权限/无效凭据）本就没有调用行，页面不补。
+钉住：`tests/test_ss18_endpoint_calls.py` **7 passed**。
+
+## D-19 交付中心的 T5/水印/行数三列只活在包内 MANIFEST（已修）
+
+`list_dataset_bundles` 的旧注释就是这个理由：「水印标志与逐文件出口审查结论写在包内 MANIFEST.json 里、
+不在这个行上，因此此处不猜」。结果是原型 M5 的三列在列表页无数据源（要显示只能整包下载）。
+
+修法：`delivery_bundles` 加三列（迁移 0024，additive、不回填），打包当时就把结论写进行：
+`t5_review_status ∈ passed / passed_with_findings / partially_reviewed`（有命中或脱敏即 findings 档，
+有未送审二进制或空文件即 partially），`watermark_status ∈ not_requested / applied / partially_applied / not_applied`
+（内容水印只注入 `.txt/.md/.json/.jsonl`，故含二进制的包最多只能 partially_applied），
+`row_count` 只数数据表文件（`.csv/.tsv` 去表头、`.jsonl` 逐行），无数据表则 NULL——**未知不等于 0 行**。
+存量行保持 NULL，前端按「未记录」渲染。
+
+钉住：`tests/test_ss18_bundle_columns.py` **12 passed**（含 mixed/text-only/未开水印/无数据表/存量 NULL 五形态）；
+`tests/test_ss17_delivery_bundles.py` + `tests/test_ss18_bundle_preview.py` 19 passed 无回归。
+
+## D-20 空文本文件被记成「已审查」并进成果包（已修）
+
+`_review_output_bytes`（`app/api/deliveries.py:105`）拿到了正确答案却扔掉：
+`output_inspector.inspect("")` 已判 `passed=False`（medium `empty_output`，`output_inspection.py:151-153`），
+但该函数只数 findings、只看 `should_block`（blocking 只含 critical），于是空文件被记成 `passed_with_findings`
+或直接 `passed`，随包 201 交付。同类真空：`/execute` 空输出走 `passed=True`（至少披露 `stage_results.no_output`），
+兄弟 `/exec`（`sandbox_sessions.py:2437`）是**零披露的预置 `passed=True`**。
+
+修法：空/全空白文本单独命名 `status="empty"`（不计入 T5 「已审」指标，包级聚合一律降为 partially_reviewed）；
+`/execute` 与 `/exec` 的 `security_report` 增加顶层 `no_output`（有输出时显式 `false`），
+使 `passed=True` 无法被读成「审查干净」。**未动**的同类真空（K-匿名/MIA/重构检测/签名在真空集上返回 `True`、
+`output_gateway.process([])` 仍 `success=True, row_count=0`）需要先统一判据再改，
+因为翻这些 `passed` 等于改训练/合规闸的通过语义，且现有 12 处断言正把它们钉成 `True`——设计写进 §8。
+
+钉住：`tests/test_ss18_empty_input.py` **8 passed / 1 skipped**（跳过项是 `/exec` 空输出披露，
+POSIX 导入链在 Windows 跑不到，与 `tests/test_session_exec_logs_usage.py` 的 `_win_skip` 同一原因）。
+
+## D-21 空码单元格白起沙箱并自增版本（已修，与 D-12 同族）
+
+`notebook_service.run_cell` 早就有空码短路（`:310` 返回 `skipped_empty`），但调用方
+`app/api/notebooks.py::execute_cell` 先 `_ensure_dev_session` 再执行：一段不存在的代码照样把开发会话拉起来、
+写 `execution_backend`/`last_executed_at`、并因 `persist=True` 自增 `version`。
+`/run` 的同族问题已按 D-12 修成 409，这半边漏了。
+
+修法：空/全空白代码在 `_ensure_dev_session` **之前** 422 `code cannot be empty`（与 `/execute`、
+`sandbox_tasks` 同文案）。另证伪一条 §8 断言：`/exec` 并非「无空命令守卫」——它的请求模型已有
+validator 返 422（我先加的 handler 守卫是死代码，已删）。
+
+钉住：`test_blank_cell_code_is_422_without_touching_the_sandbox`（三种空白 × 断言 version 不变、
+`last_executed_at is None`、该用户名下 `sandbox_sessions` 计数为 0）+ `/exec` 空命令 422 与
+非空命令仍照常 404（证明守卫没有吞掉真实解析路径）。
+
+## 本轮口径更正（写回 §8，避免下一个人按错坐标改）
+
+1. §8 P0-⑤「`code_scanner.py` 与 `cube_runtime_adapter.py` 各有一份，`:118` 是 `/workspace/output`」不成立：
+   `code_scanner.py` 全文只有一份常量（`:103`）且无 `/workspace/output` 字面量；`/workspace/output` 属
+   `SANDBOX_LEGACY_ENABLED` 之后的退役 runtime 家族（`sandbox_runtime.py:132/1302/1539`、`firecracker_runtime.py:493`、
+   `tee_simulator.py:111`）。真实缺陷是「允许集 ≠ 采集面」，见 D-17。
+2. §8 P0′ 里「`/exec` 预置 True 且无空命令守卫」半对：预置 True 属实（已补 `no_output`），
+   空命令守卫已在 schema 层存在。
+3. §8 P0′ 的行号已过期：`/execute` 空输出分支实为 `sandbox_sessions.py:1408`，`/exec` 预置在 `:2437`，
+   `skipped_binary` 不在 `output_gateway.py` 而在 `deliveries.py:112`。
+
+## 本机 Windows 侧的可复核性（新增环境事实）
+
+- 远程车道在本机不可达（`Permission denied (publickey,password)`），经用户确认改走本机 py3.12 `.venv-gate` 门：
+  `TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK=true .venv-gate/Scripts/python.exe -m pytest …`
+  （全局 python 缺 grpcio 且 protobuf 6.33.5 < vendored gencode 7.35.1，故需要该豁免变量；
+  本轮为跑 CI 门清单另装了 `kubernetes>=29`。**凡未走远程门的数字都是「本机 3.12 口径」，不等于车道口径。**
+- `scripts/verify_schema_parity.py` 在 Windows 上会先打印 `SCHEMA PARITY OK: 54 tables, columns identical`
+  再以 **rc=1** 退出——`TemporaryDirectory` 清理时 SQLite 文件句柄未释放（`WinError 32`），
+  是脚本自身的可移植性缺陷，与本轮改动无关（脚本未被改），Linux 车道不受影响。
+- `/exec` 系测试在本机恒 skip（POSIX `resource` 导入链）：本机看不到它，别把「本机绿」当「车道绿」。
+  （更正：`tests/test_ss18_guest_paths.py` 不是恒 skip 而是**恒红**——`app/services/sandbox_security.py:18`
+  顶层 `import resource` 在 Windows 直接 `ModuleNotFoundError`，3 条采集面测试因此红。这解释了换机后
+  「基线 3 failed」的来源：**不是产品回归，是这台机器跑不了 POSIX 导入链**。）
+
+**本机跑 CI 门清单的 18 条失败（227 passed / 18 failed / 1 skipped，140.85s）逐类定性**——
+门层规则是「任何失败直接阻断合入」，所以这批红**不能**当绿灯用，但也没有一条落在改动面：
+
+| 类别 | 条数 | 异常根因 |
+|---|---|---|
+| `test_deploy_manifests` | 11 | `pathlib.Path.read_text()` 未带 `encoding`，Windows 默认 GBK ⇒ `UnicodeDecodeError`（Linux 车道不受影响） |
+| `test_migrations::test_schema_parity_script_exits_zero` | 1 | 断言消息正文即 `SCHEMA PARITY OK: 54 tables, columns identical`，rc=1 来自 `TemporaryDirectory` 清理时 SQLite 句柄未释放（`WinError 32`） |
+| `test_rag_*` | 6 | `ModuleNotFoundError: No module named 'torch'` / `'onnx'`（本机未装可选 ML 依赖） |
+| `test_rate_limit_distributed` | 1 | 需真实 Redis 才能共享限流窗口；本机无 Redis ⇒ 第二个中间件实例返回 200 而非 429 |
+
+结论：本机门只能证「改动面不红」，**门层绿灯与基线比对仍必须在车道上出数**。
+
+**另一条本机预存在红（不在门清单内，定性方法记下）**：`tests/test_ss15_e2e_flow.py` 有 2 条红——
+`TestFullLoop::test_dev_test_publish_then_openapi_delivery` 与
+`TestContractModeVocabulary::test_business_vocabulary_contract_can_open_dev_session`，
+根因 `ValueError: Local storage reference escapes storage root`（`storage_service.py:240`，Windows 路径分隔符口径）。
+定性用的是**对照法**而不是读代码猜：`git stash push -- app/` 退回基线跑同样两条 ⇒ 同样 2 failed，
+`git stash pop` 后 diff 完全恢复（`337 insertions` 一致、stash 列表清空）。
+同目录另外 13 条 + `tests/test_ss15_sdk.py` 全绿，所以本轮改动的响应形状没有打破 SDK 契约。
+
+**前端门的同类坑：满载下假红**。M2 新增的 5 条用例在**满载**（与后端 pytest 并行）时红、
+**空载**时全绿——`findBy*`/`waitFor` 的默认等待上界 1000ms 被 vitest 并行导入高峰（单次
+`import 117s`）先撞穿，断言根本没轮到看被测状态。修法不是改断言也不是加重跑，
+而是 `src/test/setup.ts` 统一 `configure({ asyncUtilTimeout: 10_000 })`：放宽的是**等待上界**，
+等待条件仍是真实状态（卡片数量、错误归位文案等）。修后以两个 vitest 进程同时满载跑，
+两次均 18 files / 190 tests 全绿。可复用判据：**一条用例空载绿、满载红，先查等待上界与机器负载，
+不要先怀疑产品代码，也不要用「重跑一遍就绿」交差。**
+
 ## D-03 修复落地（对应上文 D-03）
 
 按 D-03 的一行修法落地（共三处同源阻断点，均在 `terminate_session` 清理路径上）：
@@ -791,7 +924,7 @@ failed to bind host port 192.168.0.190:9000/tcp: address already in use
 （`support/docker-compose.yaml` 是启动时生成的，改它会被覆盖）。
 
 可复用判据：**`docker-compose.yaml` 这类安装器生成物不要手改**，先找它读的环境变量；
-端口冲突时先 `ss -ltnp 'sport = :PORT'` 拿占有者名字（比“restart 一下看看”快很多）。，勿再“修”）
+端口冲突时先 `ss -ltnp 'sport = :PORT'` 拿占有者名字（比“restart 一下看看”快很多）。
 
 早前记录过一条「开发者菜单有 `/audit`，但 `RoleRoute` 把 buyer 弹回 `/`」——读源码后**推翻**：
 `Sidebar.tsx:123-133` 的「审计中心」整组由 `hasAnyRole(role, ROLE_GROUPS.auditReaders)`
@@ -800,3 +933,38 @@ failed to bind host port 192.168.0.190:9000/tcp: address already in use
 `DEVELOPER_MENU_KEYS` 里的 `/audit` 只服务「本来就有审计读权限、但切到开发者视图」的用户，
 对 buyer 不会渲染出菜单项。当时的结论是从常量推导的，没看消费侧。若按那条“修”就是**扩大审计
 可见面**，属于安全回退，因此在此记为已排除项。
+
+### V-11 真空判据改动的本机门（**本机 3.12 口径，未走远程车道**）
+
+P0′「空输入 200 / 真空为真」这一族改的是**语义**而不是加功能，所以验收重点是「有没有把别处改坏」。
+
+- 受影响 16 文件 ⇒ **233 passed / 2 failed / 1 skipped（67.33s）**；ci.yml 门清单 36 文件 ⇒
+  **227 passed / 18 failed / 1 skipped（143.08s）**，失败集合与前次**逐条相同**
+  （10 `test_deploy_manifests` + 1 `test_migrations` + 6 rag + 1 `test_rate_limit_distributed`，全部环境层）。
+- 那 2 条 `test_output_control_api.py::*_rejects_non_owner_real_session` 用**对照法**定性：
+  `git stash push -q -- app/` 退回基线跑 ⇒ 同样 2 红；`git stash pop` ⇒ 13 个 `app/` 文件全部复原。
+  根因是 `storage_service.py:240` 的 Windows 路径口径，与本轮无关。**基线既有红不记账、也不顺手修**（顺手修会掩盖真回归）。
+- 全族只动了一条既有断言：`test_output_gateway.py::test_empty_data`（0 行由 `success=True` 改诚实失败）。
+  `passed` 一律**不翻**，只新增披露字段（`empty_output` / `evaluated` / `not_evaluated` / `degraded`），
+  所以钉住「真空为真」的 12 处断言保持原样，DP 与合规闸语义零变化。
+
+可复用判据：
+- 判断一条红是不是自己引入的：`git stash push -q -- <改动目录>` 退回基线跑同一条，比读代码猜快且确定；
+  跑完立刻 `git stash pop` 并用 `git status --porcelain` 核对文件数复原。
+- `output_inspection.SandboxMode` 是**该模块自己的**枚举，取值 `query/train/develop/application`，
+  与 `sandbox_runtime.SandboxMode`（`structured_query/...`）不是一回事——写用例前先读定义，别照抄别的模块。
+
+### V-12 CI 口径门在 Windows 上的假红：看已 OK 却 rc=1（本机 3.12）
+
+`python scripts/verify_schema_parity.py` 先打 `SCHEMA PARITY OK: 54 tables, columns identical`，
+随后抛 `PermissionError: [WinError 32] ... created.db` 并以 **rc=1** 结束 —— 表面对比没漂移，脚本却失败。
+
+- 真因：`_schema_map()` 建了 engine 却没释放连接池，临时目录析构时删不掉 sqlite 文件；
+  `return 0` 是在 `with tempfile.TemporaryDirectory()` 里返回的，析构抛异常把返回值吃掉 ⇒ 未捕获异常 ⇒ rc=1。
+- **真修**：`_schema_map()` 用 `try/finally: engine.dispose()`（3 行）。没有吞异常、没有放宽比较，
+  修后本机 `PARITY_RC=0` + 同一行 OK 结论；Linux/CI 上行为不变（那边 unlink 本来就成功）。
+
+可复用判据：
+- `cmd | tail; echo RC=$?` 拿的是 **tail 的状态**，不是 cmd 的（`scripts/AGENTS.md` 明写「脚本用退出码说话」）。
+  要判 CI 门，先 `cmd > log 2>&1; echo RC=$?` 再读日志——本轮就是这么抓出来的。
+- 口径/门禁脚本报红时先看它把结论打在哪一步：结论行已打而 rc 非 0 ⇒ 十有八九是收尾（资源/临时文件）问题，不是断言漂移。

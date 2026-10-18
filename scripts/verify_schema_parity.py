@@ -20,12 +20,16 @@ def _schema_map(db_path: str) -> dict[str, set[str]]:
     from sqlalchemy import create_engine, inspect
 
     engine = create_engine(f"sqlite:///{db_path}")
-    inspector = inspect(engine)
-    return {
-        table: {col["name"] for col in inspector.get_columns(table)}
-        for table in inspector.get_table_names()
-        if table != "alembic_version"
-    }
+    try:
+        inspector = inspect(engine)
+        return {
+            table: {col["name"] for col in inspector.get_columns(table)}
+            for table in inspector.get_table_names()
+            if table != "alembic_version"
+        }
+    finally:
+        # 不释放连接池，临时目录在 Windows 上删不掉（WinError 32），脚本会在看已 OK 后以非 0 退出。
+        engine.dispose()
 
 
 def main() -> int:
