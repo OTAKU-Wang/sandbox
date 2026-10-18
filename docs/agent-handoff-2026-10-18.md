@@ -82,6 +82,15 @@
 
 对拍规程：同一命令在两棵树各跑一次，`> log 2>&1; echo "RC=$?" >> log`，**不接管道**；只有「只在现树红」的差集才是本轮引入。
 
+## 5b. 今晚的门禁读数（推送 tip `c0c31d2` 之前刚跑）
+
+| 读数 | 结果 | 日志 |
+|---|---|---|
+| 半成品全部就位、杀进程前，按 `.gate-files-tonight.txt`（= `ci.yml` 的 40 文件清单） | `321 passed, 8 skipped` / `GATETONIGHT_RC=0`（4m27s） | `gate-logs/gate-tonight-gate.log` |
+| 杀掉残留子代理进程、补交 federation/redis/catalog_sync 之后的最终复跑 | `321 passed, 8 skipped` / `FINALGATE_RC=0`（4m30s） | `gate-logs/gate-final-gate.log` |
+
+⇒ 这两个数只证明**门禁清单绿**：它们只覆盖那 40 个文件，**不含** §3 列的未验证测试模块，也不等于全量套件（全量基线 2864/24/5 是远程 py3.12 口径，见 §5 与根 `AGENTS.md`）。本机口径的数字一律标「本机 3.12」。
+
 ## 6. 换机后的第一步（可直接执行）
 
 ```bash

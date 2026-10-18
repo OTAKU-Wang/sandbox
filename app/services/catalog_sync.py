@@ -213,7 +213,7 @@ class CatalogSyncService:
         self, trust: FederationTrust, mode: SyncMode,
     ) -> list[CatalogEntry]:
         """Fetch catalog entries from remote space via federation gateway."""
-        response = self._connector.send_request(
+        response = await self._connector.send_request_async(
             trust, "read_catalog", "/catalog",
             payload={"sync_mode": mode.value},
         )

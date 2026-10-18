@@ -13,7 +13,7 @@ from app.core.scopes import key_unmapped_deny, require_group, require_human
 logger = logging.getLogger(__name__)
 from app.core.database import engine, Base
 from app.core.security import setup_security
-from app.core.redis import get_redis, close_redis
+from app.core.redis import get_redis, close_redis, redact_url
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
 from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api, quota as quota_api  # SS-15 / SS-17
 from app.api import session_stream  # W10: WebSocket exec stream
@@ -57,7 +57,8 @@ async def lifespan(app: FastAPI):
         from app.services.quota_manager import quota_manager
         quota_manager._redis = redis_client
     except Exception as e:
-        logger.error(f"Redis initialization failed: {e}")
+        # A38: 初始化失败的原因字符串可能回显含密码的 REDIS_URL
+        logger.error("Redis initialization failed: %s", redact_url(str(e)))
 
     # W3: seed per-tenant usage from the Redis write-through (restart
     # recovery); an empty Redis store falls back to a rebuild from the DB.
@@ -297,6 +298,13 @@ app.add_middleware(
     MetricsMiddleware,
     enabled=(not is_testing) and settings.METRICS_ENABLED,
 )
+# A43: bind the request_id contextvar for the request lifetime so log records
+# carry it. Added BEFORE RequestIDMiddleware on purpose → it sits just INSIDE
+# that middleware and reads the id RequestIDMiddleware stamped on
+# scope["state"]. The three documented middlewares keep their relative order.
+from app.core.logging import RequestIDContextMiddleware  # noqa: E402
+
+app.add_middleware(RequestIDContextMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 # Apply security middleware (disable rate limiting in test mode)

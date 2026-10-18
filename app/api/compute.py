@@ -90,15 +90,28 @@ async def get_schedule(
 
 
 def _check_resource_override(contract: Contract, override: dict) -> None:
-    """规格覆盖只能向下收窄合约已批准的规格（铁律：不得越权扩大资源）。"""
+    """规格覆盖只能向下收窄合约已批准的规格（铁律：不得越权扩大资源）。
+
+    A2 fail-closed：`sandbox_resource_spec` 可空（models/contract.py），缺键
+    不等于「无上限」——没有已批准的数值上限就无法证明这是收窄，一律拒绝。
+    同口径的覆盖校验另见 app/api/notebooks.py（不在本文件修复范围）。
+    """
     approved = contract.sandbox_resource_spec or {}
     for key, value in override.items():
         ceiling = approved.get(key)
-        if isinstance(ceiling, (int, float)) and not isinstance(ceiling, bool) and value > ceiling:
+        if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool):
+            raise CDSError(
+                f"合约未批准 {key} 的规格上限，不能以覆盖方式引入该规格",
+                code="RESOURCE_OVERRIDE_EXCEEDED",
+                http_status=400,
+                detail={"key": key, "requested": value, "reason": "no_approved_ceiling"},
+            )
+        if value > ceiling:
             raise CDSError(
                 f"{key}={value} 超出合约已批准的规格上限 {ceiling}",
                 code="RESOURCE_OVERRIDE_EXCEEDED",
                 http_status=400,
+                detail={"key": key, "requested": value, "ceiling": ceiling},
             )
 
 

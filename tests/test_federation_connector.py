@@ -358,10 +358,13 @@ class TestRequestProxying:
         assert response.data["verified"] is True
 
     def test_send_request_unknown_operation(self, connector, local_space, remote_space):
+        """A150: an operation absent from the trust-threshold table is denied
+        fail-closed (strictest registered threshold) instead of inheriting
+        threshold 0 and being proxied to the remote gateway."""
         trust = self._setup_trust(connector, local_space, remote_space, ops=["custom"])
         response = connector.send_request(trust, "custom", "/something")
-        assert response.status_code == 400
-        assert "Unknown operation" in response.error
+        assert response.status_code == 403
+        assert "custom" in response.error
 
     def test_send_request_inactive_trust(self, connector, local_space, remote_space):
         trust = self._setup_trust(connector, local_space, remote_space)

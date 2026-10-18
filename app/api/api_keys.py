@@ -99,6 +99,20 @@ def _list_item(key: ApiKey, username: str) -> ApiKeyListItem:
     )
 
 
+async def _get_key_for_update(db: AsyncSession, key_id: uuid.UUID) -> ApiKey | None:
+    """A7: 状态变更（rotate/revoke/PATCH）的行锁读取。
+
+    check-then-act 竞态：裸 `db.get` 读后写回状态，并发下已撤销的密钥可被
+    写回 active（终态守卫拿的是旧快照）。SELECT ... FOR UPDATE 在 PostgreSQL
+    上串行化同一行的状态事务；SQLite（测试方言）省略该子句，语义不变。
+    只读端点（activity）不需要锁，继续用 db.get。
+    """
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id).with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
 async def _audit_action(db: AsyncSession, action: str, admin: User, key: ApiKey, extra: dict | None = None) -> None:
     await audit_service.log(
         db,
@@ -206,7 +220,7 @@ async def rotate_api_key(
     admin: User = Depends(require_roles(UserRole.ADMIN)),
     db: AsyncSession = Depends(get_db),
 ):
-    old = await db.get(ApiKey, key_id)
+    old = await _get_key_for_update(db, key_id)
     _get_key_or_404(old)
     now = _now()
     if old.status == "revoked":
@@ -251,7 +265,7 @@ async def update_api_key(
     admin: User = Depends(require_roles(UserRole.ADMIN)),
     db: AsyncSession = Depends(get_db),
 ):
-    key = await db.get(ApiKey, key_id)
+    key = await _get_key_for_update(db, key_id)
     _get_key_or_404(key)
     if key.status == "revoked":
         raise _bad_request("revoked is terminal; the key cannot be re-activated",
@@ -278,7 +292,7 @@ async def revoke_api_key(
     admin: User = Depends(require_roles(UserRole.ADMIN)),
     db: AsyncSession = Depends(get_db),
 ):
-    key = await db.get(ApiKey, key_id)
+    key = await _get_key_for_update(db, key_id)
     _get_key_or_404(key)
     if key.status != "revoked":
         now = _now()

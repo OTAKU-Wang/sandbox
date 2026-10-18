@@ -294,7 +294,7 @@ async def send_federation_request(
     if not trust:
         raise HTTPException(status_code=404, detail="Trust not found")
 
-    response = federation_connector.send_request(
+    response = await federation_connector.send_request_async(
         trust, body.operation, body.resource,
         payload=body.payload, user_id=str(current_user.id),
     )

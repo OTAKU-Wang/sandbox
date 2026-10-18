@@ -238,11 +238,14 @@ def test_request_id_filter_is_installed_first(root_logging):
 # A43 后半段：request_id 上下文必须真的有人写
 # （RequestIdFilter 挂在 root 上，stdlib 子 logger 的记录根本不经过它）
 # --------------------------------------------------------------------------- #
-async def _scope_call(middleware, scope):
+async def _run_context_middleware(scope):
+    """跑一遇 RequestIDContextMiddleware，返回内层 app 看到的 request_id。"""
     seen: dict = {}
 
-    async def inner(receive, send):
+    async def inner(_scope, receive, send):
         seen["request_id"] = request_id_var.get()
+
+    middleware = log_module.RequestIDContextMiddleware(inner)
 
     async def receive():
         return {"type": "http.request"}
@@ -256,24 +259,22 @@ async def _scope_call(middleware, scope):
 
 @pytest.mark.asyncio
 async def test_context_middleware_binds_request_id_from_state():
-    mw = log_module.RequestIDContextMiddleware(lambda: None)
     scope = {"type": "http", "path": "/api/v1/x", "headers": [], "state": {"request_id": "rid-1"}}
-    seen = await _scope_call(mw, scope)
+    seen = await _run_context_middleware(scope)
     assert seen["request_id"] == "rid-1"
     # 请求结束必须复位，不能泄漏到别的任务
     assert request_id_var.get() == "-"
 
 
 @pytest.mark.asyncio
-async def test_context_middleware_uses_incoming_header_before_state():
-    mw = log_module.RequestIDContextMiddleware(lambda: None)
+async def test_context_middleware_falls_back_to_incoming_header():
     scope = {
         "type": "http",
         "path": "/x",
         "headers": [(b"x-request-id", b"rid-from-client")],
         "state": {},
     }
-    seen = await _scope_call(mw, scope)
+    seen = await _run_context_middleware(scope)
     assert seen["request_id"] == "rid-from-client"
 
 
@@ -284,9 +285,9 @@ async def test_context_middleware_is_mounted_inner_of_request_id():
 
     chain = [m.cls for m in app.user_middleware]
     assert log_module.RequestIDContextMiddleware in chain, chain
-    # Starlette: 后加入者在外层。request_id 上下文必须在 RequestIDMiddleware
-    # 之内（读它写进 scope["state"] 的 id），又在业务路由之外。
-    assert chain.index(log_module.RequestIDContextMiddleware) < chain.index(RequestIDMiddleware), chain
+    # user_middleware[0] 是最外层。request_id 上下文必须在 RequestIDMiddleware
+    # 之内（才能读到它写进 scope["state"] 的 id），又在业务路由之外。
+    assert chain.index(RequestIDMiddleware) < chain.index(log_module.RequestIDContextMiddleware), chain
 
 
 @pytest.mark.asyncio
@@ -316,3 +317,14 @@ async def test_request_id_reaches_logs_through_the_app(client, root_logging, mon
     doc = json.loads(buf.getvalue().strip().splitlines()[-1])
     assert doc["request_id"] == "rid-e2e-000111", doc
     assert doc["logger"] == "app.api.health"
+
+    # 无入站头时用的是 RequestIDMiddleware 生成的 id —— 只能来
+    # 自 scope["state"]，这一枪钉的是「state 传递」而不是「头回显」。
+    buf.truncate(0)
+    buf.seek(0)
+    resp2 = await client.get("/health")
+    assert resp2.status_code == 200
+    generated = resp2.headers["x-request-id"]
+    assert generated
+    doc2 = json.loads(buf.getvalue().strip().splitlines()[-1])
+    assert doc2["request_id"] == generated, (doc2, generated)

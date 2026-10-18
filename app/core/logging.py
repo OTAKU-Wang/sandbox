@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-import logging.handlers
 import sys
 import contextvars
 from datetime import datetime, timezone
@@ -120,9 +119,6 @@ class RequestIDContextMiddleware:
             request_id_var.reset(token)
 
 
-_INSTALLED_FLAG = "_cds_json_formatter"
-
-
 def setup_logging(json_mode: bool) -> None:
     """Install the JSON pipeline when requested; otherwise keep stdlib config."""
     root = logging.getLogger()
@@ -139,11 +135,10 @@ def setup_logging(json_mode: bool) -> None:
         # so logs are not silently swallowed by the "lastResort" fallback.
         root.addHandler(logging.StreamHandler(sys.stderr))
 
+    # Attach — never replace. Existing handlers (uvicorn/gunicorn/dictConfig,
+    # a file sink, a collector agent) keep their place and just change shape.
     for handler in list(root.handlers):
-        if getattr(handler, _INSTALLED_FLAG, False):
-            continue
         handler.setFormatter(formatter)
-        setattr(handler, _INSTALLED_FLAG, True)
 
     # Root level: surface INFO only where nothing was configured (NOTSET makes
     # the effective level WARNING). An explicit level — looser OR stricter —

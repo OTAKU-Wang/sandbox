@@ -119,6 +119,13 @@ class MfaVerifyRequest(BaseModel):
     code: str = Field(..., min_length=1, max_length=32)
 
 
+class MfaEnrollRequest(BaseModel):
+    """A14: body optional — first/in-flight enrollment keeps the old no-body
+    contract; resetting a CONFIRMED enrollment must carry the current second
+    factor (live TOTP or an unspent recovery code) as proof of possession."""
+    code: str | None = Field(None, min_length=1, max_length=32)
+
+
 class MfaRecoverRequest(BaseModel):
     recovery_code: str = Field(..., min_length=1, max_length=32)
 
@@ -366,14 +373,47 @@ async def sign_data(
 @router.post("/mfa/enroll")
 async def mfa_enroll(
     request: Request,
+    body: MfaEnrollRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Start/replace a TOTP enrollment. The secret is shown ONCE here;
-    confirm it via /mfa/verify. Re-enrolling an active enrollment resets it
-    to unconfirmed — login is blocked until re-verification."""
+    confirm it via /mfa/verify.
+
+    A14: the login gate (models/user_mfa.py) only enforces while
+    ``confirmed`` is true, so resetting a CONFIRMED enrollment silently
+    downgrades the account to password-only login. Therefore re-enrolling a
+    confirmed enrollment now requires proof of possession of the current
+    second factor (live TOTP or an unspent recovery code) in the body —
+    a password-only attacker can no longer disarm MFA with one POST. First
+    or in-flight (unconfirmed) enrollments stay body-optional; the gate
+    never covered them, so replacing them is not a downgrade."""
+    ip = request.client.host if request.client else None
     secret = _new_totp_secret()
     mfa = await _get_mfa(db, current_user.id)
+    if mfa is not None and mfa.confirmed:
+        code = body.code if body else None
+        proved = False
+        if code:
+            if mfa.totp_secret_encrypted:
+                proved = _verify_totp(
+                    _decrypt_mfa(mfa.totp_secret_encrypted), code,
+                    settings.MFA_TOTP_PERIOD, settings.MFA_TOTP_DIGITS,
+                )
+            if not proved:
+                proved = (await _consume_recovery_code(db, mfa, code)) is not None
+        if not proved:
+            await audit_service.log_standalone(
+                action="user.mfa_enroll_denied", resource_type="user", user_id=current_user.id,
+                detail={"username": current_user.username, "reason": "second_factor_proof_required"},
+                ip_address=ip,
+            )
+            raise CDSError(
+                "Re-enrolling a confirmed MFA enrollment requires the current TOTP "
+                "code or a recovery code",
+                code="AUTH_MFA_REQUIRED", http_status=401,
+                detail={"username": current_user.username},
+            )
     if mfa is None:
         mfa = UserMFA(user_id=current_user.id)
         db.add(mfa)

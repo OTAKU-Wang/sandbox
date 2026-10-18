@@ -59,6 +59,33 @@ _FEDERATION_ALLOWED_SCHEMES = frozenset({"https"})
 _FEDERATION_INTERNAL_SUFFIXES = (
     ".localhost", ".local", ".internal", ".cluster.local", ".consul",
 )
+# Ranges the federation channel must never dial. Listed explicitly rather than
+# leaned on `ipaddress.is_private`, whose membership moves between Python
+# releases — and deliberately *without* 198.18.0.0/15 (benchmark range, used as
+# the fake-IP pool by local DNS proxies: blocking it would refuse every real
+# federation hostname on such a host).
+_FEDERATION_BLOCKED_V4 = tuple(ipaddress.IPv4Network(cidr) for cidr in (
+    "0.0.0.0/8",          # "this host"
+    "10.0.0.0/8",
+    "100.64.0.0/10",      # CGNAT / carrier-internal
+    "127.0.0.0/8",
+    "169.254.0.0/16",     # link-local — includes 169.254.169.254 metadata
+    "172.16.0.0/12",
+    "192.0.0.0/24",
+    "192.0.2.0/24",
+    "192.168.0.0/16",
+    "198.51.100.0/24",
+    "203.0.113.0/24",
+    "224.0.0.0/4",
+    "240.0.0.0/4",
+))
+_FEDERATION_BLOCKED_V6 = tuple(ipaddress.IPv6Network(cidr) for cidr in (
+    "::/128",
+    "::1/128",
+    "fc00::/7",           # IPv6 unique-local
+    "fe80::/10",
+    "ff00::/8",
+))
 _HOSTNAME_RE = re.compile(
     r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
 )
@@ -76,10 +103,9 @@ def _is_internal_ip(addr: str) -> bool:
     mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
         ip = mapped
-    return bool(
-        ip.is_private or ip.is_loopback or ip.is_link_local
-        or ip.is_multicast or ip.is_reserved or ip.is_unspecified
-    )
+    if any(ip in net for net in (_FEDERATION_BLOCKED_V4 if ip.version == 4 else _FEDERATION_BLOCKED_V6)):
+        return True
+    return bool(ip.is_loopback or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
 
 
 def _resolve_addresses(host: str) -> list[str]:
@@ -918,14 +944,6 @@ class FederationConnector:
                     url,
                     json=body,
                     headers=request.headers,
-                )
-                data = response.json() if response.headers.get("content-type", "").startswith("application/json") else None
-                return GatewayResponse(
-                    request_id=request.request_id,
-                    status_code=response.status_code,
-                    data=data,
-                    error=data.get("detail") if data and response.status_code >= 400 else None,
-                    source_space=request.target_space,
                 )
                 data = response.json() if response.headers.get("content-type", "").startswith("application/json") else None
                 return GatewayResponse(

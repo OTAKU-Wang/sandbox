@@ -262,20 +262,21 @@ class TestA61EventLoopSafety:
             return GatewayResponse(request_id=request.request_id, status_code=200, data={})
 
         current = threading.current_thread().name
-        task = asyncio.create_task(connector.send_request_async(trust, "search", "/data"))
-        # Waiting for the worker in *another* thread keeps this coroutine honest:
-        # if the connector blocked the loop, `started` would never be observed
-        # before the timeout below.
-        await asyncio.wait_for(asyncio.to_thread(started.wait, 5), timeout=8)
-        progress = False
+        with patch.object(FederationConnector, "_execute_remote_request", slow):
+            task = asyncio.create_task(connector.send_request_async(trust, "search", "/data"))
+            # Waiting for the worker in *another* thread keeps this coroutine honest:
+            # if the connector blocked the loop, `started` would never be observed
+            # before the timeout below.
+            await asyncio.wait_for(asyncio.to_thread(started.wait, 5), timeout=8)
+            progress = False
 
-        async def probe():
-            nonlocal progress
-            progress = True
+            async def probe():
+                nonlocal progress
+                progress = True
 
-        await asyncio.wait_for(probe(), timeout=2)
-        release.set()
-        response = await asyncio.wait_for(task, timeout=10)
+            await asyncio.wait_for(probe(), timeout=2)
+            release.set()
+            response = await asyncio.wait_for(task, timeout=10)
 
         assert progress is True
         assert worker and worker[0] != current
