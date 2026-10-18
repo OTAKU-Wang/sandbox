@@ -10,6 +10,7 @@ Format: [key_id_len:4][key_id][nonce:12][tag:16][ciphertext]
 """
 import hashlib
 import io
+import logging
 import struct
 from pathlib import Path
 
@@ -17,10 +18,15 @@ from app.core.config import get_settings
 from app.core.path_security import safe_join_object_name
 from app.utils.crypto import SM4Cipher, sm3_hash
 
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 
 # Envelope encryption magic bytes
 _ENVELOPE_VERSION = 1
+
+# MinIO → 本地目录降级只告警一次（避免每上传刷一条）
+_MINIO_FALLBACK_WARNED = False
 
 
 class StorageService:
@@ -79,8 +85,19 @@ class StorageService:
                 )
                 if not self._client.bucket_exists(settings.MINIO_BUCKET):
                     self._client.make_bucket(settings.MINIO_BUCKET)
-            except Exception:
+            except Exception as e:
                 self._client = None
+                # 诚实降级（铁律）：降级到容器内本地目录后，上传原件不随卷存活，
+                # 必须让运维在日志里看见“为什么写的是 /tmp/cds-storage”，不能静默。
+                global _MINIO_FALLBACK_WARNED
+                if not _MINIO_FALLBACK_WARNED:
+                    _MINIO_FALLBACK_WARNED = True
+                    logger.warning(
+                        "[storage] MinIO 不可用（%s），对象存储降级为本地目录 %s："
+                        "该目录未入卷时容器重建会丢上传原件（库里仍为 ready），"
+                        "生产部署请安装 minio 客户端包并配置 CDS_MINIO_ENDPOINT",
+                        e, self._local_dir,
+                    )
         return self._client
 
     def upload(self, data: bytes, object_name: str, content_type: str = "application/octet-stream") -> dict:
@@ -157,14 +174,22 @@ class StorageService:
         if len(raw) > 5 and raw[0] == _ENVELOPE_VERSION:
             try:
                 key_id, nonce, tag, ciphertext = self._unpack_envelope(raw)
-                kms = self._get_kms()
-                dek = kms.get_key(key_id)
-                if dek is None:
-                    raise ValueError(f"Key {key_id} not found in KMS — data cannot be decrypted")
-                cipher = SM4Cipher(dek)
-                return cipher.decrypt_gcm(ciphertext, nonce, tag)
             except (ValueError, struct.error):
-                pass  # Not envelope format, return raw
+                return raw  # 首字节只是巧合，不是信封格式，按明文返回
+            # D-e2e-14: 信封在、密钥不在（或解密失败）时必须报错，不能 fallthrough 把
+            # 密文当明文返回。旧写法把下面自己抛的 ValueError 又被同一个
+            # `except ValueError: pass` 吞掉，于是供数注入会拿到一份读不了的
+            # 密文却报「已注入 1 个文件」，违反 honest-degradation。
+            kms = self._get_kms()
+            dek = kms.get_key(key_id)
+            if dek is None:
+                raise ValueError(
+                    f"密钥 {key_id} 在 KMS 中不存在，数据无法解密（可能是密钥为内存态且已重启）：{object_name}"
+                )
+            try:
+                return SM4Cipher(dek).decrypt_gcm(ciphertext, nonce, tag)
+            except Exception as exc:
+                raise ValueError(f"对象 {object_name} 解密失败（密钥 {key_id}）：{exc}") from exc
 
         return raw
 
@@ -192,13 +217,32 @@ class StorageService:
 
     def _download_raw(self, object_name: str) -> bytes:
         """Download raw bytes from storage."""
+        # 混存兼容：历史上 MinIO 客户端缺失时上传的行，storage_path 存的是本地绝对路径；
+        # 接上 MinIO 后不能把那些行直接判死——本地文件还在就读本地，不在才走对象存储。
+        if self._is_local_reference(object_name):
+            local_path = self._local_path_from_reference(object_name)
+            if local_path.exists():
+                return local_path.read_bytes()
         minio = self._get_minio_client()
         if minio:
             response = minio.get_object(settings.MINIO_BUCKET, self._object_name_from_reference(object_name))
             return response.read()
-        else:
-            local_path = self._local_path_from_reference(object_name)
-            return local_path.read_bytes()
+        local_path = self._local_path_from_reference(object_name)
+        return local_path.read_bytes()
+
+    def _is_local_reference(self, object_name: str) -> bool:
+        """这个引用是不是（旧）本地目录里的文件？minio:// 与相对对象名不算。"""
+        if not object_name or object_name.startswith("minio://"):
+            return False
+        path = Path(object_name)
+        if not path.is_absolute():
+            return False
+        try:
+            base = self._local_dir.resolve()
+            resolved = path.resolve()
+        except OSError:
+            return False
+        return resolved == base or resolved.is_relative_to(base)
 
     def delete(self, object_name: str) -> bool:
         """Delete data from storage."""
@@ -224,7 +268,7 @@ class StorageService:
         if path.is_absolute():
             base = self._local_dir.resolve()
             resolved = path.resolve()
-            if not (resolved == base or str(resolved).startswith(str(base) + "/")):
+            if not (resolved == base or resolved.is_relative_to(base)):
                 raise ValueError("Local storage reference escapes storage root")
             return str(resolved.relative_to(base))
         return object_ref
@@ -236,7 +280,7 @@ class StorageService:
         if path.is_absolute():
             base = self._local_dir.resolve()
             resolved = path.resolve()
-            if not (resolved == base or str(resolved).startswith(str(base) + "/")):
+            if not (resolved == base or resolved.is_relative_to(base)):
                 raise ValueError("Local storage reference escapes storage root")
             return resolved
         return safe_join_object_name(self._local_dir, object_ref)

@@ -108,6 +108,8 @@ class Settings(BaseSettings):
     WEBHOOK_ALLOW_PRIVATE_URLS: bool = True
     NOTEBOOK_KERNEL_ENABLED: bool = True
     JUPYTER_PROXY_BASE_URL: str | None = None
+    # 上游 JupyterLab 的访问令牌：由反代注入，浏览器永远拿不到（见 jupyter_gateway）。
+    JUPYTER_UPSTREAM_TOKEN: str = ""
 
     # W9: idle expiry behavior for sessions that do not declare their own
     # idle_policy. "kill" terminates (CDS historical default); "pause"
@@ -181,6 +183,11 @@ class Settings(BaseSettings):
     # Dev sandbox (gap A3): require a valid contract covering the attached
     # data product before a dev session may load provider data.
     DEV_SANDBOX_REQUIRE_CONTRACT: bool = True
+    # SS-19: 在线开发环的沙箱等级。默认 l2c = CubeSandbox MicroVM（SS-13 立场：
+    # 开发只在 MicroVM 里发生）。没有 Cube 节点的部署可显式降到 L0/L1/L3 等真实存在的
+    # 等级（不是模拟），前端必须把当前等级当隔离强度标出来，不得默不作声。
+    # 合约 allowed_sandbox_levels 依旧是硬门：降得比合约低就起不了会话。
+    DEV_SANDBOX_LEVEL: str = "l2c"
 
     # Gap B2/D4/B5 + F2 (T12): simulation / fallback fail-closed switches.
     # Production deployments must set these to false and prove the real

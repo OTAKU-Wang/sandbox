@@ -17,6 +17,7 @@ from app.core.redis import get_redis, close_redis
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
 from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api, quota as quota_api  # SS-15 / SS-17
 from app.api import session_stream  # W10: WebSocket exec stream
+from app.api import jupyter_proxy  # SS-19: 开发环 JupyterLab 反代
 from app.api import sandbox_nodes  # W14: node operations
 from app.api import shared_volumes  # W15: shared volumes
 from app.api import network_policy as network_policy_api
@@ -247,9 +248,16 @@ class Ss12KeyDefaultDenyMiddleware:
             return
         path = scope.get("path", "")
         auth = ""
+        header_key = ""
         for k, v in scope.get("headers") or []:
             if k == b"authorization":
                 auth = v.decode("latin-1")
+            elif k == b"x-cds-api-key":
+                header_key = v.decode("latin-1")
+        # 文档化的数据面凭据（X-CDS-API-Key）同样是 key subject：默认拒绝必须
+        # 看得见它，否则换一个头就绕过了未映射前缀的 fail-closed 判定。
+        if not auth.startswith("Bearer cds_ak_") and header_key.startswith("cds_ak_"):
+            auth = "Bearer " + header_key
         if not key_unmapped_deny(path, auth):
             await self.app(scope, receive, send)
             return
@@ -357,6 +365,10 @@ app.include_router(meta.router, prefix="/api/v1/meta", tags=["meta"], dependenci
 # SS-12: machine subjects authenticate via the WS ticket, not Bearer keys, so
 # no scope gate is attached here)
 app.include_router(session_stream.router)
+# SS-19 开发环：根级挂载，与 session_stream 同一先例 —— 鉴权不走 Authorization 头
+# （iframe 带不了），而是 /api/jupyter/tickets 发的一次性票据 → 签名 Cookie；
+# 不加入 scopes.GROUP_PREFIXES = 机器凭据默认进不来（SS-12 default-deny）。
+app.include_router(jupyter_proxy.router, tags=["jupyter-dev-env"])
 app.include_router(sandbox_nodes.router, prefix="/api/v1/sandbox-nodes", tags=["sandbox-nodes"], dependencies=[Depends(require_group("infra"))])
 app.include_router(shared_volumes.router, prefix="/api/v1/shared-volumes", tags=["shared-volumes"], dependencies=[Depends(require_group("infra"))])
 # CB-06: node audit tailer ingestion — service token + mTLS, NOT under /api/v1;
@@ -379,7 +391,9 @@ if _static_dir.exists():
         async def __call__(self, scope, receive, send):
             if scope.get("type") == "http":
                 for k, v in scope.get("headers", []):
-                    if k == b"authorization" and v.startswith(b"Bearer cds_ak_"):
+                    if (k == b"authorization" and v.startswith(b"Bearer cds_ak_")) or (
+                        k == b"x-cds-api-key" and v.startswith(b"cds_ak_")
+                    ):
                         body = ('{"code": "API_KEY_SCOPE_DENIED", '
                                 '"message": "API key subjects cannot access human-only endpoints", '
                                 '"detail": {"reason": "human_only"}, "request_id": ""}')

@@ -53,18 +53,23 @@ async def call_open_endpoint(
         result = await dv.execute_endpoint(db, endpoint, body, caller_id=current_user.id, workload=workload)
     except dv.EndpointUnavailable as exc:
         await audit_service.log(
-            db, action="openapi.call_failed", resource_type="contract",
-            user_id=current_user.id, resource_id=str(endpoint.contract_id),
-            detail={"slug": slug, "code": exc.code, "message": exc.message},
+            db, action="openapi.call_failed", resource_type="api_endpoint",
+            user_id=current_user.id, resource_id=str(endpoint.id),
+            ip_address=request.client.host if request.client else None,
+            detail={"contract_id": str(contract.id), "endpoint_id": str(endpoint.id), "slug": slug, "code": exc.code, "message": exc.message},
         )
         await db.commit()
         status = 429 if exc.code in _RETRYABLE else 502
-        raise CDSError(exc.message, code=exc.code, http_status=status, retry_after=60 if exc.code == "RATE_LIMITED" else None) from exc
+        raise CDSError(exc.message, code=exc.code, http_status=status, detail=exc.detail or None,
+                       retry_after=60 if exc.code == "RATE_LIMITED" else None) from exc
 
+    # 调用明细按被调端点归源（resource=api_endpoint，与 api_keys/training 的资源级审计同口径），
+    # 合约留在 detail 里：交付中心的「端点调用明细」要精确分页，不能靠解 JSON 过滤。
     await audit_service.log(
-        db, action="openapi.call", resource_type="contract",
-        user_id=current_user.id, resource_id=str(endpoint.contract_id),
-        detail={"endpoint_id": str(endpoint.id), "slug": slug, "output_rows": result["output_rows"], "duration_ms": result["duration_ms"], "request_sha256": result["request_sha256"]},
+        db, action="openapi.call", resource_type="api_endpoint",
+        user_id=current_user.id, resource_id=str(endpoint.id),
+        ip_address=request.client.host if request.client else None,
+        detail={"contract_id": str(contract.id), "endpoint_id": str(endpoint.id), "slug": slug, "output_rows": result["output_rows"], "duration_ms": result["duration_ms"], "request_sha256": result["request_sha256"]},
     )
     await db.commit()
     return result

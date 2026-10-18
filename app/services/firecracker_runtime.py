@@ -657,7 +657,11 @@ class FirecrackerRuntime:
                 env_vars=env_vars,
             )
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
+            from app.services.sandbox_security import close_seccomp_fd
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
+            finally:
+                close_seccomp_fd(seccomp_fd)  # 单次 fd，用完归还（见 get_seccomp_bpf_fd）
             # Retry without seccomp if kernel doesn't support it — gated by
             # CDS_SECCOMP_FALLBACK_ALLOWED (PZ-04/MR-A13, S4 closed), same as
             # sandbox_runtime. When denied, the exec fails honestly instead of
@@ -818,7 +822,11 @@ class FirecrackerRuntime:
                 env_vars=env_vars,
             )
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
+            from app.services.sandbox_security import close_seccomp_fd
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
+            finally:
+                close_seccomp_fd(seccomp_fd)  # 单次 fd，用完归还（见 get_seccomp_bpf_fd）
             # Retry without seccomp if kernel doesn't support it — gated by
             # CDS_SECCOMP_FALLBACK_ALLOWED (PZ-04/MR-A13, S4 closed).
             if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):

@@ -52,10 +52,23 @@ _SECCOMP_JSON = json.dumps({
                 "socket", "connect", "accept", "sendto", "recvfrom",
                 "shutdown", "bind", "listen", "getsockname", "getpeername",
                 "socketpair", "setsockopt", "getsockopt",
+                # accept4/sendmsg/recvmsg：glibc 的 accept() 实际走 accept4，少了它
+                # socket.accept() 在客内永远 EPERM——会话 kernel 服不了务（笔记本单元格
+                # 因而永远退回无状态）。sendmsg/recvmsg 是 sendto/recvfrom 的同族入口。
+                "accept4", "sendmsg", "recvmsg",
+                # pipe2/dup3/close_range 是 pipe/dup2/关闭 fd 的现代入口，subprocess 依赖它们；
+                # fork/clone/execve 已在白名单里，缺这三个只是让“允许的能力”静默失败。
+                "pipe2", "dup3", "close_range",
+                # ppoll/pselect6/epoll_pwait/faccessat2/set_robust_list/get_robust_list/
+                # sigaltstack/rt_sigpending/clone3/prlimit64：与已允许的 poll/select/
+                # faccessat/futex/execve 同族的现代入口，多线程与 posix_spawn 会用。
+                "ppoll", "pselect6", "epoll_pwait", "faccessat2",
+                "set_robust_list", "get_robust_list", "sigaltstack", "rt_sigpending",
+                "clone3", "prlimit64",
                 "clone", "fork", "vfork", "execve",
                 "fcntl", "ftruncate", "truncate",
                 "pread64", "pwrite64", "readv", "writev",
-                "getcwd", "chdir", "renameat2", "mkdirat",
+                "getcwd", "chdir", "renameat", "renameat2", "mkdirat", "mkdir",
                 "unlinkat", "symlinkat", "linkat",
                 "umask", "fchmod", "fchmodat",
                 "fchown", "fchownat",
@@ -102,12 +115,18 @@ _SYSCALL_NUMBERS = {
     "getdents64": 217, "readlink": 89, "arch_prctl": 158,
     "getrandom": 318, "memfd_create": 319,
     "socket": 41, "connect": 42, "accept": 43, "sendto": 44, "recvfrom": 45,
+    "sendmsg": 46, "recvmsg": 47,
     "shutdown": 48, "bind": 49, "listen": 50, "getsockname": 51, "getpeername": 52,
     "socketpair": 53, "setsockopt": 54, "getsockopt": 55,
+    "accept4": 288, "pipe2": 293, "dup3": 292, "close_range": 436,
+    "ppoll": 271, "pselect6": 270, "epoll_pwait": 281, "faccessat2": 439,
+    "set_robust_list": 273, "get_robust_list": 274, "sigaltstack": 131,
+    "rt_sigpending": 127, "clone3": 435, "prlimit64": 302,
     "clone": 56, "fork": 57, "vfork": 58, "execve": 59,
     "fcntl": 72, "ftruncate": 77, "truncate": 76,
     "pread64": 17, "pwrite64": 18, "readv": 19, "writev": 20,
-    "getcwd": 79, "chdir": 80, "renameat2": 264, "mkdirat": 258,
+    # renameat=264 / renameat2=316（旧表把 264 误标成 renameat2，等于只放行了 renameat）
+    "getcwd": 79, "chdir": 80, "renameat": 264, "renameat2": 316, "mkdirat": 258, "mkdir": 83,
     "unlinkat": 263, "symlinkat": 266, "linkat": 265,
     "umask": 95, "fchmod": 91, "fchmodat": 268,
     "fchown": 93, "fchownat": 260,
@@ -196,12 +215,24 @@ def _compile_seccomp_bpf() -> int | None:
 
 
 # Pre-compiled seccomp BPF fd (lazy-initialized)
+# 这个 fd 只当“存放已编译程序的句柄”：bwrap 永远不能直接用它（见 get_seccomp_bpf_fd）。
 _seccomp_bpf_fd: int | None = None
 _seccomp_bpf_compiled = False
 
 
 def get_seccomp_bpf_fd() -> int | None:
-    """Get the seccomp BPF file descriptor (compiled once, reused)."""
+    """为**一次** bwrap 起进程借出一个偏移为 0 的 BPF fd（调用方负责 `close_seccomp_fd`）。
+
+    不能反复共用一个缓存 fd：bwrap 会把过滤器程序从 fd 读到 EOF，而 fork/exec 继承的
+    是同一个 open file description（父子共享文件偏移）。旧实现只编译一次就重复下发，
+    于是同一进程里只有第一次 bwrap 装得上 syscall 白名单，之后每次 exec 全部
+    `PR_SET_SECCOMP EINVAL` —— 开发环境靠 SECCOMP_FALLBACK_ALLOWED 的重试把整条过滤
+    卸掉（静默安全降级），关掉重试就直接执行失败。会话 kernel / 笔记本单元格都撞在这里。
+
+    经 `/proc/self/fd/N` 重新打开得到的是同一（已 unlink）inode 的新 description，
+    偏移从 0 开始且与母 fd 互不影响（实测）。重开失败时退化到“复位共享 fd 偏移”，
+    至少保证顺序执行与旧行为一致地可用。
+    """
     global _seccomp_bpf_fd, _seccomp_bpf_compiled
     if not _seccomp_bpf_compiled:
         _seccomp_bpf_compiled = True
@@ -210,7 +241,26 @@ def get_seccomp_bpf_fd() -> int | None:
             logger.info(f"Seccomp BPF filter compiled successfully (fd={_seccomp_bpf_fd})")
         else:
             logger.warning("Seccomp BPF compilation failed; running without syscall filter")
-    return _seccomp_bpf_fd
+    if _seccomp_bpf_fd is None:
+        return None
+    try:
+        return os.open(f"/proc/self/fd/{_seccomp_bpf_fd}", os.O_RDONLY)
+    except OSError:
+        try:
+            os.lseek(_seccomp_bpf_fd, 0, os.SEEK_SET)
+        except OSError:
+            return None
+        return _seccomp_bpf_fd
+
+
+def close_seccomp_fd(fd: int | None) -> None:
+    """归还 `get_seccomp_bpf_fd()` 借出的单次 fd（全局缓存的母 fd 不动）。"""
+    if fd is None or fd == _seccomp_bpf_fd:
+        return
+    try:
+        os.close(fd)
+    except OSError:
+        pass
 
 
 def close_seccomp_bpf():
@@ -289,6 +339,7 @@ def build_bwrap_args(
     session_id: str = "",
     user_id: str = "",
     sandbox_level: str = "L3",
+    command: list[str] | None = None,
 ) -> list[str]:
     """Build hardened bwrap command arguments.
 
@@ -304,9 +355,12 @@ def build_bwrap_args(
         session_id: Sandbox session ID for audit logging
         user_id: User ID for audit logging
         sandbox_level: Sandbox level (L0/L1/L2/L3) for audit logging
+        command: Override the in-sandbox argv (session kernel supervisor). When
+            omitted the interpreter for ``language`` runs ``code_file``.
 
     Returns:
-        Tuple of (args_list, seccomp_fd). Caller must keep seccomp_fd open and pass via pass_fds.
+        Tuple of (args_list, seccomp_fd). The fd is single-use (bwrap reads the filter to
+        EOF) — hand it to one spawn via pass_fds, then release it with ``close_seccomp_fd``.
     """
     if config is None:
         config = SandboxSecurityConfig()
@@ -459,6 +513,10 @@ def build_bwrap_args(
         env_args += ["--setenv", "CDS_SESSION_ID", session_id]
         env_args += ["--setenv", "CDS_USER_ID", user_id]
         env_args += ["--setenv", "CDS_SANDBOX_LEVEL", sandbox_level]
+        # bwrap+seccomp 下 BLAS/OpenMP 线程池会因被拦系统调用陷入 futex 忙转（D-e2e-45：L3 数值负载 15 分钟不退出）；
+        # 客侧沙箱单核语义，直接限单线程。调用方 env_vars 在后面注入，仍可覆盖。
+        for _thr_env in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            env_args += ["--setenv", _thr_env, "1"]
         # Source audit helper for shell sessions
         if language == "shell":
             env_args += ["--setenv", "CDS_AUDIT_HELPER", "/workspace/tmp/.audit_helper.sh"]
@@ -474,7 +532,9 @@ def build_bwrap_args(
     args += env_args
 
     # Command to execute
-    if language == "python":
+    if command:
+        args += list(command)
+    elif language == "python":
         args += ["python3", code_file]
     elif language == "sql":
         args += ["python3", "-c", _build_sql_runner(code_file, encryption_config)]

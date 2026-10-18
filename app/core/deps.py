@@ -163,6 +163,21 @@ async def resolve_auth_subject(credential: str, db: AsyncSession, request: Reque
     return AuthSubject(kind="user", user=user)
 
 
+def machine_key_from_request(request: Request) -> str | None:
+    """Data-plane machine credential carried in the header the published
+    OpenAPI document declares (`CdsApiKey` / `X-CDS-API-Key`,
+    `delivery_service.build_openapi_doc`) — the credential a customer's
+    generated client actually sends.
+
+    Only a `cds_ak_` key is accepted here: JWTs keep traveling exclusively in
+    `Authorization: Bearer`, so no human token can be smuggled through a
+    non-standard header. Without this path a key that authenticates fine via
+    Bearer returned 401 when sent as the documented header.
+    """
+    value = (request.headers.get("x-cds-api-key") or "").strip()
+    return value if value.startswith("cds_ak_") else None
+
+
 async def get_auth_subject(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_scopes.subject_security),
@@ -175,12 +190,17 @@ async def get_auth_subject(
     request.state so a request authenticates at most once (the router-level
     scope gate and the route-level auth dependency share it).
     """
-    if credentials is None or not credentials.credentials:
+    credential = (
+        credentials.credentials
+        if credentials is not None and credentials.credentials
+        else machine_key_from_request(request)
+    )
+    if not credential:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     cached = getattr(request.state, "_ss12_subject", None)
     if cached is not None:
         return cached
-    subject = await resolve_auth_subject(credentials.credentials, db, request)
+    subject = await resolve_auth_subject(credential, db, request)
     request.state._ss12_subject = subject
     return subject
 

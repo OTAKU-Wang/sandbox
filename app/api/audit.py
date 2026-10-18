@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.user import User, UserRole
 from app.models.audit_log import AuditLog
+from app.models.contract import Contract
 from app.services.audit_service import audit_service
 from app.services.blockchain_adapter import (
     AnchorRecord,
@@ -36,6 +37,71 @@ _BACKEND_LABELS = {
     ChainBackend.ANT_CHAIN.value: "蚂蚁链 AntChain",
 }
 _CONSORTIUM_CHAIN_BACKENDS = {ChainBackend.FISCO_BCOS.value, ChainBackend.ANT_CHAIN.value}
+
+# 4-1 操作日志屏的「操作结果」与「操作类型页签」（SS-19 D-e2e-19）。
+#
+# 审计行里没有独立的「结果」列。可用的真值是项目自己的写入约定：失败/拒绝/阻断
+# 路径一律写独立动作名（sandbox.create_failed、sandbox.key_distribution_denied、
+# openapi.call_failed、delivery.dataset.blocked…），成功路径写本名。所以结果只能从
+# 动作名派生，而且这条规则归后端持有并由 tests/test_audit_query_filters.py 机检，
+# 前端不得各自猜（否则同一行在不同页面会得到不同结果）。
+# 集合里的每个标记都必须能在真实动作词表里命中（tests/test_audit_query_filters.py 机检），
+# 不得预留一个代码里从来没出现过的“以防万一”标记。
+AUDIT_FAILURE_MARKERS = ("failed", "denied", "rejected", "blocked")
+
+# 原型 4-1 的四个类型页签 → 真实动作集合（单一真值源：这里）。
+# 集合里的名字必须是 app/ 里真正写出的 action，不得为了凑页签造名字；
+# 某类暂无记录时前端如实显示 0 条，而不是拼数据。
+AUDIT_EVENT_TYPES: dict[str, tuple[str, ...]] = {
+    "dev_sandbox": ("notebook.created", "notebook.dev_session_created", "sandbox.create"),
+    "production": ("compute.run.requested", "workload.published"),
+    "export": (
+        "delivery.dataset.bundled",
+        "delivery.dataset.downloaded",
+        "delivery.dataset.blocked",
+        "delivery.dataset.review_required",
+    ),
+    "call": ("openapi.call", "openapi.call_failed"),
+}
+
+
+def audit_outcome(action: str | None) -> str:
+    """Derive the per-row outcome from the action name (see AUDIT_FAILURE_MARKERS)."""
+    lowered = (action or "").lower()
+    return "failure" if any(marker in lowered for marker in AUDIT_FAILURE_MARKERS) else "success"
+
+
+def audit_event_type(action: str | None) -> str | None:
+    """Reverse-map an action to its 4-1 tab, or None when the row belongs to no tab."""
+    for event_type, actions in AUDIT_EVENT_TYPES.items():
+        if action in actions:
+            return event_type
+    return None
+
+
+def audit_display_no(log: AuditLog) -> str | None:
+    """原型 4-2 的「日志编号 LOG-YYYYMMDD-HHMMSS-XXXX」。
+
+    库里没有业务编号列，也没人写一个发号器，所以这不是存储字段而是展示编码：
+    由 created_at (UTC) + 记录 ID 前 4 位确定性拼出，同一行永远同一个值。
+    页面上必须写清这个推导规则，不得让用户当成后端签发的业务单号。
+    """
+    if not log.created_at:
+        return None
+    stamp = log.created_at.strftime("%Y%m%d-%H%M%S")
+    return f"LOG-{stamp}-{str(log.id)[:4]}"
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Treat naive bounds as UTC — audit_rows.created_at is timestamptz."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _failure_action_condition():
+    return or_(
+        *[AuditLog.action.ilike(f"%{marker}%") for marker in AUDIT_FAILURE_MARKERS]
+    )
+
 
 
 def _backend_disclosure(backend: ChainBackend) -> dict:
@@ -103,12 +169,55 @@ async def list_audit_records(
         "actions 'cube_egress' and 'cube_egress.*' (network-layer forced-point audit; "
         "W13 app-layer audit rows carry no source prefix).",
     ),
+    date_from: datetime | None = Query(None, description="Inclusive created_at lower bound (4-1 操作时间)"),
+    date_to: datetime | None = Query(None, description="Inclusive created_at upper bound (4-1 操作时间)"),
+    keyword: str | None = Query(
+        None,
+        max_length=128,
+        description="Matches action, resource_id, or the operator's username/email (4-1 关键字)",
+    ),
+    outcome: str | None = Query(None, pattern="^(success|failure)$", description="Derived result (4-1 操作结果)"),
+    event_type: str | None = Query(
+        None,
+        pattern="^(" + "|".join(AUDIT_EVENT_TYPES) + ")$",
+        description="4-1 类型页签，取值见 AUDIT_EVENT_TYPES",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)),
 ):
     """List audit records with filtering."""
-    query = select(AuditLog)
+    query = select(
+        AuditLog, User.username, User.organization, User.role,
+    ).outerjoin(User, User.id == AuditLog.user_id)
     count_query = select(func.count()).select_from(AuditLog)
+
+    if event_type:
+        actions = AUDIT_EVENT_TYPES[event_type]
+        query = query.where(AuditLog.action.in_(actions))
+        count_query = count_query.where(AuditLog.action.in_(actions))
+    if outcome:
+        failure_cond = _failure_action_condition()
+        cond = failure_cond if outcome == "failure" else ~failure_cond
+        query = query.where(cond)
+        count_query = count_query.where(cond)
+    if date_from:
+        query = query.where(AuditLog.created_at >= _as_utc(date_from))
+        count_query = count_query.where(AuditLog.created_at >= _as_utc(date_from))
+    if date_to:
+        query = query.where(AuditLog.created_at <= _as_utc(date_to))
+        count_query = count_query.where(AuditLog.created_at <= _as_utc(date_to))
+    if keyword:
+        pattern = f"%{keyword.strip()}%"
+        # 关键字按图要能搜「操作对象 / 操作人」：操作人在 User 表里，所以左连一次；
+        # 没有用户归属的系统行（user_id 为空）仍要能被 action/resource_id 命中。
+        key_cond = or_(
+            AuditLog.action.ilike(pattern),
+            AuditLog.resource_id.ilike(pattern),
+            User.username.ilike(pattern),
+            User.email.ilike(pattern),
+        )
+        query = query.where(key_cond)
+        count_query = count_query.outerjoin(User, User.id == AuditLog.user_id).where(key_cond)
 
     if action:
         query = query.where(AuditLog.action == action)
@@ -130,10 +239,15 @@ async def list_audit_records(
     query = query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     items = []
-    for log in result.scalars().all():
+    for log, username, organization, role in result.all():
         items.append({
             "id": str(log.id),
             "user_id": str(log.user_id) if log.user_id else None,
+            # 4-1 的「操作人」列：库里只存 user_id，展示名/单位/角色在这里 join 出来。
+            "username": username,
+            "organization": organization,
+            "role": role,
+            "display_no": audit_display_no(log),
             "session_id": str(log.session_id) if log.session_id else None,
             "action": log.action,
             "resource_type": log.resource_type,
@@ -142,6 +256,9 @@ async def list_audit_records(
             "ip_address": log.ip_address,
             "blockchain_tx_hash": log.blockchain_tx_hash,
             "created_at": log.created_at.isoformat() if log.created_at else None,
+            # 4-1 列与页签的派生值（后端单源，见 AUDIT_FAILURE_MARKERS 上方说明）
+            "outcome": audit_outcome(log.action),
+            "event_type": audit_event_type(log.action),
         })
 
     return {"items": items, "total": total, "page": skip // limit + 1, "page_size": limit}
@@ -159,10 +276,30 @@ async def get_audit_record(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid record ID")
 
-    result = await db.execute(select(AuditLog).where(AuditLog.id == rid))
-    log = result.scalar_one_or_none()
-    if not log:
+    result = await db.execute(
+        select(AuditLog, User.username, User.organization, User.role)
+        .outerjoin(User, User.id == AuditLog.user_id)
+        .where(AuditLog.id == rid)
+    )
+    row = result.first()
+    if not row:
         raise HTTPException(status_code=404, detail="Audit record not found")
+    log, username, organization, role = row
+
+    # 4-2「关联合约」：库里只存 resource_id / detail.contract_id，名称在这里真查一次，
+    # 查不到就给前端 None（页面渲染「未记录」），不拼一个看上去像真的名字。
+    related_contract = None
+    contract_id = log.resource_id if log.resource_type == "contract" else (log.detail or {}).get("contract_id")
+    if contract_id:
+        try:
+            cres = await db.execute(
+                select(Contract.contract_no, Contract.title).where(Contract.id == uuid.UUID(str(contract_id)))
+            )
+            contract_row = cres.first()
+            if contract_row:
+                related_contract = {"contract_no": contract_row.contract_no, "title": contract_row.title}
+        except (ValueError, TypeError):
+            related_contract = None
 
     return {
         "id": str(log.id),
@@ -175,6 +312,13 @@ async def get_audit_record(
         "ip_address": log.ip_address,
         "blockchain_tx_hash": log.blockchain_tx_hash,
         "created_at": log.created_at.isoformat() if log.created_at else None,
+        "username": username,
+        "organization": organization,
+        "role": role,
+        "display_no": audit_display_no(log),
+        "outcome": audit_outcome(log.action),
+        "event_type": audit_event_type(log.action),
+        "related_contract": related_contract,
     }
 
 

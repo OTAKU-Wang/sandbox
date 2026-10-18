@@ -6,6 +6,7 @@ endpoint is honest about cluster availability — without a reachable cluster
 the payloads degrade to DB-backed state with ``cluster_available: false``
 (never a fabricated live list).
 """
+import json
 import logging
 import uuid
 
@@ -187,6 +188,18 @@ async def list_ops_pvcs(
     return {"cluster_available": cluster_available, "items": items, "count": len(items)}
 
 
+def _audit_detail_text(detail: object) -> str:
+    """audit_logs.detail 是 JSON 列：生产里 audit_service.log 写的永远是 dict，
+    而旧实现对它直接 `[:200]` 切串 ⇒ dict[slice] 抛 KeyError → 整个回退路径 500
+    （2026-10-18 开发道真机：已终止会话的 3/3 行 detail 均为 JSON 对象）。
+    统一转成可读文本，任何类型都不再炸。"""
+    if detail is None:
+        return ""
+    if isinstance(detail, str):
+        return detail
+    return json.dumps(detail, ensure_ascii=False, default=str)
+
+
 @router.get("/logs/{session_id}")
 async def get_ops_logs(
     session_id: uuid.UUID,
@@ -250,7 +263,7 @@ async def get_ops_logs(
         "cluster_available": False,
         "logs": [
             {
-                "line": f"[{row.action}] {(row.detail or '')[:200]}",
+                "line": f"[{row.action}] {_audit_detail_text(row.detail)[:200]}",
                 "stream": "audit",
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }

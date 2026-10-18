@@ -34,6 +34,10 @@ class KAnonymityResult:
     total_rows: int
     unique_groups: int
     violating_groups: list[KAnonymityViolation] = field(default_factory=list)
+    # 没有行可分组时 passed=True 只是数学上的真空为真，不能当放行凭据用（SS-18 §8 P0'）：
+    # evaluated=False 就是告诉判定方「这一项没有真的评估过」。
+    evaluated: bool = True
+    reason: str = ""
 
     @property
     def violation_count(self) -> int:
@@ -80,6 +84,8 @@ class KAnonymityChecker:
                 min_required=self.min_k,
                 total_rows=0,
                 unique_groups=0,
+                evaluated=False,
+                reason="no rows to group",
             )
 
         if not quasi_identifiers:
@@ -156,6 +162,8 @@ class KAnonymityChecker:
                 min_required=self.min_k,
                 total_rows=0,
                 unique_groups=0,
+                evaluated=False,
+                reason="no rows parsed from input",
             )
 
         return self.check(data, quasi_identifiers)

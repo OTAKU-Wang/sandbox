@@ -110,6 +110,23 @@ async def list_production_versions(db: AsyncSession, contract_id: uuid.UUID | No
     return list(res.scalars().all())
 
 
+def pick_test_sandbox_level(contract) -> str:
+    """按合约选测试/生产会话的隔离档：取合约 allowed_sandbox_levels 内可用的最高一档；
+    无合约约束时维持 l2c 旧行为。
+
+    CR BLOCKER-1（SS-13）：阶梯**不下探到 L3 以下**。旧阶梯把 L2/L1/L0 也列为候选，
+    等于允许一纸「只放行 L0」的合约把生产负载（真实供数 + OpenAPI 对外调用）降到
+    进程隔离——隔离下限是平台不变量，不由合约数据决定。现在合约只放行 L0/L1/L2 时
+    仍回 l2c：选档不降隔离，运行面缺失就在建会话处诚实报 RUNTIME_UNAVAILABLE。
+    L2 不进候选：它的适配器被 SANDBOX_LEGACY_ENABLED 门控，生产禁止开启（config 启动拒绝）。
+    """
+    allowed = {lv.strip() for lv in ((getattr(contract, "allowed_sandbox_levels", "") or "")).split(",") if lv.strip()}
+    for level in ("l2c", "L3"):
+        if not allowed or level in allowed:
+            return level
+    return "l2c"
+
+
 async def run_test(db: AsyncSession, workload: Workload, actor, *, keep_session: bool = False, timeout_seconds: int = 900) -> WorkloadTestRun:
     """在测试沙箱里跑一遍 entrypoint，把结果落成不可绕过的测试记录。"""
     from app.api.sandbox_sessions import create_sandbox_session, execute_in_sandbox
@@ -135,9 +152,11 @@ async def run_test(db: AsyncSession, workload: Workload, actor, *, keep_session:
             raise ValueError("工作负载未绑定数据产品，测试沙箱无法挂载数据")
 
         contract = await db.get(Contract, workload.contract_id) if workload.contract_id else None
+        # 测试会话的隔离档位必须落在合约 allowed_sandbox_levels 内（与 dev-session 同一判据）；
+        # 写死 l2c 会在不支持 Cube 数据面的合约上直接 400，按强度优先取合约允许的最高档。
         body = SandboxSessionCreate(
             data_product_id=uuid.UUID(str(workload.data_product_ids[0])),
-            sandbox_level="l2c",
+            sandbox_level=pick_test_sandbox_level(contract),
             sandbox_mode=resolve_sandbox_mode(contract, "product_dev"),
             contract_id=str(workload.contract_id) if workload.contract_id else None,
             timeout_seconds=max(600, int(timeout_seconds)),

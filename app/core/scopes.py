@@ -252,7 +252,12 @@ async def _optional_subject(
     credentials: HTTPAuthorizationCredentials | None = Depends(subject_security),
     db: AsyncSession = Depends(get_db),
 ):
-    """Resolve the auth subject when Bearer credentials are present.
+    """Resolve the auth subject when a credential is present.
+
+    A credential travels in either place: `Authorization: Bearer …` or the
+    documented data-plane key header `X-CDS-API-Key` — both must reach the
+    same resolution, or a machine key could slip past the gates below just by
+    changing the header it travels in (human-only surfaces returned 200).
 
     Returns None for anonymous requests — these gates only police MACHINE
     subjects; anonymous access is the responsibility of the route's own
@@ -261,7 +266,13 @@ async def _optional_subject(
     never authenticates (and never double-counts rate limits / audits) more
     than once even when both the group gate and the route auth run.
     """
-    if credentials is None or not credentials.credentials:
+    from app.core.deps import machine_key_from_request  # lazy: deps imports this module
+    credential = (
+        credentials.credentials
+        if credentials is not None and credentials.credentials
+        else machine_key_from_request(request)
+    )
+    if not credential:
         return None
     cached = getattr(request.state, "_ss12_subject", None)
     if cached is not None:
@@ -269,7 +280,7 @@ async def _optional_subject(
     from fastapi import HTTPException
     from app.core.deps import resolve_auth_subject  # lazy: deps imports this module
     try:
-        subject = await resolve_auth_subject(credentials.credentials, db, request)
+        subject = await resolve_auth_subject(credential, db, request)
     except HTTPException:
         # Non-subject machine credentials (KMS service token, connector key,
         # cube audit token, metrics token) sit outside the unified-subject

@@ -44,6 +44,8 @@ class GatewayResult:
     watermark: str | None = None
     signature: str | None = None
     error: str | None = None
+    # 提交 0 行时诚实失败并置位（SS-18 §8 P0'）：调用方不能把「没有数据」读成放行。
+    empty_output: bool = False
 
 
 class OutputGateway:
@@ -65,6 +67,17 @@ class OutputGateway:
         3. Convert to requested format
         4. Return processed output
         """
+        # Step 0: 空成果不得作为成功放行（SS-18 §8 P0' 真空判据）。空成果此前会一路走完检查并
+        # 返回 success=True/row_count=0，把「什么都没产出」伪装成「检查通过并转换成功」。
+        if not data:
+            return GatewayResult(
+                success=False,
+                output_format=output_format,
+                row_count=0,
+                empty_output=True,
+                error="Empty output: 0 rows submitted for release (nothing to inspect, nothing to release)",
+            )
+
         # Step 1: Validate format
         if output_format not in VALID_FORMATS:
             return GatewayResult(

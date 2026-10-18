@@ -1301,6 +1301,35 @@ async def execute_in_sandbox(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    # SS-15：Notebook 单元格驱动需要“会话常驻 kernel”。bwrap 每次 exec 都是一个新 namespace，
+    # 单元格自己拉起的子进程活不到下一个单元格，所以 kernel 由运行面按会话拉起。
+    # 这里只“准备” kernel，不执行任何用户代码：用户代码仍然只走下面这一条策略通路。
+    if body is not None and body.trusted_runner and exec_language == "python":
+        kernel_info = await runtime.ensure_session_kernel(
+            session.container_id,
+            env_vars=dict(env_vars) if env_vars else None,
+            timeout=session.timeout_seconds,
+        )
+        await audit_service.log(
+            db,
+            action="sandbox.session_kernel",
+            resource_type="sandbox_session",
+            user_id=current_user.id,
+            session_id=session.id,
+            detail={
+                "level": session.sandbox_level,
+                "supported": kernel_info.get("supported"),
+                "ok": kernel_info.get("ok"),
+                "state": kernel_info.get("state"),
+                "error": str(kernel_info.get("error") or "")[:400],
+                "seccomp": kernel_info.get("seccomp"),
+                "kernel_id": str((kernel_info.get("kernel") or {}).get("kernel_id") or ""),
+            },
+        )
+        if not kernel_info.get("ok"):
+            logger.warning("session kernel not ready for %s: %s",
+                           session_id, kernel_info.get("state") or kernel_info.get("error"))
+
     exec_result = await _execute_runtime_with_context(
         runtime,
         session.container_id,
@@ -1404,11 +1433,15 @@ async def execute_in_sandbox(
                 exec_result["output"] = inspection.redacted_output or ""
                 exec_result["output_blocked"] = False
                 record_output_inspection("redacted" if inspection.redacted_output != output else "passed")
+            report["no_output"] = False
             exec_result["security_report"] = report
         else:
+            # 空输出不等于"审查通过"：passed 只说明没有可审查的内容，
+            # 顶层 no_output 让调用方无法把它读成一次干净的审查。
             exec_result["security_report"] = {
                 "passed": True,
                 "blocked": False,
+                "no_output": True,
                 "stage_results": {"no_output": True},
                 "findings": [],
                 "findings_count": 0,
@@ -2434,7 +2467,8 @@ async def exec_in_sandbox(
 
     # T5 DLP review on the captured output (same gateway semantics as /execute).
     sandbox_mode = getattr(session, "sandbox_mode", None) or "structured_query"
-    security_report: dict = {"passed": True, "blocked": False, "findings": [], "findings_count": 0}
+    # /execute 空输出至少披露 stage_results.no_output；这里此前是零披露的预置 True，同一口径补齐。
+    security_report: dict = {"passed": True, "blocked": False, "no_output": True, "findings": [], "findings_count": 0}
     output_blocked = False
     if output:
         try:
@@ -2451,6 +2485,7 @@ async def exec_in_sandbox(
                 sandbox_mode=sandbox_mode,
             )
             report = inspection_to_report(inspection)
+            report["no_output"] = False
             from app.core.metrics import record_output_inspection
 
             if should_block(inspection):
@@ -2538,6 +2573,81 @@ async def get_session_logs(
         ],
         "count": len(rows),
         "latest_created_at": rows[0].created_at.isoformat() if rows and rows[0].created_at else None,
+    }
+
+
+@router.get("/{session_id}/metering")
+async def get_session_metering(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """D-e2e-48：状态条 CPU/内存计量——只读 cgroup v2 真实计数。
+
+    读不到（l2c 在 VM 内、非运行态、cgroup 已被回收）就返回 available:false，
+    前端继续显示「未计量」——绝不编一个百分比充数（禁伪造铁律）。
+    """
+    import asyncio
+    from pathlib import Path
+
+    session = await _load_operable_session(db, session_id, current_user)
+    cg = None
+    if session.status == "running":
+        for root in ("/sys/fs/cgroup/cds-l0", "/sys/fs/cgroup/cds-l3"):
+            for name in (session_id.hex, str(session_id)):
+                cand = Path(root) / name
+                if (cand / "memory.current").exists():
+                    cg = cand
+                    break
+            if cg:
+                break
+    if cg is None:
+        return {
+            "available": False,
+            "reason": "运行时无可读 cgroup（l2c 在 VM 内／会话非运行／cgroup 已回收）",
+            "cpu_percent": None,
+            "memory_used_mb": None,
+            "memory_limit_mb": None,
+            "pids": None,
+        }
+
+    def _int(path: Path) -> int | None:
+        try:
+            raw = path.read_text().strip()
+            return int(raw) if raw.isdigit() else None
+        except OSError:
+            return None
+
+    def _cpu_usec() -> int | None:
+        try:
+            for line in (cg / "cpu.stat").read_text().splitlines():
+                k, _, v = line.partition(" ")
+                if k == "usage_usec":
+                    return int(v)
+        except (OSError, ValueError):
+            return None
+        return None
+
+    mem_used = _int(cg / "memory.current")
+    mem_max = _int(cg / "memory.max")  # "max"（无上限）→ None
+    pids = _int(cg / "pids.current")
+    sample_ms = 250
+    u0, u1 = _cpu_usec(), None
+    cpu_pct = None
+    if u0 is not None:
+        await asyncio.sleep(sample_ms / 1000)
+        u1 = _cpu_usec()
+        if u1 is not None:
+            # 单核百分比：Δusage_usec / Δ墙钟；空闲沙箱自然是 0.0%，不是未计量。
+            cpu_pct = round(max(0.0, (u1 - u0) / (sample_ms * 1000) * 100), 1)
+    return {
+        "available": True,
+        "source": str(cg),
+        "cpu_percent": cpu_pct,
+        "memory_used_mb": round(mem_used / 1048576, 1) if mem_used is not None else None,
+        "memory_limit_mb": round(mem_max / 1048576, 1) if mem_max is not None else None,
+        "pids": pids,
+        "sampled_ms": sample_ms,
     }
 
 

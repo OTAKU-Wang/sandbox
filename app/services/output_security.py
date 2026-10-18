@@ -61,6 +61,8 @@ def inspection_to_report(result: InspectionResult) -> dict[str, Any]:
         "dp_applied": result.dp_applied,
         "watermark": result.watermark,
         "signature": result.signature,
+        "not_evaluated": list(getattr(result, "not_evaluated", []) or []),
+        "degraded": list(getattr(result, "degraded", []) or []),
     }
 
 

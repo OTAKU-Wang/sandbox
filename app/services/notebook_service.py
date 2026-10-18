@@ -22,18 +22,33 @@ Executioner = Callable[[str], Awaitable[dict[str, Any]]]
 KERNEL_MARKER = "CDS_CELL_B64::"
 ENVELOPE_MARKER = "CDS_ENV_B64::"
 
+# 降级口径（前端 display.ts 按 backend + stateful + degraded_reason 渲染，不得新增 backend 取值）
+KERNEL_UNAVAILABLE_REASON = "沙箱内 kernel 守护进程不可用，本单元格按无状态方式独立执行（不保留变量）"
+KERNEL_NOT_RESIDENT_REASON = "kernel 由单元格自行拉起，平台未能确认其跨单元格常驻（不保证保留变量）"
+
 _CELL_DRIVER = '''
-import base64, json, os, socket, sys, time
+import base64, contextlib, io, json, os, socket, sys, time
 
 _PAYLOAD = json.loads(base64.b64decode("%(payload)s").decode("utf-8"))
-_RUNTIME_DIR = os.environ.get("CDS_RUNTIME_DIR") or os.path.join("/tmp", "cds-kernel-" + os.environ.get("CDS_SESSION_ID", "local"))
+_SESSION = os.environ.get("CDS_SESSION_ID", "")
+_RUNTIME_DIR = os.environ.get("CDS_RUNTIME_DIR") or os.path.join("/tmp", "cds-kernel-" + (_SESSION or "local"))
 _SOCK = os.path.join(_RUNTIME_DIR, "kernel.sock")
 _DAEMON = os.path.join(_RUNTIME_DIR, "kernel_daemon.py")
 _LOG = os.path.join(_RUNTIME_DIR, "kernel.log")
+# managed=1 表示平台（控制面）为该会话起了常驻 kernel：驱动只连不自建，
+# 避免第二个守护进程抢同一个 socket 路径，也避免把一次性 kernel 说成有状态。
+_MANAGED = os.environ.get("CDS_KERNEL_MANAGED") == "1"
+try:
+    _CELL_TIMEOUT = float(os.environ.get("CDS_CELL_TIMEOUT") or "0")
+except ValueError:
+    _CELL_TIMEOUT = 0.0
+_READ_TIMEOUT = (_CELL_TIMEOUT - 5.0) if _CELL_TIMEOUT > 30.0 else 300.0
 
 
 def _emit(kind, obj):
     sys.stdout.write(kind + base64.b64encode(json.dumps(obj, ensure_ascii=False).encode("utf-8")).decode("ascii") + "\\n")
+    sys.stdout.flush()
+
 
 def _daemon_src():
     return base64.b64decode("%(daemon)s").decode("utf-8")
@@ -42,78 +57,143 @@ def _daemon_src():
 def _connect(timeout):
     deadline = time.time() + timeout
     last = None
-    while time.time() < deadline:
+    while True:
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(_SOCK)
             return s
         except OSError as exc:
             last = exc
-            time.sleep(0.2)
-    raise RuntimeError("kernel connect failed: " + str(last))
+            if time.time() >= deadline:
+                raise RuntimeError("kernel connect failed: " + str(last))
+            time.sleep(0.1)
 
 
-def _alive(timeout=1.0):
+def _rpc(req, connect_timeout, read_timeout):
+    s = _connect(connect_timeout)
     try:
-        s = _connect(timeout)
-        s.close()
-        return True
-    except Exception:
-        return False
+        s.settimeout(read_timeout)
+        s.sendall((json.dumps(req, ensure_ascii=False) + "\\n").encode("utf-8"))
+        buf = b""
+        while b"\\n" not in buf:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+    if not buf.strip():
+        raise RuntimeError("kernel closed the connection without answering")
+    return json.loads(buf.decode("utf-8").strip())
 
 
-if not os.path.isdir(_RUNTIME_DIR):
-    os.makedirs(_RUNTIME_DIR, exist_ok=True)
-if not _alive():
+def _cell_env():
+    return dict((k, v) for k, v in os.environ.items() if k.startswith("CDS_"))
+
+
+def _diag():
+    # 只陈述观测到的事实（目录/socket/日志尾），不猜原因：这条字符串就是用户的 kernel_error。
+    bits = ["runtime_dir=" + _RUNTIME_DIR + (" [dir]" if os.path.isdir(_RUNTIME_DIR) else " [missing]"),
+            "socket=" + _SOCK + (" [present]" if os.path.exists(_SOCK) else " [absent]"),
+            "managed=" + str(_MANAGED), "uid=" + str(os.getuid())]
+    try:
+        if os.path.exists(_LOG):
+            tail = open(_LOG, "r", encoding="utf-8", errors="replace").read()[-1200:]
+            if tail.strip():
+                bits.append("kernel.log tail: " + tail.strip()[-800:])
+    except OSError:
+        pass
+    return " | ".join(bits)
+
+
+def _spawn_daemon():
     with open(_DAEMON, "w", encoding="utf-8") as fh:
         fh.write(_daemon_src())
     import subprocess
-    _log = open(_LOG, "ab")
-    subprocess.Popen([sys.executable, _DAEMON, _SOCK], stdin=subprocess.DEVNULL, stdout=_log, stderr=_log, start_new_session=True, close_fds=True)
-    _log.close()
-    if not _alive(8.0):
-        _emit("CDS_ENV_B64::", {"backend": "cds_stateless", "kernel_error": (open(_LOG, "r", encoding="utf-8", errors="replace").read()[-2000:] if os.path.exists(_LOG) else "daemon did not start")})
-        _r = {"backend": "cds_stateless", "stateful": False, "mode": "stateless-in-driver"}
-        _g = {"__name__": "__cds_cell__"}
-        try:
-            exec(compile(base64.b64decode(_PAYLOAD["code"]).decode("utf-8"), "<cell>", "exec"), _g)
-            _r["ok"] = True
-            _r["exit_code"] = 0
-            _r["stdout"] = ""
-            _r["stderr"] = ""
-            _r["repr"] = ""
-        except BaseException:
-            import traceback
-            _r["ok"] = False
-            _r["exit_code"] = 1
-            _r["stdout"] = ""
-            _r["stderr"] = traceback.format_exc()
-            _r["repr"] = ""
-        _emit("CDS_CELL_B64::", _r)
-        raise SystemExit(0)
+    with open(_LOG, "ab") as log:
+        subprocess.Popen([sys.executable, _DAEMON, _SOCK], stdout=log, stderr=log,
+                         start_new_session=True, close_fds=True)
+    return _rpc({"op": "info", "session_id": _SESSION}, 8.0, 10.0)
 
-_req = {"id": _PAYLOAD["id"], "code": base64.b64decode(_PAYLOAD["code"]).decode("utf-8")}
-_s = _connect(20)
-_s.sendall((json.dumps(_req) + "\\n").encode("utf-8"))
-_buf = b""
-while b"\\n" not in _buf:
-    _chunk = _s.recv(65536)
-    if not _chunk:
-        break
-    _buf += _chunk
-_s.close()
-_resp = json.loads(_buf.decode("utf-8").strip())
-_resp["backend"] = "cds_kernel"
-_resp["stateful"] = True
-_emit("CDS_CELL_B64::", _resp)
+
+def _cell_code():
+    return base64.b64decode(_PAYLOAD["code"]).decode("utf-8")
+
+
+def _degrade(reason):
+    # 无 kernel：在本进程内独立执行一次（驱动自身的 stdout 是信封通道，必须截流）
+    res = {"backend": "cds_stateless", "stateful": False, "ok": True, "exit_code": 0,
+           "stdout": "", "stderr": "", "repr": "", "kernel_error": str(reason)[:2000]}
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            exec(compile(_cell_code(), "<cell>", "exec"), {"__name__": "__cds_cell__"})
+    except BaseException:
+        import traceback
+        res["ok"] = False
+        res["exit_code"] = 1
+        res["stderr"] = traceback.format_exc()
+    res["stdout"] = buf.getvalue()
+    _emit("CDS_CELL_B64::", res)
+
+
+_kernel = None
+_failure = None
+if _MANAGED:
+    # 常驻 kernel 由控制面负责拉起；这里只等它，等不到就如实降级，绝不自建。
+    try:
+        _kernel = _rpc({"op": "info", "session_id": _SESSION}, 20.0, 20.0)
+    except Exception as exc:
+        _failure = "platform session kernel not reachable: " + str(exc)
+else:
+    try:
+        _kernel = _rpc({"op": "info", "session_id": _SESSION}, 0.3, 20.0)
+    except Exception:
+        _kernel = None
+    if _kernel is None:
+        try:
+            if not os.path.isdir(_RUNTIME_DIR):
+                os.makedirs(_RUNTIME_DIR, exist_ok=True)
+            _kernel = _spawn_daemon()
+        except Exception as exc:
+            _kernel = None
+            _failure = "self-spawned kernel unavailable: " + str(exc)
+
+if isinstance(_kernel, dict) and _kernel.get("ok"):
+    # stateful 只能被证明，不能被声明：常驻 kernel（控制面拉起）或已经为本会话
+    # 跑过至少一个单元格的 kernel，才算跨单元格保留状态。
+    _prior = int(_kernel.get("prior_cells") or 0)
+    _stateful = bool(_kernel.get("resident")) or _prior > 0
+    try:
+        _resp = _rpc({"op": "exec", "id": _PAYLOAD["id"], "session_id": _SESSION,
+                      "code": _cell_code(), "env": _cell_env()}, 20.0, _READ_TIMEOUT)
+    except Exception as exc:
+        _resp = {"ok": False, "exit_code": -1, "stdout": "", "repr": "", "stderr": "kernel exec failed: " + str(exc)}
+        _stateful = False
+    _resp["backend"] = "cds_kernel"
+    _resp["stateful"] = _stateful
+    _resp["kernel_resident"] = bool(_kernel.get("resident"))
+    _resp["kernel_prior_cells"] = _prior
+    _emit("CDS_CELL_B64::", _resp)
+else:
+    _degrade(((_failure or "kernel did not answer") + " :: " + _diag()).strip())
 '''
 
 _KERNEL_DAEMON = '''
-import ast, io, json, os, socket, sys, threading, traceback, contextlib
+import ast, contextlib, io, json, os, socket, sys, time, traceback
 
-_sock_path = sys.argv[1]
+_ARGV = sys.argv[1:]
+_sock_path = _ARGV[0]
+# --resident 只由控制面（会话常驻 kernel）传入：自行拉起的一次性 kernel 没有这个
+# 参数，因此永远不会被上报成有状态后端（禁伪造铁律）。
+_resident = "--resident" in _ARGV
+_hint = _ARGV[_ARGV.index("--session") + 1] if "--session" in _ARGV else ""
 _ns = {"__name__": "__cds_kernel__"}
-_lock = threading.Lock()
+_seen: dict = {}
+_kernel_id = str(os.getpid()) + "-" + str(int(time.time()))
 
 try:
     os.unlink(_sock_path)
@@ -121,9 +201,9 @@ except OSError:
     pass
 _srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 _srv.bind(_sock_path)
-_srv.listen(8)
+_srv.listen(16)
 sys.stdout = sys.stderr
-print("cds-kernel ready", flush=True)
+print("cds-kernel ready resident=" + str(_resident) + " kernel_id=" + _kernel_id, flush=True)
 
 
 def _run(code):
@@ -143,32 +223,57 @@ def _run(code):
     return stdout.getvalue(), ("" if result is None else repr(result))
 
 
+def _handle(req):
+    op = req.get("op") or "exec"
+    sid = str(req.get("session_id") or _hint)
+    if op == "info":
+        return {"ok": True, "op": "info", "resident": _resident, "kernel_id": _kernel_id,
+                "pid": os.getpid(), "session_id": sid, "prior_cells": _seen.get(sid, 0)}
+    for key, val in (req.get("env") or {}).items():
+        # 会话密钥/DEK 只走环境变量，与逐单元格 bwrap --setenv 等价（不落盘）
+        if isinstance(key, str) and key.startswith("CDS_") and isinstance(val, str):
+            os.environ[key] = val
+    prior = _seen.get(sid, 0)
+    try:
+        out, repr_out = _run(req["code"])
+        resp = {"ok": True, "exit_code": 0, "stdout": out, "stderr": "", "repr": repr_out,
+                "cell_id": req.get("id")}
+    except BaseException:
+        resp = {"ok": False, "exit_code": 1, "stdout": "", "stderr": traceback.format_exc(),
+                "repr": "", "cell_id": req.get("id")}
+    _seen[sid] = prior + 1
+    resp["prior_cells"] = prior
+    resp["kernel_id"] = _kernel_id
+    return resp
+
+
+# 单线程串行处理：一个 kernel 就是一个命名空间，单元格之间本来就要串行；
+# 不建线程也避开了 seccomp 白面下的 clone/信号开销。卡死由控制面回收。
 while True:
-    conn, _ = _srv.accept()
-    def _serve(conn=conn):
-        try:
-            data = b""
-            while b"\\n" not in data:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    return
-                data += chunk
-            req = json.loads(data.decode("utf-8").strip())
-            with _lock:
-                try:
-                    out, repr_out = _run(req["code"])
-                    resp = {"ok": True, "exit_code": 0, "stdout": out, "stderr": "", "repr": repr_out, "cell_id": req.get("id")}
-                except BaseException:
-                    resp = {"ok": False, "exit_code": 1, "stdout": "", "stderr": traceback.format_exc(), "repr": "", "cell_id": req.get("id")}
-            conn.sendall((json.dumps(resp, ensure_ascii=False) + "\\n").encode("utf-8"))
-        except Exception:
+    try:
+        _conn, _addr = _srv.accept()
+    except OSError as _exc:
+        # 不静默退出：seccomp 缺 accept4 一类环境问题会在这里暴露到 kernel.log，
+        # 控制面才能把真实原因带进 degraded_reason（禁伪造 + 可诊断）。
+        print("cds-kernel accept failed: " + repr(_exc), flush=True)
+        break
+    try:
+        with _conn:
+            _data = b""
+            while b"\\n" not in _data:
+                _chunk = _conn.recv(65536)
+                if not _chunk:
+                    break
+                _data += _chunk
+            if not _data.strip():
+                continue
             try:
-                conn.sendall((json.dumps({"ok": False, "exit_code": -1, "stderr": traceback.format_exc(), "stdout": ""}) + "\\n").encode("utf-8"))
+                _resp = _handle(json.loads(_data.decode("utf-8").strip()))
             except Exception:
-                pass
-        finally:
-            conn.close()
-    threading.Thread(target=_serve, daemon=True).start()
+                _resp = {"ok": False, "exit_code": -1, "stdout": "", "stderr": traceback.format_exc()}
+            _conn.sendall((json.dumps(_resp, ensure_ascii=False) + "\\n").encode("utf-8"))
+    except Exception:
+        pass
 '''
 
 
@@ -207,6 +312,11 @@ def normalize_notebook(doc: Any) -> dict[str, Any]:
 
 def notebook_hash(doc: dict[str, Any]) -> str:
     return sm3_hash(json.dumps(doc, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+
+
+# 受信任的常驻 kernel 源码：由控制面（BwrapAdapter.ensure_kernel）写入会话运行目录。
+# 驱动的字节级信任（split_trusted_driver）与它就是同一份源，两处不会漂移。
+KERNEL_DAEMON_SOURCE = _KERNEL_DAEMON
 
 
 def cell_source(cell: dict[str, Any]) -> str:
@@ -319,10 +429,13 @@ async def run_cell(executor: Executioner, code: str, *, cell_id: str | None = No
         envelope = _extract_envelope(output, ENVELOPE_MARKER)
         result = _extract_envelope(output, KERNEL_MARKER)
         if result is not None:
-            if envelope:
+            if envelope and not result.get("kernel_error"):
                 result["kernel_error"] = str(envelope.get("kernel_error") or "")[:2000]
             if result.get("backend") == "cds_stateless":
-                result["degraded_reason"] = "沙箱内 kernel 守护进程不可用，本单元格按无状态方式独立执行（不保留变量）"
+                result["degraded_reason"] = KERNEL_UNAVAILABLE_REASON
+            elif result.get("backend") == "cds_kernel" and result.get("stateful") is False:
+                # kernel 应答了，但跨单元格常驻未被证实：照实降级，不因 backend=cds_kernel 就当有状态。
+                result["degraded_reason"] = KERNEL_NOT_RESIDENT_REASON
             if raw.get("output_blocked"):
                 result["output_blocked"] = True
                 result["blocked_reason"] = raw.get("blocked_reason", "output_inspection_blocked")
@@ -355,7 +468,7 @@ async def run_stateless(executor: Executioner, code: str) -> dict[str, Any]:
         "output_blocked": bool(raw.get("output_blocked")),
         "blocked_reason": raw.get("blocked_reason"),
         "security_report": raw.get("security_report"),
-        "degraded_reason": "沙箱内 kernel 守护进程不可用，本单元格按无状态方式独立执行（不保留变量）",
+        "degraded_reason": KERNEL_UNAVAILABLE_REASON,
     }
 
 

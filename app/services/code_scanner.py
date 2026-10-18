@@ -99,8 +99,10 @@ GPU_MODES = {
     SandboxMode.VISION_TRAIN, SandboxMode.MULTIMODAL_TRAIN,
 }
 
-# Valid sandbox output paths
-SANDBOX_OUTPUT_PATHS = {"/sandbox/output/", "/sandbox/checkpoints/"}
+# 允许保存的目录必须等于「真的会被成果交付采集」的目录，口径与 cube_runtime_adapter.HARVEST_DIRS
+# 同源（SS-18 目录契约）：/sandbox/output 是正规产物目录，/scratch 是兼容期仍参与采集的工作区。
+# 之前的 /sandbox/checkpoints 不在采集面内，通过检查的代码会把产物静默丢在 VM 里。
+SANDBOX_OUTPUT_PATHS = {"/sandbox/output/", "/scratch/"}
 
 
 class CodeScanner:
@@ -180,7 +182,7 @@ class CodeScanner:
                             issues.append(ScanIssue(
                                 ScanSeverity.FATAL, "INVALID_SAVE_PATH",
                                 f"'{func_name}' must target a sandbox output path "
-                                f"({', '.join(SANDBOX_OUTPUT_PATHS)})", node.lineno,
+                                f"({', '.join(sorted(SANDBOX_OUTPUT_PATHS))})", node.lineno,
                             ))
 
             # ── Attribute-based dangerous access ──

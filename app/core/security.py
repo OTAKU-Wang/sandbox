@@ -147,17 +147,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses."""
+    """Add security headers to all responses.
+
+    /api/jupyter/* 是唯一需要被前端 iframe 同源嵌入的前缀（JupyterLab 开发环，见
+    app/api/jupyter_proxy.py）：两条部署道（vite :5199 与 nginx :3000 的 /api 代理）
+    浏览器视角都与页面同源，故该前缀用 SAMEORIGIN + CSP frame-ancestors 'self'；
+    其余路径维持 DENY。安全边界不变：一次性票据 + 会话目录前缀限制 + 终端接口镜像内关闭。
+    """
+
+    EMBED_PREFIX = "/api/jupyter/"
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+        embedded = request.url.path.startswith(self.EMBED_PREFIX)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN" if embedded else "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+        csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+        if embedded:
+            csp += "; frame-ancestors 'self'"
+        response.headers["Content-Security-Policy"] = csp
         return response
 
 

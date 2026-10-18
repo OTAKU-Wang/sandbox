@@ -11,6 +11,7 @@ import json
 import os
 import shlex
 import shutil
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -32,6 +33,16 @@ def _seccomp_fallback_allowed() -> bool:
         return bool(get_settings().SECCOMP_FALLBACK_ALLOWED)
     except Exception:
         return True
+
+
+def _release_seccomp_fd(fd: int | None) -> None:
+    """归还本次 exec 向 `sandbox_security.get_seccomp_bpf_fd()` 借的 BPF fd。
+
+    该函数现在每次下发一个偏移为 0 的单独 fd（共享 fd 会被上一个 bwrap 读到 EOF，
+    导致后续 exec 全部 PR_SET_SECCOMP EINVAL），因此用完必须归还，不能漏。
+    """
+    from app.services.sandbox_security import close_seccomp_fd
+    close_seccomp_fd(fd)
 
 
 class RuntimeAdapter(ABC):
@@ -79,7 +90,8 @@ def _build_l0_bwrap_args(
             network access (for allowlist mode with iptables filtering).
         dns_proxy_port: If set, configure /etc/resolv.conf to point to DNS proxy.
 
-    Returns (args_list, seccomp_fd). Caller must keep seccomp_fd open and pass via pass_fds.
+    Returns (args_list, seccomp_fd). The fd is single-use (bwrap consumes it) — release
+    it with ``close_seccomp_fd`` after the spawn.
     """
     from app.services.sandbox_security import get_seccomp_bpf_fd
 
@@ -355,6 +367,8 @@ class ProcessAdapter(RuntimeAdapter):
             }
         except Exception as e:
             return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
+        finally:
+            _release_seccomp_fd(seccomp_fd)
 
     async def execute_streaming(self, container_id: str, code: str, language: str,
                                 *, session_key: str | None = None,
@@ -449,6 +463,8 @@ class ProcessAdapter(RuntimeAdapter):
             if proc is not None and proc.returncode is None:
                 proc.kill()
             raise
+        finally:
+            _release_seccomp_fd(seccomp_fd)
         duration = int((datetime.now() - started).total_seconds() * 1000)
         return {"exit_code": exit_code, "duration_ms": duration, "sandbox_level": "L0", "blocked": False}
 
@@ -585,6 +601,309 @@ class BwrapAdapter(RuntimeAdapter):
         self.workspace_root = Path(workspace_root)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self._allow_unsandboxed_fallback = allow_unsandboxed_fallback
+        # 会话常驻 kernel：container_id -> {"proc": Popen|None, "sock": str, "misses": int}
+        # bwrap 每次 execute() 都是一次全新的 namespace（--unshare-pid + --die-with-parent），
+        # 单元格自己拉起的子进程在 exec 调用返回时随 namespace 一起回收 —— 常驻 kernel
+        # 因此必须由控制面以会话为粒度拉起并持有，而不是靠单元格自己养。
+        self._kernels: dict[str, dict] = {}
+        self._kernel_lock = threading.Lock()
+
+    # --- 会话常驻 kernel（Notebook 有状态执行）---
+    KERNEL_SUBDIR = ".kernel"
+    KERNEL_GUEST_DIR = "/workspace/tmp/.kernel"
+    KERNEL_DAEMON_GUEST = KERNEL_GUEST_DIR + "/kernel_daemon.py"
+    KERNEL_SOCK_GUEST = KERNEL_GUEST_DIR + "/kernel.sock"
+    # AF_UNIX 的 sockaddr_un.sun_path 只有 108 字节（含结尾 NUL ⇒ 可用 107）。会话工作区在
+    # /tmp/cds-sandbox/<user>/<session>/tmp/.kernel/kernel.sock 实测 114 字节，控制面对它
+    # 的 connect 连系统调用都进不去（Python 直接抛 “AF_UNIX path too long”）—— kernel 明明
+    # 在听，也会被判成 kernel_did_not_start 并被回收，单元格于是永远退回自举 kernel。
+    # bwrap 把客内 /tmp 换成 tmpfs，客/控唯一共享的目录只有 workspace/tmp，socket 只能留在那
+    # 里；所以控制面改走一条指回同一目录的短别名，客内驱动仍用 KERNEL_SOCK_GUEST，两端名字不变。
+    SUN_PATH_MAX = 107
+    KERNEL_ALIAS_ROOT = "/tmp/cds-kernel-alias"
+
+    def _kernel_dir(self, workspace: Path) -> Path:
+        return workspace / "tmp" / self.KERNEL_SUBDIR
+
+    @staticmethod
+    def _kernel_alias(container_id: str) -> str:
+        return os.path.join(BwrapAdapter.KERNEL_ALIAS_ROOT,
+                            container_id.strip("/").replace("/", "_").replace("..", "_"))
+
+    def _control_sock(self, container_id: str, kdir: Path) -> str:
+        """控制面探测 kernel 用的 socket 路径；真实路径放不下 sun_path 时经短别名绕过去。"""
+        real = str(kdir / "kernel.sock")
+        if len(os.fsencode(real)) <= self.SUN_PATH_MAX:
+            return real
+        alias_dir = self._kernel_alias(container_id)
+        try:
+            os.makedirs(self.KERNEL_ALIAS_ROOT, mode=0o700, exist_ok=True)
+            if os.path.islink(alias_dir):
+                # 已经在指同一个目录就别反复 unlink/relink：那会在两次探活之间留一个空窗口。
+                if os.path.realpath(alias_dir) == os.path.realpath(str(kdir)):
+                    return os.path.join(alias_dir, "kernel.sock")
+                os.unlink(alias_dir)
+            os.symlink(str(kdir), alias_dir)
+        except OSError as exc:
+            logger.warning("session kernel %s: AF_UNIX alias %s unavailable: %s",
+                           container_id, alias_dir, exc)
+            return real
+        return os.path.join(alias_dir, "kernel.sock")
+
+    @classmethod
+    def _drop_kernel_alias(cls, container_id: str) -> None:
+        try:
+            if os.path.islink(cls._kernel_alias(container_id)):
+                os.unlink(cls._kernel_alias(container_id))
+        except OSError:
+            pass
+
+    def _kernel_env(self, container_id: str) -> dict[str, str]:
+        """Driver needs to know where the platform kernel listens (guest paths)."""
+        if container_id in self._kernels:
+            return {"CDS_RUNTIME_DIR": self.KERNEL_GUEST_DIR, "CDS_KERNEL_MANAGED": "1"}
+        return {}
+
+    def _kernel_probe(self, sock: Path, timeout: float = 3.0) -> dict | None:
+        """Ask a listening kernel who it is. None = nobody answered in time."""
+        import socket as _socket
+
+        try:
+            conn = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            conn.settimeout(timeout)
+            conn.connect(str(sock))
+            conn.sendall(b'{"op": "info"}\n')
+            buf = b""
+            while b"\n" not in buf:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+            conn.close()
+            return json.loads(buf.decode("utf-8").strip()) if buf.strip() else None
+        except Exception:
+            return None
+
+    def _kernel_kill(self, container_id: str) -> None:
+        with self._kernel_lock:
+            rec = self._kernels.pop(container_id, None)
+        if not rec:
+            return
+        proc = rec.get("proc")
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), 15)  # SIGTERM the whole kernel process group
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+
+    def _load_session_config(self, workspace: Path):
+        """Load the per-session security config written at provision time."""
+        from app.services.sandbox_security import SandboxSecurityConfig
+
+        config = SandboxSecurityConfig()
+        cfg: dict = {}
+        config_path = workspace / ".security_config.json"
+        if config_path.exists():
+            try:
+                cfg = json.loads(config_path.read_text())
+                config.resource_limits.timeout_seconds = cfg.get("timeout", 120)
+                config.resource_limits.max_memory_mb = cfg.get("max_memory_mb", 512)
+                config.resource_limits.max_pids = cfg.get("max_pids", 64)
+                config.resource_limits.max_output_bytes = cfg.get("max_output_bytes", 10 * 1024 * 1024)
+            except (json.JSONDecodeError, KeyError):
+                pass
+        return config, cfg
+
+    def _workspace_dek_env(self, cfg: dict, env_vars: dict[str, str] | None) -> dict[str, str] | None:
+        """Inject the workspace DEK via env var (never on disk)."""
+        workspace_key_id = cfg.get("workspace_key_id", "")
+        if not workspace_key_id:
+            return env_vars
+        if env_vars is None:
+            env_vars = {}
+        try:
+            from app.services.kms_service import kms_service
+            dek_bytes = kms_service.get_key(workspace_key_id)
+            if dek_bytes:
+                env_vars["CDS_DEK_HEX"] = dek_bytes.hex()
+        except Exception as e:
+            logger.warning(f"Failed to retrieve workspace DEK: {e}")
+        return env_vars
+
+    def _guest_argv(self, *, workspace: Path, config, cfg: dict, command: list[str] | None,
+                    env_vars: dict[str, str] | None, session_key: str | None,
+                    language: str = "python", code_file: str | None = None,
+                    session_id: str = ""):
+        """Single place that turns a session workspace into a hardened bwrap argv."""
+        from app.services.sandbox_security import build_bwrap_args
+
+        return build_bwrap_args(
+            workspace=workspace,
+            code_file=code_file or "/workspace/tmp/exec.py",
+            language=language,
+            config=config,
+            session_key=session_key,
+            env_vars=env_vars,
+            session_id=session_id,
+            user_id=cfg.get("user_id", ""),
+            sandbox_level="L3",
+            command=command,
+        )
+
+    async def ensure_kernel(self, container_id: str, env_vars: dict[str, str] | None = None,
+                            timeout: int | None = None) -> dict:
+        """Start (or adopt) the session-resident kernel that keeps notebook cell state.
+
+        诚实约束：只有这里以 ``--resident`` 拉起的 kernel 会被上报为有状态后端；
+        拉不起来时返回状态与原语，由驱动的 kernel_error 透到单元格响应里。
+        """
+        from app.services.notebook_service import KERNEL_DAEMON_SOURCE
+
+        workspace = self._resolve_workspace(container_id)
+        if not workspace or not workspace.exists():
+            return {"ok": False, "state": "no_workspace", "level": "L3"}
+        kdir = self._kernel_dir(workspace)
+        kdir_sock = kdir / "kernel.sock"
+        sock = self._control_sock(container_id, kdir)
+        if len(os.fsencode(sock)) > self.SUN_PATH_MAX:
+            # 连别名都放不下（工作区根被配得极深）：照实说清楚，别拿 15s 探活超时冒充“kernel 起不来”。
+            self._drop_kernel_alias(container_id)
+            return {"ok": False, "state": "socket_path_unreachable", "level": "L3",
+                    "error": f"kernel socket path is {len(os.fsencode(sock))} bytes, "
+                             f"AF_UNIX sun_path holds {self.SUN_PATH_MAX}: {sock}"}
+
+        info = await asyncio.to_thread(self._kernel_probe, sock, 3.0)
+        if info and info.get("ok") and info.get("resident"):
+            # 已经有一个控制面拉起的 kernel 在听（例如 API 重启后遗留、或另一个 worker 先起了）：
+            #  adopt 它。必须登记，否则 execute() 不会给驱动注 CDS_RUNTIME_DIR/CDS_KERNEL_MANAGED，
+            # 驱动会退回 /tmp 默认目录并在 seccomp 面前失败。
+            with self._kernel_lock:
+                rec = self._kernels.get(container_id)
+                if rec is None or rec.get("proc") is None:
+                    self._kernels[container_id] = {"proc": None, "sock": str(sock), "misses": 0}
+                elif rec is not None:
+                    rec["misses"] = 0
+            return {"ok": True, "state": "running", "kernel": info, "level": "L3"}
+
+        with self._kernel_lock:
+            rec = self._kernels.setdefault(container_id, {"proc": None, "sock": str(sock), "misses": 0})
+            proc = rec.get("proc")
+            alive = proc is not None and proc.poll() is None
+            rec["misses"] = rec.get("misses", 0) + 1
+            # 进程在、socket 不应答：要么正忙于一个长单元格（先别动），要么卡死。
+            # 连续两次探活失败才回收，避免误杀正在执行的单元格。
+            if alive and rec["misses"] < 2:
+                return {"ok": False, "state": "busy_or_unresponsive", "kernel": None, "level": "L3"}
+            if alive and proc is not None:
+                try:
+                    os.killpg(os.getpgid(proc.pid), 9)
+                except (ProcessLookupError, PermissionError, OSError):
+                    proc.kill()
+            rec["misses"] = 0
+            rec["proc"] = None
+
+        try:
+            kdir.mkdir(parents=True, exist_ok=True)
+            os.chmod(kdir, 0o700)
+            (kdir / "kernel_daemon.py").write_text(KERNEL_DAEMON_SOURCE)
+            try:
+                os.unlink(kdir_sock)
+            except OSError:
+                pass
+        except OSError as exc:
+            return {"ok": False, "state": "runtime_dir_unavailable", "error": str(exc)[:400], "level": "L3"}
+
+        config, cfg = self._load_session_config(workspace)
+        kernel_env = {**(env_vars or {}), "CDS_SESSION_ID": cfg.get("session_id", container_id.replace("bwrap-", ""))}
+        args, seccomp_fd = self._guest_argv(
+            workspace=workspace, config=config, cfg=cfg,
+            command=["python3", self.KERNEL_DAEMON_GUEST, self.KERNEL_SOCK_GUEST, "--resident",
+                     "--session", kernel_env["CDS_SESSION_ID"]],
+            env_vars=kernel_env, session_key=None,
+            session_id=kernel_env["CDS_SESSION_ID"],
+        )
+        log_path = kdir / "kernel.log"
+        budget = float(timeout) if timeout and 0 < float(timeout) < 15.0 else 15.0
+
+        spawn = await asyncio.to_thread(self._spawn_kernel, args, seccomp_fd, log_path)
+        if not spawn["ok"]:
+            return {"ok": False, "state": "spawn_failed", "error": spawn["error"], "level": "L3"}
+        log_offset = spawn["size"]
+        with self._kernel_lock:
+            self._kernels[container_id] = {"proc": spawn["proc"], "sock": str(sock), "misses": 0}
+        info = await self._wait_kernel(sock, budget)
+        seccomp_applied = seccomp_fd is not None
+
+        if not info and seccomp_applied:
+            # 与单元格执行同一口径：bwrap 被内核拒收 seccomp（PR_SET_SECCOMP EINVAL）时，
+            # 只有 SECCOMP_FALLBACK_ALLOWED=true 才允许去掉 syscall 白名单重试，并且必须日志披露。
+            # 只看本次 spawn 追加的日志，否则会被上一轮留下的 EINVAL 骗到。
+            tail = self._kernel_log_tail(log_path, log_offset)
+            if _seccomp_fallback_allowed() and self._seccomp_retry_needed(tail, seccomp_fd):
+                logger.warning(
+                    "SECURITY: session kernel %s rejected seccomp setup (PR_SET_SECCOMP EINVAL); "
+                    "retrying without the syscall filter because SECCOMP_FALLBACK_ALLOWED=true",
+                    container_id,
+                )
+                self._kernel_kill(container_id)
+                args = [c for c in args if c != "--seccomp" and c != str(seccomp_fd)]
+                spawn = await asyncio.to_thread(self._spawn_kernel, args, None, log_path)
+                if not spawn["ok"]:
+                    return {"ok": False, "state": "spawn_failed", "error": spawn["error"], "level": "L3"}
+                seccomp_applied = False
+                with self._kernel_lock:
+                    self._kernels[container_id] = {"proc": spawn["proc"], "sock": str(sock), "misses": 0}
+                info = await self._wait_kernel(sock, budget)
+
+        if not info:
+            self._kernel_kill(container_id)
+            return {"ok": False, "state": "kernel_did_not_start",
+                    "error": self._kernel_log_tail(log_path, log_offset) or "kernel did not answer info",
+                    "level": "L3"}
+        return {"ok": True, "state": "started", "kernel": info, "seccomp": seccomp_applied, "level": "L3"}
+
+    @staticmethod
+    def _spawn_kernel(args: list[str], seccomp_fd: int | None, log_path: Path) -> dict:
+        """Start the kernel bwrap as a child of the control-plane process (survives the exec call)."""
+        try:
+            size = log_path.stat().st_size if log_path.exists() else 0
+            log = open(log_path, "ab")
+            try:
+                proc = subprocess.Popen(
+                    args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                    pass_fds=(seccomp_fd,) if seccomp_fd is not None else (),
+                )
+            finally:
+                log.close()
+            # 子进程已在 exec 前拿到自己的副本，母进程立即归还借出的 fd（不归还就会逐次漏 fd）
+            _release_seccomp_fd(seccomp_fd)
+            return {"ok": True, "proc": proc, "size": size}
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)[:400], "size": 0}
+
+    @staticmethod
+    def _kernel_log_tail(log_path: Path, since: int = 0, limit: int = 800) -> str:
+        """Tail of what this spawn appended (``since`` = file size before it started)."""
+        try:
+            with open(log_path, "r", errors="replace") as fh:
+                fh.seek(since)
+                return fh.read()[ -limit:]
+        except OSError:
+            return ""
+
+    async def _wait_kernel(self, sock: Path, budget: float) -> dict | None:
+        started_at = datetime.now()
+        while (datetime.now() - started_at).total_seconds() < budget:
+            info = await asyncio.to_thread(self._kernel_probe, sock, 2.0)
+            if info and info.get("ok"):
+                return info
+            await asyncio.sleep(0.2)
+        return None
 
     @staticmethod
     def _seccomp_retry_needed(stderr: str, seccomp_fd: int | None) -> bool:
@@ -659,34 +978,16 @@ class BwrapAdapter(RuntimeAdapter):
         if not workspace or not workspace.exists():
             return {"output": "Workspace not found", "exit_code": -1, "duration_ms": 0}
 
-        # Load session-specific security config
-        config = SandboxSecurityConfig()
-        config_path = workspace / ".security_config.json"
-        cfg = {}
-        if config_path.exists():
-            try:
-                cfg = json.loads(config_path.read_text())
-                config.resource_limits.timeout_seconds = cfg.get("timeout", 120)
-                config.resource_limits.max_memory_mb = cfg.get("max_memory_mb", 512)
-                config.resource_limits.max_pids = cfg.get("max_pids", 64)
-                config.resource_limits.max_output_bytes = cfg.get("max_output_bytes", 10 * 1024 * 1024)
-            except (json.JSONDecodeError, KeyError):
-                pass
+        config, cfg = self._load_session_config(workspace)
 
         # Inject workspace DEK for in-sandbox file decryption
-        workspace_key_id = cfg.get("workspace_key_id", "")
-        if workspace_key_id and env_vars is None:
-            env_vars = {}
-        if workspace_key_id:
-            try:
-                from app.services.kms_service import kms_service
-                dek_bytes = kms_service.get_key(workspace_key_id)
-                if dek_bytes:
-                    env_vars["CDS_DEK_HEX"] = dek_bytes.hex()
-            except Exception as e:
-                logger.warning(f"Failed to retrieve workspace DEK: {e}")
+        env_vars = self._workspace_dek_env(cfg, env_vars)
 
         effective_timeout = timeout or config.resource_limits.timeout_seconds
+        # 平台常驻 kernel 存在时，告知驱动 socket 位置与单元格预算（它据此设定 socket 读超时）
+        kernel_env = self._kernel_env(container_id)
+        if kernel_env:
+            env_vars = {**(env_vars or {}), **kernel_env, "CDS_CELL_TIMEOUT": str(int(effective_timeout))}
 
         # Determine file extension
         ext_map = {"python": "py", "sql": "sql", "shell": "sh", "bash": "sh"}
@@ -697,16 +998,10 @@ class BwrapAdapter(RuntimeAdapter):
 
         # Build hardened bwrap arguments
         session_id = cfg.get("session_id", container_id.replace("bwrap-", ""))
-        bwrap_args, seccomp_fd = build_bwrap_args(
-            workspace=workspace,
-            code_file=f"/workspace/tmp/exec.{ext}",
-            language=language,
-            config=config,
-            session_key=session_key,
-            env_vars=env_vars,
-            session_id=session_id,
-            user_id=cfg.get("user_id", ""),
-            sandbox_level="L3",
+        bwrap_args, seccomp_fd = self._guest_argv(
+            workspace=workspace, config=config, cfg=cfg, command=None,
+            env_vars=env_vars, session_key=session_key, language=language,
+            code_file=f"/workspace/tmp/exec.{ext}", session_id=session_id,
         )
 
         # Output limiter to prevent data exfiltration via large outputs
@@ -814,6 +1109,8 @@ class BwrapAdapter(RuntimeAdapter):
             return await self._execute_direct(code_file, language, effective_timeout)
         except Exception as e:
             return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L3"}
+        finally:
+            _release_seccomp_fd(seccomp_fd)
 
     async def _execute_direct(self, code_file: Path, language: str, timeout: int = 120) -> dict:
         """Unsandboxed fallback — DEVELOPMENT ONLY. Never used in production."""
@@ -847,6 +1144,9 @@ class BwrapAdapter(RuntimeAdapter):
 
     def terminate(self, container_id: str) -> bool:
         from app.services.sandbox_security import secure_wipe_file
+        # 常驻 kernel 先停：它是会话命名空间里唯一活着的进程，workspace 一抹就变孤儿。
+        self._kernel_kill(container_id)
+        self._drop_kernel_alias(container_id)
         workspace = self._resolve_workspace(container_id)
         if workspace and workspace.exists():
             # Secure wipe sensitive files before deletion
@@ -857,6 +1157,12 @@ class BwrapAdapter(RuntimeAdapter):
             # Wipe all code files
             for code_file in (workspace / "tmp").glob("exec.*"):
                 secure_wipe_file(code_file)
+            kernel_dir = workspace / "tmp" / self.KERNEL_SUBDIR
+            if kernel_dir.is_dir():
+                # 只抹常规文件：kernel.sock 是 socket，覆写它会报 ENXIO（rmtree 会删掉它）
+                for kernel_file in kernel_dir.iterdir():
+                    if kernel_file.is_file():
+                        secure_wipe_file(kernel_file)
             # Remove workspace
             shutil.rmtree(workspace, ignore_errors=True)
         return True
@@ -864,6 +1170,19 @@ class BwrapAdapter(RuntimeAdapter):
     def get_status(self, container_id: str) -> str:
         workspace = self._resolve_workspace(container_id)
         return SessionStatus.RUNNING.value if workspace and workspace.exists() else "terminated"
+
+    def kernel_status(self, container_id: str) -> dict:
+        """Cheap liveness view for ops/UI (never starts anything)."""
+        rec = self._kernels.get(container_id)
+        if rec is None:
+            return {"resident": False, "state": "not_started"}
+        proc = rec.get("proc")
+        if proc is not None and proc.poll() is not None:
+            return {"resident": False, "state": "exited", "exit_code": proc.returncode}
+        info = self._kernel_probe(Path(rec.get("sock") or ""), 1.0)
+        if info and info.get("ok"):
+            return {"resident": True, "state": "running", "kernel": info}
+        return {"resident": False, "state": "unresponsive", "pid": proc.pid if proc else None}
 
 
 class FirecrackerAdapter(RuntimeAdapter):
@@ -1983,6 +2302,34 @@ class SandboxRuntime:
             "duration_ms": 0,
             "sandbox_level": "unknown",
         }
+
+    async def ensure_session_kernel(self, container_id: str, *, env_vars: dict | None = None,
+                                    timeout: int | None = None) -> dict:
+        """Bring up (or adopt) the session-resident notebook kernel, if this runtime has one.
+
+        这不是第二条执行通路：它不跑用户代码，只把“会话常驻 kernel”准备好。不支持常驻
+        kernel 的运行面返回 supported=False，单元格侧由驱动的 kernel_error 如实披露。
+        """
+        adapter = self._adapters.get(SandboxLevel.L3.value) if container_id.startswith("bwrap-") else None
+        ensure = getattr(adapter, "ensure_kernel", None) if adapter is not None else None
+        if ensure is None:
+            return {"supported": False, "ok": False, "state": "runtime_has_no_session_kernel"}
+        try:
+            result = await ensure(container_id, env_vars=env_vars, timeout=timeout)
+        except Exception as exc:  # 拉 kernel 失败不能把整个单元格带下：降级路径会披露
+            logger.warning("session kernel ensure failed for %s: %s", container_id, exc)
+            return {"supported": True, "ok": False, "state": "ensure_raised", "error": str(exc)[:400]}
+        return {"supported": True, **result}
+
+    def kernel_status(self, container_id: str) -> dict:
+        adapter = self._adapters.get(SandboxLevel.L3.value) if container_id.startswith("bwrap-") else None
+        status = getattr(adapter, "kernel_status", None) if adapter is not None else None
+        if status is None:
+            return {"resident": False, "state": "runtime_has_no_session_kernel"}
+        try:
+            return status(container_id)
+        except Exception as exc:
+            return {"resident": False, "state": "probe_failed", "error": str(exc)[:200]}
 
     async def execute_streaming(
         self,

@@ -28,4 +28,10 @@ class DeliveryBundle(Base):
     object_name: Mapped[str] = mapped_column(String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # ── 交付中心展示列（SS-18 §8 P0-②）：打包当时就写在行上，读侧不再解 MANIFEST 也不再猜。
+    # 存量行为 NULL（迁移只加列不回填），前端按「未记录」渲染。
+    t5_review_status: Mapped[str | None] = mapped_column(String(24))  # passed / passed_with_findings / partially_reviewed
+    watermark_status: Mapped[str | None] = mapped_column(String(24))  # not_requested / applied / partially_applied / not_applied
+    row_count: Mapped[int | None] = mapped_column(Integer)  # 数据表文件（.csv/.tsv/.jsonl）行数合计；无数据表则 NULL
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

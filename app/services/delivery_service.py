@@ -42,10 +42,12 @@ class WebhookUrlRejected(Exception):
 
 
 class EndpointUnavailable(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, detail: dict | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
+        # 可选的服务端现场（服务层已剔除敏感内容），由 open_api 转给 CDSError.detail。
+        self.detail = detail or {}
 
 
 def sign_payload(secret: str, timestamp: str, body: str) -> str:
@@ -290,7 +292,7 @@ async def execute_endpoint(db: AsyncSession, endpoint: ApiEndpoint, body: dict[s
     from app.models.sandbox_session import SandboxSession
     from app.services.session_lifecycle import terminate_session
     from app.services.session_state_machine import session_state_machine
-    from app.services.workflow_service import resolve_sandbox_mode
+    from app.services.workflow_service import pick_test_sandbox_level, resolve_sandbox_mode
     from app.utils.crypto import sm3_hash
 
     if endpoint.status != ApiEndpointStatus.ENABLED.value:
@@ -325,11 +327,18 @@ async def execute_endpoint(db: AsyncSession, endpoint: ApiEndpoint, body: dict[s
     session_id = None
     started = datetime.now(timezone.utc)
     contract = await db.get(Contract, endpoint.contract_id) if endpoint.contract_id else None
+    # 生产会话档位不再写死 "l2c"：本机 Cube 数据面关闭（CDS_CUBE_DATAPLANE_ENABLED=false）时 l2c
+    # 恒 RUNTIME_UNAVAILABLE，只放行 L3 的合约连会话都建不起来，整条「建负载→test→publish→建接口→
+    # 调用→监控」断在最后一步。改法与 run_test 的档位协商（D-e2e-45）同构：复用同一阶梯，
+    # 取合约 allowed_sandbox_levels 内可用的最高一档（下限 L3，见 pick_test_sandbox_level 的
+    # CR BLOCKER-1/SS-13 说明），无约束时仍回 l2c 旧行为。这不降隔离——低于 L3 的档位
+    # 永不选用，数据面缺失时照旧诚实报 RUNTIME_UNAVAILABLE，不伪造执行。
+    sandbox_level = pick_test_sandbox_level(contract)
     try:
         created = await create_sandbox_session(
             body=SandboxSessionCreate(
                 data_product_id=uuid.UUID(str(product_ids[0])),
-                sandbox_level="l2c",
+                sandbox_level=sandbox_level,
                 sandbox_mode=resolve_sandbox_mode(contract, "structured_query"),
                 contract_id=str(endpoint.contract_id),
                 timeout_seconds=int(spec.get("timeout_seconds") or endpoint.timeout_seconds),
@@ -363,7 +372,18 @@ async def execute_endpoint(db: AsyncSession, endpoint: ApiEndpoint, body: dict[s
     exit_code = int(exec_res.get("exit_code", -1) if isinstance(exec_res, dict) else -1)
     output = str((exec_res or {}).get("output") or "")
     if exit_code != 0:
-        raise EndpointUnavailable("WORKLOAD_FAILED", f"工作负载执行失败（退出码 {exit_code}）")
+        # 失败现场只进日志，不进响应体：这段 output 不外于成功路径，**没有
+        # 过输出策略**（`output_blocked` 只在 exit_code==0 之后才判），直接回给
+        # 调用方等于绕过输出闸门。需要查原因时按 request_id 到日志取 tail。
+        logger.warning(
+            "WORKLOAD_FAILED endpoint=%s workload=%s exit_code=%s output_chars=%s tail=%r",
+            endpoint.slug, workload.id, exit_code, len(output), output[-2000:],
+        )
+        raise EndpointUnavailable(
+            "WORKLOAD_FAILED",
+            f"工作负载执行失败（退出码 {exit_code}）",
+            detail={"exit_code": exit_code, "output_chars": len(output), "output_tail_logged": True},
+        )
     if (exec_res or {}).get("output_blocked"):
         raise EndpointUnavailable("OUTPUT_BLOCKED", str((exec_res or {}).get("blocked_reason") or "输出被策略拦截"))
 
@@ -376,6 +396,7 @@ async def execute_endpoint(db: AsyncSession, endpoint: ApiEndpoint, body: dict[s
         "contract_id": str(endpoint.contract_id),
         "endpoint": endpoint.slug,
         "workload_hash": workload.entrypoint_hash,
+        "sandbox_level": sandbox_level,
         "request_sha256": payload_hash[:16],
         "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
     }

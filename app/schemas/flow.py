@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.models.notebook import TaskDebugMethod, TaskExportMode
+
 DeliveryMethod = Literal["dataset", "open_api", "result_push"]
 ComputeFrequency = Literal["manual", "hourly", "daily"]
 WorkloadEnv = Literal["test", "production"]
@@ -32,11 +34,20 @@ class FlowConfigRequest(BaseModel):
 
 class NotebookCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=4000)
     path: str = Field(..., min_length=1, max_length=512)
     contract_id: uuid.UUID | None = None
     session_id: uuid.UUID | None = None
     content: dict[str, Any] | str | None = None
     language: str = "python"
+    # 开发任务字段（SS-18 §8 P0-①）：任务编号由服务端按当日序号生成，不接受客户端指定。
+    debug_method: TaskDebugMethod | None = None
+    export_mode: TaskExportMode | None = None
+    debug_memory_mb: int | None = Field(None, ge=1)
+    exec_memory_mb: int | None = Field(None, ge=1)
+    # 图 2-2「已选择数据」：None = 注入合约授权的全部供数；[] = 不注入任何供数；
+    # 非空则必须是合约已授权数据资源的子集（越权 422，不做静默裁剪）。
+    data_resource_ids: list[uuid.UUID] | None = Field(None, max_length=100)
 
 
 class NotebookUpdate(BaseModel):
@@ -146,6 +157,7 @@ class NotebookOut(BaseModel):
     contract_id: uuid.UUID | None
     session_id: uuid.UUID | None
     title: str
+    description: str | None = None
     path: str
     kernel: str
     language: str
@@ -153,6 +165,12 @@ class NotebookOut(BaseModel):
     version: int
     status: str
     execution_backend: str | None
+    task_no: str | None = None
+    debug_method: str | None = None
+    export_mode: str | None = None
+    debug_memory_mb: int | None = None
+    exec_memory_mb: int | None = None
+    data_resource_ids: list[uuid.UUID] | None = None
     last_executed_at: datetime | None
     created_at: datetime
     updated_at: datetime

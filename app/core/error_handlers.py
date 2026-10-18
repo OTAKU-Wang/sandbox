@@ -32,6 +32,30 @@ def _error_body(code: str, message: str, detail: dict | None, request_id: str) -
     return body
 
 
+_JSON_PRIMITIVES = (str, int, float, bool, type(None))
+
+
+def _json_safe(value, _depth: int = 0):
+    """Coerce anything ``JSONResponse`` cannot serialize into a short string.
+
+    A pydantic v2 error dict carries the offending ``input`` — for a body that
+    failed to parse that is the RAW REQUEST BYTES, and for a form field it can
+    be an ``UploadFile``/exception object living in ``ctx``. Serializing those
+    raised ``TypeError: Object of type bytes is not JSON serializable`` inside
+    the handler, which turned every client-side 422 into a server-side 500
+    (observed in the dev lane on ``POST /api/v1/auth/login``).
+    """
+    if isinstance(value, _JSON_PRIMITIVES):
+        return value
+    if _depth >= 3:
+        return str(value)[:200]
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v, _depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(v, _depth + 1) for v in list(value)[:20]]
+    return str(value)[:200]
+
+
 def _error_headers(request_id: str, retry_after: int | None = None) -> dict:
     """Error responses always self-identify their request_id — an unhandled
     exception bypasses RequestIDMiddleware's response path, so the handler
@@ -71,14 +95,16 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         request_id = _request_id(request)
-        # Some FastAPI versions put raw exception objects into ctx — sanitize
-        # so the response stays JSON-serializable across versions.
+        # Some FastAPI/pydantic versions put raw exception objects into ``ctx``
+        # and the undecoded request BYTES into ``input`` — sanitize both so the
+        # response stays JSON-serializable across versions.
         errors = []
         for err in exc.errors()[:20]:
             err = dict(err)
-            ctx = err.get("ctx")
-            if isinstance(ctx, dict):
-                err["ctx"] = {k: str(v) for k, v in ctx.items()}
+            if "ctx" in err:
+                err["ctx"] = _json_safe(err["ctx"])
+            if "input" in err:
+                err["input"] = _json_safe(err["input"])
             errors.append(err)
         body = _error_body("VALIDATION_ERROR", "Request validation failed", None, request_id)
         body["detail"] = errors  # legacy FastAPI 422 shape: detail is the error list

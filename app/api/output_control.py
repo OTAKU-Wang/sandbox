@@ -350,6 +350,7 @@ async def process_output_gateway(
             "watermark": result.watermark,
             "signature": result.signature,
             "error": result.error,
+            "empty_output": result.empty_output,
             "contract_id": contract_id,
             "effective_max_output_rows": effective_rows,
             "effective_output_formats": effective_formats,
@@ -368,6 +369,7 @@ async def process_output_gateway(
         "watermark": result.watermark,
         "signature": result.signature,
         "error": result.error,
+        "empty_output": result.empty_output,
     }
 
 

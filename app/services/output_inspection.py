@@ -69,6 +69,12 @@ class InspectionResult:
     dp_budget_remaining: float | None = None
     noisy_output_rows: list[dict] | None = None
     signature: str | None = None  # SM2 digital signature (hex r||s)
+    # SS-18 §8 P0' 真空披露：某阶段被场景启用但没有任何输入可查时，stage_results 里的 True
+    # 是「无从检查」而不是「检查通过」。这里把它列出来，判定方无法再把真空读成通过。
+    # 口径（2026-10-16 拍板，spec §8）：成果闸对阶段级真空**只披露不拦**——别往 should_block() 里加条件。
+    not_evaluated: list[str] = field(default_factory=list)
+    # 降级披露：阶段给了结论但走了弱一档的实现（如 SM2 签名失败退化成 SM3 摘要）。
+    degraded: list[str] = field(default_factory=list)
 
 
 class OutputInspector:
@@ -139,6 +145,8 @@ class OutputInspector:
         """Run full inspection pipeline with scene-aware routing."""
         findings = []
         stage_results = {}
+        not_evaluated: list[str] = []
+        degraded: list[str] = []
         redacted = output
 
         # Stage 0: Scene routing — select applicable stages
@@ -172,7 +180,10 @@ class OutputInspector:
         if InspectionStage.DATA_RECONSTRUCTION.value in active_stages:
             stage_results[InspectionStage.DATA_RECONSTRUCTION.value] = True
             source_rows = (detail or {}).get("source_rows")
-            if output_rows and source_rows:
+            recon_comparable = bool(output_rows) and bool(source_rows)
+            if not recon_comparable:
+                not_evaluated.append(InspectionStage.DATA_RECONSTRUCTION.value)
+            if recon_comparable:
                 passed_recon, match_rate = self.check_data_reconstruction(output_rows, source_rows)
                 if not passed_recon:
                     stage_results[InspectionStage.DATA_RECONSTRUCTION.value] = False
@@ -195,6 +206,7 @@ class OutputInspector:
                 ))
         elif InspectionStage.K_ANONYMITY.value in active_stages:
             stage_results[InspectionStage.K_ANONYMITY.value] = True
+            not_evaluated.append(InspectionStage.K_ANONYMITY.value)
 
         # Stage 4: Differential Privacy — REAL noise application (PZ-02 / MR-A3)
         #
@@ -268,6 +280,7 @@ class OutputInspector:
                     ))
             else:
                 stage_results[InspectionStage.MIA.value] = True  # No model output to check
+                not_evaluated.append(InspectionStage.MIA.value)
 
         # Stage 5: Watermark — embed steganographic watermark into output
         watermark = self._generate_watermark(user_id, session_id)
@@ -295,6 +308,9 @@ class OutputInspector:
             # Fallback to SM3 hash if SM2 signing fails (dev mode)
             sig = crypto_service.sm3_hash(redacted.encode())
             stage_results[InspectionStage.SIGNATURE.value] = True
+            degraded.append(
+                f"{InspectionStage.SIGNATURE.value}: sm3_digest (SM2 signing unavailable — not a GM/T signature)"
+            )
 
         # Stage 6: Final Approval
         critical_findings = [f for f in findings if f.severity == "critical"]
@@ -311,6 +327,8 @@ class OutputInspector:
             dp_budget_remaining=dp_budget_remaining,
             noisy_output_rows=noisy_rows,
             signature=sig,
+            not_evaluated=not_evaluated,
+            degraded=degraded,
         )
 
     def _generate_watermark(self, user_id: str, session_id: str) -> str:

@@ -15,6 +15,7 @@ from app.core.deps import get_business_user
 from app.core.errors import CDSError
 from app.core.metrics import record_output_inspection
 from app.models.api_endpoint import ApiEndpoint, ApiEndpointStatus
+from app.models.audit_log import AuditLog
 from app.models.contract import Contract, DeliveryMethod
 from app.models.delivery_bundle import DeliveryBundle
 from app.models.sandbox_session import SandboxSession
@@ -66,6 +67,22 @@ def _require_method(contract: Contract, method: DeliveryMethod) -> None:
         )
 
 
+def _ensure_session_contract(session: SandboxSession, contract: Contract) -> None:
+    """D-e2e-15: 会话必须属于签好约的那份合约。
+
+    `sandbox_sessions.contract_id` 是 String(255)（数字合约 ID），而 `Contract.id` 是
+    `UUID(as_uuid=True)`：直接 `!=` 会拿 str 跟 UUID 比，恒为 True，于是**任何**会话
+    都会被误判 `CONTRACT_MISMATCH`，数据集打包永远 403。两侧统一按 str 比。
+    """
+    if session.contract_id and str(session.contract_id) != str(contract.id):
+        raise CDSError(
+            "会话不属于该合约",
+            code="CONTRACT_MISMATCH",
+            http_status=403,
+            detail={"session_id": str(session.id), "contract_id": str(contract.id)},
+        )
+
+
 async def _load_session(db: AsyncSession, session_id: uuid.UUID, user: User) -> SandboxSession:
     res = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = res.scalar_one_or_none()
@@ -95,9 +112,11 @@ async def _collect_session_files(db: AsyncSession, session: SandboxSession) -> l
     workspace = _session_workspace_or_400(session)
     dek = await _session_dek(session)
     entries = []
-    for meta in sf.list_files(workspace):
+    # 递归采集 files/（排除 input/ tmp/）：开发环产物写在 files/output/ 下，
+    # 旧 list_files() 只看顶层，那部分会被当成“没有产出”。SS-19 D-e2e-11。
+    for meta in sf.list_output_files(workspace):
         name = meta["name"]
-        data, _read_meta = sf.read_file(workspace, name, dek=dek)
+        data, _read_meta = sf.read_output_file(workspace, name, dek=dek)
         entries.append({"name": name, "data": data, "size_bytes": meta.get("size"), "encrypted": bool(meta.get("encrypted"))})
     return entries
 
@@ -120,11 +139,52 @@ def _review_output_bytes(data: bytes, user_id: str, session: SandboxSession) -> 
     findings = len(result.findings or [])
     blocked = should_block(result)
     redacted = getattr(result, "redacted_output", None)
+    if not text.strip():
+        # 审查器对空文本判 passed=False（empty_output），但 findings 里只有 medium，
+        # 沿用旧分支会被记成 passed_with_findings 并进包。空文件单独命名，不冒充已审。
+        return {"data": data, "status": "empty", "findings": findings, "blocked": blocked}
     if findings and redacted is not None:
         return {"data": redacted.encode("utf-8"), "status": "redacted", "findings": findings, "blocked": blocked}
     status = "passed" if not findings else "passed_with_findings"
     return {"data": data, "status": status, "findings": findings, "blocked": blocked}
 
+
+DATA_TABLE_SUFFIXES = (".csv", ".tsv", ".jsonl")
+
+
+def _data_row_count(name: str, data: bytes) -> int | None:
+    """数据表文件的行数：.csv/.tsv 去掉表头，.jsonl 逐行；非数据表或解不出文本返回 None（未知，不按 0 交付）。"""
+    lowered = name.lower()
+    if not lowered.endswith(DATA_TABLE_SUFFIXES):
+        return None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    lines = [line for line in text.splitlines() if line.strip()]
+    if lowered.endswith(".jsonl"):
+        return len(lines)
+    return max(len(lines) - 1, 0)
+
+
+def _t5_review_status(manifest_files: list[dict[str, Any]]) -> str:
+    """聚合口径：命中/脱敏 → passed_with_findings；有未送审二进制或空文件 → partially_reviewed。"""
+    statuses = [str(item.get("output_review")) for item in manifest_files]
+    if any(status in ("redacted", "passed_with_findings") for status in statuses):
+        return "passed_with_findings"
+    if any(status in ("skipped_binary", "empty") for status in statuses):
+        return "partially_reviewed"
+    return "passed"
+
+
+def _watermark_status(requested: bool, manifest_files: list[dict[str, Any]]) -> str:
+    """内容水印只注入文本文件（二进制注入会破坏解析），所以 applied 只在包内全部文件都是文本时成立。"""
+    if not requested:
+        return "not_requested"
+    applied = sum(1 for item in manifest_files if item.get("watermark_applied"))
+    if not applied:
+        return "not_applied"
+    return "applied" if applied == len(manifest_files) else "partially_applied"
 
 @router.post("/dataset/bundle", status_code=201)
 async def create_dataset_bundle(
@@ -135,8 +195,7 @@ async def create_dataset_bundle(
     contract = await _load_contract(db, body.contract_id, current_user)
     _require_method(contract, DeliveryMethod.DATASET)
     session = await _load_session(db, body.session_id, current_user)
-    if session.contract_id and session.contract_id != contract.id:
-        raise CDSError("会话不属于该合约", code="CONTRACT_MISMATCH", http_status=403, detail={"session_id": str(session.id), "contract_id": str(contract.id)})
+    _ensure_session_contract(session, contract)
 
     files = await _collect_session_files(db, session)
     if not files:
@@ -151,6 +210,9 @@ async def create_dataset_bundle(
     total = 0
     total_findings = 0
     skipped_binary = 0
+    total_rows = 0
+    files_with_rows = 0
+    empty_files = 0
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for entry in files:
             # T5 出口审查：单文件下载已按 SS-14 RT-07 过审，打包通道必须同契约，
@@ -170,12 +232,18 @@ async def create_dataset_bundle(
                     detail={"session_id": str(session.id), "file": entry["name"], "findings": review["findings"]},
                 )
             data = review["data"]
-            if review["status"] != "skipped_binary":
+            data_rows = _data_row_count(entry["name"], data)
+            if data_rows is not None:
+                total_rows += data_rows
+                files_with_rows += 1
+            if review["status"] not in ("skipped_binary", "empty"):
                 record_output_inspection("redacted" if review["status"] == "redacted" else "passed")
             total += len(data)
             total_findings += review["findings"]
             if review["status"] == "skipped_binary":
                 skipped_binary += 1
+            elif review["status"] == "empty":
+                empty_files += 1
             if total > MAX_BUNDLE_BYTES:
                 raise CDSError("交付包超过 512MB 上限，请分批交付或走数据产品通道", code="BUNDLE_TOO_LARGE", http_status=413)
             name = entry["name"]
@@ -189,7 +257,7 @@ async def create_dataset_bundle(
                 except Exception as exc:
                     reason = f"水印注入失败，按原文交付: {exc}"
             zf.writestr(f"files/{name}", data)
-            manifest_files.append({"name": name, "size_bytes": len(data), "watermark_applied": applied, "watermark_note": reason, "output_review": review["status"], "output_findings": review["findings"]})
+            manifest_files.append({"name": name, "size_bytes": len(data), "data_rows": data_rows, "watermark_applied": applied, "watermark_note": reason, "output_review": review["status"], "output_findings": review["findings"]})
         manifest = {
             "bundle_id": str(bundle_id),
             "contract_id": str(contract.id),
@@ -203,8 +271,13 @@ async def create_dataset_bundle(
             "output_review_scope": "utf-8 文本文件已过 T5 出口审查；二进制文件未送审（status=skipped_binary）",
             "output_findings_total": total_findings,
             "output_review_skipped_binary": skipped_binary,
+            "output_review_empty": empty_files,
         }
         zf.writestr("MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+
+    t5_review_status = _t5_review_status(manifest_files)
+    watermark_status = _watermark_status(body.watermark, manifest_files)
+    row_count = total_rows if files_with_rows else None
 
     payload = buffer.getvalue()
     object_name = f"delivery/{bundle_id}.zip"
@@ -218,6 +291,9 @@ async def create_dataset_bundle(
         object_name=object_name,
         size_bytes=len(payload),
         file_count=len(manifest_files),
+        t5_review_status=t5_review_status,
+        watermark_status=watermark_status,
+        row_count=row_count,
     ))
     await audit_service.log(
         db, action="delivery.dataset.bundled", resource_type="contract",
@@ -231,7 +307,10 @@ async def create_dataset_bundle(
         "download_url": f"/api/v1/deliveries/dataset/{bundle_id}/download",
         "watermark_applied": any(f["watermark_applied"] for f in manifest_files),
         "watermark_scope": "text-files-only",
-        "output_review": {"findings_total": total_findings, "skipped_binary": skipped_binary, "scope": "utf-8 text files"},
+        "output_review": {"findings_total": total_findings, "skipped_binary": skipped_binary, "empty": empty_files, "scope": "utf-8 text files"},
+        "t5_review_status": t5_review_status,
+        "watermark_status": watermark_status,
+        "row_count": row_count,
     }
 
 
@@ -251,8 +330,8 @@ async def list_dataset_bundles(
     （或反之）的口径漂移。合约行缺失的孤儿包因 JOIN 自然不落进列表——与下载端点
     的 404/403 保持同一口径。
 
-    只下发交付包表已落库的字段：水印标志与逐文件出口审查结论写在包内 MANIFEST.json
-    里、不在这个行上，因此此处不猜（历史行的水印以清单为准）。
+    只下发交付包表已落库的字段：T5 审查状态、内容水印状态与数据表行数是打包当时落在行上的
+    结论（SS-18 §8 P0-②）；这两列之前的包为 NULL，按「未记录」下发，不从包体反推。
     """
     query = (
         select(DeliveryBundle, Contract.contract_no)
@@ -278,8 +357,14 @@ async def list_dataset_bundles(
                 "contract_id": str(bundle.contract_id),
                 "contract_no": contract_no,
                 "session_id": str(bundle.session_id) if bundle.session_id else None,
+                # 对象名就是交付包的文件名口径（delivery/<bundle_id>.zip）：首页与结果集列表
+                # 需要「叫什么名字」，之前只下发 size/file_count，前端只能自己编占位名。
+                "file_name": bundle.object_name,
                 "file_count": bundle.file_count,
                 "size_bytes": bundle.size_bytes,
+                "row_count": bundle.row_count,
+                "t5_review_status": bundle.t5_review_status,
+                "watermark_status": bundle.watermark_status,
                 "created_at": bundle.created_at,
                 "download_url": f"/api/v1/deliveries/dataset/{bundle.id}/download",
             }
@@ -854,3 +939,70 @@ async def delete_openapi_endpoint(endpoint_id: uuid.UUID, db: AsyncSession = Dep
     await db.delete(endpoint)
     await audit_service.log(db, action="openapi.endpoint_deleted", resource_type="contract", user_id=current_user.id, resource_id=str(endpoint.contract_id), detail={"endpoint_id": str(endpoint.id), "slug": endpoint.slug})
     return Response(status_code=204)
+
+OPENAPI_CALL_ACTIONS = ("openapi.call", "openapi.call_failed")
+OPENAPI_CALL_BY_STATUS = {"succeeded": ("openapi.call",), "failed": ("openapi.call_failed",)}
+
+
+async def _load_endpoint(db: AsyncSession, endpoint_id: uuid.UUID, user: User) -> ApiEndpoint:
+    res = await db.execute(select(ApiEndpoint).where(ApiEndpoint.id == endpoint_id))
+    endpoint = res.scalar_one_or_none()
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="endpoint not found")
+    await _load_contract(db, endpoint.contract_id, user)
+    return endpoint
+
+
+def _call_dict(entry: AuditLog, endpoint: ApiEndpoint) -> dict[str, Any]:
+    """调用明细一行 = 一条审计日志：失败行没有输出行数/耗时，保持 None，不按 0 交付。"""
+    detail = entry.detail or {}
+    failed = entry.action == "openapi.call_failed"
+    return {
+        "id": str(entry.id),
+        "endpoint_id": str(endpoint.id),
+        "slug": detail.get("slug") or endpoint.slug,
+        "status": "failed" if failed else "succeeded",
+        "code": detail.get("code") if failed else None,
+        "message": detail.get("message") if failed else None,
+        "output_rows": detail.get("output_rows"),
+        "duration_ms": detail.get("duration_ms"),
+        "request_sha256": detail.get("request_sha256"),
+        "caller_id": str(entry.user_id) if entry.user_id else None,
+        "client_ip": entry.ip_address,
+        "created_at": entry.created_at,
+    }
+
+
+@router.get("/openapi/endpoints/{endpoint_id}/calls")
+async def list_openapi_endpoint_calls(
+    endpoint_id: uuid.UUID,
+    status_filter: str | None = Query(None, alias="status", pattern="^(succeeded|failed)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """端点调用明细（SS-18 §8 P0-③）。
+
+    数据面每次调用都写在带 Merkle 锚定的审计日志上（openapi.call / openapi.call_failed，
+    resource_type=api_endpoint），这里按 (action, resource_type, resource_id) 精确读那份日志，
+    不再另建一张无人锚定的影子调用表。归属口径与端点增删改同源（_load_contract → _is_party）。
+
+    在依赖层就被拒掉的请求（无权限 / 无效凭据）本来没有调用日志行，这里不补也不猜。
+    """
+    endpoint = await _load_endpoint(db, endpoint_id, current_user)
+    wanted = OPENAPI_CALL_BY_STATUS[status_filter] if status_filter else OPENAPI_CALL_ACTIONS
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.resource_type == "api_endpoint", AuditLog.resource_id == str(endpoint.id), AuditLog.action.in_(wanted))
+    )
+    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    res = await db.execute(
+        stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    )
+    return {
+        "items": [_call_dict(entry, endpoint) for entry in res.scalars().all()],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
