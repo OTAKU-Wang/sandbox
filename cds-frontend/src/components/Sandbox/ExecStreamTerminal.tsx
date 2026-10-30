@@ -79,7 +79,10 @@ export default function ExecStreamTerminal({
   }, []);
 
   const connectAndRun = useCallback(
-    async (cmd: string) => {
+    // P4-3（lint 清零·immutability）：自递归改走具名函数表达式自身的 `run` 绑定——
+    // 旧写法在 onclose 里引用外层 `connectAndRun`，那个 const 在本工厂执行时还没初始化
+    // （先声明后访问）。`run` 在自身函数作用域内恒可用，语义不变。
+    async function run(cmd: string) {
       // A248：守卫不能只看 socketRef —— 它要等下面那个 await 之后才被赋值，而「运行」在
       // connecting 态并未禁用 Input 那条通道，双击就会吃两张 ticket、开两条流，
       // 第一条被 socketRef 覆盖后再也关不掉。connectingRef 是跨越那个 await 的互斥量。
@@ -156,7 +159,7 @@ export default function ExecStreamTerminal({
         if (event.code === CLOSE_UNAUTHENTICATED && reconnectRef.current) {
           reconnectRef.current = false;
           writeLine('[终端] ticket 失效，自动重连一次…', '33');
-          void connectAndRun(cmd);
+          void run(cmd);
           return;
         }
         setState('closed');

@@ -194,10 +194,21 @@ services:
       # 白名单类别是代码常量，见 docs/retention.md
       CDS_JANITOR_ENABLED: "false"
       CDS_RETENTION_JANITOR_ENABLED: "true"
+      # P2-5（D-e2e-18）：MinIO 一致性巡检主闸，默认关（与生产副本同姿态）
+      CDS_INTEGRITY_PATROL_ENABLED: "false"
+      # P2-3：KMS 主密钥文件持久化（lane-b 语义）。"" = 旧行为（内存态主密钥，
+      # api 重启即丢、既有信封不可解密——现状口径，不是回归）。启用 = 指向
+      # /var/lib/cds-kms 下的路径（卷已在下方挂好）；非空时路径校验由启动门把关。
+      CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-}"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"
       # Round 45+ (spec N2): experimental Merkle batch pipeline, off by default
       CDS_MERKLE_PIPELINE_ENABLED: "false"
       # W13 egress audit (dev: plaintext JSONL under ./logs)
+      # EGRESS 审计（波3口径注记）：dev 面保持默认相对路径 ./logs/cds-egress/——
+      # 容器内该文件随 api 重建蒸发是开发环可接受口径（非证据面）；宿主机直跑 api
+      # 时它落仓内 ./logs/，由 .gitignore（logs/）兜底不再入库（access.jsonl 事故
+      # 后的锁，tests/test_deploy_manifests 掩码门+gitignore 双保险）。生产形态副本
+      # （prod compose/helm/k8s/两脚本）一律绝对路径 /data/egress-audit + 挂卷。
       CDS_EGRESS_AUDIT_ENABLED: "true"
       # W14 node stale detection
       CDS_NODE_STALE_SECONDS: "300"
@@ -249,6 +260,9 @@ services:
       # 上传的供数原件只活在容器可写层：api 一重建字节就没了，而 data_resources
       # 行仍是 ready，开发环数据注入只能拿到空 input/（SS-19 e2e 实比）。
       - cds-storage:/tmp/cds-storage
+      # P2-3：KMS 主密钥文件落盘位。默认空转（env 未设值时目录无人使用）；
+      # 设值后主密钥跨 api 重建存活，存量信封可继续解密。
+      - cds-kms-master:/var/lib/cds-kms
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -300,3 +314,5 @@ volumes:
   cds-workspaces-l0:
   # MinIO 客户端不可用时的降级落盘位（见 app/services/storage_service.py 告警）。
   cds-storage:
+  # P2-3：KMS 主密钥文件卷（默认空转）。
+  cds-kms-master:

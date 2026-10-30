@@ -31,6 +31,42 @@ from app.services.federation_connector import (
 logger = logging.getLogger(__name__)
 _REMOTE_PROVIDER_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "cds:federated-remote-provider")
 
+# A282（2026-10-30）：镜像条目的「名字怎么写」与「怎么按空间捞回来」原本各写各的三份，
+# 而且捞的那三份用的是裸 LIKE。SQL 的 LIKE 不是子串匹配：`%` 吞任意串、`_` 顶掉一个字符，
+# 而 space_id 是**可写**字段（app/schemas/federation.py 的 SpaceTrustCreate.space_id 只有
+# min_length=1/max_length=64，没有 pattern，`%` 与 `_` 存得进去）。于是 id 里带一个 `%` 的
+# 空间，它的「本空间镜像」WHERE 会连邻居空间一起命中——统计错还是轻的，`_full_sync` 拿同一条
+# 式子做 delete（本文件下方），一次全量同步会把邻居空间的镜像整批删掉再重建。
+# 收成一个来源：前缀只在这里拼一次，元字符整段转义，通配符只剩末尾那一个 `%`。
+LIKE_ESCAPE = "\\"
+_REMOTE_NAME_PREFIX = "[remote:"
+_REMOTE_NAME_SUFFIX = "] "
+
+
+def escape_like(value: str) -> str:
+    """转义 LIKE 模式里的 `%`/`_`；转义符自身要先转义，否则会把后两步产出的 `\\` 再吞一次。"""
+    return (
+        value.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2)
+        .replace("%", LIKE_ESCAPE + "%")
+        .replace("_", LIKE_ESCAPE + "_")
+    )
+
+
+def remote_product_name(space_id: str, entry_name: str) -> str:
+    """本地镜像条目的名字（写侧唯一入口）：`[remote:<space_id>] <远端名>`。"""
+    return f"{_REMOTE_NAME_PREFIX}{space_id}{_REMOTE_NAME_SUFFIX}{entry_name}"
+
+
+def remote_name_like(space_id: str | None = None):
+    """某个远端空间的镜像条目条件；`space_id=None` = 任意远端镜像。
+
+    交给 SQLAlchemy 的 `escape=` 而不是自己拼 `ESCAPE`，SQLite 与 PG 两边渲染都对。
+    """
+    prefix = _REMOTE_NAME_PREFIX if space_id is None else (
+        f"{_REMOTE_NAME_PREFIX}{space_id}{_REMOTE_NAME_SUFFIX}"
+    )
+    return DataProduct.name.like(f"{escape_like(prefix)}%", escape=LIKE_ESCAPE)
+
 
 class SyncMode(str, Enum):
     FULL = "full"
@@ -135,7 +171,7 @@ class CatalogSyncService:
     ) -> DataProduct:
         provider_id = await self._ensure_remote_provider(db, space_id, entry.provider_name)
         return DataProduct(
-            name=f"[remote:{space_id}] {entry.name}",
+            name=remote_product_name(space_id, entry.name),
             description=entry.description,
             product_type=entry.product_type,
             industry=entry.industry,
@@ -246,14 +282,14 @@ class CatalogSyncService:
         # Remove existing entries from this space
         existing = await db.execute(
             select(DataProduct).where(
-                DataProduct.name.like(f"[remote:{space_id}]%")
+                remote_name_like(space_id)
             )
         )
         existing_count = len(list(existing.scalars().all()))
 
         await db.execute(
             delete(DataProduct).where(
-                DataProduct.name.like(f"[remote:{space_id}]%")
+                remote_name_like(space_id)
             )
         )
 
@@ -274,7 +310,7 @@ class CatalogSyncService:
         # Get existing remote entries for this space
         existing_result = await db.execute(
             select(DataProduct).where(
-                DataProduct.name.like(f"[remote:{space_id}]%")
+                remote_name_like(space_id)
             )
         )
         existing_map: dict[str, DataProduct] = {}

@@ -22,6 +22,24 @@ from httpx import AsyncClient
 _win_skip = pytest.mark.skipif(sys.platform == "win32",
                                reason="sandbox_security imports POSIX-only 'resource'")
 
+# P1a-8（2026-10-30 lead 代收）failed-即-skip 纪律：环境性失败只认下面这组
+# **签名白名单**（逐条对应 ci/known-failures.md「宿主 AppArmor 禁非特权 userns」行），
+# 命中才允许 skip 且 reason 带签名名；产品性失败（回归、断言、错误档位）绝不落进
+# 白名单，必须红。白名单外的一切失败照抛——门禁不许被 skip 静默绕过。
+_ENV_FAILURE_SIGNATURES = (
+    "No permissions to create a new namespace",  # Ubuntu apparmor userns 拒（本机现态）
+    "unprivileged user namespaces",              # 同类文案变体
+    "Read-only file system: '/sys/fs/cgroup",    # cgroup 只读挂载（本机另一签名）
+)
+
+
+def _env_failure_reason(text: str) -> str | None:
+    """命中白名单签名 → 返回签名名（进 skip reason）；否则 None（=必须红）。"""
+    for sig in _ENV_FAILURE_SIGNATURES:
+        if sig in text:
+            return sig
+    return None
+
 PII_FREE_PAYLOAD = b"name,Alice\nname,Bob\nname,Carol\n"
 
 
@@ -62,9 +80,14 @@ async def test_e2e_data_loop_upload_execute_download_audit(
     assert sid in aud.text, "file_upload audit record for this session missing"
 
     if status not in ("ready", "running"):
-        pytest.skip(f"L0 provisioning status={status} in this environment "
-                    f"(bwrap/cgroup env whitelist, ci/known-failures.md); "
-                    f"upload/audit half of the loop verified")
+        reason = _env_failure_reason(status + " " + str(session))
+        if reason:
+            pytest.skip(f"L0 provisioning status={status} hit env whitelist signature "
+                        f"[{reason}] (ci/known-failures.md 宿主 AppArmor/userns 行); "
+                        f"upload/audit half of the loop verified")
+        pytest.fail(f"L0 provisioning status={status} is NOT an env-whitelisted failure "
+                    f"(no signature in {_ENV_FAILURE_SIGNATURES}) — product regression? "
+                    f"failed-即-skip 纪律：白名单外必须红。session={session}")
 
     ex = await client.post(f"/api/v1/sandbox-sessions/{sid}/execute",
                            json={"language": "python",
@@ -73,6 +96,14 @@ async def test_e2e_data_loop_upload_execute_download_audit(
     assert ex.status_code == 200, ex.text
     body = ex.json()
     out = str(body.get("output") or body.get("stdout") or body)
+    # failed-即-skip 纪律（本机实证落点）：会话能到 ready，但 exec 真跑时 bwrap
+    # 被宿主拒——错误以「exec 200 + 输出即错误」形态返回。输出命中白名单签名才
+    # skip（前半程 upload/audit 已验）；其余输出=产品面，照常红。
+    reason = _env_failure_reason(out)
+    if reason:
+        pytest.skip(f"exec output hit env whitelist signature [{reason}] "
+                    f"(ci/known-failures.md 宿主 AppArmor/userns 行); "
+                    f"upload/audit half verified; download/T5 half unreachable without exec")
     assert "pz08-hello" in out
 
     dl = await client.get(f"/api/v1/sandbox-sessions/{sid}/files/loop.csv",

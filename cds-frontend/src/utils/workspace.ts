@@ -105,9 +105,21 @@ export function filterMenuByWorkspace<T>(
     // CR N-2：带 children 的 keyless 子菜单不得直接放行——它是白名单，deny-by-default，
     // 将来漏写 key 的运营分组不能就这样暴露给开发角色。
     if (node.key == null && childless) return item as T;
-    if (DEVELOPER_MENU_KEYS.includes(String(node.key ?? ''))) return item as T;
-    if (!hasChildren) return null;
+    // A259（2026-10-30）：命中白名单**只授权这一层**，不再顺手把整棵子树放行。
+    // 旧写法是 `if (白名单命中) return item`，直接连着 children 一起返回；今天不出事，
+    // 全靠一条没人写下来的命名约定撑着——Sidebar 里带 children 的分组 key 全是不带斜杠的
+    // token（data-products / contracts / sandbox / dev / results / output-control / audit /
+    // monitoring / k8s-ops / identity / sec），而这份白名单全是带前导斜杠的路由，
+    // 于是没有任何一项能当父节点（`/audit` 与分组 `audit` 就差一个斜杠）。
+    // 下一个人把分组 key 写成 `/data-products`，那一整块运营子菜单就静默进开发菜单了
+    // （泄露的是菜单可见性，路由层还有 RoleRoute 兜着，所以是 latent）。
+    // 现在命中与否只决定这一层去留，子层一律递归各自主张——顺带把那条约定从"靠人记"
+    // 变成由代码保证（静态针见 workspace.a259.test.ts）。
+    const whitelisted = DEVELOPER_MENU_KEYS.includes(String(node.key ?? ''));
+    if (!hasChildren) return whitelisted ? (item as T) : null;
     const children = (node.children as KeyedNode[]).map(prune).filter((child): child is T => child != null);
+    // 一个子项都没活下来的分组不渲染（空子菜单点了没反应，比不出现更糟）。
+    // 注意这也意味着「命中白名单的分组若子项全不可见 ⇒ 整块消失」，与旧的整树放行相比是收紧。
     if (children.length === 0) return null;
     return { ...node, children } as unknown as T;
   };

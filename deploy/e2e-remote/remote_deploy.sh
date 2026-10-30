@@ -241,17 +241,26 @@ run cds-api cds-api:latest \
   -e CDS_CUBE_TEMPLATE_DIST_RETRY="2" \
   -e CDS_JANITOR_ENABLED="false" \
   -e CDS_RETENTION_JANITOR_ENABLED="true" \
+  -e CDS_INTEGRITY_PATROL_ENABLED="false" \
+  -e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-}" \
   -e CDS_RETENTION_JANITOR_DRY_RUN="true" \
   -e CDS_MERKLE_PIPELINE_ENABLED="false" \
   -e CDS_EGRESS_AUDIT_ENABLED="true" \
   -e CDS_NODE_STALE_SECONDS="300" \
   -e CDS_SHARED_VOLUME_ROOT=/data/shared-volumes \
   -e CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED="true" \
+  # EGRESS 审计写方治理（波3收口 2026-10-30）：ENABLED=true 而不设 LOG_PATH，
+  # JSONL 就落容器层默认 ./logs/cds-egress/——容器重建证据蒸发（e2e 证据面；
+  # 历史 access.jsonl 入库事故正是这枚默认相对路径的产物）。默认绝对路径+挂卷，
+  # 宿主 cds.env 可覆写。此键 A301 optional_empty 不适用：必须接，不接=丢证据。
+  -e CDS_EGRESS_AUDIT_LOG_PATH="${CDS_EGRESS_AUDIT_LOG_PATH:-/data/egress-audit/access.jsonl}" \
   -e CDS_RATE_LIMIT_ENABLED="true" \
   -e CDS_RATE_LIMIT_AUTH_PER_MINUTE="10" \
   -v "$(vol sandbox-workspace):/tmp/cds-sandbox" \
   -v "$(vol sandbox-workspace-l0):/tmp/cds-sandbox-l0" \
-  -v "$(vol cds-storage):/tmp/cds-storage"
+  -v "$(vol cds-storage):/tmp/cds-storage" \
+  -v "$(vol cds-kms-master):/var/lib/cds-kms" \
+  -v "$(vol cds-egress-audit):/data/egress-audit"
 
 echo "== waiting for api /health =="
 i=0

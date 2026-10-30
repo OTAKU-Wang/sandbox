@@ -7,7 +7,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/test-utils';
-import InspectionPipeline, { dpBudgetView } from '../InspectionPipeline';
+import InspectionPipeline from '../InspectionPipeline';
+import { dpBudgetView } from '../dpBudgetView';
 import api from '../../../services/api';
 
 Object.defineProperty(window, 'matchMedia', {

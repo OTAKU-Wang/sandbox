@@ -1,33 +1,19 @@
 import type { ReactNode } from 'react';
 import { Typography, Card, Row, Col, Statistic, Table, Tag, Space, Button, Tooltip as AntTooltip, Alert } from 'antd';
 import {
-  DatabaseOutlined,
-  FileTextOutlined,
-  CloudServerOutlined,
-  SafetyOutlined,
-  BlockOutlined,
-  AuditOutlined,
-  CloudUploadOutlined,
-  KeyOutlined,
-  PlayCircleOutlined,
-  PlusOutlined,
-  BarChartOutlined,
-  SearchOutlined,
-  CheckCircleOutlined,
-} from '@ant-design/icons';
+  DatabaseOutlined, FileTextOutlined, CloudServerOutlined, SafetyOutlined, BlockOutlined, AuditOutlined, CloudUploadOutlined, KeyOutlined, PlayCircleOutlined, PlusOutlined, BarChartOutlined, SearchOutlined, CheckCircleOutlined, } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, BarChart, Bar, Legend,
-} from 'recharts';
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, Legend, } from 'recharts';
 import { monitoringApi } from '../../services/monitoringApi';
 import { auditApi } from '../../services/auditApi';
 import { useApiEndpoints, useNotebooks } from '../../services/flow';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
 import { UserRole } from '../../types/enums';
-import { EmptyState, QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import SimulationBadge, { simulationStateForValue } from '../../components/Feedback/SimulationBadge';
 import dayjs from 'dayjs';
 

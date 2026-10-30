@@ -34,10 +34,20 @@ def _connector() -> FederationConnector:
     return connector
 
 
-async def _drain_pending() -> None:
-    """让 establish/revoke 的 fire-and-forget 持久化真正跑完（不用 sleep 碰运气）。"""
+async def _drain_pending(baseline: set[int]) -> None:
+    """让 establish/revoke 的 fire-and-forget 持久化真正跑完（不用 sleep 碰运气）。
+
+    A192x (P4-1): 只等「本用例新造」的任务。套件 loop 钉到 session 级后
+    ``asyncio.all_tasks()`` 是全套件视图——旧版 gather 全部 pending，被前置
+    用例的长寿守护任务（实证：egress_audit ``_writer_loop``，Event().wait()
+    永不完成）拖成 55% 位置全量 hang。基线快照来自 conftest `_task_generation`。
+    """
     current = asyncio.current_task()
-    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    pending = [
+        t
+        for t in asyncio.all_tasks()
+        if t is not current and not t.done() and id(t) not in baseline
+    ]
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
@@ -49,10 +59,10 @@ async def _db_rows() -> list[FederationTrustRecord]:
 
 class TestA63TrustIdRestart:
     @pytest.mark.asyncio
-    async def test_row_primary_key_is_the_derivation_of_the_opaque_id(self):
+    async def test_row_primary_key_is_the_derivation_of_the_opaque_id(self, _task_generation):
         connector = _connector()
         trust = connector.establish_trust(REMOTE, TrustLevel.VERIFIED)
-        await _drain_pending()
+        await _drain_pending(_task_generation)
 
         rows = await _db_rows()
         assert len(rows) == 1, "trust was not persisted at all"
@@ -61,11 +71,11 @@ class TestA63TrustIdRestart:
         assert fc.opaque_trust_id(row.id) == trust.trust_id
 
     @pytest.mark.asyncio
-    async def test_trust_created_before_restart_is_revocable_after(self):
+    async def test_trust_created_before_restart_is_revocable_after(self, _task_generation):
         """核心：重启前 `POST /trust` 返回的 id，重启后仍能查到并吊销到库里那一行。"""
         connector = _connector()
         trust = connector.establish_trust(REMOTE, TrustLevel.VERIFIED)
-        await _drain_pending()
+        await _drain_pending(_task_generation)
 
         reloaded = _connector()
         assert await reloaded.load_trusts_from_db() == 1
@@ -74,7 +84,7 @@ class TestA63TrustIdRestart:
             "while the trust is still active in the DB"
         )
         assert reloaded.revoke_trust(trust.trust_id) is True
-        await _drain_pending()
+        await _drain_pending(_task_generation)
 
         rows = await _db_rows()
         assert [r.status for r in rows] == ["revoked"], (
@@ -85,7 +95,7 @@ class TestA63TrustIdRestart:
         assert await after.load_trusts_from_db() == 0, "a revoked trust must not come back on restart"
 
     @pytest.mark.asyncio
-    async def test_loader_issued_id_always_addresses_its_own_row(self):
+    async def test_loader_issued_id_always_addresses_its_own_row(self, _task_generation):
         legacy_id = uuid.uuid4()
         async with test_session_factory() as session:
             session.add(
@@ -110,7 +120,7 @@ class TestA63TrustIdRestart:
         loaded = connector.list_trusts()[0]
 
         assert connector.revoke_trust(loaded.trust_id) is True
-        await _drain_pending()
+        await _drain_pending(_task_generation)
 
         rows = await _db_rows()
         assert len(rows) == 1 and rows[0].id == legacy_id

@@ -1,21 +1,11 @@
 import { Alert, Button, Empty, Spin } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { ReactNode } from 'react';
+import { getErrorMessage } from './errorMessage';
 
-export function getErrorMessage(error: unknown, fallback = '请求失败，请稍后重试') {
-  if (!error) return fallback;
-  if (typeof error === 'string') return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === 'object' && 'detail' in error) {
-    const detail = (error as { detail?: unknown }).detail;
-    if (typeof detail === 'string') return detail;
-    if (detail && typeof detail === 'object' && 'error' in detail) {
-      const nested = (detail as { error?: unknown }).error;
-      if (typeof nested === 'string') return nested;
-    }
-  }
-  return fallback;
-}
+// P4-3（lint 清零·react-refresh）：getErrorMessage / tableEmpty 两个非组件导出已拆去
+// ./errorMessage.ts 与 ./tableEmpty.tsx——组件文件混导出符号会让 HMR 整族失效。
+// 消费方请直接从各自模块导入；本文件只导出组件。
 
 export function QueryErrorAlert({
   error,
@@ -65,10 +55,4 @@ export function EmptyState({
       {action}
     </Empty>
   );
-}
-
-export function tableEmpty(description: ReactNode) {
-  return {
-    emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={description} />,
-  };
 }

@@ -1,7 +1,8 @@
 import { Alert, Button, Modal, Space, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { dataResourceApi } from '../../services/dataResourceApi';
-import { CenteredLoading, QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { CenteredLoading, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import { parseCsvPreview } from '../../utils/csvPreview';
 
 const { Text } = Typography;

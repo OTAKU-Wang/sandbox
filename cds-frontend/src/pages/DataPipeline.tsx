@@ -6,7 +6,8 @@ import { catalogApi } from '../services/catalogApi';
 import { dataPipelineApi, type PipelineTaskSummary } from '../services/dataPipelineApi';
 import { dataProductApi } from '../services/dataProductApi';
 import { dataResourceApi } from '../services/dataResourceApi';
-import { QueryErrorAlert, tableEmpty } from '../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../components/Feedback/tableEmpty';
 
 const { Title, Text } = Typography;
 

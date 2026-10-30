@@ -257,6 +257,51 @@ class StorageService:
                 return True
             return False
 
+    def stat_presence(self, object_ref: str | None) -> tuple[str, str | None]:
+        """P2-5（D-e2e-18）一致性巡检的只读探测面——纯 head，不读内容、不落盘、
+        不写任何对象；上传/下载热路径不经过这里（一行未动）。
+
+        诚实三态（禁冒认 ok）：
+          ("ok", None)            对象在桶里 / 本地遗留文件确实在
+          ("missing", reason)     桶可达而对象不在（NoSuchKey/NoSuchBucket）、
+                                  本地文件已丢、或 ready 行根本没有存储引用
+          ("uncheckable", reason) 无法下结论：MinIO 不可达/凭据错/指向陌生桶…
+        storage_path 混存现实（upload 返回值即如此）：minio://bucket/obj、
+        降级期的本地绝对路径、裸对象名，三种形态都要能吃。"""
+        if not object_ref:
+            return "missing", "storage_path 为空：ready 资源应持有存储引用"
+        if self._is_local_reference(object_ref):
+            try:
+                local = self._local_path_from_reference(object_ref)
+            except ValueError as e:
+                return "uncheckable", str(e)
+            try:
+                if local.exists():
+                    return "ok", None
+                return "missing", f"本地降级文件已不在（{local.name}）"
+            except OSError as e:  # 文件系统本身不可下结论（权限/IO）
+                return "uncheckable", f"{type(e).__name__}: {e}"
+        minio = self._get_minio_client()
+        if minio is None:
+            return "uncheckable", "MinIO 客户端不可用（不可达或未装 minio 包），无法判定对象是否存在"
+        try:
+            object_name = self._object_name_from_reference(object_ref)
+        except ValueError as e:
+            return "uncheckable", str(e)
+        try:
+            minio.stat_object(settings.MINIO_BUCKET, object_name)
+            return "ok", None
+        except Exception as e:
+            # 结构化识别 NoSuchKey/NoSuchBucket（真 SDK 的 S3Error 必带 code/status）。
+            # 不在这里 import minio.error：本机无 minio 包时 except 块里再抛
+            # ModuleNotFoundError 会把原始异常吞成假 uncheckable——分类必须只依赖
+            # 异常对象的形状，真实 SDK 与测试双形状通用，且可测。
+            code = getattr(e, "code", None)
+            status_code = getattr(e, "status", None)
+            if code in ("NoSuchKey", "NoSuchBucket") or status_code == 404:
+                return "missing", f"对象不在桶内（{code or 'HTTP 404'}）"
+            return "uncheckable", f"{type(e).__name__}: {e}"
+
     def _object_name_from_reference(self, object_ref: str) -> str:
         """Normalize object names returned by upload() or stored in DB."""
         if object_ref.startswith("minio://"):

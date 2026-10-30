@@ -5,7 +5,7 @@ import {
 import { DownloadOutlined, FileProtectOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { sandboxApi, type SessionProofBundle } from '../../services/sandboxApi';
-import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import SimulationBadge, { simulationStateForValue } from '../../components/Feedback/SimulationBadge';
 
 const { Text } = Typography;

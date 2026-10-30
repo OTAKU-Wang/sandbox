@@ -26,7 +26,7 @@ import {
   fetchJupyterTree,
   type JupyterContentEntry,
 } from '../../services/jupyterContents';
-import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import { formatDevTaskTime } from './devTasksModel';
 import { formatGibFromMb } from './homeModel';
 
@@ -38,6 +38,14 @@ const COLUMN_GAP = 25;
 // 图 1 §3.1 实测文件行距 44（文字行 311/350/394/…）。行高只有这一处来源：文件树是递归的
 // FileRows，本文件没有虚拟化列表组件，不存在需要同步的第二处 rowHeight。
 const ROW_HEIGHT = 44;
+
+/* 本屏的危险色只有一支真值：index.css `:root` 的 `--cds-danger`（antd red-6 #cf1322）。
+   原来这里是三处内联 `#c0392b`（目录读取失败那行、状态点「沙箱已断开」、供数异常那段），
+   与同目录 NotebookWorkbench 那支 `--nbw-danger` 是同一屏两种红的老问题（A225 的判法：
+   同一屏两种红没有依据，统一走 antd red-6）。本页没挂路由、也没有自己的 .css，所以走全局
+   令牌而不是页面级令牌；`--nbw-danger` 声明在 `.nbw-root` 里，引用它在这页只会落到兜底值，
+   那是假引用。兜底值照留：令牌那一行被人删掉时，退回的仍是同一支红，不会变成 antd 默认色。 */
+const DANGER_INK = 'var(--cds-danger, #cf1322)';
 
 /** 原型标题卡上那句「交付场景」说明：图 1 的副标题位置留给任务真值，这句话收进旁边 ⓘ。 */
 const SCENE_NOTE = '交付场景：数据沙箱开发 · 配置合约、资源与关联数据后即可启动调试';
@@ -127,7 +135,7 @@ function FileRows({ entries, depth }: { entries: JupyterContentEntry[]; depth: n
               )}
             </div>
             {entry.isDirectory && entry.error ? (
-              <div style={{ paddingLeft: 26 + depth * 14, color: '#c0392b', fontSize: 12 }}>
+              <div style={{ paddingLeft: 26 + depth * 14, color: DANGER_INK, fontSize: 12 }}>
                 读取失败：{entry.error}
               </div>
             ) : null}
@@ -182,7 +190,7 @@ export function JupyterDevEnv({ notebookId }: { notebookId: string }) {
   const connection = !ticket
     ? null
     : contents.isError
-      ? { color: '#c0392b', label: '● 沙箱已断开' }
+      ? { color: DANGER_INK, label: '● 沙箱已断开' }
       : contents.isSuccess
         ? { color: '#2e9e5b', label: '● 沙箱已连接' }
         : { color: '#8c8c8c', label: '● 连接检测中' };
@@ -375,7 +383,7 @@ export function JupyterDevEnv({ notebookId }: { notebookId: string }) {
                       。票据 {ticket.ttl}s 内一次性有效，会话 Cookie 8 小时。
                     </div>
                     {ticket.inject_errors?.length ? (
-                      <div style={{ color: '#c0392b' }}>
+                      <div style={{ color: DANGER_INK }}>
                         供数异常 {ticket.inject_errors.length} 项（后端原话）：
                         {ticket.inject_errors.slice(0, 3).join('；')}
                         {ticket.inject_errors.length > 3 ? '…' : ''}

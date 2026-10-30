@@ -412,6 +412,13 @@ role='operator'`），属本机测试夹具。
 5. **D-e2e-18 库里 `ready` 的资源对象可能已不在 MinIO**：早期 fixture `88057f46…`（零售订单 031858）注入时
    `S3Error … NoSuchKey`，票据如实记 `injected: []` + 逐资源错误、界面不假装注入成功（诚实降级按预期），
    但 `data_resources.status=ready` 与桶内对象存在性之间没有一致性巡检。
+   **P2-5 已落地（2026-10-30 波次 3）**：`app/services/integrity_patrol.py` 批量 head 对账，结果写
+   `data_resources.integrity_status ∈ {ok, missing, uncheckable}`（迁移 0034，默认 `uncheckable`
+   =未核实、禁冒认 ok；`integrity_checked_at=NULL` 区分「从未巡检」）；MinIO 不可达一律 `uncheckable`
+   诚实档。审计 `integrity.patrol` 留痕；台账 `GET /api/v1/integrity/data-resources`、手动触发
+   `POST /api/v1/integrity/patrol`（OPERATOR+，不受调度闸约束）；定时化搭载会话清理骨架、双门默认关
+   （`CDS_INTEGRITY_PATROL_ENABLED=false` × interval>0）。不碰上传/下载热路径。
+   门禁：`tests/test_integrity_patrol.py`（诚实三态分类学/只碰 ready/双门默认关/0034 恒单头+祖先形）。
 
 ### 10.2 原型自相矛盾处（按图记录，不自行统一）
 

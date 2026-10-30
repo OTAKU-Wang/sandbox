@@ -41,9 +41,16 @@ def _connector() -> FederationConnector:
     return connector
 
 
-async def _drain_pending() -> None:
+async def _drain_pending(baseline: set[int]) -> None:
+    """A192x (P4-1): 只等本用例新造的任务——session 级 loop 上 all_tasks() 是
+    全套件视图，旧版全局 gather 会被前置用例的长寿守护任务永挂（conftest
+    `_task_generation` 提供基线快照；同 test_ocr_a63 的修法）。"""
     current = asyncio.current_task()
-    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    pending = [
+        t
+        for t in asyncio.all_tasks()
+        if t is not current and not t.done() and id(t) not in baseline
+    ]
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
@@ -53,10 +60,10 @@ async def _rows() -> list[FederationTrustRecord]:
         return list((await session.execute(select(FederationTrustRecord))).scalars().all())
 
 
-async def _establish(connector: FederationConnector, level: TrustLevel):
+async def _establish(connector: FederationConnector, level: TrustLevel, baseline: set[int]):
     """establish_trust + 等它的 fire-and-forget 落库：两条写路径不能在同一连接上交错。"""
     trust = connector.establish_trust(REMOTE, level)
-    await _drain_pending()
+    await _drain_pending(baseline)
     return trust
 
 
@@ -66,9 +73,9 @@ async def _live_rows() -> list[FederationTrustRecord]:
 
 class TestA85PersistTrustUpsert:
     @pytest.mark.asyncio
-    async def test_repeating_persist_of_one_trust_updates_the_row_in_place(self):
+    async def test_repeating_persist_of_one_trust_updates_the_row_in_place(self, _task_generation):
         connector = _connector()
-        trust = await _establish(connector, TrustLevel.BASIC)
+        trust = await _establish(connector, TrustLevel.BASIC, _task_generation)
 
         trust.trust_level = TrustLevel.FULL
         trust.allowed_operations = ["read_catalog", "execute"]
@@ -82,11 +89,11 @@ class TestA85PersistTrustUpsert:
         assert rows[0].allowed_operations_json == '["read_catalog", "execute"]'
 
     @pytest.mark.asyncio
-    async def test_re_establishing_the_same_pair_leaves_one_live_row_with_the_newest_state(self):
+    async def test_re_establishing_the_same_pair_leaves_one_live_row_with_the_newest_state(self, _task_generation):
         connector = _connector()
-        first = await _establish(connector, TrustLevel.BASIC)
+        first = await _establish(connector, TrustLevel.BASIC, _task_generation)
 
-        second = await _establish(connector, TrustLevel.VERIFIED)
+        second = await _establish(connector, TrustLevel.VERIFIED, _task_generation)
         assert second.trust_id != first.trust_id
 
         live = await _live_rows()
@@ -96,13 +103,13 @@ class TestA85PersistTrustUpsert:
         )
 
     @pytest.mark.asyncio
-    async def test_revoking_the_newest_trust_empties_the_live_set(self):
+    async def test_revoking_the_newest_trust_empties_the_live_set(self, _task_generation):
         connector = _connector()
-        first = await _establish(connector, TrustLevel.BASIC)
-        second = await _establish(connector, TrustLevel.VERIFIED)
+        first = await _establish(connector, TrustLevel.BASIC, _task_generation)
+        second = await _establish(connector, TrustLevel.VERIFIED, _task_generation)
 
         assert connector.revoke_trust(second.trust_id) is True
-        await _drain_pending()
+        await _drain_pending(_task_generation)
 
         live = await _live_rows()
         assert live == [], (
@@ -111,7 +118,7 @@ class TestA85PersistTrustUpsert:
         )
 
     @pytest.mark.asyncio
-    async def test_revoked_history_for_the_pair_is_not_collapsed(self):
+    async def test_revoked_history_for_the_pair_is_not_collapsed(self, _task_generation):
         async with test_session_factory() as session:
             session.add(
                 FederationTrustRecord(
@@ -130,7 +137,7 @@ class TestA85PersistTrustUpsert:
             await session.commit()
 
         connector = _connector()
-        await _establish(connector, TrustLevel.VERIFIED)
+        await _establish(connector, TrustLevel.VERIFIED, _task_generation)
 
         rows = await _rows()
         statuses = sorted(r.status for r in rows)
@@ -139,14 +146,14 @@ class TestA85PersistTrustUpsert:
         )
 
     @pytest.mark.asyncio
-    async def test_reestablish_after_suspend_reactivates_a_single_live_row(self):
+    async def test_reestablish_after_suspend_reactivates_a_single_live_row(self, _task_generation):
         connector = _connector()
-        trust = await _establish(connector, TrustLevel.BASIC)
+        trust = await _establish(connector, TrustLevel.BASIC, _task_generation)
 
         assert connector.suspend_trust(trust.trust_id) is True
-        await _drain_pending()
+        await _drain_pending(_task_generation)
 
-        again = await _establish(connector, TrustLevel.FULL)
+        again = await _establish(connector, TrustLevel.FULL, _task_generation)
 
         live = await _live_rows()
         assert len(live) == 1, f"suspend -> re-establish must not stack rows: {[r.status for r in live]}"

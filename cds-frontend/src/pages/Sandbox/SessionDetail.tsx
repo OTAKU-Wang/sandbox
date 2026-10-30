@@ -64,7 +64,8 @@ import { metaApi } from '../../services/metaApi';
 import { useAuthStore } from '../../stores/authStore';
 import { UserRole } from '../../types/enums';
 import { hasAnyRole } from '../../utils/roles';
-import { getErrorMessage, CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import SimulationBadge, { simulationStateForValue, type SimulationBadgeState } from '../../components/Feedback/SimulationBadge';
 import { supportsWsStreaming, rowReviewStatus, parseW2Error } from './sessionWorkbench';
 

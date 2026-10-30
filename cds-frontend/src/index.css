@@ -8,13 +8,20 @@
   --cds-success: #00a870;
   --cds-purple: #7a5af8;
   --cds-orange: #f77335;
+  /* 危险红（antd red-6）。原型色板里没有它——它来自组件库那一侧。提到 :root 是因为有两类页面
+     拿不到页面级令牌：未挂路由的独立页（JupyterDevEnv）和走 portal 的片段，作用域一断，
+     页面级 `var(--nbw-*)` 就只剩兜底值。引用点仍一律带兜底：令牌断了也只是退回同一支红。
+     全局这一支是唯一真值，`--nbw-danger` 已改成它的别名（notebookWorkbench.css），
+     两条钉 `--nbw-danger: #cf1322` 的旧门同步改成钉 var 形。 */
+  --cds-danger: #cf1322;
   --cds-primary-soft: #e8f1ff;
   /* A240：页面底色原本在正文里拄了 3 处字面量（body / .cds-app / 侧栏一侧），
      而文件头自己写着「组件一律引用这些令牌」——补上令牌，改底色只动这一行。 */
   --cds-page-bg: #f0f5fb;
   --cds-success-soft: #e8f7ee;
   --cds-purple-soft: #f1ecff;
-  --cds-orange-soft: #fff3e8;
+  /* `--cds-orange-soft` 已删：波次 3 死令牌门扫出来它是这一批 soft 里唯一 0 引用的，
+     而豁免表每多一行都是永续债（lead 裁定）。色板哪天真用到橙色浅底，加回来零成本。 */
 }
 
 body {
@@ -761,14 +768,10 @@ body {
   line-height: 20px;
 }
 
-/* 内嵌小卡（只有 .cds-subcard：首页内存两段按 strict-1-home.md §8 直接坐在卡体白底上，
-   不再有 .cds-home-mem 外壳 ⇒ 该选择器已除）。 */
-.cds-subcard {
-  padding: 14px 16px;
-  border: 1px solid #eef1f6;
-  border-radius: 10px;
-  background: #fafcfe;
-}
+/* 这里原来有一条 `.cds-subcard { … }`（内嵌小卡：#fafcfe 底 + 1px 边框）。波次 3 死选择器门
+   扫出来它在全仓 0 个消费者——而且它自带的注释就写着「首页内存两段直接坐在卡体白底上」，
+   与规则本身（给小卡一层浅底和边框）互相矛盾，是上一轮删 `.cds-home-mem` 外壳时漏下的尾巴。
+   真值以注释那句为准：不留壳、不留底，所以删规则而不是补类名。 */
 
 :is(.cds-home, .cds-detail) [data-bar] {
   transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -950,16 +953,15 @@ body {
 
 /* 审计详情弹窗（PNG 4-2 实测：弹窗内唯一实心面板 y354..511 = #f7f9fc；分区标题非 Divider；按钮 h40；标题 18px） */
 
-.cds-detail-modal .cds-detail-section {
-  font-weight: 600;
-  margin: 0 0 12px;
-}
-
-.cds-detail-modal .cds-detail-panel {
-  background: #f7f9fc;
-  padding: 16px 20px;
-  border-radius: 6px;
-}
+/* 这里原来有两条 `.cds-detail-modal .cds-detail-section` / `-panel`（分区标题 600 字重 +
+   #f7f9fc 浅底面板）。波次 3 死选择器门扫出它俩 0 消费者；追下去发现不是「真值没落地」，
+   而是「真值改了名字」：同一批像素现在活在 auditLog.css 的 `.cds-audit-modal .cds-audit-section`
+   （16px/600 + 4×16 蓝条 + 无分隔线）与 `.cds-audit-modal .cds-audit-panel`
+   （`--audit-head-bg` = #f7f9fc、圆角 8、padding 9px 16px）上，PNG 4-2 的读数一条没丢。
+   所以删的是这一代孤儿规则，而不是把旧类名接回 AuditLog：两条旧规则与 auditLog.css 那两条
+   同权重（0,2,0），而弹窗上 `.cds-detail-modal` 与 `.cds-audit-modal` 两个类同时都在，
+   接回去就变成 padding 16px 20px vs 9px 16px、圆角 6 vs 8 抢同一批像素、谁赢只看 CSS 加载顺序。
+   DOM 侧真值现由 AuditLog.test.tsx「弹窗分区标题与灰面板坐在真节点上」那条针钉住。 */
 
 /* 3-3：KPI 三卡坐在一条浅蓝带上（PNG 底色 #E8F1FF→#F7FBFF 竖向渐变），与下方明细卡分层。 */
 /* 首页 C2 指标条（图 1 §5 + 像素探针 c2probe3.py，2026-10-18）：一个 1172×136 面板内 4 列，

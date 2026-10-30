@@ -207,11 +207,9 @@ jobs:
         working-directory: cds-frontend
         run: npm run build
 
-      - name: Lint (informational baseline — 13 known errors, must not grow)
+      - name: Lint (hard gate since 2026-10-30 wave 3 — baseline reached 0 errors via 10/10 real refactors, 0 waivers)
         working-directory: cds-frontend
-        continue-on-error: true
-        run: |
-          npm run lint || echo "::warning::eslint failures — informational baseline (2026-10-16 FE lane: 13 errors, files byte-identical to HEAD); lint errors introduced by this PR still belong to that PR (see ci/known-failures.md)"
+        run: npm run lint
 
   secrets:
     runs-on: ubuntu-latest

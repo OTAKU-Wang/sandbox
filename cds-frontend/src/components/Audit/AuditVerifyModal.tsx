@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Modal, Spin, Table, Tag, Typography } from 'antd';
 import { auditApi, type MerkleProofStep } from '../../services/auditApi';
-import { QueryErrorAlert, getErrorMessage } from '../Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../Feedback/QueryFeedback';
+import { getErrorMessage } from '../Feedback/errorMessage';
 import SimulationBadge, { simulationStateForValue } from '../Feedback/SimulationBadge';
 
 const { Text } = Typography;

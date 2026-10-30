@@ -23,44 +23,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, Modal, Select, Spin, Tooltip, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  ArrowLeftOutlined,
-  CheckCircleFilled,
-  DownOutlined,
-  FileTextOutlined,
-  InfoCircleOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
+  ArrowLeftOutlined, CheckCircleFilled, DownOutlined, FileTextOutlined, InfoCircleOutlined, ReloadOutlined, } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import './monacoSetup';
 import './notebookWorkbench.css';
 import {
-  describeFlowError,
-  UNKNOWN_TEXT,
-  parseNotebookContent,
-  serializeNotebookContent,
-  canonicalizeNotebookContent,
-  defaultNotebookPath,
-  useCreateNotebook,
-  useCreateWorkload,
-  useDeleteNotebook,
-  useExecuteCell,
-  useJupyterStatus,
-  useNotebook,
-  useNotebooks,
-  useOpenJupyterEnv,
-  useRunNotebook,
-  useStartDevSession,
-  useUpdateNotebook,
-  type CellExecuteResult,
-  type JupyterEnvTicket,
-  type Notebook,
-} from '../../services/flow';
+  describeFlowError, UNKNOWN_TEXT, parseNotebookContent, serializeNotebookContent, canonicalizeNotebookContent, defaultNotebookPath, useCreateNotebook, useCreateWorkload, useDeleteNotebook, useExecuteCell, useJupyterStatus, useNotebook, useNotebooks, useOpenJupyterEnv, useRunNotebook, useStartDevSession, useUpdateNotebook, type CellExecuteResult, type JupyterEnvTicket, type Notebook, } from '../../services/flow';
 import { sandboxApi } from '../../services/sandboxApi';
 import { useQuotaUsage } from '../../services/quotaApi';
 import { fetchJupyterTree } from '../../services/jupyterContents';
-import { CenteredLoading, QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { CenteredLoading, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import { backendFromCellResult, backendFromNotebook, toOutputPane } from './display';
 import { RuntimeStatusBanner } from './RuntimeStatusBanner';
 import { useContractOptions } from './useContractOptions';
@@ -101,6 +76,13 @@ interface CellState {
 // 单元格 id 只要在本页生命周期里唯一即可；仓里没有 nanoid 这个依赖，就不为一个计数器加包。
 let cellSeq = 0;
 const nextCellId = () => `cell-${(cellSeq += 1)}`;
+
+/* A225：本屏的危险色只有一支真值——notebookWorkbench.css 的 `--nbw-danger`（antd red-6）。
+   以前这里散着三支内联红（供数异常 / 目录读取失败 / stderr），与 CSS 侧那一支在同一屏并存成
+   两种红；台账说的"两套红"活的就是这三处内联，不是 CSS（CSS 里那条 `.nbw-tree-error` 早就是死规则）。
+   内联样式引令牌时同样带兜底值：这几个节点在 portal 外时吃到令牌，被搬进 portal 就吃兜底，
+   与本文件 `var(--nbw-x, 兜底)` 的口径一致，两头都不会拿到 undefined。 */
+const DANGER_INK = 'var(--nbw-danger, #cf1322)';
 
 /** 会话目录 = 后端下发的 notebook_path 去掉文件名；开发环反代只允许列这个前缀以内。 */
 function sessionDirOf(notebookPath: string | null | undefined): string {
@@ -482,13 +464,18 @@ function NotebookWorkspace({
   // D-e2e-48：自动保存对齐原型卡头「已自动保存 HH:MM:SS」——实现 = 本页前端每次编辑
   // 重置一个 2s 计时器，到点静默 PUT（服务端仍无自动保存任务，离开本页即不再触发）；
   // 自动保存与手动保存同价：每次都是新版本（代价写在卡头 tooltip，不假装免费）。
+  // P4-3（lint 清零·refs-during-render）：两个「最新值桥」的 .current 赋值从渲染期挪进
+  // commit 后的 effect——唯一读者是 2s setTimeout 回调，commit 必在其触发之前，语义不变；
+  // 「ref 比 effect 闭包更新」的 D-e2e-48/CR B-1 设计原样保留（每次 commit 都刷新）。
   const autoSaveBridge = useRef(saveContent);
-  autoSaveBridge.current = saveContent;
   // CR B-1：服务端已被别人改过时，自动保存不得盲 PUT 掉别人的版本——
   // 冲突横幅（reloadFromServer）必须活到用户亲手处置；手动保存是用户
   // 知情决策，仍照走。ref 而非闭包：2s 窗口内后端回流也要被看见。
   const serverChangedRef = useRef(false);
-  serverChangedRef.current = serverChanged;
+  useEffect(() => {
+    autoSaveBridge.current = saveContent;
+    serverChangedRef.current = serverChanged;
+  });
   useEffect(() => {
     if (!dirty) return undefined;
     const timer = window.setTimeout(() => {
@@ -1128,12 +1115,12 @@ function DevEnvFrame({
               空产物会被如实记为真空。
             </div>
             {ticket.inject_errors?.length ? (
-              <div style={{ color: '#c0392b' }}>
+              <div style={{ color: DANGER_INK }}>
                 供数异常 {ticket.inject_errors.length} 项（后端原话）：{ticket.inject_errors.slice(0, 3).join('；')}
                 {ticket.inject_errors.length > 3 ? '…' : ''}
               </div>
             ) : null}
-            {treeError ? <div style={{ color: '#c0392b' }}>左栏目录读取失败：{treeError}</div> : null}
+            {treeError ? <div style={{ color: DANGER_INK }}>左栏目录读取失败：{treeError}</div> : null}
           </div>
         }
       />
@@ -1175,7 +1162,7 @@ function OutputView({ result }: { result: CellExecuteResult }) {
       ) : null}
       {pane.repr ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{pane.repr}</pre> : null}
       {pane.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{pane.stdout}</pre> : null}
-      {pane.stderr ? <pre style={{ margin: 0, color: '#c0392b', whiteSpace: 'pre-wrap' }}>{pane.stderr}</pre> : null}
+      {pane.stderr ? <pre style={{ margin: 0, color: DANGER_INK, whiteSpace: 'pre-wrap' }}>{pane.stderr}</pre> : null}
       {!pane.hasContent ? (
         <Text type="secondary" style={{ fontSize: 12 }}>
           无输出（stdout/stderr/repr 都是空）

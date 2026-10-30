@@ -2,7 +2,8 @@ import { Alert, Button, Descriptions, Modal, Table, Tag, Typography } from 'antd
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { flowApi, flowKeys } from '../../services/flow';
-import { CenteredLoading, QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { CenteredLoading, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import PreviewWatermarkOverlay from '../../components/Feedback/PreviewWatermark';
 import { parseCsvPreview } from '../../utils/csvPreview';
 import { useAuthStore } from '../../stores/authStore';

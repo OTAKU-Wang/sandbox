@@ -124,8 +124,11 @@ def test_remote_deploy_failfast_covers_every_passed_secret():
     fail_fast = {t for t in loop.group(1).split() if t.rstrip("\\").isidentifier()}
     # optional-by-design empty pass-throughs: consumed only when the feature is
     # explicitly enabled (pairing/boot validation happens in the app itself).
+    # P2-3 adds CDS_KMS_MASTER_KEY_FILE: ""=旧行为（内存态主密钥）是设计默认，
+    # 非空但不可用的路径由 validate_security_config 拒启把关（A301 同口径）。
     optional_empty = {"CDS_FEDERATION_CERT", "CDS_FEDERATION_CA_BUNDLE",
-                      "CDS_FEDERATION_KEY", "CDS_ATTESTATION_ALLOWED_MEASUREMENTS"}
+                      "CDS_FEDERATION_KEY", "CDS_ATTESTATION_ALLOWED_MEASUREMENTS",
+                      "CDS_KMS_MASTER_KEY_FILE"}
     inline = set(re.findall(r'-e (CDS_[A-Z_]+|VAULT_[A-Z_]+)="\$\{\1:-\}"', text))
     missing = inline - fail_fast - optional_empty
     assert not missing, f"passed with :- but not fail-fast checked: {sorted(missing)}"
@@ -482,3 +485,102 @@ def test_dev_twins_keep_the_relaxed_posture_pinned():
     local = read(LOCAL / "local_deploy.sh")
     assert "dev-only" in local, "local_deploy must keep declaring itself a dev stack"
     assert re.search(r'-e CDS_DEBUG=true', local), "local node track is DEBUG by design"
+
+
+# ---------------------------------------------------------------------------
+# P2-3（2026-10-30 波次 3，lane-e）：KMS 主密钥文件持久化的部署接线形状针。
+# lane-b 语义：CDS_KMS_MASTER_KEY_FILE 空 = 旧行为（内存态主密钥）逐字节不变；
+# 设路径 = 主密钥落文件。部署面纪律：默认一律「不设值」——本针同时反向锁死
+# 「不许把生产姿态偷偷翻成持久化」（那是显式运维决策，不是部署面的默认）。
+# ---------------------------------------------------------------------------
+
+def test_kms_master_key_file_env_wired_with_default_unset():
+    # dev/prod compose：透传形 `${VAR:-}` = 默认空串 = Settings 默认 = 旧行为
+    for f in (ROOT / "docker-compose.yml", ROOT / "docker-compose.prod.yml"):
+        text = read(f)
+        assert 'CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-}"' in text, f
+    # k8s：ConfigMap 显式空串（唯一改点，启用=改这一行）
+    app = read(K8S / "cds-app.yaml")
+    assert 'CDS_KMS_MASTER_KEY_FILE: ""' in app
+    # remote_deploy：宿主透传，默认空
+    assert '-e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-}" \\' in read(E2E / "remote_deploy.sh")
+    # local_deploy（第七拷贝，P6 漂移纪律，lead 代收 2026-10-30）：同款透传默认空
+    assert '-e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-}" \\' in read(LOCAL / "local_deploy.sh")
+    # helm：values 默认空 + 模板条件渲染（空 = 不出现 = 渲染与旧逐字节一致）
+    vals = yaml.safe_load(read(HELM / "values.yaml"))
+    assert vals["kms"]["masterKeyFile"] == "", "helm 默认必须是不设值（旧行为）"
+    cm = read(HELM / "templates" / "configmap.yaml")
+    assert "{{- if .Values.kms.masterKeyFile }}" in cm
+    assert 'CDS_KMS_MASTER_KEY_FILE: {{ .Values.kms.masterKeyFile | quote }}' in cm
+
+
+def test_kms_master_key_volume_mounted_in_every_api_copy():
+    # 卷先行挂载 = 启用只改 env 一行的运维体验；env 空时目录空转零行为。
+    for f in (ROOT / "docker-compose.yml", ROOT / "docker-compose.prod.yml"):
+        assert "- cds-kms-master:/var/lib/cds-kms" in read(f), f
+        assert "cds-kms-master:" in read(f).split("\nvolumes:")[-1], f"{f} 顶层卷声明缺失"
+    app = read(K8S / "cds-app.yaml")
+    assert "name: api-kms-master" in app
+    assert "claimName: cds-api-kms-master-pvc" in app
+    assert "name: cds-api-kms-master-pvc" in app, "PVC 对象本体必须在清单里"
+    e2e = read(E2E / "remote_deploy.sh")
+    assert '-v "$(vol cds-kms-master):/var/lib/cds-kms"' in e2e
+    assert '-v "l_cds_kms:/var/lib/cds-kms"' in read(LOCAL / "local_deploy.sh"), "第七拷贝卷也要在位"
+    dep = read(HELM / "templates" / "deployment-api.yaml")
+    assert 'mountPath: /var/lib/cds-kms' in dep
+    assert "subPath: kms-master" in dep, "helm 复用 RWX 共享的 subPath，多副本同键"
+
+
+def test_kms_master_key_file_not_secret_and_no_value_baked():
+    """这是路径不是密钥：k8s/secrets.yaml 不许出现该键（lane-b 拍板），且任何
+    副本都不许烤入真实路径值（默认旧行为的反向锁）。"""
+    secrets = read(K8S / "secrets.yaml")
+    assert "KMS_MASTER_KEY_FILE" not in secrets, "路径不是 secret，别塞进来"
+    for f in (ROOT / "docker-compose.yml", ROOT / "docker-compose.prod.yml",
+              K8S / "cds-app.yaml", HELM / "values.yaml", E2E / "remote_deploy.sh"):
+        text = read(f)
+        assert "/var/lib/cds-kms/master" not in text, f"{f} 烤入了具体主密钥文件名（启用属人工决策）"
+
+
+# ---------------------------------------------------------------------------
+# EGRESS 审计写方治理（波3收口 2026-10-30）：ENABLED=true 必须「路径+卷」成对，
+# 防「只开不接」回潮——审计 JSONL 落容器层默认 ./logs/cds-egress/ = e2e 证据面
+# 随容器重建蒸发（历史 access.jsonl 入库事故的病根就是这枚相对默认路径）。
+# ---------------------------------------------------------------------------
+
+def _run_block(text: str, needle: str) -> str:
+    """取包含 needle 的那条 `run …` 命令的完整文本块（到无续行反斜杠为止）。
+    run 块里允许夹注释行（本仓惯例）：它们不参与续行，下探/回探都要跳过。"""
+    lines = text.splitlines()
+    idx = next(i for i, l in enumerate(lines) if needle in l)
+    start = next(i for i in range(idx, -1, -1) if lines[i].startswith("run "))
+    end = idx
+    while end + 1 < len(lines) and (
+        lines[end].rstrip().endswith("\\") or lines[end].lstrip().startswith("#")
+    ):
+        end += 1
+    return "\n".join(lines[start:end + 1])
+
+
+def test_egress_audit_enabled_always_ships_log_path_and_volume():
+    log_path = ('-e CDS_EGRESS_AUDIT_LOG_PATH='
+                '"${CDS_EGRESS_AUDIT_LOG_PATH:-/data/egress-audit/access.jsonl}"')
+    for script, vol in (
+        (E2E / "remote_deploy.sh", '-v "$(vol cds-egress-audit):/data/egress-audit"'),
+        (LOCAL / "local_deploy.sh", '-v "l_cds_egress_audit:/data/egress-audit"'),
+    ):
+        text = read(script)
+        enabled = [l for l in text.splitlines() if 'CDS_EGRESS_AUDIT_ENABLED="true"' in l]
+        assert len(enabled) == 1, f"{script}：ENABLED 钉应恰一枚，实际 {len(enabled)}"
+        block = _run_block(text, 'CDS_EGRESS_AUDIT_ENABLED="true"')
+        assert log_path in block, f"{script}：ENABLED 同块必须有 LOG_PATH（默认须是绝对路径）"
+        assert vol in block, f"{script}：路径接了但卷没挂 = 卷在证据蒸发"
+        assert ':-./logs' not in text and ':-logs/' not in text, "默认值不得回潮成相对路径"
+    # k8s 补点：api-egress-audit PVC 早已挂好，路径必须显式接上（代码默认 ENABLED=true
+    # + 相对 LOG_PATH，靠默认=蒸发）；prod compose/helm 两副本本就成对在位，顺带总锁。
+    app = read(K8S / "cds-app.yaml")
+    assert "CDS_EGRESS_AUDIT_LOG_PATH: /data/egress-audit/access.jsonl" in app
+    assert "claimName: cds-api-egress-audit-pvc" in app
+    for f in (ROOT / "docker-compose.prod.yml", HELM / "values.yaml"):
+        text = read(f)
+        assert "CDS_EGRESS_AUDIT_ENABLED" in text and "CDS_EGRESS_AUDIT_LOG_PATH" in text, f

@@ -6,15 +6,22 @@
    Dropdown/Tooltip 挂 document.body）——那里取不到这些变量，声明整条失效。两种修法里选了
    更便宜的那种：**每个引用点都带兜底值**（`var(--nbw-x, 兜底)`），令牌仍然集中在下面这一处。
    同时把两支红收成一支：树错误用 #c0392b、运行/日志错误用 #cf1322，同一屏两种红没有依据，
-   统一走 antd red-6 `#cf1322`。 */
+   统一走 antd red-6 `#cf1322`。
+   波次 3 补正：那支 #c0392b 其实在 CSS 里早就是死规则（`.nbw-tree-error` 全仓 0 个引用，
+   目录读取失败走的是 antd `<Text type="danger">`），活着的那几支红是 TSX 里的内联
+   `#c0392b`（NotebookWorkbench.tsx 三处）——所以本轮删掉死规则连同 `--nbw-tree-error-indent`
+   那个 30px 魔数，并把三处内联红改指这支令牌。 */
 .nbw-root {
   --nbw-border: #eceff4;
   --nbw-muted: #8c8c8c;
   --nbw-ink: #1f2937;
   --nbw-blue: #1b6ef3;
   --nbw-green: #2e9e5b;
-  --nbw-danger: #cf1322;
-  --nbw-tree-error-indent: 30px;
+  /* 危险红自波次 3 起是全局那一支的**别名**（唯一真值在 index.css `:root` 的 `--cds-danger`）。
+     本页自己的引用点照旧写 `--nbw-danger`（页面级名字保持不动，改动面留在令牌这一行）；
+     兜底值照留：本页样式表可以单独被加载/单测，:root 那一行取不到时仍是同一支红。
+     钉这条形状的门有两条，改这儿要一起改：cssLowClear.wave2 与 cssHygiene.wave3。 */
+  --nbw-danger: var(--cds-danger, #cf1322);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -182,13 +189,12 @@
   border: 0;
   cursor: pointer;
 }
-.nbw-tree-error {
-  /* 缩进 30 = 行内缩进 6 + 折叠钮 18 + 间隙 6（notebookWorkbenchPanels.tsx:75 的
-     `paddingLeft: 6 + depth * 14`，depth 0 那一档的正文起点），写死过一次的魔数收成令牌。 */
-  padding: 0 8px 6px var(--nbw-tree-error-indent, 30px);
-  font-size: 12px;
-  color: var(--nbw-danger, #cf1322);
-}
+/* A225：这里原来有一条 `.nbw-tree-error { padding: 0 8px 6px var(--nbw-tree-error-indent, 30px); … }`。
+   全仓 0 个引用（`nbw-tree-error` 在 .tsx/.ts 里一次都没出现过）：目录读取失败那一行
+   实际走的是 notebookWorkbenchPanels.tsx 的 antd `<Text type="danger">`。死选择器比魔数更该收口
+   ——它让"改这里就能调树错误行"这个读法一直成立，而实际上改哪儿都没用。连同 30px 令牌一起删；
+   要恢复这一族样式先给那行 Text 挂上类名（静态针见 cssHygiene.wave3.test.ts：CSS 里不许再出现
+   没人用的 .nbw-* 选择器）。 */
 
 .nbw-panel-foot {
   flex: 0 0 auto;

@@ -165,6 +165,16 @@ class Settings(BaseSettings):
     WORKSPACE_RESIDUE_RETENTION_DAYS: int = 30
     DEV_ARTIFACT_RETENTION_DAYS: int = 14
 
+    # P2-5（D-e2e-18，ss-19 §10.1-5）：MinIO 一致性巡检——data_resources.status
+    # =ready 与桶内对象存在性的对账。双门形状（janitor 同款）：
+    # INTEGRITY_PATROL_ENABLED 主开关默认 false（生产默认关闭），且要求
+    # INTEGRITY_PATROL_INTERVAL_SECONDS > 0 才随会话清理骨架调度；interval=0
+    # = 只留手动触发面。诚实三态 ok/missing/uncheckable：MinIO 不可达必须记
+    # uncheckable，禁冒认 ok（app/services/integrity_patrol.py）。
+    INTEGRITY_PATROL_ENABLED: bool = False
+    INTEGRITY_PATROL_INTERVAL_SECONDS: int = 3600
+    INTEGRITY_PATROL_BATCH_SIZE: int = 200
+
     # Round 45+ (spec N2): Merkle batch pipeline (Redis Stream worker in
     # app/services/merkle_pipeline.py) is an experimental async batch-anchoring
     # mode, DISABLED by default — the audit path uses the synchronous
@@ -220,6 +230,11 @@ class Settings(BaseSettings):
     # validate_security_config refuses it in production (first-account rule).
     ALLOW_ADMIN_SELF_REGISTER: bool = False
     HSM_SOFTWARE_FALLBACK_ALLOWED: bool = True  # fall back to in-memory software KEK/signing
+    # P2-3 (todo-plan 2026-10-30, ss-19 §10.1-2): 软件 backend 的主密钥持久化文件。
+    # 空 = 旧行为（KEK 只活在本进程，容器重启后既有信封不可解密——仍诚实报错）。
+    # 设了路径 = 首启以 0600 生成 32 字节主密钥，KEK 由 HMAC(master, key_id) 确定性
+    # 派生——同路径重启后旧信封照常解密。真 KMS/HSM 属 P5 硬件轨道，本项不是硬件豁免。
+    KMS_MASTER_KEY_FILE: str = ""
     FEDERATION_JWT_KEY_REQUIRED: bool = True    # refuse static federation JWT key in prod
 
     # PZ-04/PZ-05 (spec ss-11, MR-A4/A5/A9/A14 + MR-B1): crypto & federation
@@ -488,6 +503,26 @@ class Settings(BaseSettings):
                 "sandbox exec must never retry without seccomp. Set "
                 "CDS_SECCOMP_FALLBACK_ALLOWED=false (requires a seccomp-capable kernel)."
             )
+        # P2-3 生产门：主密钥文件一旦配置，路径必须能用——挂载卷没挂上/不可写时
+        # 拒启，而不是首启"成功"后随容器销毁把全部信封陪葬。放在 HSM 口径拒之前，
+        # 路径错报路径错（诊断优先）。生产要软件持久轨还是等 P5 硬件轨，由下面的
+        # HSM_SOFTWARE_FALLBACK_ALLOWED 拒继续把关——本门不构成硬件豁免。
+        if self.KMS_MASTER_KEY_FILE:
+            _mk_path = os.path.abspath(self.KMS_MASTER_KEY_FILE)
+            _mk_ok = (
+                os.path.isfile(_mk_path) and os.access(_mk_path, os.R_OK | os.W_OK)
+            ) or (
+                not os.path.exists(_mk_path)
+                and os.path.isdir(os.path.dirname(_mk_path))
+                and os.access(os.path.dirname(_mk_path), os.W_OK)
+            )
+            if not _mk_ok:
+                raise ValueError(
+                    "KMS_MASTER_KEY_FILE is configured but unusable in production: "
+                    f"{self.KMS_MASTER_KEY_FILE} — 文件不存在且父目录缺失或不可写"
+                    "（挂载卷没挂上？）。首启生成本来就会失败，拒启而不是等重启后"
+                    "既有信封全灭才暴露。"
+                )
         if self.HSM_SOFTWARE_FALLBACK_ALLOWED:
             raise ValueError(
                 "HSM_SOFTWARE_FALLBACK_ALLOWED=true is not permitted in production: "

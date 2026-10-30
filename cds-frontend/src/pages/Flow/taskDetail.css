@@ -237,15 +237,12 @@
   margin-inline-end: 8px;
 }
 
-/* 卡头右侧蓝字（共 N 个数据产品 / 查看全部记录 > / 前往我的结果集 >）：12px #1b6ef3，右缘 1391 */
-.cds-t24 .t24-card > .ant-card-head .ant-card-extra,
-.cds-t24 .t24-extra {
+/* 卡头右侧蓝字（共 N 个数据产品 / 查看全部记录 > / 前往我的结果集 >）：12px #1b6ef3，右缘 1391。
+   A234 卫生族补一条：这条原来还挂着 `.t24-extra` 这个别名、下面另有一条 `.t24-extra-muted`，
+   两个类名全仓 0 个引用（antd 的 `.ant-card-extra` 才是真正命中的那一支，活着）。
+   死别名与死规则一起删——留着它们，下一个人会以为给卡头右侧加灰字只要挂 `t24-extra-muted`。 */
+.cds-t24 .t24-card > .ant-card-head .ant-card-extra {
   color: var(--t24-blue);
-  font-size: 12px;
-}
-
-.cds-t24 .t24-extra-muted {
-  color: var(--t24-grey);
   font-size: 12px;
 }
 
@@ -396,16 +393,25 @@
   line-height: 8px;
 }
 
+/* A234（F-37 那一半，本轮收口）：这两条原本是「半条 !important」——`height: 6px !important`
+   而 background / border-radius 不带。antd 的 Line 进度条**总是**给 `.ant-progress-bg` 写内联
+   height（不传 size 时是默认 8），所以 !important 本身不是写错；错在它顺手剥夺了调用方的几何：
+   以后谁传 `size={[…, 8]}` 想要粗一点的条，会被这支笔按回 6，页面上只看得出"传了没用"。
+   反过来 background/border-radius 只在调用方真传了 strokeColor 才会被写成内联，那时**该**它赢。
+   口径收成一个：几何走组件 API（TaskDetail.tsx 的 `size={['100%', 6]}`，内联 6px 与这里同值），
+   CSS 只留 antd 表达不了的槽底色与圆角，全文不再出现 !important。像素一处没动：
+   槽 x1080..1375（面板内宽 296）y1016..1021（h6），槽底 #e3edfb，填充 #1b6ef3。 */
 .cds-t24 .t24-mem-bar .ant-progress-inner,
 .cds-t24 .t24-mem-bar.ant-progress .ant-progress-inner {
-  height: 6px !important;
+  /* 轨道自己不接内联高度（antd 只给 -bg 写），所以仍由这里给 6px；
+     特异度 (0,3,1) 足够压过 antd 自己的 (0,1,0)，不需要 !important。 */
+  height: 6px;
   background: var(--t24-track);
   border-radius: 3px;
 }
 
 .cds-t24 .t24-mem-bar .ant-progress-bg,
 .cds-t24 .t24-mem-bar.ant-progress .ant-progress-bg {
-  height: 6px !important;
   background: var(--t24-blue);
   border-radius: 3px;
 }
@@ -489,9 +495,15 @@
 }
 
 /* A234：`font-size: 13px` 原本挂在整条 `.cds-t24 .ant-alert` 上，等于给本页**将来任何**
-   Alert（含嵌在子组件里的）预设了 13px。改成只点名这两类现存的 Alert：卡内的、页头的
-   （弹窗里那条走 portal，本来就在 .cds-t24 之外）。渲染结果一字不变，作用域收回。 */
+   Alert（含嵌在子组件里的）预设了 13px。改成点名现存的那三类：卡内的、页根的、页根 Space
+   里直接挂着的（弹窗里那条走 portal，本来就在 .cds-t24 之外）。
+   波次 3 更正一处：上一轮写「渲染结果一字不变」是错的——`.cds-t24` 挂在 antd `<Space>` 上
+   （TaskDetail.tsx:362），Space 会把每个子项包一层 `.ant-space-item`，所以 `.cds-t24 > .ant-alert`
+   一条都匹配不到，执行失败那条 Alert（TaskDetail.tsx:390，页根的直接子项）从 13px 掉回 14px。
+   补上 `.ant-space-item > .ant-alert` 这一支把像素要回来；仍然只覆盖页根这一层，
+   深层嵌套与新加的 Alert 依旧不预设字号。 */
 .cds-t24 .t24-card .ant-alert,
+.cds-t24 > .ant-space-item > .ant-alert,
 .cds-t24 > .ant-alert {
   font-size: 13px;
 }

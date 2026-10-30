@@ -133,6 +133,8 @@ spec:
               mountPath: /data/shared-volumes
             - name: api-cube-results
               mountPath: /var/lib/cds/sandbox-results
+            - name: api-kms-master
+              mountPath: /var/lib/cds-kms
       volumes:
         - name: api-sandbox
           persistentVolumeClaim:
@@ -152,6 +154,9 @@ spec:
         - name: api-cube-results
           persistentVolumeClaim:
             claimName: cds-api-cube-results-pvc
+        - name: api-kms-master
+          persistentVolumeClaim:
+            claimName: cds-api-kms-master-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -254,6 +259,17 @@ data:
   # 白名单类别是 app/services/retention_janitor.py 的代码常量，audit_logs /
   # merkle_leaves / delivery_bundles / data_resources 永久硬拒，配置翻不动。
   CDS_JANITOR_ENABLED: "false"
+  # P2-5（D-e2e-18）：MinIO 一致性巡检主闸，生产默认关（双门：此闸×interval>0）
+  CDS_INTEGRITY_PATROL_ENABLED: "false"
+  # P2-3：KMS 主密钥文件路径。"" = 旧行为（内存态，重启丢，现状口径）；
+  # 启用 = 填 /var/lib/cds-kms 下的文件路径（PVC cds-api-kms-master-pvc 已挂），
+  # 非空路径在生产由 validate_security_config 拒启校验。
+  CDS_KMS_MASTER_KEY_FILE: ""
+  # EGRESS 审计写方治理（波3补点）：代码默认 ENABLED=true 而 LOG_PATH=./logs/
+  # cds-egress/（容器层）——本清单早已把 api-egress-audit PVC 挂在 /data/egress-audit，
+  # 路径不接上就是「卷在证据蒸发」。补齐后与 prod compose/helm 两副本同姿态显式化。
+  CDS_EGRESS_AUDIT_ENABLED: "true"
+  CDS_EGRESS_AUDIT_LOG_PATH: /data/egress-audit/access.jsonl
 ---
 # Prod 姿态下 main.py 跳过 create_all，schema 只能由 Alembic 建；没有这一步
 # cds-api 会在空库上起来然后 500。与 deploy/e2e-remote/remote_deploy.sh 的
@@ -336,6 +352,21 @@ spec:
   resources:
     requests:
       storage: 10Gi
+---
+# P2-3：KMS 主密钥文件持久化。env 空 = 卷空转零行为；1Gi 超配，真实占用一枚
+# 主密钥文件。单副本 RWO 与上方 replicas=1/Recreate 纪律一致。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-kms-master-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
 ---
 # 出口审计日志：retention 0=永久，与其他卷不同，这里的丢失是不可逆的。
 apiVersion: v1

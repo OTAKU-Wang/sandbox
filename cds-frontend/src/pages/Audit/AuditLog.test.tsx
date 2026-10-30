@@ -449,6 +449,31 @@ describe('AuditLog（原型 4-1 / 4-2）', { timeout: 20_000 }, () => {
     await waitFor(() => expect(body.textContent).toContain('"bundle": "bundle-2026-1017"'));
   });
 
+  // PNG 4-2 的两条像素真值（#f7f9fc 灰面板 + 蓝条分区标题、无分隔线）要钉在**真节点**上，
+  // 而不是钉在「CSS 里有一条规则」上：波次 3 之前 index.css 里躺着同名旧一代规则
+  // （.cds-detail-modal .cds-detail-section / -panel），谁都没命中，读起来像真值已落地。
+  it('分区标题与灰面板坐在真节点上（.cds-audit-section / .cds-audit-panel）', async () => {
+    await renderPage();
+    fireEvent.click(screen.getByText('详情'));
+    const scoped = await waitFor(() => {
+      const node = document.querySelector('.cds-detail-modal');
+      if (!node?.querySelector('.cds-audit-panel')) throw new Error('弹窗灰面板节点还没渲染出来');
+      return node as HTMLElement;
+    });
+
+    expect([...scoped.querySelectorAll('.cds-audit-section')].map((n) => n.textContent))
+      .toEqual(['基础信息', '操作内容', '不可篡改存证']);
+    // 「分区标题非 Divider」：标题是自己那一层节点，不是 antd 分隔线。
+    expect(scoped.querySelectorAll('.ant-divider')).toHaveLength(0);
+
+    const panels = scoped.querySelectorAll('.cds-audit-panel');
+    expect(panels).toHaveLength(1);
+    expect(panels[0].querySelector('.cds-audit-content'), '灰面板包住的应当是「操作内容」那组字段').not.toBeNull();
+
+    // 旧一代同名类回来 = 两套同权重规则抢同一批像素（谁赢只看 CSS 加载顺序），拦住。
+    expect(scoped.querySelector('.cds-detail-section, .cds-detail-panel')).toBeNull();
+  });
+
   // ⑦-6 4-1.3：下拉 10 项都是后端真写过的 action，每项都有中文名（不再「code (code)」）
   it('操作类型下拉的 10 项都有中文名，且不掺后端没有的动作', async () => {
     await renderPage();

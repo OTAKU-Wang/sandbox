@@ -9,7 +9,7 @@ import type { TablePaginationConfig } from 'antd';
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import { dataProductApi } from '../../services/dataProductApi';
 import type { DataProduct } from '../../types/models';
 import { CONTRACT_DATA_RESOLVE_LIMIT, buildContractDataSummary } from './contractDataModel';

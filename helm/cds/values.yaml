@@ -66,6 +66,8 @@ api:
     # 白名单类别是代码常量，受保护类别（审计/存证/交付物/原始数据）代码层硬拒。
     CDS_JANITOR_ENABLED: "false"
     CDS_RETENTION_JANITOR_ENABLED: "true"
+    # P2-5（D-e2e-18）：MinIO 一致性巡检主闸，默认关；双门形状同 janitor
+    CDS_INTEGRITY_PATROL_ENABLED: "false"
     CDS_AUDIT_LOG_RETENTION_DAYS: "0"
     CDS_MERKLE_LEAF_RETENTION_DAYS: "0"
     CDS_ALERT_RETENTION_DAYS: "180"
@@ -289,6 +291,12 @@ secrets:
   # Optional: CDS_CDC_KAFKA_BROKERS
 
 # ─── Sandbox workspace ───
+# P2-3：KMS 主密钥文件持久化。"" = 完全不出图（渲染与改动前逐字节一致=旧行为，
+# 内存态主密钥）。启用 = 填 /var/lib/cds-kms/ 下的路径；卷复用 sandbox-workspace
+# 的 RWX 共享 subPath（不新增 PVC），多副本读同一枚主密钥。
+kms:
+  masterKeyFile: ""
+
 sandbox:
   workspaceSize: 20Gi
   storageClass: ""

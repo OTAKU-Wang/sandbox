@@ -167,6 +167,13 @@ services:
       # 在代码层永久硬拒，配置翻不动（docs/retention.md）。
       CDS_JANITOR_ENABLED: "false"
       CDS_RETENTION_JANITOR_ENABLED: "true"
+      # P2-5（D-e2e-18）：MinIO 一致性巡检主闸，生产默认关；双门=此闸×interval>0，
+      # 手动触发面不受此闸约束（app/services/integrity_patrol.py）。
+      CDS_INTEGRITY_PATROL_ENABLED: "false"
+      # P2-3：KMS 主密钥文件持久化（lane-b 语义）。"" = 旧行为（内存态主密钥，
+      # api 重启即丢、既有信封不可解密——现状口径，不是回归）。启用 = 指向
+      # /var/lib/cds-kms 下的路径（卷已在下方挂好）；非空时路径校验由启动门把关。
+      CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-}"
       CDS_AUDIT_LOG_RETENTION_DAYS: "0"
       CDS_MERKLE_LEAF_RETENTION_DAYS: "0"
       CDS_ALERT_RETENTION_DAYS: "180"
@@ -266,6 +273,8 @@ services:
       - cds-egress-audit:/data/egress-audit
       - cds-shared-volumes:/data/shared-volumes
       - cds-sandbox-results:/var/lib/cds/sandbox-results
+      # P2-3：KMS 主密钥文件落盘位（"" = 旧行为；启用见 CDS_KMS_MASTER_KEY_FILE）。
+      - cds-kms-master:/var/lib/cds-kms
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -293,3 +302,5 @@ volumes:
   cds-egress-audit:
   cds-shared-volumes:
   cds-sandbox-results:
+  # P2-3：KMS 主密钥文件卷（默认空转）。
+  cds-kms-master:

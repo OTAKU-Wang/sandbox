@@ -7,7 +7,8 @@ import { contractApi } from '../../services/contractApi';
 import type { Contract } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
-import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title } = Typography;

@@ -13,56 +13,15 @@ import { useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Alert,
-  Button,
-  Card,
-  Descriptions,
-  Modal,
-  Progress,
-  Space,
-  Statistic,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from 'antd';
+  Alert, Button, Card, Descriptions, Modal, Progress, Space, Statistic, Table, Tag, Tooltip, Typography, message, } from 'antd';
 import {
-  ArrowLeftOutlined,
-  CaretRightFilled,
-  CheckCircleFilled,
-  CodeOutlined,
-  DatabaseOutlined,
-  ExportOutlined,
-  ImportOutlined,
-  InfoCircleOutlined,
-  LockOutlined,
-  ProfileOutlined,
-  ReloadOutlined,
-  RiseOutlined,
-} from '@ant-design/icons';
+  ArrowLeftOutlined, CaretRightFilled, CheckCircleFilled, CodeOutlined, DatabaseOutlined, ExportOutlined, ImportOutlined, InfoCircleOutlined, LockOutlined, ProfileOutlined, ReloadOutlined, RiseOutlined, } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import TaskRunRecords from './TaskRunRecords';
 import type { DebugRunRecordInput } from './TaskRunRecords';
 import { bundleReviewMeta, bundleWatermarkMeta } from './display';
 import {
-  BUNDLE_EXPORT_STATUS_HINT,
-  BUNDLE_NAME_HINT,
-  DEV_TASK_NODE_HINT,
-  MEMORY_USAGE_UNMEASURED,
-  NO_ACTIVE_DEBUG_SESSION_NOTE,
-  NO_SOURCE_TEXT,
-  PRODUCT_ORG_HINT,
-  RESULT_SET_SCOPE_HINT,
-  SANDBOX_MEMORY_RUNNING_NOTE,
-  formatDevTaskTime,
-  formatPrototypeMemory,
-  memoryUnmeasuredReason,
-  notebookStateMeta,
-  productTypeLabel,
-  statusTagTone,
-  taskNodeText,
-} from './devTasksModel';
+  BUNDLE_EXPORT_STATUS_HINT, BUNDLE_NAME_HINT, DEV_TASK_NODE_HINT, MEMORY_USAGE_UNMEASURED, NO_ACTIVE_DEBUG_SESSION_NOTE, NO_SOURCE_TEXT, PRODUCT_ORG_HINT, RESULT_SET_SCOPE_HINT, SANDBOX_MEMORY_RUNNING_NOTE, formatDevTaskTime, formatPrototypeMemory, memoryUnmeasuredReason, notebookStateMeta, productTypeLabel, statusTagTone, taskNodeText, } from './devTasksModel';
 import { useContractById } from './useContractOptions';
 import type { ContractOption } from './useContractOptions';
 import { CONTRACT_DATA_RESOLVE_LIMIT, buildContractDataSummary } from './contractDataModel';
@@ -72,21 +31,10 @@ import { usersApi } from '../../services/usersApi';
 import { sandboxApi } from '../../services/sandboxApi';
 import { useAuthStore } from '../../stores/authStore';
 import {
-  TASK_DEBUG_METHOD_OPTIONS,
-  TASK_EXPORT_MODE_OPTIONS,
-  UNKNOWN_TEXT,
-  describeDeliveryMethod,
-  describeFlowError,
-  formatBytes,
-  formatDateTime,
-  taskEnumLabel,
-  useDatasetBundles,
-  useHomeOverview,
-  useNotebook,
-  useRunNotebook,
-} from '../../services/flow';
+  TASK_DEBUG_METHOD_OPTIONS, TASK_EXPORT_MODE_OPTIONS, UNKNOWN_TEXT, describeDeliveryMethod, describeFlowError, formatBytes, formatDateTime, taskEnumLabel, useDatasetBundles, useHomeOverview, useNotebook, useRunNotebook, } from '../../services/flow';
 import type { DatasetBundleRow } from '../../services/flow';
-import { CenteredLoading, QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { CenteredLoading, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import './taskDetail.css';
 
 const { Text } = Typography;
@@ -352,7 +300,11 @@ export default function FlowTaskDetail() {
       </div>
       <div className="t24-mem-bar">
         <Tooltip title={unmeasuredReason}>
-          <Progress percent={0} showInfo={false} />
+          {/* A234（F-37）：6px 这条槽的高矮由组件 API 给（antd 总会往 .ant-progress-bg 写内联
+              height，不传就是默认 8）。以前靠 CSS 的 `height: 6px !important` 去压内联，
+              顺带把以后调用方想改的粗细也一起压掉了；现在几何只有这一个来源，
+              CSS 侧只剩槽底色与圆角（taskDetail.css 同处注释记着这条口径）。 */}
+          <Progress percent={0} showInfo={false} size={['100%', 6]} />
         </Tooltip>
       </div>
     </>

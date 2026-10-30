@@ -160,6 +160,12 @@ spec:
               # CDS_CUBE_RESULTS_DIR：Cube(L2') 数据面开启时的结果回收目录。
               mountPath: /var/lib/cds/sandbox-results
               subPath: cube-results
+            {{- if .Values.kms.masterKeyFile }}
+            # P2-3：KMS 主密钥目录（sandbox-workspace RWX 的 subPath，全副本同键）。
+            - name: sandbox-workspace
+              mountPath: /var/lib/cds-kms
+              subPath: kms-master
+            {{- end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone

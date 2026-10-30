@@ -1,14 +1,13 @@
 import { useState, type CSSProperties } from 'react';
 import {
-  Button, Card, Collapse, DatePicker, Descriptions, Input, Modal, Select, Space,
-  Table, Tag, Tooltip, Typography, message,
-} from 'antd';
+  Button, Card, Collapse, DatePicker, Descriptions, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message, } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Dayjs } from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import { auditApi, type AuditRecord, type AuditRecordDetail } from '../../services/auditApi';
-import { QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import AuditVerifyModal from '../../components/Audit/AuditVerifyModal';
 import { useAuthStore } from '../../stores/authStore';
 import { ROLE_GROUPS, ROLE_LABELS, hasAnyRole } from '../../utils/roles';

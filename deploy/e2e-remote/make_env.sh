@@ -42,6 +42,11 @@ trap 'rm -f "$TMP"' EXIT
   printf 'CDS_CUBE_NODE_GRPC_TLS=%s\n'    "$CUBE_TLS"
   printf 'CDS_SANDBOX_LEGACY_ENABLED=false\n'
   printf 'CDS_AUTH_MFA_ENABLED=true\n'
+  # Optional (non-secret, deliberately NOT generated): CDS_EGRESS_AUDIT_LOG_PATH.
+  # remote_deploy.sh already defaults it to /data/egress-audit/access.jsonl AND
+  # mounts the volume — unset here = pinned default. Set in this env file only to
+  # deliberately relocate the evidence surface (the path must stay on the mounted
+  # volume; a relative path means evidence dies with the container).
 } > "$TMP"
 
 # verify-before-publish: every secret line must carry a value

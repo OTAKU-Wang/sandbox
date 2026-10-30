@@ -8,6 +8,7 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import String, DateTime, BigInteger, Integer, ForeignKey, func, JSON, Index
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -67,6 +68,16 @@ class DataResource(Base):
     schema_fields: Mapped[list | None] = mapped_column(JSON)            # [{name, type, sensitivity, mask_pattern}]
     row_count: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(String(1000))    # Last error if status=failed
+
+    # P2-5（D-e2e-18）：MinIO 一致性巡检标注（app/services/integrity_patrol.py）。
+    # integrity_status ∈ {ok, missing, uncheckable}；默认/存量行 = `uncheckable`
+    # ——没被巡检确认过就不许冒认 ok（诚实铁律）。integrity_checked_at 为 NULL
+    # = 从未巡检。巡检为只读 head 对账，只写这两列，不碰上传/下载热路径。
+    # DDL 侧成对：alembic revision 0034（verify_schema_parity 门）。
+    integrity_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=sa_text("'uncheckable'"), default="uncheckable"
+    )
+    integrity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Gap A5/T7: field-level classification map {field: level} where
     # level ∈ {1,2,3,4} (public/internal/confidential/secret). Level 3 fields

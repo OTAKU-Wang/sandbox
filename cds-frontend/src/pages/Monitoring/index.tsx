@@ -1,42 +1,14 @@
 import { useState } from 'react';
 import {
-  Typography,
-  Card,
-  Row,
-  Col,
-  Statistic,
-  Table,
-  Tag,
-  Select,
-  Space,
-  Button,
-  Modal,
-  Input,
-  Drawer,
-  Descriptions,
-  Badge,
-  message,
-} from 'antd';
+  Typography, Card, Row, Col, Statistic, Table, Tag, Select, Space, Button, Modal, Input, Drawer, Descriptions, Badge, message, } from 'antd';
 import {
-  BellOutlined,
-  BlockOutlined,
-  CheckCircleOutlined,
-  CloudServerOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  FileTextOutlined,
-  ReloadOutlined,
-  SafetyOutlined,
-} from '@ant-design/icons';
+  BellOutlined, BlockOutlined, CheckCircleOutlined, CloudServerOutlined, DatabaseOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined, SafetyOutlined, } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import {
-  monitoringApi,
-  type Alert as AlertType,
-  type AlertSeverity,
-  type AlertStatus,
-} from '../../services/monitoringApi';
-import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+  monitoringApi, type Alert as AlertType, type AlertSeverity, type AlertStatus, } from '../../services/monitoringApi';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title, Text } = Typography;

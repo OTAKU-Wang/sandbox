@@ -40,8 +40,9 @@ class _FakeV1:
 
 
 class _FakeSC:
-    def __init__(self, name, annotations=None):
+    def __init__(self, name, annotations=None, provisioner=""):
         self.metadata = type("M", (), {"name": name, "annotations": annotations or {}})()
+        self.provisioner = provisioner  # A128①: RWX 能力判定读 provisioner
 
 
 class _FakeStorage:
@@ -94,18 +95,33 @@ def test_ensure_pvc_honest_error_without_storage_class(monkeypatch):
 
 
 def test_ensure_pvc_creates_rwx_with_default_class(monkeypatch):
-    from app.services.k8s_client import KubernetesClient
+    """A128① 转强：default 注解 + RWX 能力双条件才放行。
+
+    旧针把 local-path（default=true 但真实 RWO，RWX PVC 会永久 Pending）钉成绿——
+    正是被 A128① 关闭的猜谜路径；现要求拒绝它，并以带 cds.volume.rwx 注解的
+    default 类走创建路径。
+    """
+    from app.services.k8s_client import KubernetesClient, KubernetesClientUnavailable
     v1 = _FakeV1()
-    default_sc = _FakeSC("local-path", annotations={"storageclass.kubernetes.io/is-default-class": "true"})
-    _install_fakes(monkeypatch, v1=v1, storage=_FakeStorage([default_sc]))
+    default_annot = {"storageclass.kubernetes.io/is-default-class": "true"}
+    rwo_default = _FakeSC("local-path", annotations=dict(default_annot),
+                          provisioner="rancher.io/local-path")
+    rwx_default = _FakeSC("nfs-default", annotations={**default_annot, "cds.volume.rwx": "true"},
+                          provisioner="nfs.csi.k8s.io")
+    _install_fakes(monkeypatch, v1=v1, storage=_FakeStorage([rwo_default, rwx_default]))
     client = KubernetesClient(namespace="cds-test")
     result = client.ensure_pvc("cds-shared-x")
     assert result["status"] == "created"
-    assert result["storage_class"] == "local-path"
+    assert result["storage_class"] == "nfs-default"
     body = v1.pvc_created[0]
     assert body["spec"]["accessModes"] == ["ReadWriteMany"]
-    assert body["spec"]["storageClassName"] == "local-path"
+    assert body["spec"]["storageClassName"] == "nfs-default"
     assert body["spec"]["resources"]["requests"]["storage"] == "1Gi"
+    # 纯 RWO 的 default 单独存在时必须拒（错误文案点名 RWX 条件）
+    _install_fakes(monkeypatch, v1=v1, storage=_FakeStorage([rwo_default]))
+    client2 = KubernetesClient(namespace="cds-test")
+    with pytest.raises(KubernetesClientUnavailable, match="ReadWriteMany"):
+        client2.ensure_pvc("cds-shared-y")
 
 
 def test_ensure_pvc_prefers_configured_class(monkeypatch):

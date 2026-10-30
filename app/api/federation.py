@@ -13,7 +13,7 @@ from app.models.data_product import DataProduct
 from app.models.federation_trust import FederationAuditRecord
 from app.models.user import User, UserRole
 from app.services.audit_service import audit_service
-from app.services.catalog_sync import SyncMode, catalog_sync
+from app.services.catalog_sync import SyncMode, catalog_sync, remote_name_like
 from app.services.federation_connector import (
     federation_connector,
     SpaceIdentity,
@@ -161,7 +161,7 @@ async def get_trust_score(
     reputation = max(0, min(100, 100 - int(failure_rate * 100)))
 
     catalog_count_result = await db.execute(
-        select(func.count()).select_from(DataProduct).where(DataProduct.name.like(f"[remote:{trust.remote_space.space_id}]%"))
+        select(func.count()).select_from(DataProduct).where(remote_name_like(trust.remote_space.space_id))
     )
     catalog_count = catalog_count_result.scalar() or 0
     data_quality = min(100, 60 + catalog_count * 4) if catalog_count else 50
@@ -260,7 +260,7 @@ async def get_catalog_sync_status(
         history = catalog_sync.get_sync_history(space_id)
         latest = history[-1] if history else None
         count_result = await db.execute(
-            select(func.count()).select_from(DataProduct).where(DataProduct.name.like(f"[remote:{space_id}]%"))
+            select(func.count()).select_from(DataProduct).where(remote_name_like(space_id))
         )
         entry_count = count_result.scalar() or 0
         items.append({
@@ -316,9 +316,9 @@ async def list_synced_catalog_entries(
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """List locally mirrored remote catalog entries."""
-    query = select(DataProduct).where(DataProduct.name.like("[remote:%"))
+    query = select(DataProduct).where(remote_name_like())
     if space_id:
-        query = query.where(DataProduct.name.like(f"[remote:{space_id}]%"))
+        query = query.where(remote_name_like(space_id))
     query = query.order_by(DataProduct.updated_at.desc()).limit(limit)
     result = await db.execute(query)
     entries = []

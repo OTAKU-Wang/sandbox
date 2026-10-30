@@ -3,7 +3,8 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { quotaNumber, useQuotaUsage } from '../../services/quotaApi';
 import type { QuotaEndpointItem, QuotaSessionItem, QuotaSource } from '../../services/quotaApi';
-import { QueryErrorAlert, CenteredLoading, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { QueryErrorAlert, CenteredLoading } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import { isLegacySandboxLevel, sandboxLevelLabel } from '../../types/enums';
 import type { ColumnsType } from 'antd/es/table';
 

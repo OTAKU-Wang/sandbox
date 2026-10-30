@@ -9,7 +9,8 @@ import { contractApi } from '../../services/contractApi';
 import type { SandboxSession } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { hasAnyRole, ROLE_GROUPS } from '../../utils/roles';
-import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import { SandboxLevel, isLegacySandboxLevel, sandboxLevelLabel } from '../../types/enums';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -50,9 +51,11 @@ export default function SessionList() {
   const [form] = Form.useForm();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
-  const [createOpen, setCreateOpen] = useState(false);
   const requestedCreate = searchParams.get('create') === '1';
   const requestedProductId = searchParams.get('product_id');
+  // P4-3（lint 清零·set-state-in-effect）：弹窗开合改以 URL 为单一真相（派生值），
+  // 不再「URL→effect→setState」三段式同步。刷新/回退因此也能保持弹窗语义（只强不弱）。
+  const createOpen = canCreateSession && requestedCreate;
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['sandbox-sessions', page, statusFilter],
@@ -114,8 +117,7 @@ export default function SessionList() {
     }),
     onSuccess: (session) => {
       message.success('沙箱会话已创建');
-      setCreateOpen(false);
-      setSearchParams({}, { replace: true });
+      setSearchParams({}, { replace: true }); // createOpen 随 URL 派生自动归位
       form.resetFields();
       queryClient.invalidateQueries({ queryKey: ['sandbox-sessions'] });
       navigate(`/sandbox-sessions/${session.id}`);
@@ -123,16 +125,19 @@ export default function SessionList() {
     onError: () => message.error('创建沙箱会话失败'),
   });
 
+  // URL 里的 product_id 只是预填表单（antd form store，非 React state）；开合由 createOpen 派生承担
   useEffect(() => {
-    if (!canCreateSession || !requestedCreate) return;
-    setCreateOpen(true);
-    if (requestedProductId) {
-      form.setFieldsValue({ data_product_id: requestedProductId });
-    }
-  }, [canCreateSession, form, requestedCreate, requestedProductId]);
+    if (!canCreateSession || !requestedProductId) return;
+    form.setFieldsValue({ data_product_id: requestedProductId });
+  }, [canCreateSession, form, requestedProductId]);
+
+  const openCreateModal = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('create', '1');
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const closeCreateModal = () => {
-    setCreateOpen(false);
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('create');
     nextParams.delete('product_id');
@@ -166,7 +171,7 @@ export default function SessionList() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>沙箱会话</Title>
         {canCreateSession && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
             创建会话
           </Button>
         )}

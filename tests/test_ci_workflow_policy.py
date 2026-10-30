@@ -351,10 +351,12 @@ def test_frontend_runs_tests_and_lint() -> None:
     runs = [s.get("run", "") for s in steps]
     assert any("npm test" in r for r in runs), "frontend job must run vitest"
     lint = [s for s in steps if "npm run lint" in s.get("run", "")]
-    assert lint, "frontend job must at least run lint (informational baseline)"
-    assert lint[0].get("continue-on-error") is True, (
-        "lint is an informational baseline (13 known errors, 2026-10-16 FE lane): "
-        "continue-on-error + warning, never a silent drop"
+    assert lint, "frontend job must run lint"
+    # 2026-10-30 波次 3：lint 基线经 10/10 真重构（0 豁免/0 disable）到 0 errors，
+    # 按「门禁只强不弱」提为硬门。反向锁：谁想退回 continue-on-error 静默降级，先红这里。
+    assert lint[0].get("continue-on-error") is not True, (
+        "lint became a HARD gate on 2026-10-30 (0-error baseline, lane-h); "
+        "downgrading back to informational requires a ledger entry in ci/known-failures.md first"
     )
 
 

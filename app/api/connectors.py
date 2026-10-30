@@ -350,7 +350,13 @@ async def connector_browse_catalog(
 
     if q:
         from sqlalchemy import or_
-        search = or_(DataProduct.name.ilike(f"%{q}%"), DataProduct.description.ilike(f"%{q}%"))
+        from app.services.catalog_sync import escape_like  # A282 同族（lead 代收 2026-10-30）：
+        # 用户搜索词里的 %/_ 是 LIKE 元字符，不转义则 `q=%` 命中全表、`q=_` 单字符通配——
+        # 搜索面读不到别人的东西（本查询已被 connector 谓词圈死），但结果集会静默串味。
+        # 转义后交 escape="\\" 渲染，通配符只剩两端我们自己的 %。
+        escaped = escape_like(q)
+        search = or_(DataProduct.name.ilike(f"%{escaped}%", escape="\\"),
+                     DataProduct.description.ilike(f"%{escaped}%", escape="\\"))
         query = query.where(search)
         count_query = count_query.where(search)
     if product_type:

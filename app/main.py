@@ -22,6 +22,7 @@ from app.core.database import engine, Base
 from app.core.security import setup_security
 from app.core.redis import get_redis, close_redis, redact_url
 from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
+from app.api import integrity as integrity_api  # P2-5 (D-e2e-18): MinIO 一致性巡检面
 from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api, quota as quota_api  # SS-15 / SS-17
 from app.api import session_stream  # W10: WebSocket exec stream
 from app.api import jupyter_proxy  # SS-19: 开发环 JupyterLab 反代
@@ -178,14 +179,31 @@ def hsm_backend_disclosure() -> dict[str, object]:
         return {"backend": "unknown", "is_simulation": True, "error": str(exc)}
 
     log = logger.warning if desc["is_simulation"] else logger.info
+    # P2-3 持久化事实从适配器属性读（describe_hsm_backend 的两键口径被
+    # test_ocr_a094_hsm_disclosure 锁死，不扩键）。
+    from app.services import hsm_adapter as _hsm
+    _adapter = getattr(_hsm, "hsm_adapter", None)
+    _mk_persistent = bool(getattr(_adapter, "master_key_persistent", False))
+    _mk_file = str(getattr(_adapter, "master_key_file", "") or "")
+    if desc["is_simulation"] and _mk_persistent:
+        detail = (
+            f"软件主密钥文件（非 HSM）：{_mk_file} — KEK 由它确定性派生，"
+            "跨重启可解密既有信封（P2-3）；SM2 签名密钥对仍为内存态。"
+            "真 KMS/HSM 属 P5 硬件轨道，本文件不是硬件豁免"
+        )
+    elif desc["is_simulation"]:
+        detail = (
+            "KEK 活在本进程、不是硬件 HSM（dev/test only；生产请接 Vault 并置 "
+            "CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false）。P2-3：设 "
+            "CDS_KMS_MASTER_KEY_FILE=<挂载卷路径> 可让主密钥跨重启"
+        )
+    else:
+        detail = "KEK 由外部 HSM/Vault 托管，本进程不持明文 KEK"
     log(
         "[MAIN] HSM backend=%s is_simulation=%s — %s",
-        desc["backend"], desc["is_simulation"],
-        "KEK 活在本进程、不是硬件 HSM（dev/test only；生产请接 Vault 并置 "
-        "CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false）" if desc["is_simulation"]
-        else "KEK 由外部 HSM/Vault 托管，本进程不持明文 KEK",
+        desc["backend"], desc["is_simulation"], detail,
     )
-    return desc
+    return {**desc, "master_key_persistent": _mk_persistent, "master_key_file": _mk_file}
 
 
 DUCKDB_ENGINE_SWEEP_SECONDS = 300
@@ -325,6 +343,31 @@ async def lifespan(app: FastAPI):
             logger.info("[MAIN] Restored %d wrapped keys from persistence", restored_keys)
     except Exception as e:
         logger.error(f"[MAIN] Wrapped key restore failed: {e}")
+
+    # P2-3: 软件主密钥文件若是本次首启生成，落一条 kms.master_key.generated 审计
+    # （适配器构造在 import 期，没有 DB，事件只能落在 lifespan 里）。审计写不进
+    # 只披露不吞（core 铁律）：生成事实此刻也已在本进程 WARNING 日志里。
+    try:
+        from app.services import hsm_adapter as _hsm_mod
+        _adapter = getattr(_hsm_mod, "hsm_adapter", None)
+        if _adapter is not None and getattr(_adapter, "master_key_just_generated", False):
+            from app.core.database import async_session as _mk_session
+            from app.services.audit_service import audit_service
+            async with _mk_session() as db:
+                await audit_service.log(
+                    db, action="kms.master_key.generated", resource_type="kms",
+                    detail={
+                        "backend": "software-fallback",
+                        "file": str(getattr(_adapter, "master_key_file", "")),
+                        "note": "首启生成 0600 软件主密钥文件（非 HSM，P2-3）；"
+                                "备份/迁移该文件即迁移全部既有信封的可解密性",
+                    },
+                    actor_type="system",
+                )
+                await db.commit()
+            logger.info("[MAIN] kms.master_key.generated 审计已落库（软件主密钥文件首启生成）")
+    except Exception as e:
+        logger.error(f"[MAIN] kms.master_key.generated 审计落库失败（生成事实已在 WARNING 日志留痕）: {e}")
 
     # Startup: session lifecycle cleanup loop (gap A2/D1 — expired sessions,
     # dev sessions and contracts). Disabled under TESTING (tests disable the
@@ -583,6 +626,9 @@ app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monito
 app.include_router(output_control.router, prefix="/api/v1/output-control", tags=["output-control"], dependencies=[Depends(require_group("output"))])
 app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"], dependencies=[Depends(require_group("data"))])
 app.include_router(compliance.router, prefix="/api/v1/compliance", tags=["compliance"], dependencies=[Depends(require_group("audit"))])
+# P2-5（D-e2e-18）：巡检台账与手动触发挂 audit 组（与审计面同群，不新开
+# scope）；OPERATOR+/ADMIN 收紧在路由级 require_roles。
+app.include_router(integrity_api.router, prefix="/api/v1/integrity", tags=["integrity"], dependencies=[Depends(require_group("audit"))])
 app.include_router(data_pipeline.router, prefix="/api/v1/data-pipeline", tags=["data-pipeline"], dependencies=[Depends(require_group("pipeline"))])
 app.include_router(certificates.router, prefix="/api/v1/certificates", tags=["certificates"], dependencies=[Depends(require_group("certs"))])
 app.include_router(mpc.router, prefix="/api/v1/mpc", tags=["mpc"], dependencies=[Depends(require_group("pipeline"))])

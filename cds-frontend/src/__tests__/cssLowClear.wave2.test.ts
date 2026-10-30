@@ -162,7 +162,10 @@ describe('A225：笔记本工作台不再吃未定义的 --nbw-*', () => {
   });
 
   it('危险色与灰各收成一支，正文不再散着 #cf1322 / #8c8c8c 字面量', () => {
-    expect(nbw).toMatch(/--nbw-danger:\s*#cf1322/);
+    // 波次 3 并支：危险红的唯一真值搬到 index.css `:root` 的 `--cds-danger`（JupyterDevEnv 那类
+    // 拿不到页面级作用域的页面也要能引用同一支），`--nbw-danger` 降成带兜底的别名。
+    expect(nbw).toMatch(/--nbw-danger:\s*var\(--cds-danger,\s*#cf1322\)/);
+    expect(index).toMatch(/--cds-danger:\s*#cf1322/);
     expect(bareLiterals(nbw, ['#cf1322', '#8c8c8c'])).toEqual([]);
   });
 

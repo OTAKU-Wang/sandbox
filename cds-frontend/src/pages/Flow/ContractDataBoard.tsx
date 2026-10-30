@@ -5,7 +5,7 @@
 // 「本任务挑这 2 份数据」是一份后端根本不执行的假勾选（禁伪造铁律）。
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Descriptions, Empty, Spin, Table, Tabs, Tag, Typography } from 'antd';
-import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import { dataProductApi } from '../../services/dataProductApi';
 import { SANDBOX_DIRECTORY_ENTRIES, SANDBOX_HARVEST_RULE } from './directoryContract';
 import {

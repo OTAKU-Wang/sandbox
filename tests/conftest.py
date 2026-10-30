@@ -91,6 +91,10 @@ test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expi
 # mid-test connection killer to chase.
 _pool_logger = logging.getLogger("tests.conftest.a192x")
 
+# Captured by _quiesce_background_singletons at every test boundary; re-pinned
+# as the thread's "current" loop after every test (see pytest_runtest_teardown).
+_pinned_loop: asyncio.AbstractEventLoop | None = None
+
 
 def _a192x_noop_terminate(dbapi_connection):  # noqa: ARG001 — signature fixed by SQLAlchemy
     _pool_logger.warning(
@@ -262,6 +266,10 @@ async def _quiesce_background_singletons():
     yield
     import asyncio as _asyncio
 
+    global _pinned_loop
+    _pinned_loop = _asyncio.get_running_loop()
+
+    from app.services import egress_audit
     from app.services.task_pipeline import task_pipeline
 
     running = list(task_pipeline._running.values())
@@ -271,6 +279,57 @@ async def _quiesce_background_singletons():
         logging.getLogger(__name__).warning("task_pipeline quiesce failed: %s", exc)
     if running:
         await _asyncio.gather(*running, return_exceptions=True)
+    # A192x (P4-1), same quarantine for the egress-audit daemon writer: any
+    # test that touches log_egress_event lazily respawns _writer_loop on the
+    # SESSION loop (egress_audit.py:124) — without this it outlives its test
+    # forever (test_egress_audit.py:83 even installs an intentionally stuck
+    # writer) and poisons any global all_tasks() consumer on the pinned loop
+    # (the exact 55%-position full-suite hang behind A192x). shutdown is
+    # no-op when never started, sentinel+5s-bounded join otherwise.
+    try:
+        await egress_audit.shutdown_egress_audit()
+    except Exception as exc:
+        logging.getLogger(__name__).warning("egress_audit quiesce failed: %s", exc)
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """A192x (P4-1): keep the pinned session loop visible as the thread's
+    CURRENT loop after every test.
+
+    The legacy session ``event_loop`` fixture used to leave the loop set in
+    the event-loop policy, and a number of SYNC tests rely on that
+    (``asyncio.get_event_loop().run_until_complete(...)`` in
+    test_audit_partition / test_p05_code_scanning / test_rate_limiting).
+    pytest-asyncio 1.4 with loop-scope=session no longer publishes the loop
+    that way, and any sync test calling ``asyncio.run()`` on Python 3.14
+    leaves the policy current-loop as None (3.12 and earlier tolerated it) —
+    poisoning every later get_event_loop() consumer. This hook runs after
+    fixture finalizers, so the re-pin cannot be undone by quiesce itself.
+
+    Retirement clause (lead ruling 2026-10-30): this hook REPLACES the
+    side-effect semantics of the legacy fixture, not the fixture itself.
+    If anyone ever resurrects a session ``event_loop`` fixture the pin in
+    tests/test_a192x_harness_discipline.py goes red — retire this hook in
+    the same change; never run both (double publication of the current
+    loop is how the next A192x archaeology round starts).
+    """
+    if _pinned_loop is not None and not _pinned_loop.is_closed():
+        asyncio.set_event_loop(_pinned_loop)
+
+
+@pytest_asyncio.fixture
+async def _task_generation():
+    """A192x (P4-1): generation watermark for tests that fire-and-forget.
+
+    On the session-pinned loop, ``asyncio.all_tasks()`` shows the WHOLE
+    suite's task population — tests must only ever await tasks their own body
+    spawned. Request this fixture and pass it to your drain helper; it
+    snapshots every pending task at setup (BEFORE your body runs). Ordering
+    contract: snapshot precedes the test body, the drain only waits for
+    post-snapshot newcomers — whoever swaps this order owns the deadlock.
+    Consumers are pinned by tests/test_a192x_harness_discipline.py.
+    """
+    return {id(t) for t in asyncio.all_tasks()}
 
 
 @pytest_asyncio.fixture(autouse=True)

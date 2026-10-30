@@ -1,41 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
-  Alert,
-  Button,
-  Card,
-  Descriptions,
-  Drawer,
-  Input,
-  InputNumber,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from 'antd';
+  Alert, Button, Card, Descriptions, Drawer, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message, } from 'antd';
 import { FileSearchOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import {
-  describeDeliveryMethod,
-  describeFlowError,
-  describeFrequency,
-  formatDateTime,
-  useCancelComputeRun,
-  useComputeRuns,
-  useComputeSchedule,
-  useWorkloads,
-} from '../../services/flow';
+  describeDeliveryMethod, describeFlowError, describeFrequency, formatDateTime, useCancelComputeRun, useComputeRuns, useComputeSchedule, useWorkloads, } from '../../services/flow';
 import type { ComputeRun, ComputeScheduleItem } from '../../services/flow';
 import { useTriggerComputeRunDetailed } from '../../services/computeApi';
 import type { ComputeRunView } from '../../services/computeApi';
 import { sandboxApi } from '../../services/sandboxApi';
 import { useQuery } from '@tanstack/react-query';
-import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 import { COMPUTE_RUN_STATUS_META, statusMeta } from './display';
 import { useContractOptions } from './useContractOptions';
 
@@ -332,9 +309,13 @@ export default function ComputeSchedule() {
   // 等调度行到手再自动开执行弹窗并预选版本；不认得的 workload 不往选择里塞。
   const presetContractId = searchParams.get('contract');
   const [contractId, setContractId] = useState<string | null>(presetContractId);
-  const [preset, setPreset] = useState<{ contractId: string; workloadId: string | null } | null>(
-    presetContractId ? { contractId: presetContractId, workloadId: searchParams.get('workload') } : null,
-  );
+  // P4-3（lint 清零·set-state-in-effect）：URL 预置改为「派生 + 一次性消费」，
+  // 不再用 effect 把 URL 意图 setState 进 executeTarget。顺带修掉原实现的一个次序
+  // 缺陷：effect 迟到时曾把用户已手点的行覆盖成 URL 预置行；现在手动目标恒优先。
+  const [presetConsumed, setPresetConsumed] = useState(false);
+  const preset = !presetConsumed && presetContractId
+    ? { contractId: presetContractId, workloadId: searchParams.get('workload') }
+    : null;
   const { data: contracts } = useContractOptions();
   const scheduleQuery = useComputeSchedule(contractId);
   const runsQuery = useComputeRuns({ contractId }, RUN_POLL_INTERVAL_MS);
@@ -489,14 +470,11 @@ export default function ComputeSchedule() {
 
   const scheduleItems = scheduleQuery.data?.items ?? [];
 
-  // 预置的开弹窗要等调度行（弹窗标题与规格上限都取自行内数据，不拿路由参数凑）。
-  useEffect(() => {
-    if (!preset) return;
-    const row = (scheduleQuery.data?.items ?? []).find((item) => item.contract_id === preset.contractId);
-    if (!row) return;
-    setExecuteTarget({ row, workloadId: preset.workloadId });
-    setPreset(null);
-  }, [preset, scheduleQuery.data]);
+  // 预置的开弹窗要等调度行（弹窗标题与规格上限都取自行内数据，不拿路由参数凑）——
+  // 派生即可：调度行一到，effectiveTarget 自然浮出，无需 effect 中转 setState。
+  const presetRow = preset ? scheduleItems.find((item) => item.contract_id === preset.contractId) : undefined;
+  const urlTarget = preset && presetRow ? { row: presetRow, workloadId: preset.workloadId } : null;
+  const effectiveTarget = executeTarget ?? urlTarget;
 
   return (
     <div>
@@ -584,11 +562,14 @@ export default function ComputeSchedule() {
         />
       </Card>
 
-      {executeTarget && (
+      {effectiveTarget && (
         <ExecuteModal
-          contract={executeTarget.row}
-          initialWorkloadId={executeTarget.workloadId}
-          onClose={() => setExecuteTarget(null)}
+          contract={effectiveTarget.row}
+          initialWorkloadId={effectiveTarget.workloadId}
+          onClose={() => {
+            setExecuteTarget(null);
+            setPresetConsumed(true); // URL 预置一次性消费：关掉不再弹回
+          }}
           onDone={(run) => {
             if (run.status === 'skipped_overlap') message.warning('上一轮计算尚未结束，本次已跳过');
             else if (run.status === 'succeeded') message.success(`执行完成（${run.id.slice(0, 8)}…）`);

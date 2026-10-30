@@ -102,8 +102,23 @@ class ContractFulfillmentService:
             raise ValueError(f"Product {product_uuid} is not published")
 
         # Determine sandbox level from contract
-        allowed_levels = (contract.allowed_sandbox_levels or "L3").split(",")
-        sandbox_level = allowed_levels[0].strip() if allowed_levels else "L3"
+        # P1a-8②（cr §4-9「兜底 L3」）：档位兜底本身保留（legacy 合约的 NULL
+        # 取值域是现实），但来源必须诚实披露——会话返回与履约审计要能区分
+        # 「合约声明的档」与「平台默认兜底档」，审计上不得把兜底档伪装成合约
+        # 授权。选档语义一字不动：falsy 取值域→L3；否则取声明列表第一档；
+        # 下方 A55c 供数下限门对兜底档同样生效（不静默升档/放行）。
+        raw_levels = contract.allowed_sandbox_levels
+        if raw_levels:
+            sandbox_level = raw_levels.split(",")[0].strip()
+            sandbox_level_source = "contract_declared"
+        else:
+            sandbox_level = "L3"
+            sandbox_level_source = "platform_default_fallback"
+            logger.warning(
+                "Contract %s declares no allowed_sandbox_levels; fulfilling with the platform "
+                "default level L3 (source disclosed on the session info and fulfillment audit)",
+                contract.id,
+            )
 
         # A55c（A55/A55b 的自动履约入口）：这里建出来的会话装载的就是合约供数，选档
         # 必须过同一条平台隔离下限。判据只在调用时读权威
@@ -218,6 +233,9 @@ class ContractFulfillmentService:
             "product_id": str(product_uuid),
             "session_id": str(session.id),
             "sandbox_level": sandbox_level,
+            # P1a-8②: 档位来源必须随会话信息透传——审计/调用方由此可分辨合约
+            # 声明档与平台默认兜底档（禁伪造：兜底不伪装成授权）。
+            "sandbox_level_source": sandbox_level_source,
             "status": session.status,
         }
 

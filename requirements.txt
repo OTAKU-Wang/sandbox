@@ -73,4 +73,13 @@ minio>=7.2.0  # app/services/storage_service.py：缺这个包时 _get_minio_cli
               # 上传的供数原件随 api 容器重建消失而库里仍是 ready（SS-19 数据注入断链的真因）
 
 # === Cube 数据面 (SS-10 CB-00) ===
-grpcio>=1.60.0   # gRPC 运行时：Cubelet 节点直驱客户端（SS-10 §5.1）；grpcio-tools 仅构建期 stub 再生成工具，不入运行时依赖
+# P1a-8①（cr §4-9「grpcio>=1.60 低于生成码 import 期硬校验」）：app/_stubs/cube 的
+# gencode 在 **import 期** 双重硬校验——pb2_grpc 要求 grpc>=1.84.0
+# （GRPC_GENERATED_VERSION='1.84.0'，低于即 RuntimeError），pb2 的
+# ValidateProtobufRuntimeVersion 要求 protobuf 同 major 且 >=7.35.1（AGENTS 记过
+# 真事故：系统 python 的 7.35.0 撞仓内 gencode 7.35.1，import app._stubs 即抛
+# Protobuf VersionError 假失败）。旧下限 grpcio>=1.60.0 允许装出一个 import 即炸
+# 的运行时，protobuf 此前完全未钉（grpcio 1.84 起不再硬依赖它）。
+# 兼容性声明＝下方两行，由 tests/test_ocr_p1a8_gencode_compat.py 机器钉住与 gencode 同步。
+grpcio>=1.84.0   # gRPC 运行时：Cubelet 节点直驱客户端（SS-10 §5.1）；grpcio-tools 仅构建期 stub 再生成工具，不入运行时依赖
+protobuf>=7.35.1,<8   # 与 app/_stubs/cube gencode（7.35.1，PUBLIC 域同 major）对齐；重新生成 stub 须同步本行

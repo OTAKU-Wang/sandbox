@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Descriptions,
@@ -138,13 +138,34 @@ function renderConstraintValue(value: unknown) {
   return String(value);
 }
 
+// P4-3（lint 清零·preserve-manual-memoization）：旧的 useMemo 依赖 [product?.data_schema]
+// 编译器无法保守成立（memo 不可保留）。这本来就是纯且廉价的映射——提成模块级纯函数
+// 每次渲染直接派生，语义相同、无需缓存表演。
+function buildSchemaFields(fields: unknown): SchemaFieldRow[] {
+  if (!Array.isArray(fields)) return [];
+  return fields.map((field, index) => {
+    const item = field as Record<string, unknown>;
+    return {
+      key: String(item.name ?? index),
+      name: String(item.name ?? `字段 ${index + 1}`),
+      type: String(item.type ?? '-'),
+      sensitivity: String(item.sensitivity ?? item.level ?? '-'),
+      description: String(item.description ?? item.comment ?? '-'),
+    };
+  });
+}
+
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
-  const [fieldRules, setFieldRules] = useState<Record<string, FieldRule>>({});
-  const [defaultSensitivity, setDefaultSensitivity] = useState<FieldSensitivity>('internal');
+  // P4-3（lint 清零·set-state-in-effect）：字段规则改为「服务端真相 + 本地草稿」两层：
+  // 服务端值恒在 react-query 缓存里，草稿只在用户真的改过时存在（null=未动）。
+  // 旧实现用 effect 把服务端值 setState 进本地，既级联渲染又会在 refetch 时
+  // 悄悄覆盖未保存编辑；现在编辑永不与服务端回同步互相踩。
+  const [fieldRulesDraft, setFieldRulesDraft] = useState<Record<string, FieldRule> | null>(null);
+  const [defaultSensitivityDraft, setDefaultSensitivityDraft] = useState<FieldSensitivity | null>(null);
 
   const { data: product, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['data-product', id],
@@ -175,11 +196,15 @@ export default function ProductDetail() {
     enabled: !!id && (isOwner || canReview),
   });
 
-  useEffect(() => {
-    if (!visibilityConfig) return;
-    setFieldRules(visibilityConfig.field_rules || {});
-    setDefaultSensitivity(visibilityConfig.default_sensitivity);
-  }, [visibilityConfig]);
+  // 派生视图：草稿优先，未编辑时直接是服务端值（旧 effect 同步的替代，无任何 setState）
+  const fieldRules = fieldRulesDraft ?? visibilityConfig?.field_rules ?? {};
+  const defaultSensitivity: FieldSensitivity = defaultSensitivityDraft ?? visibilityConfig?.default_sensitivity ?? 'internal';
+  const patchFieldRule = (name: string, patch: Partial<FieldRule>) => {
+    setFieldRulesDraft((current) => {
+      const base = current ?? visibilityConfig?.field_rules ?? {};
+      return { ...base, [name]: { ...(base[name] ?? { sensitivity: defaultSensitivity }), ...patch } };
+    });
+  };
 
   const lifecycleMutation = useMutation({
     mutationFn: (action: LifecycleAction) => {
@@ -224,7 +249,10 @@ export default function ProductDetail() {
     },
     onSuccess: (config) => {
       message.success('字段可见性规则已保存');
-      setFieldRules(config.field_rules || {});
+      // 单一真相：直接刷新缓存（UI 立即等于服务端），草稿功成身退
+      queryClient.setQueryData(['field-visibility', id], config);
+      setFieldRulesDraft(null);
+      setDefaultSensitivityDraft(null);
       queryClient.invalidateQueries({ queryKey: ['field-visibility', id] });
     },
     onError: () => message.error('字段可见性规则保存失败'),
@@ -246,20 +274,7 @@ export default function ProductDetail() {
     },
   });
 
-  const schemaFields = useMemo<SchemaFieldRow[]>(() => {
-    const fields = product?.data_schema?.fields;
-    if (!Array.isArray(fields)) return [];
-    return fields.map((field, index) => {
-      const item = field as Record<string, unknown>;
-      return {
-        key: String(item.name ?? index),
-        name: String(item.name ?? `字段 ${index + 1}`),
-        type: String(item.type ?? '-'),
-        sensitivity: String(item.sensitivity ?? item.level ?? '-'),
-        description: String(item.description ?? item.comment ?? '-'),
-      };
-    });
-  }, [product?.data_schema]);
+  const schemaFields = buildSchemaFields(product?.data_schema?.fields);
 
   if (isError) return <QueryErrorAlert error={error} message="产品详情加载失败" onRetry={() => { void refetch(); }} />;
   if (isLoading) return <CenteredLoading tip="加载产品详情" />;
@@ -460,7 +475,7 @@ export default function ProductDetail() {
                 <Space>
                   <Select
                     value={defaultSensitivity}
-                    onChange={setDefaultSensitivity}
+                    onChange={setDefaultSensitivityDraft}
                     style={{ width: 120 }}
                     options={(Object.keys(sensitivityLabels) as FieldSensitivity[]).map((value) => ({
                       label: sensitivityLabels[value],
@@ -491,10 +506,7 @@ export default function ProductDetail() {
                           <Select
                             value={value}
                             style={{ width: 120 }}
-                            onChange={(next) => setFieldRules((current) => ({
-                              ...current,
-                              [field.name]: { ...(current[field.name] || { sensitivity: defaultSensitivity }), sensitivity: next },
-                            }))}
+                            onChange={(next) => patchFieldRule(field.name, { sensitivity: next })}
                             options={(Object.keys(sensitivityLabels) as FieldSensitivity[]).map((item) => ({
                               label: sensitivityLabels[item],
                               value: item,
@@ -511,10 +523,7 @@ export default function ProductDetail() {
                         <Switch
                           checked={!!fieldRules[field.name]?.auto_approve}
                           disabled={!canEditFieldRules || (fieldRules[field.name]?.sensitivity || defaultSensitivity) === 'restricted'}
-                          onChange={(checked) => setFieldRules((current) => ({
-                            ...current,
-                            [field.name]: { ...(current[field.name] || { sensitivity: defaultSensitivity }), auto_approve: checked },
-                          }))}
+                          onChange={(checked) => patchFieldRule(field.name, { auto_approve: checked })}
                         />
                       ),
                     },
@@ -526,10 +535,7 @@ export default function ProductDetail() {
                           <Input
                             value={fieldRules[field.name]?.mask_pattern || ''}
                             placeholder="redact/hash/keep_first_3_last_4"
-                            onChange={(event) => setFieldRules((current) => ({
-                              ...current,
-                              [field.name]: { ...(current[field.name] || { sensitivity: defaultSensitivity }), mask_pattern: event.target.value },
-                            }))}
+                            onChange={(event) => patchFieldRule(field.name, { mask_pattern: event.target.value })}
                           />
                         ) : fieldRules[field.name]?.mask_pattern || '-'
                       ),

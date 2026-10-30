@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { Typography, Card, Steps, Table, Tag, Descriptions, Space, Button, Input, InputNumber, Select, message, Row, Col, Statistic, Divider } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { outputControlApi, type DPBudgetState, type InspectionResult, type DPNoiseResult } from '../../services/outputControlApi';
+import { outputControlApi, type InspectionResult, type DPNoiseResult } from '../../services/outputControlApi';
 import { sandboxApi } from '../../services/sandboxApi';
 import { EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+// P4-3（lint 清零·react-refresh）：页面文件只导出组件；A192e 三态文案映射按仓内
+// sibling-module 惯例拆到 ./dpBudgetView.ts（纯函数单测在那边跑）。
+import { dpBudgetView } from './dpBudgetView';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -22,35 +25,6 @@ const stages = [
 ];
 
 const stageLabels = Object.fromEntries(stages.map((stage) => [stage.key, stage.title]));
-
-export interface DPBudgetView {
-  /** 上屏的读数：可读时是两位小数，未知/未分配时是状态词，永远不是被造出来的 0。 */
-  display: string;
-  hint: string | null;
-}
-
-export function dpBudgetView(
-  state: DPBudgetState | undefined,
-  remaining: number | null,
-  authoritative = true,
-): DPBudgetView {
-  if (remaining === null || remaining === undefined || state === 'unverified') {
-    return {
-      display: '未核实',
-      hint: '预算后端读不到，剩余 ε 未知——未知不是 0。',
-    };
-  }
-  if (state === 'unallocated') {
-    return { display: '未分配', hint: '该会话没有 ε 预算记录，不代表已耗尽' };
-  }
-  if (state === 'exhausted') {
-    return { display: remaining.toFixed(2), hint: '预算已耗尽（核实过的读数）' };
-  }
-  return {
-    display: remaining.toFixed(2),
-    hint: authoritative ? null : '本机进程内预算，未跨副本共享',
-  };
-}
 
 const severityColors: Record<string, string> = {
   critical: 'red',

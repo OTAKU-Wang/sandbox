@@ -4,7 +4,7 @@
 // API_KEY_SCOPE_DENIED 的 {group,verb,path}），对尚未通过认证的访客一律不外泄，也绝不
 // JSON.stringify 整个错误对象。例外：422 的 detail 是 FastAPI 校验错误数组，其中的
 // msg/message 本就是后端写给用户看的文案。
-import { getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 
 export function describeAuthError(err: unknown, fallback = '登录失败'): string {
   const envelope = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};

@@ -316,11 +316,22 @@ async def session_cleanup_loop(interval_seconds: float = 300.0) -> None:
                         janitor_results = await purge_cycle(db)
                 except Exception as e:
                     logger.error("[SessionLifecycle] Retention janitor failed: %s", e)
+                # P2-5（D-e2e-18）：MinIO 一致性巡检搭载同一 sweep 骨架（janitor
+                # 同型双门默认关：INTEGRITY_PATROL_ENABLED 主闸 × interval>0；
+                # 语义与诚实三态见 integrity_patrol 模块头）。巡检只写
+                # integrity_* 两列并自留审计，事务与 janitor 同批提交。
+                patrol_summary: dict = {}
+                try:
+                    from app.services.integrity_patrol import maybe_run_patrol_cycle
+
+                    patrol_summary = await maybe_run_patrol_cycle(db)
+                except Exception as e:
+                    logger.error("[SessionLifecycle] Integrity patrol failed: %s", e)
                 await db.commit()
-            if cleaned or dev_cleaned or contracts_expired or any(v for v in janitor_results.values()):
+            if cleaned or dev_cleaned or contracts_expired or any(v for v in janitor_results.values()) or patrol_summary:
                 logger.info(
-                    "[SessionLifecycle] Sweep: %d sessions, %d dev sessions, %d contracts expired, janitor=%s",
-                    cleaned, dev_cleaned, contracts_expired, janitor_results,
+                    "[SessionLifecycle] Sweep: %d sessions, %d dev sessions, %d contracts expired, janitor=%s, patrol=%s",
+                    cleaned, dev_cleaned, contracts_expired, janitor_results, patrol_summary or "idle",
                 )
         except asyncio.CancelledError:
             break

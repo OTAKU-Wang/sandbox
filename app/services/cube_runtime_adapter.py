@@ -780,7 +780,24 @@ class CubeRuntimeAdapter(RuntimeAdapter):
         except CDSError as exc:
             logger.error("[CubeRuntime] Create failed for session %s: %s", session_id, exc)
             return {"error": str(exc.message), "status": SessionStatus.FAILED.value, "container_id": None}
-        sandbox_id = response.sandboxID or str(uuid.uuid4())
+        # P1a-8③（cr §4-9「create 返回空 ID 时臆造 uuid」）：节点报成功却不带
+        # sandboxID 是协议违规——旧代码 uuid4() 兜底等于凭空发明一个节点从未登记
+        # 的地址：session 行与 destroy/exec/metrics 全部拿这个假 ID 寻址（本文件
+        # _parse_container_id 的四处消费点），真沙箱连同注入的数据通道就此脱离
+        # 账本泄漏。禁伪造铁律：响亮失败，session 记 FAILED，绝不臆造。
+        if not response.sandboxID:
+            logger.error(
+                "[CubeRuntime] node %s returned success with EMPTY sandboxID for session %s — "
+                "refusing to fabricate an id (the node would never recognize it; the real sandbox "
+                "would leak unaddressable)",
+                node["node_id"], session_id,
+            )
+            return {
+                "error": "cube node returned success with an empty sandboxID (protocol violation)",
+                "status": SessionStatus.FAILED.value,
+                "container_id": None,
+            }
+        sandbox_id = response.sandboxID
         container_id = f"{_CONTAINER_PREFIX}{node['node_id']}-{sandbox_id}"
         return {
             "container_id": container_id,

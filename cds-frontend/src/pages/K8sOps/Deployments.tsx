@@ -4,7 +4,8 @@ import { ReloadOutlined, ClusterOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import { listDeployments, type OpsDeployment } from '../../services/k8sOpsApi';
-import { QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../../components/Feedback/tableEmpty';
 
 const { Text } = Typography;
 

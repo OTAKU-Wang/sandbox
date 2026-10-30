@@ -8,3 +8,7 @@ data:
 {{- range $key, $value := .Values.api.env }}
   {{ $key }}: {{ $value | quote }}
 {{- end }}
+{{- if .Values.kms.masterKeyFile }}
+  # P2-3：仅在显式设值时出现；默认空 = 本行不渲染 = 旧行为。
+  CDS_KMS_MASTER_KEY_FILE: {{ .Values.kms.masterKeyFile | quote }}
+{{- end }}

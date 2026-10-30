@@ -8,7 +8,8 @@ import { useAuthStore } from '../stores/authStore';
 import { normalizeUserRole } from '../utils/roles';
 import { UserRole } from '../types/enums';
 import { confirmHighRiskOperation } from '../utils/highRiskOperation';
-import { QueryErrorAlert, tableEmpty } from '../components/Feedback/QueryFeedback';
+import { QueryErrorAlert } from '../components/Feedback/QueryFeedback';
+import { tableEmpty } from '../components/Feedback/tableEmpty';
 
 const { Title, Text } = Typography;
 

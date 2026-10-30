@@ -311,12 +311,14 @@ class TestCreateRoleAndDsn:
         role2 = await m2.create_session_role(SID, dup)  # 不抛
         assert role2.startswith("sandbox_")
 
-    def test_dsn_rebuild_carries_credential_and_no_guc(self):
+    async def test_dsn_rebuild_carries_credential_and_no_guc(self):
         """#2/#3b/#3c：DSN 不再携带 options GUC（注入面），make_url 重建，
         无用户名基 DSN 如实拒绝而不是把 app 角色 DSN 当会话 DSN 发出去。"""
-        import asyncio
+        # A192x (P4-1): 本用例曾是 sync + asyncio.run()——3.14 的 Runner 收尾会把
+        # policy 的 current loop 置 None（3.12 及以前容忍），把后面 sync 用例的
+        # get_event_loop() 全数打成 RuntimeError。挂到套件钉住的 session loop 上。
         m = PGRLSManager()
-        asyncio.run(m.create_session_role(SID, _RecorderSession()))
+        await m.create_session_role(SID, _RecorderSession())
         dsn = m.get_connection_string(SID, "postgresql+asyncpg://app:s3cr3t@db:5432/cds")
         assert "options=" not in dsn
         assert "app:" not in dsn.split("@")[0].replace(m._build_role_name(SID), "")
