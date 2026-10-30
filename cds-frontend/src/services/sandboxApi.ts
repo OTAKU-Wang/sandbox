@@ -1,4 +1,6 @@
 import api from './api';
+import { p } from './pathSegment';
+import { UPLOAD_TIMEOUT_MS } from './timeouts';
 import type { SandboxSession } from '../types/models';
 import type { PaginatedResponse } from '../types/api';
 import type { SecurityReport } from '../types/security';
@@ -110,21 +112,44 @@ export interface SessionFilesResponse {
   files: SessionFile[];
 }
 
-export interface FileDownloadBlockedError {
-  status: 409;
-  detail: {
-    findings_count: number;
+/**
+ * A296（M-302）：下载被输出审查阻断（409 DLP）时的错误形状。
+ *
+ * 旧形态是一个 `interface`，定义完从没被引用过——`downloadFile` 抛的是当场手搓的交叉类型，
+ * 于是页面想分辨「被审查阻断」和「其它下载失败」只能靠 `err.status === 409` 猜。
+ * 这里改成真的 Error 子类并由 `downloadFile` 抛出：`instanceof` 可用，
+ * 同时保留 `.status` / `.detail` 两个字段的既有读法（SessionDetail 的错误提示就靠它们）。
+ */
+export class FileDownloadBlockedError extends Error {
+  readonly status = 409 as const;
+
+  readonly detail: {
+    findings_count?: number;
     error?: string;
+    findings?: unknown[];
   };
+
+  constructor(detail: FileDownloadBlockedError['detail']) {
+    super('输出审查阻断');
+    this.name = 'FileDownloadBlockedError';
+    this.detail = detail;
+  }
 }
 
 // ---------- Operations (W11 202 异步模型) ----------
+
+/**
+ * A296（M-301）：`'…' | string` 会让整条联合退化成 `string`，`op.status === 'succeded'`
+ * 这种拼错编译期一声不响。`(string & {})` 保住后端将来新增状态的兼容性，
+ * 同时让已知四态重新成为可自动补全、可 switch 收窄的字面量。
+ */
+export type SessionOperationStatus = 'pending' | 'running' | 'succeeded' | 'failed' | (string & {});
 
 export interface SessionOperation {
   operation_id: string;
   session_id: string;
   op_type: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed' | string;
+  status: SessionOperationStatus;
   progress: number;
   error: string | null;
   result_ref: Record<string, unknown> | null;
@@ -280,14 +305,19 @@ export const parseReviewHeader = (header?: string | null): FileReviewStatus | nu
 };
 
 export const sandboxApi = {
-  list: (params?: { page?: number; page_size?: number; status?: string }): Promise<PaginatedResponse<SandboxSession>> =>
-    api.get('/sandbox-sessions', {
+  // A296（M-300）：page 传 0/负数时旧算法算出**负 skip**，后端 `Query(0, ge=0)` 直接 422
+  // ——报错是拦住了，但用户看到的是一条和自己操作对不上的 422。这里把页码钳回合法区间。
+  list: (params?: { page?: number; page_size?: number; status?: string }): Promise<PaginatedResponse<SandboxSession>> => {
+    const page = Math.max(1, Math.trunc(params?.page ?? 1));
+    const pageSize = Math.min(200, Math.max(1, Math.trunc(params?.page_size ?? 20)));
+    return api.get('/sandbox-sessions', {
       params: {
-        skip: ((params?.page ?? 1) - 1) * (params?.page_size ?? 20),
-        limit: params?.page_size ?? 20,
+        skip: (page - 1) * pageSize,
+        limit: pageSize,
         status: params?.status,
       },
-    }),
+    });
+  },
 
   get: (id: string): Promise<SandboxSession> =>
     api.get(`/sandbox-sessions/${id}`),
@@ -326,8 +356,9 @@ export const sandboxApi = {
   devTerminate: (id: string): Promise<{ status: string }> =>
     api.post(`/dev-sandbox/sessions/${id}/terminate`),
 
+  // A273（M-304）：模板名走的是后端 4 条固定名路由，段照样得编码（`p()` 对安全字符集原样透出）
   devGetTemplate: (name: string): Promise<{ template: string }> =>
-    api.get(`/dev-sandbox/templates/${name}`),
+    api.get(`/dev-sandbox/templates/${p(name)}`),
 
   // ---------- Session usability (Rounds 39-40) ----------
 
@@ -358,7 +389,9 @@ export const sandboxApi = {
   uploadFile: (id: string, file: File): Promise<SessionFile> => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post(`/sandbox-sessions/${id}/files`, formData);
+    // A311 的另一半：会话文件上传后端压根没有显式大小上限，全局 30s 是唯一护栏，
+    // 而它拦的正是最不该拦的地方（慢链接上的大文件）。与数据资源上传同一口径。
+    return api.post(`/sandbox-sessions/${id}/files`, formData, { timeout: UPLOAD_TIMEOUT_MS });
   },
 
   // Blob download — returns blob plus review status parsed from the
@@ -399,10 +432,7 @@ export const sandboxApi = {
         // report "0 findings" to the operator.
         const detail = ((envelope as { detail?: unknown }).detail ?? envelope) as
           { findings_count?: number; error?: string; findings?: unknown[] };
-        const blockedErr = new Error('输出审查阻断') as Error & { status: number; detail: typeof detail };
-        blockedErr.status = 409;
-        blockedErr.detail = detail;
-        throw blockedErr;
+        throw new FileDownloadBlockedError(detail);
       }
       throw error;
     }

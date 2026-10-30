@@ -87,9 +87,12 @@ class TestGeneralizeAge:
         assert result.masked_row["age"] == "60+"
 
     def test_age_invalid(self, masker):
+        # A149: GENERALIZE used to fail OPEN — an unparseable age passed through as
+        # plaintext. Now the rule falls back to REDACT and discloses the fallback.
         rules = [MaskRule("age", MaskMode.GENERALIZE, generalize_type="age_range")]
         result = masker.mask_row({"age": "unknown"}, rules)
-        assert result.masked_row["age"] == "unknown"
+        assert result.masked_row["age"] == "[REDACTED]"
+        assert "age" in result.fallback_fields
 
 
 class TestGeneralizeDate:
@@ -126,9 +129,12 @@ class TestGeneralizeRegion:
         assert result.masked_row["city"] == "华南"
 
     def test_unknown_region_passthrough(self, masker):
+        # A149: unmapped region was raw-value passthrough; a masked field that
+        # secretly carries plaintext is worse than no mask. Fail-closed now.
         rules = [MaskRule("city", MaskMode.GENERALIZE, generalize_type="region")]
         result = masker.mask_row({"city": "Tokyo"}, rules)
-        assert result.masked_row["city"] == "Tokyo"
+        assert result.masked_row["city"] == "[REDACTED]"
+        assert "city" in result.fallback_fields
 
 
 class TestGeneralizeNumericBucket:
@@ -143,9 +149,11 @@ class TestGeneralizeNumericBucket:
         assert result.masked_row["score"] == "[80, 90)"
 
     def test_numeric_bucket_invalid(self, masker):
+        # A149: non-numeric value under numeric_bucket used to pass through raw.
         rules = [MaskRule("val", MaskMode.GENERALIZE, generalize_type="numeric_bucket")]
         result = masker.mask_row({"val": "abc"}, rules)
-        assert result.masked_row["val"] == "abc"
+        assert result.masked_row["val"] == "[REDACTED]"
+        assert "val" in result.fallback_fields
 
 
 class TestGeneralizeTruncate:

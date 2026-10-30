@@ -368,6 +368,22 @@ def is_key_credential(value: str | None) -> bool:
     return bool(value) and value.strip().startswith("cds_ak_")
 
 
+def effective_key_credential(auth_header: str = "", api_key_header: str = "") -> str | None:
+    """按**路由层的优先级**选出守卫应当据此判定 key 主体的那一份凭据（A67）。
+
+    `deps.get_auth_subject` 的口径是：`Authorization` 里出现任何 Bearer token
+    就是本请求的凭据（人 JWT 走 JWT 路、401 也是 401），**绝不**回退到
+    `X-CDS-API-Key`；只有 header 缺失或不是 bearer 形态时，
+    `deps.machine_key_from_request` 才拿 `cds_ak_` 头凭据。守卫若在「bearer 不是
+    key」时就改看头凭据（旧实现），人 JWT + 任意残留 key 头会在未映射路径上被
+    当 key 主体拒 403——路由本会按人处理（自我伤害型 403，A67）。
+    """
+    credential = key_credential_from_authorization(auth_header)
+    if credential is None:
+        return (api_key_header or "").strip() or None
+    return credential
+
+
 def key_unmapped_deny(
     path: str, auth_header: str, api_key_header: str = ""
 ) -> bool:
@@ -376,13 +392,12 @@ def key_unmapped_deny(
 
     Pure function so the default-deny check runs in raw ASGI middleware
     (WebSocket handshakes cannot inject Request-taking dependencies). The
-    credential is read the same way the router layer reads it (A65), and
-    `api_key_header` lets a caller hand over the other credential transport
-    (`X-CDS-API-Key`) instead of only the folded bearer form.
+    credential is read the same way the router layer reads it (A65) with the
+    same priority (A67: bearer token wins whenever present); `api_key_header`
+    is the fallback transport (`X-CDS-API-Key`) for requests whose
+    `Authorization` is absent or not bearer-shaped.
     """
-    credential = key_credential_from_authorization(auth_header)
-    if not is_key_credential(credential):
-        credential = api_key_header
+    credential = effective_key_credential(auth_header, api_key_header)
     if not is_key_credential(credential):
         return False
     if is_human_only(path):

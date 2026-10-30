@@ -1302,12 +1302,17 @@ export default function SessionDetail() {
         {(activeOp || opData) && (() => {
           const op = opData ?? activeOp!;
           const percent = Math.min(100, Math.round((op.progress ?? 0) * 100));
-          const statusTag = {
+          /* A296（M-301）：`SessionOperationStatus` 去掉 `| string` 之后是
+             `'pending' | 'running' | 'succeeded' | 'failed' | (string & {})`，字面量表的键
+             覆盖不住「后端将来加一档」这一支，直接索引会不成类型。表按 string 键声明，
+             下面那条 `?? <Tag>{op.status}</Tag>` 原样留着——它就是未知档位的如实回退。 */
+          const statusTags: Record<string, ReactNode> = {
             pending: <Tag>待处理</Tag>,
             running: <Tag color="processing" style={{ marginInlineEnd: 0 }}>进行中</Tag>,
             succeeded: <Tag color="success" style={{ marginInlineEnd: 0 }}>已完成</Tag>,
             failed: <Tag color="error" style={{ marginInlineEnd: 0 }}>失败</Tag>,
-          }[op.status] ?? <Tag>{op.status}</Tag>;
+          };
+          const statusTag = statusTags[op.status] ?? <Tag>{op.status}</Tag>;
           return (
             <Alert
               type={op.status === 'failed' ? 'error' : 'info'}

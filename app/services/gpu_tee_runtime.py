@@ -84,6 +84,9 @@ class SecureAllocation:
     encrypted: bool = True
     gpu_device: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # A132 (2026-10-30): 模拟运行时产出的每一项产物都必须自我披露（禁伪造铁律），
+    # 与 AttestationReport.is_simulation 同构；真实硬件运行时保持 False。
+    is_simulation: bool = False
 
 
 @dataclass
@@ -98,6 +101,7 @@ class ComputeJob:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
+    is_simulation: bool = False  # A132: 同上，模拟运行时的作业即时完成，必须披露
 
 
 @dataclass
@@ -110,6 +114,7 @@ class GPUMetrics:
     utilization_pct: float
     temperature_c: float
     tee_active: bool
+    is_simulation: bool = False  # A132: 模拟指标的 tee_active/温度/利用率不是硬件读数
 
 
 @dataclass
@@ -179,6 +184,7 @@ class EpochMetrics:
     avg_loss: float = 0.0
     duration_seconds: float = 0.0
     gpu_memory_peak_mb: int = 0
+    is_simulation: bool = False  # A132: 训练损失/耗时若来自模拟运行时不是真训练证据
 
     def update(self, loss: float) -> None:
         self.total_batches += 1
@@ -313,6 +319,7 @@ class GPUTeeRuntimeStub(GPUTeeRuntime):
             size_bytes=size_bytes,
             encrypted=True,
             gpu_device=gpu_device,
+            is_simulation=True,  # A132: 「加密 GPU 显存」在本地运行时里是 AES-GCM 软件信封
         )
         self._allocations[alloc_id] = allocation
         self._memory_used += size_bytes
@@ -352,6 +359,7 @@ class GPUTeeRuntimeStub(GPUTeeRuntime):
             output_allocation=output_alloc.allocation_id,
             started_at=datetime.now(timezone.utc),
             completed_at=datetime.now(timezone.utc),
+            is_simulation=True,  # A132: 即时完成 + 哈希代理计算，绝不冒充 TEE 内真作业
         )
         self._jobs[job_id] = job
         logger.info(f"GPU-TEE local: compute job {job_id} completed (mode={mode.value})")
@@ -370,6 +378,7 @@ class GPUTeeRuntimeStub(GPUTeeRuntime):
             utilization_pct=mem_used_pct * 100,
             temperature_c=35.0 + min(mem_used_pct * 25.0, 30.0),
             tee_active=True,
+            is_simulation=True,  # A132: 软件记账的「利用率/温度」不是硬件读数
         )
 
     async def initialize_gpu_cc(self, session_id: str, config: GPUCCConfig | None = None) -> GPUHandle:
@@ -415,7 +424,7 @@ class GPUTeeRuntimeStub(GPUTeeRuntime):
     ) -> EpochMetrics:
         import time as _time
         start = _time.monotonic()
-        metrics = EpochMetrics()
+        metrics = EpochMetrics(is_simulation=True)  # A132: 哈希代理 loss，非真训练
 
         for batch in batches:
             # Encrypt and send batch to GPU-TEE
@@ -467,14 +476,30 @@ class GPUTeeRuntimeFactory:
     def create(cls, implementation: str = "local", **kwargs) -> GPUTeeRuntime:
         """Create a GPU-TEE runtime instance.
 
-        When implementation is 'auto', checks CDS_GPU_TEE_SIMULATION config:
-        - True  -> uses 'simulator' (CPU-based fallback)
-        - False -> uses local software runtime
+        ``auto``（A132，SS-13 铁律）：真实 NVIDIA CC 运行时本构建**不存在**——
+        未显式开启 ``GPU_TEE_SIMULATION`` 时响亮拒绝（400 RUNTIME_UNAVAILABLE），
+        绝不静默回退到任何模拟实现；显式开启才允许选择模拟运行时（其全部产物自带
+        ``is_simulation=True`` 披露）。显式点名 "local"/"stub"/"simulator" 是开发/
+        测试的显式选择，与 auto 互不越界：flag 不劫持点名，点名也不伪装真硬件。
         """
         if implementation == "auto":
             from app.core.config import get_settings
+            from app.core.errors import CDSError
+
             settings = get_settings()
-            implementation = "simulator" if settings.GPU_TEE_SIMULATION else "local"
+            if not settings.GPU_TEE_SIMULATION:
+                raise CDSError(
+                    "GPU-TEE auto selection refused: no real NVIDIA CC runtime is integrated in this "
+                    "build and GPU_TEE_SIMULATION is disabled — refusing to silently degrade to a "
+                    "simulated runtime (SS-13). Set CDS_GPU_TEE_SIMULATION=true to opt into the "
+                    "disclosed software simulator.",
+                    code="RUNTIME_UNAVAILABLE",
+                    http_status=400,
+                    detail={"reason": "gpu_tee_real_runtime_missing", "gpu_tee_simulation": False},
+                )
+            # 显式开启模拟：优先注册的 simulator，导入缺失时退而求其次用同样自我
+            # 披露的 local 运行时——两者都在产物级 is_simulation，不存在冒充空间。
+            implementation = "simulator" if "simulator" in cls._implementations else "local"
 
         impl_cls = cls._implementations.get(implementation)
         if not impl_cls:
@@ -487,10 +512,27 @@ class GPUTeeRuntimeFactory:
         cls._implementations[name] = impl_cls
 
 
-# Default singleton -- use simulator when available, fall back to local runtime
+def _build_default_runtime() -> GPUTeeRuntime | None:
+    """A132: 默认单例必须尊重 GPU_TEE_SIMULATION 开关——SS-13 之后不允许
+    「import 即得到模拟器」。未显式开启模拟且无真实适配器时返回 None（诚实的
+    “没有运行时”），消费者必须显式处理，而不是拿到一个伪装成硬件的替身。
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    if not settings.GPU_TEE_SIMULATION:
+        return None
+    if "simulator" in GPUTeeRuntimeFactory._implementations:
+        return GPUTeeRuntimeFactory._implementations["simulator"]()
+    return LocalSoftwareGPUTeeRuntime()
+
+
+# 注册模拟器类（点名 create("simulator") 仍可用），但默认单例按配置构建：
+# 开启模拟 → 披露型模拟器；关闭 → None（没有运行时，绝不静默给替身）。
 try:
     from app.services.gpu_tee_simulator import GPUTeeSimulator
-    gpu_tee_runtime: GPUTeeRuntime = GPUTeeSimulator()
     GPUTeeRuntimeFactory.register("simulator", GPUTeeSimulator)
 except ImportError:
-    gpu_tee_runtime: GPUTeeRuntime = LocalSoftwareGPUTeeRuntime()
+    pass
+
+gpu_tee_runtime: GPUTeeRuntime | None = _build_default_runtime()

@@ -229,7 +229,10 @@
   border-bottom: 0;
 }
 
-.cds-audit-screen .cds-audit-records .ant-table-tbody > tr:last-child > td {
+/* A230：这条按「末行」画真值里那条下边线（y956..957），但空态时 antd 的末行是
+   `.ant-table-placeholder`（"暂无数据" 那一整块），于是空表底下也压出一条分隔线——
+   图上的空态卡里没有这条。空态本来就不存在「最后一条数据行」。 */
+.cds-audit-screen .cds-audit-records .ant-table-tbody > tr:last-child:not(.ant-table-placeholder) > td {
   border-bottom: 1px solid var(--audit-rule);
 }
 
@@ -325,10 +328,12 @@
   order: 2;
 }
 
-/* 图上当前页是实心蓝块白字（#186cf0 探值；主色同源 #1b6ef3），antd 默认白底蓝框不够。 */
+/* 图上当前页是实心蓝块白字（#186cf0 探值；主色同源 #1b6ef3），antd 默认白底蓝框不够。
+   A230：这里原本把主色又拄了一份字面量——index.css 的 `--cds-primary` 就是同一支 #1b6ef3，
+   调色板一改就会分叉，改成引用令牌（取值不变）。 */
 .cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-item-active {
-  background: #1b6ef3;
-  border-color: #1b6ef3;
+  background: var(--cds-primary);
+  border-color: var(--cds-primary);
 }
 
 .cds-audit-screen .cds-audit-records .ant-pagination .ant-pagination-item-active a,

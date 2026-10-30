@@ -240,8 +240,8 @@ export default function ProductDetail() {
       message.success('字段申请已处理');
       queryClient.invalidateQueries({ queryKey: ['field-exposure-requests', id] });
     },
-    onError: (error: any) => {
-      const detail = error?.detail;
+    onError: (error: unknown) => {
+      const detail = (error as { detail?: unknown } | null)?.detail;
       message.error(typeof detail === 'string' ? detail : '字段申请处理失败');
     },
   });

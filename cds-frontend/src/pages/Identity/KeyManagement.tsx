@@ -9,16 +9,19 @@ import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
 const { Title, Text } = Typography;
 
+// A271-FE：类型与算法都读后端真值；后端没给的那一档显示「未记录」，不再代填 DEK / SM4。
 const keyTypeLabels: Record<string, string> = {
   dek: 'DEK',
   session: 'Session',
   kek: 'KEK',
+  unknown: '未记录',
 };
 
 const keyTypeColors: Record<string, string> = {
   dek: 'blue',
   session: 'cyan',
   kek: 'purple',
+  unknown: 'default',
 };
 
 const statusColors: Record<string, string> = {
@@ -109,7 +112,7 @@ export default function KeyManagement() {
       render: (v) => <Tag color={keyTypeColors[v]}>{keyTypeLabels[v] || v}</Tag>,
     },
     { title: '产品ID', dataIndex: 'product_id', render: (v) => v ? <Text code>{v.slice(0, 12)}...</Text> : '-' },
-    { title: '算法', dataIndex: 'algorithm', render: (v) => v || 'SM4' },
+    { title: '算法', dataIndex: 'algorithm', render: (v) => v || '未记录' },
     {
       title: '状态',
       dataIndex: 'status',

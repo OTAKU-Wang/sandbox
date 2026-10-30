@@ -2,7 +2,7 @@
 // 夹具给真后端字段名（Notebook / DatasetBundleRow），断言的是页面上出现什么、没出现什么。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../../../test/test-utils';
 import api from '../../../services/api';
 import { useAuthStore } from '../../../stores/authStore';

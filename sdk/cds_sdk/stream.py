@@ -21,6 +21,7 @@ import json
 import shlex
 from typing import Any, Callable, Iterator
 
+from ._encoding import path_segment, query_value
 from .client import CDSError
 
 # Capability matrix (PZ-13): levels where streaming exec is real.
@@ -100,6 +101,39 @@ def _validate_timeout_seconds(value: Any) -> None:
         )
 
 
+def _validate_stream_args(session_id: Any, language: Any, recv_timeout: Any) -> None:
+    """A218: validate the remaining ``stream_exec`` arguments BEFORE any I/O.
+
+    Companion of :func:`_validate_timeout_seconds` — same contract: a bad
+    argument is a caller bug, so it raises :class:`ValueError` with an
+    actionable message *before* burning a ws-ticket round trip, instead of
+    surfacing later as a raw ``AttributeError``/``TypeError`` (or, for
+    ``session_id``, as a percent-mangled route 404 from the server).
+    ``code`` keeps its existing contract: empty code raises
+    :class:`CDSError` (400) at frame-build time — that one is data, not
+    argument shape.
+    """
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError(
+            f"session_id must be a non-empty string, got {session_id!r}"
+            f" ({type(session_id).__name__})"
+        )
+    if not isinstance(language, str) or not language.strip():
+        raise ValueError(
+            f"language must be a non-empty string, got {language!r}"
+            f" ({type(language).__name__})"
+        )
+    if isinstance(recv_timeout, bool) or not isinstance(recv_timeout, (int, float)):
+        raise ValueError(
+            f"recv_timeout must be a positive number of seconds "
+            f"(int or float), got {recv_timeout!r} ({type(recv_timeout).__name__})"
+        )
+    if not recv_timeout > 0:
+        raise ValueError(
+            f"recv_timeout must be a positive number of seconds, got {recv_timeout!r}"
+        )
+
+
 def stream_exec(
     client,
     session_id: str,
@@ -119,6 +153,8 @@ def stream_exec(
         determines the WebSocket endpoint).
     session_id:
         Target session (must be an L0 or k8s session, status running/ready).
+        Must be a non-empty string — validated before any request (A218);
+        percent-encoded as a single URL path segment (A215).
     code:
         Code to run. ``language="python"`` wraps it as
         ``python3 -c <code>``; any other language runs ``code`` as a shell
@@ -128,7 +164,9 @@ def stream_exec(
         exec timeout). Validated up-front — anything that is not a positive
         int/float raises :class:`ValueError` before any request is sent.
     recv_timeout:
-        Seconds to wait for the next frame before giving up.
+        Seconds to wait for the next frame before giving up. Also validated
+        up-front: a non-positive or non-numeric value raises
+        :class:`ValueError` before any request is sent (A218).
     _ws_open:
         Test hook: ``fn(url, timeout) -> ws-like`` with ``send``/``recv``/
         ``close``. Defaults to websocket-client.
@@ -146,17 +184,21 @@ def stream_exec(
     (fail-closed) — treat the output as untrusted and check
     :meth:`CDSClient.get_session_audit`.
     """
-    # SDK MINOR: validate the argument shape before burning a ws-ticket.
+    # SDK MINOR / A218: validate every argument shape before burning a
+    # ws-ticket (timeout first — the pre-existing pin keeps that order).
     _validate_timeout_seconds(timeout_seconds)
+    _validate_stream_args(session_id, language, recv_timeout)
     ticket_resp = client.request_ws_ticket()
     ticket = ticket_resp.get("ticket") if isinstance(ticket_resp, dict) else None
     if not ticket:
         raise CDSError(500, f"ws-ticket response has no ticket: {ticket_resp!r}")
 
     command = _build_command(code, language)
+    # A215: session id is one route segment and the ticket one query value —
+    # encode both, or a reserved character silently re-routes/breaks the URL.
     path = (
-        f"/api/v1/sandbox-sessions/{session_id}/exec/stream"
-        f"?ticket={ticket}"
+        f"/api/v1/sandbox-sessions/{path_segment(session_id)}/exec/stream"
+        f"?ticket={query_value(ticket)}"
     )
     url = _to_ws_url(str(client._client.base_url), path)
 

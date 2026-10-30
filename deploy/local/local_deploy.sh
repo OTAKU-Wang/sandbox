@@ -134,6 +134,7 @@ run l-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -v "l_cds_ch:/var/lib/clickhouse" \
   -v "${CH_PORTS_FILE}:/etc/clickhouse-server/config.d/ports.xml:ro"
 
+# 钉版本纪律：永不用 :latest；升级归属 = 发布流程人工评审，与 compose/k8s/helm 同 tag 同升
 run l-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -e MINIO_ROOT_USER=cds_minio_admin -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   -v "l_cds_minio:/data" \

@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.scopes import (
+    effective_key_credential,
     is_key_credential,
-    key_credential_from_authorization,
     key_unmapped_deny,
     require_group,
     require_human,
@@ -495,10 +495,12 @@ class Ss12KeyDefaultDenyMiddleware:
                     header_key = v.decode("latin-1")
         # 文档化的数据面凭据（X-CDS-API-Key）同样是 key subject：默认拒绝必须
         # 看得见它，否则换一个头就绕过了未映射前缀的 fail-closed 判定。
-        if (not is_key_credential(key_credential_from_authorization(auth))
-                and is_key_credential(header_key)):
-            auth = "Bearer " + header_key.strip()
-        if not key_unmapped_deny(path, auth):
+        # A67：但优先级必须与 `deps.get_auth_subject` 一致——Authorization 里
+        # 出现任何 Bearer token 就是本请求的凭据，头凭据只在 bearer 缺失/非
+        # bearer 形态时说话。旧写法把「bearer 不是 key」直接折叠成头 key，人
+        # JWT + 残留 key 头会在未映射路径被守卫当 key 主体拒 403（路由本会
+        # 按人处理——自我伤害）。判定收敛进 `key_unmapped_deny` 的同口径谓词。
+        if not key_unmapped_deny(path, auth, api_key_header=header_key):
             await self.app(scope, receive, send)
             return
         request_id = (scope.get("state") or {}).get("request_id") or uuid.uuid4().hex[:16]
@@ -646,15 +648,16 @@ if _static_dir.exists():
                         header_key = v.decode("latin-1")
                 # A65: 与路由同口径 —— `HTTPBearer` 对 scheme 大小写不敏感、`deps` 会
                 # strip 凭据，字节比较 `b"Bearer cds_ak_"` 差一个字节就看不见 key。
-                if (is_key_credential(key_credential_from_authorization(auth))
-                        or is_key_credential(header_key)):
-                        body = ('{"code": "API_KEY_SCOPE_DENIED", '
-                                '"message": "API key subjects cannot access human-only endpoints", '
-                                '"detail": {"reason": "human_only"}, "request_id": ""}')
-                        await send({"type": "http.response.start", "status": 403,
-                                    "headers": [(b"content-type", b"application/json")]})
-                        await send({"type": "http.response.body", "body": body.encode()})
-                        return
+                # A67: 优先级也与路由同口径（`effective_key_credential`）——人 JWT + 残留
+                # key 头仍是人主体，人机分流不得误伤人。
+                if is_key_credential(effective_key_credential(auth, header_key)):
+                    body = ('{"code": "API_KEY_SCOPE_DENIED", '
+                            '"message": "API key subjects cannot access human-only endpoints", '
+                            '"detail": {"reason": "human_only"}, "request_id": ""}')
+                    await send({"type": "http.response.start", "status": 403,
+                                "headers": [(b"content-type", "application/json")]})
+                    await send({"type": "http.response.body", "body": body.encode()})
+                    return
             await self._inner(scope, receive, send)
 
     app.mount("/static", _KeyBlockedStatic(StaticFiles(directory=str(_static_dir))), name="static")

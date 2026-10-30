@@ -34,7 +34,10 @@ api:
       memory: 2Gi
   env:
     CDS_DEBUG: "false"
-    CDS_LOG_JSON: "false"
+    # P6 漂移收敛（2026-10-30）：CDS_LOG_JSON 的单一真值源是生产姿态 = "true"
+    # （docker-compose.prod.yml 为基准，k8s cds-app-env / deploy/e2e-remote 同值）；
+    # 旧的 "false" 是漂移值，已由 test_deploy_manifest_gates PROD_POSTURE 钉死。
+    CDS_LOG_JSON: "true"
     CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
     CDS_KMS_REQUIRE_ATTESTATION: "true"
     # CB-01: service token for the Go volume plugin's KMS volume-key endpoints.
@@ -208,6 +211,34 @@ opa:
       cpu: 100m
       memory: 128Mi
 
+# ─── MinIO (S3 对象存储) ───
+# P6（2026-10-30）：chart 补齐 MinIO 模板，与 k8s/minio.yaml（deploy.sh 默认
+# apply 的 k3s 路径）对等。默认 enabled: false —— 已有安装都按 runbook 指向带
+# 外置 MinIO 的 CDS_MINIO_ENDPOINT，翻默认会把别人的存量拓扑改掉。要用 chart
+# 托管的 MinIO：置 true，给 existingSecret 补 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD
+# 两个键，并把 CDS_MINIO_ENDPOINT 指到 http://<release>-cds-minio:9000。
+minio:
+  enabled: false
+  image:
+    # 钉版本纪律：永不用 :latest。此 tag 与 compose×3 / k8s/minio.yaml /
+    # deploy 脚本六个副本同值，升级归属 = 发布流程人工评审，七副本一把同升
+    # （单点升级 = helm 路径与 manifest 路径的对象存储行为漂移）。
+    repository: minio/minio
+    tag: "RELEASE.2025-01-20T14-49-07Z"
+    pullPolicy: IfNotPresent
+  service:
+    port: 9000
+    consolePort: 9001
+  persistence:
+    size: 10Gi
+    # 同 pvc.yaml 的纪律：留空则不渲染 storageClassName（空串会被读成
+    # "no StorageClass"，直接禁掉动态供给）。
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
 # ─── External component whitelist ───
 # Components whose `enabled: true` does NOT map to an in-chart template or a
 # Chart.yaml dependency. They are provisioned externally and wired via
@@ -251,6 +282,10 @@ secrets:
   # CDS_DATABASE_URL, CDS_REDIS_URL, CDS_CLICKHOUSE_URL, CDS_JWT_SECRET_KEY,
   # CDS_VAULT_ADDR, CDS_VAULT_TOKEN, CDS_MINIO_ENDPOINT,
   # CDS_MINIO_ACCESS_KEY, CDS_MINIO_SECRET_KEY
+  # P6（2026-10-30）新增（与 k8s/secrets.yaml 模板同键集）：
+  # CDS_COLUMN_ENCRYPTION_KEY（列级 DEK，prod 姿态 validate_security_config
+  # 强制非空）、CDS_MFA_SECRET_ENCRYPTION_KEY（MFA TOTP 种子主密钥，同上）。
+  # minio.enabled=true 时另需 MINIO_ROOT_USER / MINIO_ROOT_PASSWORD。
   # Optional: CDS_CDC_KAFKA_BROKERS
 
 # ─── Sandbox workspace ───

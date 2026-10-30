@@ -41,9 +41,13 @@ export default function ErrorCard({
   const base = hintForCode(code, status);
   const role = useAuthStore((s) => s.user?.role);
   const showCapability = base.showCapability && canAccessAdminWorkspace(role);
-  // 调用方显式 retryable 优先；410 强制不可重试（GONE 契约）。
-  const canRetry = status === 410 ? false : retryable ?? base.retryable;
-  const warning = base.retryable && canRetry;
+  // A293：按钮与告警以前是两套口径——`canRetry` 吃调用方的显式 `retryable`，`warning` 却只看
+  // 映射表 `base.retryable`。调用方覆盖一个映射表里不可重试的码（如 VALIDATION_ERROR）时，
+  // 重试按钮出来了、卡片却还是红色硬失败态：同一张卡一边说“可以再来一次”一边说“这是终态”。
+  // 现在只有一个派生值：**卡片色调 = 这条错误到底可不可重试**（410 契约强制不可）。
+  // 按钮仍要求 `retryAction` 存在才出现——那是“我这儿有动作”，不是对错误性质的断言。
+  const canRetry = status === 410 ? false : (retryable ?? base.retryable);
+  const warning = canRetry;
 
   const reportRequestId = async () => {
     const text = `CDS 错误报告\n错误码: ${code ?? 'UNKNOWN'}\n提示: ${base.hint}\n下一步: ${base.next}request_id: ${request_id ?? '（本次响应未携带，请从响应头 X-Request-ID 获取）'}`;

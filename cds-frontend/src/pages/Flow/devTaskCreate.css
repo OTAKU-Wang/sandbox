@@ -5,6 +5,15 @@
    清空蓝链右缘 x1374）；分页带在表区**右对齐**（尾件「页」右缘 x1079），当前页实心 #1b6ff2 30×28；
    页签药签 h27：选中=实心 #1b6ff2 白字，未选=白底 #f1f2f4 描边。 */
 
+/* A237：本屏有两支蓝，各自有真值出处，别再散成字面量——
+   · `--cds-dtc-ink-blue` = #1b6ff2，图 2-2 实采（当前页签/当前页实心块），与 index.css 的
+     主色差 1/255，文件头注释写明是图内噪声，这里按实采值保留；
+   · 交互态（focus/hover/建议题字）跟 index.css 的 `--cds-primary`（#1b6ef3）走，换主题要跟着换。
+   改主题时只搜这两个令牌，不要再数 `#1b6e` 出现了几次。 */
+.cds-dev-task-create {
+  --cds-dtc-ink-blue: #1b6ff2;
+}
+
 /* —— 卡壳 —— */
 .cds-dev-task-create .ant-card {
   border-color: #f1f2f4;
@@ -24,15 +33,17 @@
   min-width: 0;
 }
 
-/* 配额列小字：图字高≈12px（行 20），14px 会在 304px 列宽里折行把卡垫高 23；
-   antd Typography 自带 font-size，需要直接铟子选择器而不是靠继承。 */
+/* 尾列吃剩余：这一条是三行 `.cds-trio` 共有的**布局**，留在位置选择器上是安全的。 */
 .cds-dev-task-create .cds-trio > *:nth-child(3) {
   flex: 1 1 auto;
-  font-size: 12px;
-  line-height: 20px;
 }
 
-.cds-dev-task-create .cds-trio > *:nth-child(3) .ant-typography {
+/* A210：配额列小字。图字高≈12px（行 20），14px 会在 304px 列宽里折行把卡垫高 23。
+   过去这条也写成 `> *:nth-child(3)`，于是合约卡那一行的第三列（`export_mode` 的 Select）
+   被同一支笔染成 12px——位置选择器管布局没问题，管字号就会串列。改成真类 `.cds-trio-note`，
+   由 TSX 明确指给那一列；antd Typography 自带 font-size，所以连它的子元素一起钉。 */
+.cds-dev-task-create .cds-trio-note,
+.cds-dev-task-create .cds-trio-note .ant-typography {
   font-size: 12px;
   line-height: 20px;
 }
@@ -99,6 +110,23 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+/* A236：上一条把卡头标题改成 `display: flex`，antd 写在同一个元素上的
+   `overflow:hidden; white-space:nowrap; text-overflow:ellipsis` 就此作废（flex 容器不吃
+   text-overflow），而本页副标题是整句（「内存配额将应用于调试与执行阶段」）⇒ 窄档不是截断，
+   而是把 `.ant-card-extra` 整块挤出去。省略得自己接回来：内层允许收缩（min-width:0），
+   副标题这一端先省略，题字与蓝条/ⓘ 不缩。 */
+.cds-dev-task-create .ant-card-head-title {
+  min-width: 0;
+}
+
+.cds-dev-task-create .ant-card-head-title > .cds-card-head-inner > .ant-typography {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .cds-dev-task-create .ant-card-head-title::before {
@@ -106,7 +134,7 @@
   flex: none;
   width: 4px;
   height: 14px;
-  background: #1b6ff2;
+  background: var(--cds-dtc-ink-blue);
 }
 
 /* —— 必填星号按图放标签右侧（antd 默认在左；antd 竖排也会给 label::after 塞冒号，
@@ -156,13 +184,16 @@
 
 /* —— 步进器（图：− 与 ＋ 在盒内两端，G 后缀，整盒 h41 一圈描边）—— */
 /* 旧的全局「框内右侧后缀 G」（index.css `.cds-unit-item`）与步进器自带的 G 叠加 ⇒ 本屏禁用旧画法，
- *  G 由 .cds-mem-g 画在盒内＋钮前（图：后缀在数字与＋之间）。 */
-body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::after {
+   G 由 .cds-mem-g 画在盒内＋钮前（图：后缀在数字与＋之间）。
+   A237 两处收口：① 不再用 `body` 前缀抬特异性——`:has(.cds-mem-stepper)` 本身就是 (0,4,1)，
+   稳赢 index.css 的 (0,3,1)；② 判定改成「这一条自带 G」而不是整片 `.cds-unit-item` 一起关，
+   将来本页再加一个不带步进器的单位字段，不会被这条静默剥掉单位。 */
+.cds-dev-task-create .cds-unit-item:has(.cds-mem-stepper) .ant-form-item-control-input-content::after {
   content: none;
 }
 
 /* 步进器盒比列窄 8（图：盒 272..637 vs 列 268..641）。 */
-.cds-mem-stepper {
+.cds-dev-task-create .cds-mem-stepper {
   display: flex;
   align-items: center;
   height: 40px;
@@ -172,8 +203,8 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
   background: #fff;
 }
 
-.cds-mem-stepper:focus-within {
-  border-color: #1b6ef3;
+.cds-dev-task-create .cds-mem-stepper:focus-within {
+  border-color: var(--cds-primary);
   box-shadow: 0 0 0 2px rgba(27, 110, 243, 0.1);
 }
 
@@ -190,7 +221,7 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
   box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.1);
 }
 
-.cds-mem-step {
+.cds-dev-task-create .cds-mem-step {
   flex: none;
   width: 36px;
   height: 38px;
@@ -202,23 +233,23 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
   cursor: pointer;
 }
 
-.cds-mem-step:hover:not(:disabled) {
-  color: #1b6ef3;
+.cds-dev-task-create .cds-mem-step:hover:not(:disabled) {
+  color: var(--cds-primary);
 }
 
-.cds-mem-step:disabled {
+.cds-dev-task-create .cds-mem-step:disabled {
   color: #c9cdd4;
   cursor: not-allowed;
 }
 
-.cds-mem-stepper .cds-mem-input.ant-input-number {
+.cds-dev-task-create .cds-mem-stepper .cds-mem-input.ant-input-number {
   flex: 1;
   min-width: 0;
   border: 0;
   background: transparent;
 }
 
-.cds-mem-stepper .cds-mem-input .ant-input-number-input {
+.cds-dev-task-create .cds-mem-stepper .cds-mem-input .ant-input-number-input {
   height: 38px;
 }
 
@@ -234,15 +265,25 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
 }
 
 /* —— 关联数据：表区 + 已选面板分栏（面板 x1112..1368 = 256 宽，左缘分栏线）—— */
-.cds-picker-side {
+.cds-dev-task-create .cds-picker-side {
   width: 256px;
   flex: 0 0 256px;
   border-left: 1px solid #f1f2f4;
   padding-left: 19px;
 }
 
-/* 页签药签（选中实心蓝在 JS 内联色）：h28，药签 144 = 8 字 12px + 21px 内距×2 + 描边。 */
-.cds-dev-task-create [data-testid^='task-tab-'] {
+/* A237：已选列表原来是全量渲染的 `<li>`，勾到上百项时「关联数据」卡被无限撑高
+   （全文件 `grep -c max-height` = 0）。给一屏左右的高度上限，超出内部滚动，
+   表体那侧本来就是定高滚动，两侧行为对齐。 */
+.cds-dev-task-create .cds-picker-side ul {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* 页签药签（选中实心蓝在 JS 内联色）：h28，药签 144 = 8 字 12px + 21px 内距×2 + 描边。
+   A237：选择器从 `[data-testid^='task-tab-']` 换成真类 `.cds-task-tab`——测试钩子改名
+   不该让药签退化成浏览器默认按钮，而且那种退化没有任何测试会红。 */
+.cds-dev-task-create .cds-task-tab {
   height: 28px;
   font-size: 12px;
   padding-inline: 21px;
@@ -258,8 +299,8 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
 }
 
 .cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item-active {
-  background: #1b6ff2;
-  border-color: #1b6ff2;
+  background: var(--cds-dtc-ink-blue);
+  border-color: var(--cds-dtc-ink-blue);
 }
 
 .cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item-active a,
@@ -305,23 +346,23 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
 }
 
 /* 配额使用建议：图上浅蓝 alert 卡（定位图钉蓝标 + 蓝题 + 深灰正文） */
-.cds-quota-advice {
+.cds-dev-task-create .cds-quota-advice {
   height: 100%;
   padding: 12px 16px;
   border-radius: 8px;
   background: #eef3fb;
 }
 
-.cds-quota-advice-title {
+.cds-dev-task-create .cds-quota-advice-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #1b6ef3;
+  color: var(--cds-primary);
   font-weight: 600;
   font-size: 13px;
 }
 
-.cds-quota-advice-body {
+.cds-dev-task-create .cds-quota-advice-body {
   margin-top: 6px;
   color: #4e5969;
   font-size: 12px;
@@ -336,4 +377,12 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
 
 .cds-dev-task-create .cds-dev-task-foot .ant-card-body {
   padding: 16px 3px 16px 24px;
+}
+
+/* A236：操作条那一行是 TSX 里的内联 `display:flex; justify-content:space-between`，没有 wrap
+   ⇒ 窄档 / 125% 缩放下左侧说明与「取消/完成」互挤。补换行 + 行距（选择器只命中这一张卡的
+   直接子 div，就是那个内联 flex 容器）。 */
+.cds-dev-task-create .cds-dev-task-foot .ant-card-body > div {
+  flex-wrap: wrap;
+  row-gap: 8px;
 }

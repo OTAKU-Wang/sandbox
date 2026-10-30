@@ -538,6 +538,9 @@ export default function FlowDevHome() {
                 <button
                   key={tab.key}
                   type="button"
+                  /* A240：样式钩子从 `data-testid^="task-tab-"` 换到这个真类名（index.css 里那三条
+                     hover/光标/焦点态原来吃的是测试属性）。data-testid 原样留着给测试。 */
+                  className="cds-task-tab"
                   style={tabStyle(taskTab === tab.key)}
                   data-testid={`task-tab-${tab.key}`}
                   onClick={() => setTaskTab(tab.key as 'all' | 'active' | 'ended')}

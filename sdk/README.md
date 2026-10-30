@@ -14,6 +14,12 @@ pip install ./sdk          # 仓库内安装
 pip install -e ./sdk       # 开发模式
 ```
 
+打包卫生（A207）：依赖均为**有界区间**（`httpx>=0.27,<1.0`；`[stream]` 的
+`websocket-client>=1.6,<2.0`，httpx 未到 1.0 故 0.x 设上限防破坏性行为变更）；
+包内带 `py.typed` 标记，mypy/pyright 可直接消费类型标注；版本号单源于
+`pyproject.toml` 的 `[project].version`（A78），`__init__.py` 在 import 期解析，
+不得再引入第二处字面量。
+
 ## 快速开始（登录直连）
 
 ```python
@@ -188,8 +194,14 @@ print(agent.invoke_open_endpoint("<slug>", {"input": {"day": "2026-10-15"}}))
 - `410 SESSION_TERMINATED` **不重试**：这是终态（W2 错误契约要求客户端遇 410 停止重试），
   重试只会反复打一个已死的会话。
 - 非 2xx 一律抛 `CDSError(status_code, detail)`；W2 错误契约响应抛 `CDSApiError`，
-  含 `code` / `message` / `request_id` / `retry_after`。
+  含 `code` / `message` / `request_id` / `retry_after`。错误体解析本身不再抛别的异常：
+  非 dict 的合法 JSON（`[...]` / `"x"` / `null`）与非文本/坏压缩响应都会落成
+  `CDSApiError`（A173/A76），`detail` 原样保留可观测内容。
+- 路径标识符（`session_id` / `filename` / `contract_id` 等所有拼进 URL 的参数）一律
+  **百分号编码**（A215）：`"../../admin"`、含空格/`%`/`#` 的 id 不再能改写路由；常规
+  UUID/十六进制/slug 原样不变，行为零感知。
 - WS 流式 exec（`stream_exec`）：静默超过 `recv_timeout` 抛 `CDSError(504)` 且
   `err.truncated is True`（结构化截断标记，不靠文案判别）；干净收尾（exit/blocked/error
-  终帧或服务端关闭）不置该标记。`timeout_seconds` 在服务端执行前校验，非正数/非数值
-  直接抛 `ValueError`。
+  终帧或服务端关闭）不置该标记。入参全部**先发请求前校验**（A218）：`timeout_seconds`、
+  `recv_timeout` 非正数/非数值，`session_id` / `language` 非非空字符串，都直接抛
+  `ValueError`，一个网络往返都不烧。

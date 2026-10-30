@@ -1,0 +1,178 @@
+npm warn Unknown user config "http-proxy". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown user config "no-proxy". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/components/Feedback/QueryFeedback.tsx
+   5:17  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  70:17  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/components/Sandbox/ExecStreamTerminal.tsx
+  159:16  error  Error: Cannot access variable before it is declared
+
+`connectAndRun` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/components/Sandbox/ExecStreamTerminal.tsx:159:16
+  157 |           reconnectRef.current = false;
+  158 |           writeLine('[终端] ticket 失效，自动重连一次…', '33');
+> 159 |           void connectAndRun(cmd);
+      |                ^^^^^^^^^^^^^ `connectAndRun` accessed before it is declared
+  160 |           return;
+  161 |         }
+  162 |         setState('closed');
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/components/Sandbox/ExecStreamTerminal.tsx:81:3
+   79 |   }, []);
+   80 |
+>  81 |   const connectAndRun = useCallback(
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  82 |     async (cmd: string) => {
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  83 |       // A248：守卫不能只看 socketRef —— 它要等下面那个 await 之后才被赋值，而「运行」在
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 169 |     [sessionId, writeLine, disabled],
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 170 |   );
+      | ^^^^^ `connectAndRun` is declared here
+  171 |
+  172 |   // A248：disabled 必须在依赖里。会话从 running 转终态后组件早退渲染 Alert、宿主 div 被卸，
+  173 |   // 只依 [closeSocket] 的 effect 既不重跑也不跑 cleanup ⇒ xterm 与 WebSocket 继续活着往  react-hooks/immutability
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Audit/AuditLog.test.tsx
+  127:16  error  'openSelectByText' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Catalog/index.tsx
+  64:53  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  84:22  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Contracts/ContractList.tsx
+  2:37  error  'Input' is defined but never used           @typescript-eslint/no-unused-vars
+  3:24  error  'SearchOutlined' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/DataProducts/ProductDetail.tsx
+  180:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/DataProducts/ProductDetail.tsx:180:5
+  178 |   useEffect(() => {
+  179 |     if (!visibilityConfig) return;
+> 180 |     setFieldRules(visibilityConfig.field_rules || {});
+      |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  181 |     setDefaultSensitivity(visibilityConfig.default_sensitivity);
+  182 |   }, [visibilityConfig]);
+  183 |  react-hooks/set-state-in-effect
+  243:22  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-explicit-any
+  249:24  error  Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. This value was memoized in source but not in compilation output.
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/DataProducts/ProductDetail.tsx:249:24
+  247 |   });
+  248 |
+> 249 |   const schemaFields = useMemo<SchemaFieldRow[]>(() => {
+      |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 250 |     const fields = product?.data_schema?.fields;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 251 |     if (!Array.isArray(fields)) return [];
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 261 |     });
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 262 |   }, [product?.data_schema]);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Could not preserve existing memoization
+  263 |
+  264 |   if (isError) return <QueryErrorAlert error={error} message="产品详情加载失败" onRetry={() => { void refetch(); }} />;
+  265 |   if (isLoading) return <CenteredLoading tip="加载产品详情" />;    react-hooks/preserve-manual-memoization
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/ComputeSchedule.tsx
+  497:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/ComputeSchedule.tsx:497:5
+  495 |     const row = (scheduleQuery.data?.items ?? []).find((item) => item.contract_id === preset.contractId);
+  496 |     if (!row) return;
+> 497 |     setExecuteTarget({ row, workloadId: preset.workloadId });
+      |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  498 |     setPreset(null);
+  499 |   }, [preset, scheduleQuery.data]);
+  500 |  react-hooks/set-state-in-effect
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/NotebookWorkbench.tsx
+  486:3  error  Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/NotebookWorkbench.tsx:486:3
+  484 |   // 自动保存与手动保存同价：每次都是新版本（代价写在卡头 tooltip，不假装免费）。
+  485 |   const autoSaveBridge = useRef(saveContent);
+> 486 |   autoSaveBridge.current = saveContent;
+      |   ^^^^^^^^^^^^^^^^^^^^^^ Cannot update ref during render
+  487 |   // CR B-1：服务端已被别人改过时，自动保存不得盲 PUT 掉别人的版本——
+  488 |   // 冲突横幅（reloadFromServer）必须活到用户亲手处置；手动保存是用户
+  489 |   // 知情决策，仍照走。ref 而非闭包：2s 窗口内后端回流也要被看见。  react-hooks/refs
+  491:3  error  Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/NotebookWorkbench.tsx:491:3
+  489 |   // 知情决策，仍照走。ref 而非闭包：2s 窗口内后端回流也要被看见。
+  490 |   const serverChangedRef = useRef(false);
+> 491 |   serverChangedRef.current = serverChanged;
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^ Cannot update ref during render
+  492 |   useEffect(() => {
+  493 |     if (!dirty) return undefined;
+  494 |     const timer = window.setTimeout(() => {                                        react-hooks/refs
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/Quota.tsx
+    4:10  error  'quotaApi' is defined but never used                @typescript-eslint/no-unused-vars
+  109:53  error  'dataUpdatedAt' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/TaskDetail.tsx
+   19:3   error  'Col' is defined but never used                  @typescript-eslint/no-unused-vars
+   23:3   error  'Row' is defined but never used                  @typescript-eslint/no-unused-vars
+   36:3   error  'ClockCircleOutlined' is defined but never used  @typescript-eslint/no-unused-vars
+   96:15  error  'Title' is assigned a value but never used       @typescript-eslint/no-unused-vars
+  111:10  error  'TintedIcon' is defined but never used           @typescript-eslint/no-unused-vars
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/__tests__/TaskDetail.test.tsx
+  5:10  error  'MemoryRouter' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Flow/__tests__/devTaskCreate.a209.test.ts
+  75:48  error  Unnecessary escape character: \[  no-useless-escape
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/OutputControl/InspectionPipeline.tsx
+  32:17  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Sandbox/SessionList.tsx
+  128:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Sandbox/SessionList.tsx:128:5
+  126 |   useEffect(() => {
+  127 |     if (!canCreateSession || !requestedCreate) return;
+> 128 |     setCreateOpen(true);
+      |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  129 |     if (requestedProductId) {
+  130 |       form.setFieldsValue({ data_product_id: requestedProductId });
+  131 |     }  react-hooks/set-state-in-effect
+
+/home/kratos/Documents/workspace/sandbox/cds-frontend/src/pages/Sandbox/__tests__/sessionDetail.a294.test.tsx
+  24:10  error  'message' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 26 problems (26 errors, 0 warnings)
+
+LINT_EXIT=1

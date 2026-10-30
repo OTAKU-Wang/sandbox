@@ -1,4 +1,7 @@
 import api from './api';
+// A311：上传上限是后端的 500MB（app/api/data_resources.py:MAX_UPLOAD_SIZE），全局 30s
+// （services/api.ts）在大文件上必先把请求掐了。超时口径唯一来源见 services/timeouts.ts。
+import { UPLOAD_TIMEOUT_MS } from './timeouts';
 import type { PaginatedResponse } from '../types/api';
 
 export interface DataResource {
@@ -44,13 +47,6 @@ export interface DeleteResourceResult {
   key_destroyed: boolean;
 }
 
-/**
- * A311：上传上限是后端的 500MB（app/api/data_resources.py:MAX_UPLOAD_SIZE），
- * 全局 30s（services/api.ts）在大文件上必先把请求掐了。逐调用放宽，口径同
- * flow.ts 的 TIMEOUT_*（网关 /api/ 的 proxy_read_timeout 就是 300s）。
- */
-const TIMEOUT_UPLOAD_MS = 300_000;
-
 export const dataResourceApi = {
   list: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<DataResource>> =>
     // A310：分页交给后端做。`paginated=true` 才回 {items,total,page,page_size} 信封，
@@ -74,7 +70,7 @@ export const dataResourceApi = {
     if (data.description) formData.append('description', data.description);
     // Content-Type 必须留给浏览器：手写 'multipart/form-data' 会顶掉浏览器自动生成的
     // boundary，后端拿不到 file 部件（实测 422）。
-    return api.post('/data-resources/upload', formData, { timeout: TIMEOUT_UPLOAD_MS });
+    return api.post('/data-resources/upload', formData, { timeout: UPLOAD_TIMEOUT_MS });
   },
 
   delete: (id: string): Promise<DeleteResourceResult> =>

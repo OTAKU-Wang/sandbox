@@ -26,8 +26,10 @@ class WebhookDelivery(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # A170: 同 webhook.py 的 user_id ——单列自动索引与 ix_webhook_deliveries_sub_status
+    # 最左前缀重复，0033 drop 旧库那一支，这里成对摘除 index=True。
     subscription_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("webhook_subscriptions.id"), nullable=True, index=True
+        UUID(as_uuid=True), ForeignKey("webhook_subscriptions.id"), nullable=True
     )
 
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -17,6 +17,13 @@ export default function Register() {
     setLoading(true);
     try {
       const resp = await authApi.register(values);
+      // A251：200 不等于「拿到了登录态」。缺 access_token 还写 store，用户会被当成已登录
+      // 送进受保护路由，接下来每一发请求都是 401（刷新队列也跟着空转），而屏幕上只写着「注册成功」。
+      // 所以凭证缺失按失败分支处理：不清 store、不进控制台，让用户用登录页重试。
+      if (!resp?.access_token) {
+        message.error('注册已提交，但后端没有返回登录凭证（access_token 缺失）：请用登录页登录');
+        return;
+      }
       login(resp.user, resp.access_token, resp.refresh_token);
       message.success('注册成功');
       navigate('/');

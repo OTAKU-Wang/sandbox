@@ -2,12 +2,19 @@
    只服务 NotebookWorkbench 这一页；全局样式在 src/index.css，本文件不碰它。
    类名统一 nbw- 前缀，避免与 .cds-* 全局类相互影响。 */
 
+/* A225：这套令牌原本只声明在 `.nbw-root` 上，而本屏有子树会被送进 portal（antd 的
+   Dropdown/Tooltip 挂 document.body）——那里取不到这些变量，声明整条失效。两种修法里选了
+   更便宜的那种：**每个引用点都带兜底值**（`var(--nbw-x, 兜底)`），令牌仍然集中在下面这一处。
+   同时把两支红收成一支：树错误用 #c0392b、运行/日志错误用 #cf1322，同一屏两种红没有依据，
+   统一走 antd red-6 `#cf1322`。 */
 .nbw-root {
   --nbw-border: #eceff4;
   --nbw-muted: #8c8c8c;
   --nbw-ink: #1f2937;
   --nbw-blue: #1b6ef3;
   --nbw-green: #2e9e5b;
+  --nbw-danger: #cf1322;
+  --nbw-tree-error-indent: 30px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -18,7 +25,7 @@
    键盘用户在这页看不到焦点落在哪。挂 `.nbw-root` 后代上＝一条覆盖页内全部可聚焦元素；
    用 :focus-visible 而不是 :focus，鼠标点击不留环、键盘导航必留环。 */
 .nbw-root :focus-visible {
-  outline: 2px solid var(--nbw-blue);
+  outline: 2px solid var(--nbw-blue, #1b6ef3);
   outline-offset: 1px;
 }
 
@@ -29,7 +36,7 @@
   justify-content: space-between;
   gap: 16px;
   background: #fff;
-  border: 1px solid var(--nbw-border);
+  border: 1px solid var(--nbw-border, #eceff4);
   border-radius: 8px;
   padding: 14px 20px;
   /* PNG 2-3：页头卡 y138..231（h93）。antd reset 已开 border-box，
@@ -40,12 +47,12 @@
 .nbw-titlecard-title {
   font-size: 17px;
   font-weight: 600;
-  color: var(--nbw-ink);
+  color: var(--nbw-ink, #1f2937);
   line-height: 1.4;
 }
 .nbw-titlecard-sub {
   font-size: 12px;
-  color: var(--nbw-muted);
+  color: var(--nbw-muted, #8c8c8c);
   margin-top: 2px;
 }
 
@@ -69,7 +76,7 @@
   display: flex;
   flex-direction: column;
   background: #fff;
-  border: 1px solid var(--nbw-border);
+  border: 1px solid var(--nbw-border, #eceff4);
   border-radius: 8px;
   min-height: 0;
   overflow: hidden;
@@ -116,7 +123,7 @@
   display: flex;
   flex-direction: column;
   background: #fff;
-  border: 1px solid var(--nbw-border);
+  border: 1px solid var(--nbw-border, #eceff4);
   border-radius: 8px;
   min-height: 0;
   overflow: hidden;
@@ -130,13 +137,13 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--nbw-border);
+  border-bottom: 1px solid var(--nbw-border, #eceff4);
   flex: 0 0 auto;
 }
 .nbw-card-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--nbw-ink);
+  color: var(--nbw-ink, #1f2937);
 }
 .nbw-card-body {
   flex: 1 1 auto;
@@ -162,7 +169,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  color: var(--nbw-ink);
+  color: var(--nbw-ink, #1f2937);
 }
 .nbw-folder-toggle {
   width: 18px;
@@ -170,23 +177,25 @@
   padding: 0;
   height: 18px;
   line-height: 1;
-  color: #8c8c8c;
+  color: var(--nbw-muted, #8c8c8c);
   background: transparent;
   border: 0;
   cursor: pointer;
 }
 .nbw-tree-error {
-  padding: 0 8px 6px 30px;
+  /* 缩进 30 = 行内缩进 6 + 折叠钮 18 + 间隙 6（notebookWorkbenchPanels.tsx:75 的
+     `paddingLeft: 6 + depth * 14`，depth 0 那一档的正文起点），写死过一次的魔数收成令牌。 */
+  padding: 0 8px 6px var(--nbw-tree-error-indent, 30px);
   font-size: 12px;
-  color: #c0392b;
+  color: var(--nbw-danger, #cf1322);
 }
 
 .nbw-panel-foot {
   flex: 0 0 auto;
-  border-top: 1px solid var(--nbw-border);
+  border-top: 1px solid var(--nbw-border, #eceff4);
   padding: 8px 12px;
   font-size: 12px;
-  color: var(--nbw-muted);
+  color: var(--nbw-muted, #8c8c8c);
   line-height: 1.7;
 }
 .nbw-panel-foot-action {
@@ -199,7 +208,7 @@
   align-items: center;
   gap: 4px;
   font-weight: 600;
-  color: var(--nbw-ink);
+  color: var(--nbw-ink, #1f2937);
   cursor: pointer;
 }
 .nbw-editor-meta {
@@ -208,13 +217,13 @@
   gap: 10px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: var(--nbw-muted);
+  color: var(--nbw-muted, #8c8c8c);
   font-weight: 400;
   margin-top: 2px;
 }
-.nbw-saved-ok { color: var(--nbw-green); }
+.nbw-saved-ok { color: var(--nbw-green, #2e9e5b); }
 .nbw-lang-pick {
-  color: var(--nbw-blue);
+  color: var(--nbw-blue, #1b6ef3);
   cursor: pointer;
   white-space: nowrap;
   font-size: 13px;
@@ -227,7 +236,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 5px 12px;
-  border-bottom: 1px solid var(--nbw-border);
+  border-bottom: 1px solid var(--nbw-border, #eceff4);
   flex: 0 0 auto;
   flex-wrap: wrap;
 }
@@ -241,7 +250,7 @@
   cursor: pointer;
   user-select: none;
 }
-.nbw-menu-label:hover { background: #f2f6fd; color: var(--nbw-blue); }
+.nbw-menu-label:hover { background: #f2f6fd; color: var(--nbw-blue, #1b6ef3); }
 .nbw-tool-item {
   font-size: 12px;
   color: #66707f;
@@ -256,9 +265,9 @@
   border-radius: 10px;
   white-space: nowrap;
 }
-.nbw-chip-ok { color: var(--nbw-green); background: #f0f9f2; }
+.nbw-chip-ok { color: var(--nbw-green, #2e9e5b); background: #f0f9f2; }
 .nbw-chip-warn { color: #ad6800; background: #fff7e6; }
-.nbw-chip-off { color: #8c8c8c; background: #f5f5f5; }
+.nbw-chip-off { color: var(--nbw-muted, #8c8c8c); background: #f5f5f5; }
 /* 「未知 / 未接入」是降级态（tone=unknown：会话状态没查回来、接口没接），不是「已关闭」这个真值。
    两条类此前逐字相同（A224）⇒ 按 honest-degradation 铁律改成可区分披露：挖黑字 + 斜纹底 + 虚线框。
    字色 #8c5000 对两条斜纹底实测 6.04:1 / 5.69:1（WCAG 相对亮度），不再引入 A233 那一族对比度缺陷。 */
@@ -288,7 +297,7 @@
   gap: 12px;
   flex-wrap: wrap;
   background: #fafafa;
-  border-top: 1px solid var(--nbw-border);
+  border-top: 1px solid var(--nbw-border, #eceff4);
   padding: 5px 16px;
   font-size: 12px;
   color: #66707f;
@@ -303,7 +312,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 0 12px 0 16px;
-  border-bottom: 1px solid var(--nbw-border);
+  border-bottom: 1px solid var(--nbw-border, #eceff4);
   flex: 0 0 auto;
 }
 .nbw-tabs { display: flex; align-items: center; gap: 20px; }
@@ -312,21 +321,21 @@
   border: 0;
   padding: 11px 0 9px;
   font-size: 13px;
-  color: var(--nbw-muted);
+  color: var(--nbw-muted, #8c8c8c);
   cursor: pointer;
   border-bottom: 2px solid transparent;
 }
 .nbw-tab[aria-selected='true'] {
-  color: var(--nbw-blue);
-  border-bottom-color: var(--nbw-blue);
+  color: var(--nbw-blue, #1b6ef3);
+  border-bottom-color: var(--nbw-blue, #1b6ef3);
   font-weight: 500;
 }
 .nbw-tab-actions { display: flex; align-items: center; gap: 8px; }
 .nbw-run-status { font-size: 12px; white-space: nowrap; }
-.nbw-run-ok { color: var(--nbw-green); }
-.nbw-run-error { color: #cf1322; }
+.nbw-run-ok { color: var(--nbw-green, #2e9e5b); }
+.nbw-run-error { color: var(--nbw-danger, #cf1322); }
 .nbw-run-warn { color: #ad6800; }
-.nbw-run-idle { color: var(--nbw-muted); }
+.nbw-run-idle { color: var(--nbw-muted, #8c8c8c); }
 .nbw-icon-btn {
   border: 0;
   background: transparent;
@@ -346,14 +355,17 @@
   font-size: 12px;
   line-height: 1.8;
   white-space: pre-wrap;
-  word-break: break-all;
+  /* A225：`break-all` 会在任意字符间断行，中文日志看着还行，英文/路径/栈信息会被切成
+     `Trac`/`eback` 这种没法读的东西。`overflow-wrap: anywhere` 同样能拆开超长不可断 token
+     （base64、长路径），但优先在正常边界换行。 */
+  overflow-wrap: anywhere;
 }
 .nbw-log-line { display: flex; gap: 8px; }
 .nbw-log-clock { color: #98a2b3; flex: 0 0 auto; }
 .nbw-log-text { min-width: 0; }
-.nbw-log-ok .nbw-log-text { color: var(--nbw-green); }
+.nbw-log-ok .nbw-log-text { color: var(--nbw-green, #2e9e5b); }
 .nbw-log-warn .nbw-log-text { color: #ad6800; }
-.nbw-log-error .nbw-log-text { color: #cf1322; }
+.nbw-log-error .nbw-log-text { color: var(--nbw-danger, #cf1322); }
 
 .nbw-output-foot {
   display: flex;
@@ -361,10 +373,10 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  border-top: 1px solid var(--nbw-border);
+  border-top: 1px solid var(--nbw-border, #eceff4);
   padding: 6px 16px;
   font-size: 12px;
-  color: var(--nbw-muted);
+  color: var(--nbw-muted, #8c8c8c);
   flex: 0 0 auto;
 }
 

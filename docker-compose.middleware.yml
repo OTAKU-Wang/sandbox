@@ -20,14 +20,17 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_DB: cds
-      POSTGRES_USER: cds_admin
+      # P6 漂移收敛（2026-10-30）：单一真值源 = cds（本 compose 挂的
+      # scripts/init-db.sql 恰好 GRANT TO cds，旧值 cds_admin 让这条 GRANT
+      # 从一开始就落空）。与 compose×2 / k8s / helm / deploy 脚本同值，测试钉死。
+      POSTGRES_USER: cds
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - empty/committed-fallback boots Postgres with a public password}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cds_admin -d cds"]
+      test: ["CMD-SHELL", "pg_isready -U cds -d cds"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -68,6 +71,8 @@ services:
 
   # ── MinIO (S3-compatible object storage) ───────────────────
   minio:
+    # 钉版本纪律：永不用 :latest。升级归属 = 发布流程人工评审，与 compose×3/
+    # k8s/helm values/deploy 脚本同 tag 一把同升（tests/test_deploy_manifests 钉死同值）。
     image: minio/minio:RELEASE.2025-01-20T14-49-07Z
     container_name: cds-minio
     restart: unless-stopped

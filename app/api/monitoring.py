@@ -98,16 +98,28 @@ def _security_posture_payload() -> dict:
         [f"mode={settings.TEE_MODE}", f"provider={tee_capability.provider}", f"evidence_count={len(tee_capability.evidence)}"],
     ))
 
-    gpu_status = "software" if settings.GPU_TEE_SIMULATION else "configured"
+    # A132（2026-10-30）：GPU-TEE 卡的口径与运行时选择铁律同步——本构建没有真实
+    # NVIDIA CC 运行时：开启模拟时状态是 software 且证据行携带 is_simulation=true
+    # （运行时全部模拟产物自带该披露，透传到本 API 响应）；关闭模拟时不得再写
+    # "configured"（没有任何已配置的真硬件可背书），按 SS-13 形状报 risk——
+    # auto 选择此时会 400 RUNTIME_UNAVAILABLE 响亮拒绝，绝不静默降级。
+    gpu_sim = settings.GPU_TEE_SIMULATION
+    gpu_status = "software" if gpu_sim else "risk"
     capabilities.append(_capability(
         "gpu_tee",
         "GPU-TEE",
         gpu_status,
-        "warn" if settings.GPU_TEE_SIMULATION else "info",
-        "GPU training uses local/simulator runtime" if settings.GPU_TEE_SIMULATION else "GPU-TEE simulation disabled; hardware integration must provide runtime evidence",
-        "conditional",
+        "warn" if gpu_sim else "critical",
+        (
+            "GPU training uses local/simulator runtime; every simulated artifact (attestation report, "
+            "secure channel, compute job, metrics, epoch) carries is_simulation=true"
+            if gpu_sim else
+            "GPU-TEE simulation disabled and no real NVIDIA CC runtime is integrated — auto selection "
+            "rejects with 400 RUNTIME_UNAVAILABLE instead of silently degrading (SS-13)"
+        ),
+        "conditional" if gpu_sim else "block",
         "Do not claim production GPU-TEE without NVIDIA CC or equivalent attestation report",
-        [f"simulation={settings.GPU_TEE_SIMULATION}"],
+        [f"simulation={gpu_sim}", f"is_simulation={str(gpu_sim).lower()}"],
     ))
 
     vault_configured = bool(settings.VAULT_ADDR and settings.VAULT_TOKEN)

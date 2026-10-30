@@ -77,8 +77,13 @@ type MenuKey = string | number | bigint;
 type KeyedNode = { key?: MenuKey; type?: string; children?: KeyedNode[] };
 
 export function resolveWorkspace(role: RoleLike, stored: Workspace | null): Workspace {
-  if (stored === 'admin' && !canAccessAdminWorkspace(role)) return defaultWorkspace(role);
-  return stored ?? defaultWorkspace(role);
+  // A296（M-195）：`stored` 是 zustand persist 从 localStorage 里读回来的 JSON，
+  // 类型标注管不住它——手改成一个非法值（"Admin"、123、{…}）时旧实现会原样当工台用，
+  // 于是 resolveWorkspace 返回一个既不是 'admin' 也不是 'developer' 的"工台"，
+  // 菜单裁剪与首页分派各自落到自己的 else 分支上。只认这两个字面量，其余按没存过处理。
+  const known: Workspace | null = stored === 'admin' || stored === 'developer' ? stored : null;
+  if (known === 'admin' && !canAccessAdminWorkspace(role)) return defaultWorkspace(role);
+  return known ?? defaultWorkspace(role);
 }
 
 export function filterMenuByWorkspace<T>(
@@ -91,12 +96,18 @@ export function filterMenuByWorkspace<T>(
   const prune = (item: unknown): T | null => {
     if (item == null) return null;
     const node = item as KeyedNode;
+    // A296（M-196）：子项只认「没有 children」和「children 是数组」两种形态。
+    // 历史数据里 children 是个非数组真值（{} / 字符串）时，旧判定 `!Array.isArray(children)`
+    // 会把它当**叶子**原样放行给开发角色；它其实是个结构坏了的分组，deny-by-default 该剔。
+    const childless = node.children == null;
+    const hasChildren = Array.isArray(node.children);
     // 分隔线这类**无子项**结构节点不带路由 key，原样保留（路由白名单管不到它）；
     // CR N-2：带 children 的 keyless 子菜单不得直接放行——它是白名单，deny-by-default，
     // 将来漏写 key 的运营分组不能就这样暴露给开发角色。
-    if (node.key == null && !Array.isArray(node.children)) return item as T;
+    if (node.key == null && childless) return item as T;
     if (DEVELOPER_MENU_KEYS.includes(String(node.key ?? ''))) return item as T;
-    const children = (node.children ?? []).map(prune).filter((child): child is T => child != null);
+    if (!hasChildren) return null;
+    const children = (node.children as KeyedNode[]).map(prune).filter((child): child is T => child != null);
     if (children.length === 0) return null;
     return { ...node, children } as unknown as T;
   };
@@ -114,7 +125,10 @@ function collectLeafRoutes(nodes: readonly unknown[], groupKey?: string, into = 
     if (item.children?.length) {
       // 父项自身也可能挂路由（antd 允许），两者都登记：精确命中优先父项，前缀命中优先分组。
       if (item.key != null) into.set(String(item.key), String(item.key));
-      collectLeafRoutes(item.children, String(item.key ?? ''), into);
+      // A296（M-317）：分组没有 key 时旧写法 `String(item.key ?? '')` 会把子项的 groupKey
+      // 坐实成**空串**，调用方普遍的 `if (groupKey)` 判据当场失效（分组高亮没了，还不报错）。
+      // 没有 key 就没有分组，沿用上一层的 groupKey（可能仍是 undefined）才是诚实的值。
+      collectLeafRoutes(item.children, item.key != null ? String(item.key) : groupKey, into);
     } else if (item.key != null) {
       into.set(String(item.key), groupKey ?? String(item.key));
     }

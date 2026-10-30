@@ -215,18 +215,31 @@ async def get_ssl_context_info(
     }
 
 
-# ─── OCR-A106：验证结论的口径披露 ────────────────────────────────────
-# 两个验证明白端点过去直接转发服务层结论，而结论远比字面弱：
-#   * tlcp_service.verify_certificate 只做指纹查表 / X.509 解析 + 有效期比较；
-#   * certificate_service.verify_chain（certificate_service.py:467-536）只顺着
-#     parent_cert_id 取 DB 行、比对 issuer/subject 字符串与状态列，既不对任何
-#     签名做密码学校验，也不校验可信锚（“任意 is_ca 且 issuer==subject 的行”就是根）。
-# 铁律：拿不出的结论不能报成通过。根因在 certificate_service（不在本任务
-# 文件集），本层先把“验了什么/没验什么”随结论一同发出，使 ``valid: true``
-# 不会被读成“这条链验过签”（那正是 A257 担心后端会谎报的那一点）。
+# ─── OCR-A106：验证结论的口径披露（2026-10-30 起随实际验签能力动态）────────
+# 历史：两个验证明白端点过去直接转发服务层结论，而结论远比字面弱
+#   （tlcp_service.verify_certificate 只做指纹查表/解析+有效期；
+#    certificate_service.verify_chain 当时只比对 issuer/subject 字符串与状态列，
+#    不验任何签名、无信任锚——A101 那批针当时锁的就是这副「metadata-only」形态）。
+# 现在 verify_chain 已做逐环密码学验签并要求根自签（A106 修复），披露改为**从结论
+# 推导**：真验了签才许报 signature_verified=true；没验的路径（tlcp 单证书端点、
+# 失败/未知 id 分支）继续诚实报 none/false——披露只强不弱。
 
-def _verification_assurance(revocation_checked_against: str) -> dict:
-    """机器可读地声明该验证结论**不**覆盖什么。"""
+def _verification_assurance(
+    revocation_checked_against: str,
+    *,
+    signatures_verified: bool = False,
+    trust_anchor: str = "none",
+) -> dict:
+    """机器可读地声明该验证结论覆盖/不覆盖什么（与结论同源，不写死）。"""
+    if signatures_verified:
+        return {
+            "level": "cryptographic",
+            "signature_verified": True,
+            "trust_anchor": trust_anchor,
+            "revocation_checked_against": revocation_checked_against,
+            "meaning": "已用父公钥逐环验证 TBS 的 SM2 签名，根要求自签验签+CA 位；"
+                       "并检查有效期、状态列与 issuer/subject 一致性",
+        }
     return {
         "level": "metadata-only",
         "signature_verified": False,
@@ -251,4 +264,14 @@ async def verify_certificate_chain(
         raise HTTPException(status_code=400, detail="Invalid certificate ID")
 
     result = await certificate_service.verify_chain(db, cert_uuid)
-    return {**result, "assurance": _verification_assurance("database-row-status")}
+    anchor = result.get("trust_anchor")
+    return {
+        **result,
+        "assurance": _verification_assurance(
+            "database-row-status",
+            signatures_verified=bool(result.get("signatures_verified")),
+            trust_anchor=(
+                "self-signed-root (self-signature verified)" if anchor else "none"
+            ),
+        ),
+    }

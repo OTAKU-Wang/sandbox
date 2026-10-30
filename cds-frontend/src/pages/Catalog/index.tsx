@@ -61,7 +61,7 @@ export default function CatalogPage() {
 
   const selectedDetail = detailData || detail;
   const schemaFields = Array.isArray(selectedDetail?.data_schema?.fields)
-    ? selectedDetail.data_schema.fields.map((field: any) => String(field.name)).filter(Boolean)
+    ? selectedDetail.data_schema.fields.map((field: { name?: unknown }) => String(field.name)).filter(Boolean)
     : [];
 
   const { data: approvedFields } = useQuery({
@@ -81,8 +81,8 @@ export default function CatalogPage() {
       setFieldRequestOpen(false);
       fieldForm.resetFields();
     },
-    onError: (error: any) => {
-      const detailText = error?.detail;
+    onError: (error: unknown) => {
+      const detailText = (error as { detail?: unknown } | null)?.detail;
       message.error(typeof detailText === 'string' ? detailText : '字段申请失败');
     },
   });

@@ -118,8 +118,10 @@ class TestChunkInspection:
         assert result.chunk_index == 0
 
     def test_inspect_pii_chunk(self):
+        # OCR-A105 新契约：短 chunk 处于边界保留带内，只有 final=True 才定局。
+        # 旧形状（不传 final 就期望立即命中）正是 4KB 切块逃逸的温床，故显式定局。
         inspector = StreamingInspector(session_id="s1")
-        output, result = inspector.inspect_chunk(b"Phone: 13812345678")
+        output, result = inspector.inspect_chunk(b"Phone: 13812345678", final=True)
         assert len(result.pii_hits) > 0
         assert result.redacted is True
         assert b"13812345678" not in output
@@ -132,16 +134,17 @@ class TestChunkInspection:
         assert r2.chunk_index == 1
 
     def test_inspect_tracks_stats(self):
+        # 流尾以 final=True 收尾（新契约）：定局时才计命中，stats 语义不变
         inspector = StreamingInspector(session_id="s1")
         inspector.inspect_chunk(b"Phone: 13812345678")
-        inspector.inspect_chunk(b"Clean text")
+        inspector.inspect_chunk(b"Clean text", final=True)
         stats = inspector.stats
         assert stats["chunks_inspected"] == 2
         assert stats["total_pii_hits"] > 0
 
     def test_inspect_creates_audit_events(self):
         inspector = StreamingInspector(session_id="s1")
-        inspector.inspect_chunk(b"Phone: 13812345678")
+        inspector.inspect_chunk(b"Phone: 13812345678", final=True)
         log = inspector.get_audit_log()
         assert len(log) > 0
         assert isinstance(log[0], RedactionEvent)
@@ -149,9 +152,52 @@ class TestChunkInspection:
     def test_inspect_result_sizes(self):
         inspector = StreamingInspector(session_id="s1")
         data = b"Phone: 13812345678"
-        _, result = inspector.inspect_chunk(data)
+        _, result = inspector.inspect_chunk(data, final=True)
         assert result.original_size == len(data)
         assert result.output_size > 0
+
+
+class TestBoundaryCarryContract:
+    """OCR-A105（2026-10-30）新契约钉：未 final 不定局 + flush 必收口.
+
+    旧缺陷（4KB 字节切块 + errors="ignore"）让跳边界的 PII 永不命中、跨块多字节
+    被静默吞掉。修复引入 64B 边界保留带后，短 chunk 的匹配在定局前**不得外发**
+    ——这里钉住「不外发未定局字节」与「flush 收口」「截断≠坏字节」。
+    """
+
+    def test_sub_carry_pii_not_emitted_before_final(self):
+        inspector = StreamingInspector(session_id="s1")
+        output, result = inspector.inspect_chunk(b"Phone: 13812345678")  # 19B < carry
+        assert result.pii_hits == []
+        assert result.redacted is False
+        assert b"13812345678" not in output  # 保留带字节绝不以未脱敏形态外发
+        assert output == b""
+
+    def test_flush_resolves_carried_tail_pii(self):
+        inspector = StreamingInspector(session_id="s1")
+        _, r1 = inspector.inspect_chunk(b"Phone: 1381234567")  # 残段：不许半号外发/半号计hit
+        _, r2 = inspector.inspect_chunk(b"8")                   # 号码拼齐但仍在保留带
+        tail_out, r3 = inspector.flush()                        # 流尾定局
+        assert r1.pii_hits == [] and r2.pii_hits == []
+        assert r3.pii_hits and b"13812345678" not in tail_out
+        assert inspector.stats["total_pii_hits"] >= 1
+
+    def test_multibyte_split_across_chunks_lossless(self):
+        payload = "结论：中文输出αβ".encode("utf-8")
+        insp = StreamingInspector(session_id="s1")
+        out = b""
+        for i in range(0, len(payload), 3):  # 3B 切块必然劈开多字节
+            chunk_out, res = insp.inspect_chunk(payload[i:i + 3])
+            assert res.undecodable is False  # 半截序列应被缓存而非判坏
+            out += chunk_out
+        tail_out, _ = insp.flush()
+        out += tail_out
+        assert out == payload  # 零丢失
+
+    def test_truly_broken_bytes_flag_undecodable(self):
+        insp = StreamingInspector(session_id="s1")
+        _, res = insp.inspect_chunk(b"abc\xff\xfe\xfd")  # 中段坏字节：不是流截断
+        assert res.undecodable is True  # fail-closed 交调用方阻断，绝不吞字节
 
 
 # ── Rolling Window Check ──────────────────────────────────────

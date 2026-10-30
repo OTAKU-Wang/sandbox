@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Table, Button, Space, Tag, Input, Select, Typography } from 'antd';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Tag, Select, Typography } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { contractApi } from '../../services/contractApi';

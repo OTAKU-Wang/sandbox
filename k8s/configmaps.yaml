@@ -10,7 +10,9 @@ data:
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
     -- Grant permissions
-    GRANT ALL PRIVILEGES ON DATABASE cds TO cds_admin;
+    -- P6 漂移收敛（2026-10-30）：角色名与单一真值源 scripts/init-db.sql 对齐
+    -- （GRANT TO cds）；cds_admin 漂移值已全线清除，由 test_deploy_manifests 钉死。
+    GRANT ALL PRIVILEGES ON DATABASE cds TO cds;
 ---
 apiVersion: v1
 kind: ConfigMap

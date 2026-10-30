@@ -56,7 +56,10 @@ export function useContractOptions() {
 export function useContractById(contractId: string | null) {
   return useQuery({
     queryKey: ['contracts', 'flow-detail', contractId],
-    enabled: contractId !== null,
+    // A263：`!== null` 只挡 null，空串照样放行——`row.contract_id ?? ''`、表单初值、
+    // URL query 缺省都会送 ''，于是每渲染一次真发一发 `GET /contracts/`（列表或 404），
+    // 再把它喂给 toContractOption。空串和 null 是同一件事：手里没有 id，就不该发这一枪。
+    enabled: Boolean(contractId),
     queryFn: () => contractApi.get(contractId as string),
     select: (data) => toContractOption(data),
   });

@@ -10,6 +10,8 @@ from typing import Any, BinaryIO, Iterable, Iterator
 
 import httpx
 
+from ._encoding import path_segment as _enc
+
 _TERMINAL_STATUSES = ("completed", "terminated", "failed", "expired")
 
 # PZ-11④: honest-degradation disclosure fields — extracted from any response
@@ -203,12 +205,25 @@ class CDSResponse(dict):
 
 
 def _parse_error(resp: httpx.Response, path: str) -> CDSApiError:
-    """Build a CDSApiError from a non-2xx response (W2 shape or legacy)."""
+    """Build a CDSApiError from a non-2xx response (W2 shape or legacy).
+
+    A173: the contract is "every non-2xx raises CDSApiError" — parsing the
+    body must never raise a *different* exception on hostile input. The old
+    code caught only ``ValueError`` (JSON decode failures) and then touched
+    the payload with ``.get``; A76 covered non-dict JSON, but a response
+    declaring ``Content-Encoding: gzip`` with a corrupt payload makes httpx
+    raise ``httpx.DecodingError`` (not a ValueError) out of ``.json()`` AND
+    ``.text``, which escaped the parser as a raw transport error. Every
+    extraction is guarded now; the fallback detail is the raw bytes.
+    """
     try:
         payload = resp.json()
-    except ValueError:
+    except (ValueError, httpx.DecodingError):
         payload = None
-        detail = resp.text
+        try:
+            detail: Any = resp.text
+        except (ValueError, httpx.DecodingError):
+            detail = repr(resp.content)
     else:
         # A76: valid JSON is not necessarily an object — an upstream gateway can
         # answer ``[{...}]`` / ``"error"`` / ``null``, and ``payload.get`` on those
@@ -216,7 +231,10 @@ def _parse_error(resp: httpx.Response, path: str) -> CDSApiError:
         if isinstance(payload, dict):
             detail = payload.get("detail", payload)
         elif payload is None:
-            detail = resp.text
+            try:
+                detail = resp.text
+            except (ValueError, httpx.DecodingError):
+                detail = repr(resp.content)
         else:
             detail = payload
     return CDSApiError(
@@ -418,7 +436,7 @@ class CDSClient:
         return self._request("POST", "/api/v1/sandbox-sessions", json=body)
 
     def get_session(self, session_id: str) -> dict:
-        return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}")
+        return self._request("GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}")
 
     def list_sessions(
         self,
@@ -470,11 +488,11 @@ class CDSClient:
                 return
 
     def terminate_session(self, session_id: str) -> dict:
-        return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/terminate")
+        return self._request("POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/terminate")
 
     def execute(self, session_id: str, code: str, language: str = "python") -> dict:
         return self._request(
-            "POST", f"/api/v1/sandbox-sessions/{session_id}/execute",
+            "POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/execute",
             json={"code": code, "language": language},
         )
 
@@ -482,17 +500,17 @@ class CDSClient:
         body: dict[str, Any] = {"command": command}
         if timeout_seconds is not None:
             body["timeout_seconds"] = timeout_seconds
-        return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/exec", json=body)
+        return self._request("POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/exec", json=body)
 
     def pause(self, session_id: str) -> dict:
-        return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/pause")
+        return self._request("POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/pause")
 
     def resume(self, session_id: str) -> dict:
-        return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/resume")
+        return self._request("POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/resume")
 
     def refresh(self, session_id: str, extend_seconds: int | None = None) -> dict:
         body = {"extend_seconds": extend_seconds} if extend_seconds is not None else {}
-        return self._request("POST", f"/api/v1/sandbox-sessions/{session_id}/refreshes", json=body)
+        return self._request("POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/refreshes", json=body)
 
     def wait_for_status(
         self,
@@ -513,13 +531,13 @@ class CDSClient:
                 return last
             time.sleep(poll_interval)
         raise TimeoutError(
-            f"session {session_id} did not reach {sorted(targets)} within {timeout}s "
+            f"session {_enc(session_id)} did not reach {sorted(targets)} within {timeout}s "
             f"(last status: {last.get('status')!r})"
         )
 
     # ── files ────────────────────────────────────────────────────────────
     def list_files(self, session_id: str) -> list[dict]:
-        return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/files")["files"]
+        return self._request("GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/files")["files"]
 
     def upload_file(
         self,
@@ -539,31 +557,31 @@ class CDSClient:
         else:
             payload = data.read()
         return self._request(
-            "POST", f"/api/v1/sandbox-sessions/{session_id}/files",
+            "POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/files",
             files={"file": (filename, payload)},
         )
 
     def download_file(self, session_id: str, filename: str) -> bytes:
-        resp = self._client.get(f"/api/v1/sandbox-sessions/{session_id}/files/{filename}")
+        resp = self._client.get(f"/api/v1/sandbox-sessions/{_enc(session_id)}/files/{_enc(filename)}")
         if resp.status_code >= 400:
-            raise _parse_error(resp, f"/files/{filename}")
+            raise _parse_error(resp, f"/files/{_enc(filename)}")
         return resp.content
 
     def delete_file(self, session_id: str, filename: str) -> dict:
-        return self._request("DELETE", f"/api/v1/sandbox-sessions/{session_id}/files/{filename}")
+        return self._request("DELETE", f"/api/v1/sandbox-sessions/{_enc(session_id)}/files/{_enc(filename)}")
 
     # ── snapshots ────────────────────────────────────────────────────────
     def list_snapshots(self, session_id: str) -> list[dict]:
-        return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/snapshots")["snapshots"]
+        return self._request("GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/snapshots")["snapshots"]
 
     def create_snapshot(self, session_id: str, *, async_mode: bool = False) -> dict:
         params = {"async": "true"} if async_mode else None
         return self._request(
-            "POST", f"/api/v1/sandbox-sessions/{session_id}/snapshots", params=params
+            "POST", f"/api/v1/sandbox-sessions/{_enc(session_id)}/snapshots", params=params
         )
 
     def get_operation(self, operation_id: str) -> dict:
-        return self._request("GET", f"/api/v1/sandbox-sessions/operations/{operation_id}")
+        return self._request("GET", f"/api/v1/sandbox-sessions/operations/{_enc(operation_id)}")
 
     def wait_for_operation(self, operation_id: str, *, timeout: float = 120.0,
                            interval: float = 0.5) -> dict:
@@ -574,18 +592,18 @@ class CDSClient:
             if op.get("status") in ("succeeded", "failed"):
                 return op
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"operation {operation_id} did not finish within {timeout}s")
+                raise TimeoutError(f"operation {_enc(operation_id)} did not finish within {timeout}s")
             time.sleep(interval)
 
     def rollback_snapshot(self, session_id: str, snapshot_id: str) -> dict:
         return self._request(
             "POST",
-            f"/api/v1/sandbox-sessions/{session_id}/snapshots/{snapshot_id}/rollback",
+            f"/api/v1/sandbox-sessions/{_enc(session_id)}/snapshots/{_enc(snapshot_id)}/rollback",
         )
 
     def delete_snapshot(self, session_id: str, snapshot_id: str) -> dict:
         return self._request(
-            "DELETE", f"/api/v1/sandbox-sessions/{session_id}/snapshots/{snapshot_id}"
+            "DELETE", f"/api/v1/sandbox-sessions/{_enc(session_id)}/snapshots/{_enc(snapshot_id)}"
         )
 
     # ── logs / usage ─────────────────────────────────────────────────────
@@ -603,11 +621,11 @@ class CDSClient:
         if action:
             params["action"] = action
         return self._request(
-            "GET", f"/api/v1/sandbox-sessions/{session_id}/logs", params=params
+            "GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/logs", params=params
         )
 
     def usage(self, session_id: str) -> dict:
-        return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/usage")
+        return self._request("GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/usage")
 
     # ── auth (N9) ────────────────────────────────────────────────────────
     def refresh_token(self) -> dict:
@@ -679,7 +697,7 @@ class CDSClient:
         return self._request("GET", "/api/v1/contracts", params=params)
 
     def get_contract(self, contract_id: str) -> dict:
-        return self._request("GET", f"/api/v1/contracts/{contract_id}")
+        return self._request("GET", f"/api/v1/contracts/{_enc(contract_id)}")
 
     @staticmethod
     def sign_data(contract_id: str, contract_no: str, party_role: str, timestamp: str,
@@ -709,7 +727,7 @@ class CDSClient:
                 ),
                 "errors": errors,
             })
-        base = f"CDS-SIGN|{contract_id}|{contract_no}|{party_role}|{timestamp}"
+        base = f"CDS-SIGN|{_enc(contract_id)}|{contract_no}|{party_role}|{timestamp}"
         if purpose:
             base += f"|purpose:{purpose}"
         if purpose_scope:
@@ -718,18 +736,18 @@ class CDSClient:
 
     def sign_contract(self, contract_id: str, signature: str, timestamp: str) -> dict:
         return self._request(
-            "POST", f"/api/v1/contracts/{contract_id}/sign",
+            "POST", f"/api/v1/contracts/{_enc(contract_id)}/sign",
             json={"signature": signature, "timestamp": timestamp},
         )
 
     def activate_contract(self, contract_id: str) -> dict:
-        return self._request("POST", f"/api/v1/contracts/{contract_id}/activate")
+        return self._request("POST", f"/api/v1/contracts/{_enc(contract_id)}/activate")
 
     def terminate_contract(self, contract_id: str, reason: str, ticket_id: str | None = None) -> dict:
         body: dict[str, Any] = {"reason": reason}
         if ticket_id:
             body["ticket_id"] = ticket_id
-        return self._request("POST", f"/api/v1/contracts/{contract_id}/terminate", json=body)
+        return self._request("POST", f"/api/v1/contracts/{_enc(contract_id)}/terminate", json=body)
 
     # ── tasks (N9) ───────────────────────────────────────────────────────
     def create_task(
@@ -774,22 +792,22 @@ class CDSClient:
 
     def submit_task(self, session_id: str, task_id: str) -> dict:
         return self._request(
-            "POST", f"/api/v1/sandbox-tasks/{task_id}/submit", params={"session_id": session_id}
+            "POST", f"/api/v1/sandbox-tasks/{_enc(task_id)}/submit", params={"session_id": session_id}
         )
 
     def get_task(self, session_id: str, task_id: str) -> dict:
         return self._request(
-            "GET", f"/api/v1/sandbox-tasks/{task_id}", params={"session_id": session_id}
+            "GET", f"/api/v1/sandbox-tasks/{_enc(task_id)}", params={"session_id": session_id}
         )
 
     def get_task_result(self, session_id: str, task_id: str) -> dict:
         return self._request(
-            "GET", f"/api/v1/sandbox-tasks/{task_id}/result", params={"session_id": session_id}
+            "GET", f"/api/v1/sandbox-tasks/{_enc(task_id)}/result", params={"session_id": session_id}
         )
 
     # ── proof bundle (N9) ────────────────────────────────────────────────
     def get_proof_bundle(self, session_id: str) -> dict:
-        return self._request("GET", f"/api/v1/sandbox-sessions/{session_id}/proof-bundle")
+        return self._request("GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/proof-bundle")
 
     # ── inference (N5/N9) ────────────────────────────────────────────────
     def list_models(self) -> list[dict]:
@@ -802,7 +820,7 @@ class CDSClient:
         body: dict[str, Any] = {"inputs": inputs}
         if purpose:
             body["purpose"] = purpose
-        return self._request("POST", f"/api/v1/inference/{model_id}/invoke", json=body)
+        return self._request("POST", f"/api/v1/inference/{_enc(model_id)}/invoke", json=body)
 
     def get_inference_metering(self) -> dict:
         return self._request("GET", "/api/v1/inference/metering")
@@ -838,22 +856,27 @@ class CDSClient:
         streaming exec — other levels raise :class:`CDSApiError` with
         guidance to fall back to :meth:`execute` or :meth:`logs` polling.
         Requires the optional ``websocket-client`` dependency.
-        ``timeout_seconds`` is validated before any request: a non-positive
-        or non-numeric value raises :class:`ValueError` up-front. A stream
-        that stalls past ``recv_timeout`` raises :class:`CDSError` (504)
-        with ``truncated = True`` — never a silent "complete" end.
+        ``timeout_seconds``/``session_id``/``language``/``recv_timeout`` are
+        validated before any request (A218): a bad argument raises
+        :class:`ValueError` up-front, burning zero round trips. Path
+        identifiers are percent-encoded (A215). A stream that stalls past
+        ``recv_timeout`` raises :class:`CDSError` (504) with
+        ``truncated = True`` — never a silent "complete" end.
         """
         from . import stream as _stream
 
-        # Validate before the first network call (get_session below).
+        # Validate before the first network call (get_session below):
+        # timeout_seconds (A218 wave-1) plus session_id/language/recv_timeout
+        # (A218 remainder) — a bad argument must never burn an HTTP round trip.
         _stream._validate_timeout_seconds(timeout_seconds)
+        _stream._validate_stream_args(session_id, language, recv_timeout)
         session = self.get_session(session_id)
         level = session.get("sandbox_level") if isinstance(session, dict) else None
         if level not in _stream.SUPPORTED_STREAM_LEVELS:
             raise CDSApiError(
                 400,
                 "streaming exec not supported on this sandbox level",
-                f"/api/v1/sandbox-sessions/{session_id}/exec/stream",
+                f"/api/v1/sandbox-sessions/{_enc(session_id)}/exec/stream",
                 code="STREAM_UNSUPPORTED",
                 message=(
                     f"WS streaming exec is only available on L0/k8s sessions "
@@ -887,14 +910,14 @@ class CDSClient:
         return self._request("GET", "/api/v1/data-products", params=params)
 
     def get_data_product(self, product_id: str) -> dict:
-        return self._request("GET", f"/api/v1/data-products/{product_id}")
+        return self._request("GET", f"/api/v1/data-products/{_enc(product_id)}")
 
     def list_data_resources(self) -> list[dict]:
         """List data resources owned by the calling user."""
         return self._request("GET", "/api/v1/data-resources/")
 
     def get_data_resource(self, resource_id: str) -> dict:
-        return self._request("GET", f"/api/v1/data-resources/{resource_id}")
+        return self._request("GET", f"/api/v1/data-resources/{_enc(resource_id)}")
 
     def search_catalog(
         self,
@@ -927,7 +950,7 @@ class CDSClient:
         return self._request("GET", "/api/v1/training/jobs", params=params)
 
     def get_training_job(self, job_id: str) -> dict:
-        return self._request("GET", f"/api/v1/training/jobs/{job_id}")
+        return self._request("GET", f"/api/v1/training/jobs/{_enc(job_id)}")
 
     def training_job_status(self, job_id: str) -> str:
         """Return the ``status`` of a training job (e.g. ``running``)."""
@@ -960,7 +983,7 @@ class CDSClient:
         if category:
             params["category"] = category
         return self._request(
-            "GET", f"/api/v1/sandbox-sessions/{session_id}/audit", params=params
+            "GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/audit", params=params
         )
 
     def cleanup_expired_sessions(self) -> dict:
@@ -969,14 +992,14 @@ class CDSClient:
 
     def get_session_network_policy(self, session_id: str) -> dict:
         return self._request(
-            "GET", f"/api/v1/sandbox-sessions/{session_id}/network-policy"
+            "GET", f"/api/v1/sandbox-sessions/{_enc(session_id)}/network-policy"
         )
 
     def update_session_network_policy(self, session_id: str,
                                       policy: dict) -> dict:
         """Update the session network policy (mode / allowlists / active)."""
         return self._request(
-            "PUT", f"/api/v1/sandbox-sessions/{session_id}/network-policy", json=policy
+            "PUT", f"/api/v1/sandbox-sessions/{_enc(session_id)}/network-policy", json=policy
         )
 
     # ── capability matrix (PZ-13 / PZ-11) ──────────────────────────────
@@ -995,7 +1018,7 @@ class CDSClient:
         or the Bearer token otherwise); contract binding is enforced server-side.
         """
         body: dict[str, Any] = {"sql": sql, "product_id": product_id, "format": format}
-        return self._request("POST", f"/api/v1/gateway/{contract_id}/query", json=body)
+        return self._request("POST", f"/api/v1/gateway/{_enc(contract_id)}/query", json=body)
 
     # ── flow orchestration: notebook (SS-15 stage 2) ─────────────────
     def list_notebooks(self, *, contract_id: str | None = None, status: str | None = None,
@@ -1022,19 +1045,19 @@ class CDSClient:
 
     def get_notebook(self, notebook_id: str) -> dict:
         """Read one notebook, including its persisted ``content`` document and ``version``."""
-        return self._request("GET", f"/api/v1/notebooks/{notebook_id}")
+        return self._request("GET", f"/api/v1/notebooks/{_enc(notebook_id)}")
 
     def update_notebook(self, notebook_id: str, *, title: str | None = None,
                         content: Any = None, session_id: str | None = None) -> dict:
         """Save the notebook; every successful save bumps ``version`` server-side."""
         return self._request(
-            "PUT", f"/api/v1/notebooks/{notebook_id}",
+            "PUT", f"/api/v1/notebooks/{_enc(notebook_id)}",
             json=_compact({"title": title, "content": content, "session_id": session_id}),
         )
 
     def archive_notebook(self, notebook_id: str) -> None:
         """Archive (soft-delete) a notebook. Returns ``None`` on 204."""
-        return self._request("DELETE", f"/api/v1/notebooks/{notebook_id}")
+        return self._request("DELETE", f"/api/v1/notebooks/{_enc(notebook_id)}")
 
     def start_notebook_dev_session(self, notebook_id: str) -> dict:
         """Open/reuse the test sandbox session backing this notebook.
@@ -1042,7 +1065,7 @@ class CDSClient:
         Fails with 400 ``RUNTIME_UNAVAILABLE`` (``detail.reason`` carries the cause, e.g.
         ``dataplane_disabled``) when no sandbox runtime is reachable — never simulated.
         """
-        return self._request("POST", f"/api/v1/notebooks/{notebook_id}/dev-session")
+        return self._request("POST", f"/api/v1/notebooks/{_enc(notebook_id)}/dev-session")
 
     def execute_notebook_cell(self, notebook_id: str, code: str, *, cell_index: int | None = None,
                              persist: bool = False) -> dict:
@@ -1050,15 +1073,15 @@ class CDSClient:
         body: dict[str, Any] = {"code": code, "persist": persist}
         if cell_index is not None:
             body["cell_index"] = cell_index
-        return self._request("POST", f"/api/v1/notebooks/{notebook_id}/cells/execute", json=body)
+        return self._request("POST", f"/api/v1/notebooks/{_enc(notebook_id)}/cells/execute", json=body)
 
     def get_notebook_jupyter(self, notebook_id: str) -> dict:
         """Report whether the notebook's session exposes a native Jupyter UI."""
-        return self._request("GET", f"/api/v1/notebooks/{notebook_id}/jupyter")
+        return self._request("GET", f"/api/v1/notebooks/{_enc(notebook_id)}/jupyter")
 
     def run_notebook(self, notebook_id: str) -> dict:
         """Execute every code cell in order (per-cell results, stop-on-failure semantics)."""
-        return self._request("POST", f"/api/v1/notebooks/{notebook_id}/run")
+        return self._request("POST", f"/api/v1/notebooks/{_enc(notebook_id)}/run")
 
     # ── flow orchestration: workload (test → publish gate) ──────────────
     def list_workloads(self, *, contract_id: str | None = None, env: str | None = None,
@@ -1093,35 +1116,35 @@ class CDSClient:
         return self._request("POST", "/api/v1/workloads", json=body)
 
     def get_workload(self, workload_id: str) -> dict:
-        return self._request("GET", f"/api/v1/workloads/{workload_id}")
+        return self._request("GET", f"/api/v1/workloads/{_enc(workload_id)}")
 
     def test_workload(self, workload_id: str) -> dict:
         """Run the workload in a test sandbox. ``passed=False`` is a normal 200 outcome."""
-        return self._request("POST", f"/api/v1/workloads/{workload_id}/test")
+        return self._request("POST", f"/api/v1/workloads/{_enc(workload_id)}/test")
 
     def list_workload_test_runs(self, workload_id: str, *, page: int = 1,
                                 page_size: int = 20) -> dict:
         """History of test runs, including check items and the failure reason."""
         return self._request(
-            "GET", f"/api/v1/workloads/{workload_id}/test-runs",
+            "GET", f"/api/v1/workloads/{_enc(workload_id)}/test-runs",
             params={"page": page, "page_size": page_size},
         )
 
     def get_workload_test_run(self, workload_id: str, run_id: str) -> dict:
-        return self._request("GET", f"/api/v1/workloads/{workload_id}/test-runs/{run_id}")
+        return self._request("GET", f"/api/v1/workloads/{_enc(workload_id)}/test-runs/{_enc(run_id)}")
 
     def publish_workload(self, workload_id: str) -> dict:
         """Publish to production. Rejected with 412 ``WORKLOAD_NOT_PUBLISHED`` family codes
         until the latest entrypoint hash passed a test run."""
-        return self._request("POST", f"/api/v1/workloads/{workload_id}/publish")
+        return self._request("POST", f"/api/v1/workloads/{_enc(workload_id)}/publish")
 
     def rollback_workload(self, workload_id: str) -> dict:
         """Roll the production slot back to the previously published revision."""
-        return self._request("POST", f"/api/v1/workloads/{workload_id}/rollback")
+        return self._request("POST", f"/api/v1/workloads/{_enc(workload_id)}/rollback")
 
     def retire_workload(self, workload_id: str) -> dict:
         """Retire the workload (no further runs or OpenAPI exposure)."""
-        return self._request("POST", f"/api/v1/workloads/{workload_id}/retire")
+        return self._request("POST", f"/api/v1/workloads/{_enc(workload_id)}/retire")
 
     # ── flow orchestration: delivery (stage 3, three channels) ─────────
     def create_dataset_bundle(self, session_id: str, contract_id: str,
@@ -1134,7 +1157,7 @@ class CDSClient:
 
     def download_dataset_bundle(self, bundle_id: str) -> bytes:
         """Download a bundle zip. Only contract parties may fetch it (404 otherwise)."""
-        path = f"/api/v1/deliveries/dataset/{bundle_id}/download"
+        path = f"/api/v1/deliveries/dataset/{_enc(bundle_id)}/download"
         resp = self._client.get(path)
         if resp.status_code >= 400:
             raise _parse_error(resp, path)
@@ -1143,7 +1166,7 @@ class CDSClient:
     def get_contract_openapi(self, contract_id: str) -> dict:
         """OpenAPI 3.1 document for the contract's published workloads (``paths`` is empty
         when nothing is published — unpublished workloads are never advertised)."""
-        return self._request("GET", f"/api/v1/deliveries/openapi/contract/{contract_id}")
+        return self._request("GET", f"/api/v1/deliveries/openapi/contract/{_enc(contract_id)}")
 
     def create_openapi_endpoint(self, contract_id: str, name: str, *,
                                 workload_id: str | None = None, slug: str | None = None,
@@ -1175,7 +1198,7 @@ class CDSClient:
                                 rate_limit_per_minute: int | None = None,
                                 quota_total: int | None = None) -> dict:
         return self._request(
-            "PATCH", f"/api/v1/deliveries/openapi/endpoints/{endpoint_id}",
+            "PATCH", f"/api/v1/deliveries/openapi/endpoints/{_enc(endpoint_id)}",
             json=_compact({
                 "status": status,
                 "rate_limit_per_minute": rate_limit_per_minute,
@@ -1184,12 +1207,12 @@ class CDSClient:
         )
 
     def delete_openapi_endpoint(self, endpoint_id: str) -> None:
-        return self._request("DELETE", f"/api/v1/deliveries/openapi/endpoints/{endpoint_id}")
+        return self._request("DELETE", f"/api/v1/deliveries/openapi/endpoints/{_enc(endpoint_id)}")
 
     def invoke_open_endpoint(self, slug: str, payload: dict) -> dict:
         """Call the external delivery entry point (agent-side surface; authenticated by a
         platform API key, not a user token)."""
-        return self._request("POST", f"/open/v1/{slug}", json=payload)
+        return self._request("POST", f"/open/v1/{_enc(slug)}", json=payload)
 
     def create_webhook(self, name: str, url: str, events: list[str], *,
                        contract_id: str | None = None) -> dict:
@@ -1209,13 +1232,13 @@ class CDSClient:
                        url: str | None = None, events: list[str] | None = None,
                        status: str | None = None) -> dict:
         return self._request(
-            "PATCH", f"/api/v1/deliveries/webhooks/{subscription_id}",
+            "PATCH", f"/api/v1/deliveries/webhooks/{_enc(subscription_id)}",
             json=_compact({"name": name, "url": url, "events": events, "status": status}),
         )
 
     def delete_webhook(self, subscription_id: str) -> None:
         """Delete a subscription; delivery history is retained for audit (0 = forever)."""
-        return self._request("DELETE", f"/api/v1/deliveries/webhooks/{subscription_id}")
+        return self._request("DELETE", f"/api/v1/deliveries/webhooks/{_enc(subscription_id)}")
 
     def list_webhook_deliveries(self, subscription_id: str, *, status: str | None = None,
                                 page: int = 1, page_size: int = 20) -> dict:
@@ -1223,25 +1246,25 @@ class CDSClient:
         if status:
             params["status"] = status
         return self._request(
-            "GET", f"/api/v1/deliveries/webhooks/{subscription_id}/deliveries", params=params
+            "GET", f"/api/v1/deliveries/webhooks/{_enc(subscription_id)}/deliveries", params=params
         )
 
     def redeliver_webhook_delivery(self, subscription_id: str, delivery_id: str) -> dict:
         """Force a redelivery attempt (backoff schedule restarts)."""
         return self._request(
             "POST",
-            f"/api/v1/deliveries/webhooks/{subscription_id}/deliveries/{delivery_id}/redeliver",
+            f"/api/v1/deliveries/webhooks/{_enc(subscription_id)}/deliveries/{_enc(delivery_id)}/redeliver",
         )
 
     def rotate_webhook_secret(self, subscription_id: str) -> dict:
         """Rotate the HMAC signing secret; the new plaintext is returned once."""
         return self._request(
-            "POST", f"/api/v1/deliveries/webhooks/{subscription_id}/rotate-secret"
+            "POST", f"/api/v1/deliveries/webhooks/{_enc(subscription_id)}/rotate-secret"
         )
 
     def test_webhook(self, subscription_id: str) -> dict:
         """Send a probe event so the receiver can be verified before real results flow."""
-        return self._request("POST", f"/api/v1/deliveries/webhooks/{subscription_id}/test")
+        return self._request("POST", f"/api/v1/deliveries/webhooks/{_enc(subscription_id)}/test")
 
     # ── flow orchestration: scheduled compute + contract flow config ────
     def trigger_compute_run(self, contract_id: str) -> dict:
@@ -1258,10 +1281,10 @@ class CDSClient:
         return self._request("GET", "/api/v1/compute/runs", params=params)
 
     def get_compute_run(self, run_id: str) -> dict:
-        return self._request("GET", f"/api/v1/compute/runs/{run_id}")
+        return self._request("GET", f"/api/v1/compute/runs/{_enc(run_id)}")
 
     def cancel_compute_run(self, run_id: str) -> dict:
-        return self._request("POST", f"/api/v1/compute/runs/{run_id}/cancel")
+        return self._request("POST", f"/api/v1/compute/runs/{_enc(run_id)}/cancel")
 
     def get_compute_schedule(self, *, contract_id: str | None = None) -> dict:
         """Scheduled-compute plan per contract (``next_compute_at`` is server-owned)."""
@@ -1288,4 +1311,4 @@ class CDSClient:
             "compute_tz": compute_tz,
             "sandbox_resource_spec": sandbox_resource_spec,
         })
-        return self._request("POST", f"/api/v1/contracts/{contract_id}/flow-config", json=body)
+        return self._request("POST", f"/api/v1/contracts/{_enc(contract_id)}/flow-config", json=body)

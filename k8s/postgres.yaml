@@ -27,7 +27,13 @@ spec:
             - name: POSTGRES_DB
               value: cds
             - name: POSTGRES_USER
-              value: cds_admin
+              # P6 漂移收敛（2026-10-30）：应用用户单一真值源 = `cds`——与
+              # scripts/init-db.sql(GRANT TO cds)、compose×3、两个 deploy 脚本、
+              # helm bitnami auth.username 同值；旧的 cds_admin 是 k3s 路径孤儿漂移。
+              # 存量 dev 卷（initdb 已跑过 cds_admin）升级前先执行：
+              #   ALTER USER cds_admin RENAME TO cds;
+              # 否则下面的 pg_isready 探针对旧卷必红。test_deploy_manifests 钉死同值。
+              value: cds
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -53,12 +59,12 @@ spec:
               readOnly: true
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "cds_admin", "-d", "cds"]
+              command: ["pg_isready", "-U", "cds", "-d", "cds"]
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "cds_admin", "-d", "cds"]
+              command: ["pg_isready", "-U", "cds", "-d", "cds"]
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:

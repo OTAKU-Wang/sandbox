@@ -16,11 +16,9 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Modal,
   Progress,
-  Row,
   Space,
   Statistic,
   Table,
@@ -33,7 +31,6 @@ import {
   ArrowLeftOutlined,
   CaretRightFilled,
   CheckCircleFilled,
-  ClockCircleOutlined,
   CodeOutlined,
   DatabaseOutlined,
   ExportOutlined,
@@ -45,7 +42,6 @@ import {
   RiseOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import type { ReactNode } from 'react';
 import TaskRunRecords from './TaskRunRecords';
 import type { DebugRunRecordInput } from './TaskRunRecords';
 import { bundleReviewMeta, bundleWatermarkMeta } from './display';
@@ -93,7 +89,7 @@ import type { DatasetBundleRow } from '../../services/flow';
 import { CenteredLoading, QueryErrorAlert, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import './taskDetail.css';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 /** 图 2-4「资源配置」左栏两句固定说明。 */
 const DEBUG_MEMORY_CAPTION = '用于在线调试、断点运行与日志查看';
@@ -106,26 +102,6 @@ const RESULT_SET_NOTE = '按合约约定，结果集已通过 OpenApi 导出至�
 const FULL_PAGE_SIZE = 100;
 
 const footnoteStyle = { fontSize: 12 } as const;
-
-/** 统计小卡右侧那种「彩色底 + 白色图形」图标（图：紫底圆柱、橙底柱状图文档）。 */
-function TintedIcon({ icon, background }: { icon: ReactNode; background: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 24,
-        height: 24,
-        borderRadius: 4,
-        background,
-        color: '#fff',
-      }}
-    >
-      {icon}
-    </span>
-  );
-}
 
 export default function FlowTaskDetail() {
   const { taskId } = useParams<{ taskId: string }>();

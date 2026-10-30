@@ -68,6 +68,9 @@ class ChunkInspectionResult:
     redacted: bool = False
     original_size: int = 0
     output_size: int = 0
+    # OCR-A105: 非 UTF-8 字节流不再被 errors="ignore" 静默吃掉——该 chunk 原样返回并置位，
+    # 由调用方（输出代理）fail-closed 阻断。
+    undecodable: bool = False
 
 
 @dataclass
@@ -123,6 +126,55 @@ def pii_regex_scan(text: str) -> list[PIIHit]:
                 end=match.end(),
             ))
     return hits
+
+
+# OCR-A105：chunk 边界保留带。PII 正则最长匹配 19 字符（bank_card），再加一位负向预查
+# （(?!\d) 需要看到下一个字符才能定局）；64 个字符的保留带覆盖上界并留足余量。
+_BOUNDARY_CARRY = 64
+
+
+def _is_plausible_partial_tail(tail: bytes) -> bool:
+    """tail 是否可能是「被流边界截断的合法多字节序列」——而非永远解不出来的坏字节。
+
+    只有以合法首字节（0xC2..0xF4）开始、其余全是连续字节（0x80..0xBF）、且长度不足
+    该序列声明长度的残留才允许扣留到下块；0xFF/孤立连续字节等坏字节必须立即判
+    undecodable（扣留它们只会把阻断拖到 flush，且掩盖真坏数据）。
+    """
+    if not tail:
+        return True
+    b0 = tail[0]
+    if 0xC2 <= b0 <= 0xDF:
+        need = 2
+    elif 0xE0 <= b0 <= 0xEF:
+        need = 3
+    elif 0xF0 <= b0 <= 0xF4:
+        need = 4
+    else:
+        return False
+    if len(tail) >= need:
+        return False  # 长度已够却解不出 = 坏字节，不是截断
+    return all(0x80 <= b <= 0xBF for b in tail[1:])
+
+
+def _decode_utf8_prefix(buf: bytes) -> tuple[str, bytes]:
+    """尽量解码 buf；末尾不完整的多字节序列原样留到返回值第二段（OCR-A105，零丢失）。
+
+    截尾式重试只针对「末尾残留不完整序列」这一合法流式形态（最多 3 个后续字节，
+    且必须通过 :func:`_is_plausible_partial_tail`）；中段坏字节与永远解不出的尾字节
+    都抛 UnicodeDecodeError，交由调用方按 undecodable fail-closed 处理，绝不
+    errors="ignore" 静默丢字节。
+    """
+    for trim in range(0, 4):
+        head = buf[: len(buf) - trim] if trim else buf
+        tail = buf[len(head):]
+        try:
+            text = head.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if _is_plausible_partial_tail(tail):
+            return text, tail
+        break
+    raise UnicodeDecodeError("utf-8", buf, 0, min(len(buf), 1), "invalid UTF-8 beyond a trailing partial sequence")
 
 
 def auto_redact(text: str, hits: list[PIIHit]) -> str:
@@ -183,50 +235,86 @@ class StreamingInspector:
         self._audit_log: list[RedactionEvent] = []
         self._window_hits: deque[tuple[float, int]] = deque()  # (timestamp, pii_count)
         self._window_exceeded = False
+        # OCR-A105 流式状态：_pending 持有末尾不完整的 UTF-8 字节；_carry 持有已解码但
+        # 因边界匹配未定局而未外发的文本。不变式：carry 之前的文本已全部外发（且已定稿
+        # 脱敏），carry 字节永远不可能在未定局状态下外发。
+        self._pending: bytes = b""
+        self._carry: str = ""
 
-    def inspect_chunk(self, data: bytes) -> tuple[bytes, ChunkInspectionResult]:
-        """Inspect a single chunk of data.
+    def inspect_chunk(self, data: bytes, final: bool = False) -> tuple[bytes, ChunkInspectionResult]:
+        """Inspect a single chunk of data (OCR-A105 修复版).
+
+        与旧实现的三点差异（都是原缺陷的反面）：
+        1. 不再 ``errors="ignore"``——非 UTF-8 字节流整 chunk 原样返回并标记
+           ``undecodable``，由调用方 fail-closed；末尾不完整多字节序列缓存到下个 chunk
+           拼接（多字节字符不再被静默丢弃、破损 body 不再被写回）。
+        2. 边界保留带：每次只外发 ``_BOUNDARY_CARRY`` 之前的文本，跳 chunk 边界的 PII
+           （含负向预查未定局的尾部）在下一轮扫描中定局后才外发，永不逃逸。
+        3. 流尾必须 ``flush()``：drain 保留带，尾部 PII 不漏。
 
         Args:
             data: Raw bytes from response stream
+            final: True 表示流已结束（drain pending+carry 并定局所有匹配）
 
         Returns:
-            Tuple of (output_bytes, inspection_result)
+            Tuple of (output_bytes, inspection_result) — output 可能少于输入（保留带），
+            字节层面除脱敏处外无损。
         """
-        text = data.decode("utf-8", errors="ignore")
-        hits = pii_regex_scan(text)
-
         result = ChunkInspectionResult(
             chunk_index=self._chunk_index,
-            pii_hits=hits,
+            pii_hits=[],
             original_size=len(data),
         )
+        buf = self._pending + data
+        self._pending = b""
+        try:
+            if final:
+                # 流已结束仍剩不完整序列 = 真坏数据：原样交回，fail-closed 交给调用方
+                if buf:
+                    text = buf.decode("utf-8")  # 允许 raise → undecodable
+                else:
+                    text = ""
+            else:
+                text, self._pending = _decode_utf8_prefix(buf)
+        except UnicodeDecodeError:
+            result.undecodable = True
+            result.output_size = len(buf)
+            self._chunk_index += 1
+            return buf, result
 
-        if hits:
-            text = auto_redact(text, hits)
+        scan_text = self._carry + text
+        hits = pii_regex_scan(scan_text)
+        cut = len(scan_text) if final else max(0, len(scan_text) - _BOUNDARY_CARRY)
+        # 只有完全落在外发区内的匹配才定局；跨过保留带的（或因尾部预查未定局的）留到下轮
+        resolved = [h for h in hits if h.end <= cut]
+        out_text = auto_redact(scan_text[:cut], resolved)
+        self._carry = scan_text[cut:]
+
+        if resolved:
             result.redacted = True
-
-            # Record audit events
-            for hit in hits:
+            for hit in resolved:
                 self._audit_log.append(RedactionEvent(
                     event_id=f"redact-{uuid.uuid4().hex[:8]}",
                     session_id=self._session_id,
                     chunk_index=self._chunk_index,
                     pii_type=hit.pii_type,
                 ))
-
-            # Update rolling window
             now = time.monotonic()
-            self._window_hits.append((now, len(hits)))
+            self._window_hits.append((now, len(resolved)))
 
-        output = text.encode("utf-8")
+        result.pii_hits = resolved
+        output = out_text.encode("utf-8")
         result.output_size = len(output)
 
-        self._total_pii_hits += len(hits)
-        self._total_chars += len(text)
+        self._total_pii_hits += len(resolved)
+        self._total_chars += len(out_text)
         self._chunk_index += 1
 
         return output, result
+
+    def flush(self) -> tuple[bytes, ChunkInspectionResult]:
+        """Drain the boundary carry (and any pending bytes) — 流的每次调用序列都必须以它收尾。"""
+        return self.inspect_chunk(b"", final=True)
 
     def check_window(self) -> WindowCheckResult:
         """Check rolling window PII density.

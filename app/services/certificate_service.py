@@ -241,6 +241,30 @@ _SM2_PUBKEY_OID = "1.2.156.10197.1.301"
 _SM2_CURVE_OID = "1.2.156.10197.1.301.1"
 
 
+def _as_aware(dt: datetime | None) -> datetime | None:
+    """把 DB 读回的 naive datetime 归一为 UTC-aware（OCR-A106/A320）。
+
+    SQLite 的 DateTime 列不携带时区，`datetime.now(timezone.utc) < naive` 直接
+    TypeError → verify_chain/validate 在 SQLite 上必 500（fix-waves 记录的 A320
+    同族）。naive 按 UTC 解释是本仓写入侧（一律 aware-utc 写入）的逆运算。
+    """
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _pem_to_der(cert_pem: str) -> bytes:
+    """PEM → DER bytes（raise ValueError on garbage）。"""
+    import re
+
+    pem_body = re.sub(r"-----.*?-----", "", cert_pem).strip()
+    pem_body = re.sub(r"\s+", "", pem_body)
+    try:
+        return base64.b64decode(pem_body)
+    except Exception as e:
+        raise ValueError(f"invalid PEM base64: {e}") from e
+
+
 class CertificateService:
     """SM2 PKI certificate lifecycle manager."""
 
@@ -395,21 +419,28 @@ class CertificateService:
     async def suspend_sessions_by_cert(self, db: AsyncSession, cert_id: uuid.UUID, reason: str = "cert_revoked") -> int:
         """Public API: suspend all sessions dependent on a certificate (P0-10).
 
-        Returns the number of sessions affected.
+        Returns the number of sessions actually terminated via the
+        cert → DEKs → sessions cascade (OCR-A106: 旧实现恒返 1——「证书存在」被
+        冒充成「会话受影响数」；现在返回真实处置计数，级联失败不再被粉饰)。
         """
         from sqlalchemy import select
         result = await db.execute(select(Certificate).where(Certificate.id == cert_id))
         cert = result.scalar_one_or_none()
         if not cert:
             return 0
-        await self._cascade_revoke(db, cert, reason)
-        return 1
+        summary = await self._cascade_revoke(db, cert, reason)
+        return int(summary.get("sessions_terminated", 0))
 
-    async def _cascade_revoke(self, db: AsyncSession, cert: Certificate, reason: str) -> None:
+    async def _cascade_revoke(self, db: AsyncSession, cert: Certificate, reason: str) -> dict:
         """Cascade certificate revocation to dependent keys and sessions.
 
         Flow: revoke cert → find DEKs encrypted with this cert → suspend them
               → terminate active sessions using those keys → audit all actions.
+
+        OCR-A106 诚实化：会话终止失败过去被 except 吞掉后仍记
+        ``certificate.cascade.complete``——审计在级联实际未完成时谎报完成。
+        失败现在如实入账：动作名 ``certificate.cascade.incomplete`` + 错误明细，
+        并把结构化摘要返回给调用方。
         """
         from app.models.kms import DataEncryptionKey, DEKStatus
 
@@ -424,7 +455,7 @@ class CertificateService:
 
         if not affected_deks:
             logger.info(f"[CertRevoke] No DEKs linked to cert {cert.serial_number}")
-            return
+            return {"deks_suspended": 0, "sessions_terminated": 0, "termination_error": None}
 
         suspended_key_ids = []
         for dek in affected_deks:
@@ -448,6 +479,7 @@ class CertificateService:
 
         # Terminate active sessions using affected keys
         total_terminated = 0
+        termination_error: str | None = None
         try:
             from app.services.sandbox_runtime import sandbox_runtime
             for key_id in suspended_key_ids:
@@ -456,25 +488,37 @@ class CertificateService:
                 )
                 total_terminated += count
         except Exception as e:
+            # A106：不再「吞失败 + 记 complete」；错误进审计、进返回值。
             logger.error(f"[CertRevoke] Session termination failed: {e}")
+            termination_error = f"{type(e).__name__}: {e}"
 
+        cascade_complete = termination_error is None
         await audit_service.log(
             db,
-            action="certificate.cascade.complete",
+            action="certificate.cascade.complete" if cascade_complete else "certificate.cascade.incomplete",
             resource_type="certificate",
             resource_id=str(cert.id),
             detail={
                 "cert_serial": cert.serial_number,
                 "deks_suspended": len(affected_deks),
                 "sessions_terminated": total_terminated,
+                "sessions_termination_error": termination_error,
+                "cascade_complete": cascade_complete,
                 "reason": reason,
             },
         )
 
         logger.info(
-            f"[CertRevoke] Cascade complete for cert {cert.serial_number}: "
-            f"{len(affected_deks)} DEKs suspended, {total_terminated} sessions terminated"
+            f"[CertRevoke] Cascade {'complete' if cascade_complete else 'INCOMPLETE'} "
+            f"for cert {cert.serial_number}: {len(affected_deks)} DEKs suspended, "
+            f"{total_terminated} sessions terminated"
+            + (f" (termination error: {termination_error})" if termination_error else "")
         )
+        return {
+            "deks_suspended": len(affected_deks),
+            "sessions_terminated": total_terminated,
+            "termination_error": termination_error,
+        }
 
     async def get_user_certificates(
         self,
@@ -514,9 +558,11 @@ class CertificateService:
             return False, f"Certificate revoked: {cert.revoke_reason}"
 
         now = datetime.now(timezone.utc)
-        if now < cert.not_before:
+        not_before = _as_aware(cert.not_before)   # A320 同族：SQLite naive 列直比 aware 会 TypeError→500
+        not_after = _as_aware(cert.not_after)
+        if not_before and now < not_before:
             return False, "Certificate not yet valid"
-        if now > cert.not_after:
+        if not_after and now > not_after:
             return False, "Certificate expired"
 
         if cert.status == CertStatus.SUSPENDED.value:
@@ -557,31 +603,87 @@ class CertificateService:
             ],
         }
 
-        # Sign the CRL
-        try:
-            keypair = crypto_service.generate_keypair()
-            import json
-            crl_data = json.dumps(crl, sort_keys=True).encode()
-            signature = crypto_service.sign(crl_data, keypair.private_key, keypair.public_key)
-            crl["signature"] = signature.signature
-        except Exception as e:
-            logger.warning(f"CRL signing failed: {e}")
+        # Sign the CRL — OCR-A106 修复：旧实现每次调用现 generate_keypair() 签一把
+        # 一次性密钥，验方永远拿不到那把公钥——「已签名」纯属装饰，比不签更坏
+        # （它诱导消费方把撤销列表读成可信签发物）。现在只认本地密钥库里的签发 CA
+        # 私钥：有则真签并披露 signed_by；无则显式 unsigned + reason，绝不伪造。
+        import json
+
+        crl["signed"] = False
+        crl["signature"] = None
+        issuer_cert = await self._find_issuer_ca(db, issuer)
+        if issuer_cert is None:
+            crl["signature_reason"] = (
+                "no active issuer CA certificate found — CRL left unsigned "
+                "(never signed with an ephemeral key nobody can verify against)"
+            )
+        else:
+            priv = (
+                self._local_private_keys.get(str(issuer_cert.id))
+                or self._local_private_keys.get(issuer_cert.serial_number)
+            )
+            if not priv:
+                crl["signature_reason"] = (
+                    f"issuer CA {issuer_cert.serial_number} private key not available "
+                    "in local key vault — CRL left unsigned"
+                )
+            else:
+                try:
+                    signable = {k: v for k, v in crl.items()
+                                if k not in ("signed", "signature", "signed_by_serial", "signature_reason")}
+                    crl_data = json.dumps(signable, sort_keys=True).encode()
+                    signature = crypto_service.sign(crl_data, priv, issuer_cert.public_key)
+                    crl["signature"] = signature.signature
+                    crl["signed"] = True
+                    crl["signed_by_serial"] = issuer_cert.serial_number
+                except (TypeError, ValueError, RuntimeError, AttributeError) as e:
+                    crl["signature_reason"] = (
+                        f"issuer key present but CRL signing failed ({type(e).__name__}: {e}) "
+                        "— CRL left unsigned"
+                    )
 
         return crl
+
+    async def _find_issuer_ca(self, db: AsyncSession, issuer: str | None) -> Certificate | None:
+        """Find an active CA certificate that could legitimately sign the CRL."""
+        query = select(Certificate).where(
+            Certificate.is_ca.is_(True),
+            Certificate.status == CertStatus.ACTIVE.value,
+        )
+        if issuer:
+            query = query.where(Certificate.subject == issuer)
+        else:
+            query = query.where(Certificate.issuer == Certificate.subject)  # 自签根
+        query = query.order_by(Certificate.not_before.desc())
+        result = await db.execute(query)
+        rows = list(result.scalars().all())
+        return rows[0] if rows else None
 
     async def verify_chain(
         self,
         db: AsyncSession,
         cert_id: uuid.UUID,
     ) -> dict:
-        """Verify the certificate chain of trust.
+        """Verify the certificate chain of trust — cryptographically (OCR-A106 修复).
 
-        Walks up the parent_cert_id chain until reaching a self-signed CA cert
-        or a cert with no parent. Returns the full chain and validation status.
+        旧实现只是「沿 parent_cert_id 取 DB 行比对 issuer/subject 字符串与状态列」，
+        既不验任何签名也不校验信任锚：一行自签伪造就能冒充 CA 签发（自签仹即信），
+        单行无 parent 的链还会直接 ``valid: true``。现在：
+
+        1. 每一环用**父证书公钥**验子证书 TBS 的 SM2 签名（签名材料就是
+           ``_build_cert_pem`` 签出去的那段 DER，父签发路径本就用父私钥签）；
+        2. 根必须同时满足：PEM 回读 basicConstraints CA=TRUE、issuer==subject、
+           **自签验签通过**——不再是「库里任意 is_ca 行」；
+        3. 链必须终止于这样的根；无 parent 又非根 → ``no trust anchor`` 失效
+           （旧实现在这里吐 valid true）；
+        4. 有效期比较走 :func:`_as_aware`（SQLite naive 列直接比会 TypeError→500，
+           即 fix-waves 记的 A320 同族）。
         """
-        chain = []
-        visited = set()
+        chain: list[dict] = []
+        parsed_chain: list[dict] = []
+        visited: set[uuid.UUID] = set()
         current_id = cert_id
+        root_parsed: dict | None = None
 
         while current_id:
             if current_id in visited:
@@ -594,9 +696,21 @@ class CertificateService:
                 return {"valid": False, "error": f"Certificate {current_id} not found", "chain": chain}
 
             now = datetime.now(timezone.utc)
-            is_expired = cert.not_after < now if cert.not_after else False
+            not_before = _as_aware(cert.not_before)
+            not_after = _as_aware(cert.not_after)
+            is_expired = not_after < now if not_after else False
             is_revoked = cert.status == CertStatus.REVOKED.value
-            is_not_yet_valid = cert.not_before > now if cert.not_before else False
+            is_not_yet_valid = not_before > now if not_before else False
+
+            # 密码学输入不可得 = 无从验证 = fail-closed（不再只看状态列就放行）
+            try:
+                parsed = self._parse_x509_der(_pem_to_der(cert.certificate_pem or ""))
+            except Exception as e:  # 解析器/解码抛什么都算「不可验」→ fail-closed
+                return {
+                    "valid": False,
+                    "error": f"Certificate {cert.serial_number} has no parseable certificate_pem: {e}",
+                    "chain": chain,
+                }
 
             chain_entry = {
                 "id": str(cert.id),
@@ -605,13 +719,15 @@ class CertificateService:
                 "issuer": cert.issuer,
                 "is_ca": cert.is_ca,
                 "status": cert.status,
-                "not_before": cert.not_before.isoformat() if cert.not_before else None,
-                "not_after": cert.not_after.isoformat() if cert.not_after else None,
+                "not_before": not_before.isoformat() if not_before else None,
+                "not_after": not_after.isoformat() if not_after else None,
                 "is_expired": is_expired,
                 "is_revoked": is_revoked,
                 "is_not_yet_valid": is_not_yet_valid,
+                "signature_verified": False,
             }
             chain.append(chain_entry)
+            parsed_chain.append(parsed)
 
             # Check validity
             if is_expired:
@@ -621,12 +737,34 @@ class CertificateService:
             if is_not_yet_valid:
                 return {"valid": False, "error": f"Certificate {cert.serial_number} is not yet valid", "chain": chain}
 
-            # Self-signed CA (issuer == subject) = root of trust
-            if cert.is_ca and cert.issuer == cert.subject:
+            # Self-signed CA (issuer == subject) = potential root of trust — must PROVE it
+            if parsed["issuer"] == parsed["subject"]:
+                if not parsed.get("is_ca") or not cert.is_ca:
+                    return {
+                        "valid": False,
+                        "error": f"Certificate {cert.serial_number} is self-signed but not a CA — cannot anchor a chain",
+                        "chain": chain,
+                    }
+                if not self._verify_parsed_signature(parsed, parsed["public_key"]):
+                    return {
+                        "valid": False,
+                        "error": f"Root certificate {cert.serial_number} fails self-signature verification",
+                        "chain": chain,
+                    }
                 chain_entry["is_root"] = True
+                chain_entry["signature_verified"] = True
+                root_parsed = parsed
                 break
 
             current_id = cert.parent_cert_id
+
+        if root_parsed is None:
+            # A106 核心补洞：旧实现让「无 parent 的任意单行」直接 valid true。
+            return {
+                "valid": False,
+                "error": "Chain does not terminate at a self-signed CA root — no trust anchor",
+                "chain": chain,
+            }
 
         # Verify issuer consistency: each cert's issuer should match parent's subject
         for i in range(len(chain) - 1):
@@ -639,21 +777,58 @@ class CertificateService:
                     "chain": chain,
                 }
 
-        return {"valid": True, "chain_length": len(chain), "chain": chain}
+        # A106 核心修复：每一环用父公钥对 PEM 内的 TBS 做真验签（父行 PEM 的 SPKI
+        # 是密码学权威，不信任可被改写的 DB public_key 列）
+        for i in range(len(chain) - 1):
+            child_parsed = parsed_chain[i]
+            parent_parsed = parsed_chain[i + 1]
+            if not self._verify_parsed_signature(child_parsed, parent_parsed["public_key"]):
+                return {
+                    "valid": False,
+                    "error": (
+                        f"Signature verification failed at position {i}: certificate "
+                        f"'{chain[i]['serial']}' was NOT signed by its parent key "
+                        f"'{chain[i + 1]['serial']}' (self-forged link)"
+                    ),
+                    "chain": chain,
+                }
+            chain[i]["signature_verified"] = True
+
+        return {
+            "valid": True,
+            "chain_length": len(chain),
+            "chain": chain,
+            "signatures_verified": True,
+            "trust_anchor": {"serial": chain[-1]["serial"], "type": "self-signed-root", "self_signature": "verified"},
+        }
+
+    @staticmethod
+    def _verify_parsed_signature(parsed: dict, issuer_public_key_hex: str) -> bool:
+        """用给定公钥验 parsed 证书的 TBS 签名；任何异常/缺失都算验签失败（fail-closed）。"""
+        try:
+            tbs_der = parsed.get("tbs_certificate_der")
+            sig_hex = parsed.get("signature") or ""
+            if not tbs_der or not sig_hex or not issuer_public_key_hex:
+                return False
+            return bool(crypto_service.verify(tbs_der, sig_hex, issuer_public_key_hex))
+        except (TypeError, ValueError, RuntimeError, AttributeError):
+            return False
 
     def verify_certificate(self, cert_pem: str) -> dict:
         """Parse X.509 DER certificate and verify SM2 signature (P0-1).
 
         Returns dict with parsed fields and signature verification result.
-        """
-        import re
 
-        # Extract DER from PEM
-        pem_body = re.sub(r'-----.*?-----', '', cert_pem).strip()
-        pem_body = re.sub(r'\s+', '', pem_body)
+        OCR-A106 诚实化：本函数只做「TBS 对证书内嵌公钥」的自洽验签——它证明的是
+        「这张证书是自己签的」，不是「它被可信 CA 签发」。旧结果把 True 读成可信就是
+        「自签仹即信」；现在随结论发出 ``self_signed`` / ``trusted`` /
+        （签名自洽却谎称他人签发时的）``selfsigned_despite_issuer_claim`` 三件披露，
+        信任判定只属于 :meth:`verify_chain`。公钥不再做脆弱的 startswith("04") 预剥
+        （x 恰以 04 开头时会错剥两位），归一交给 crypto_service.verify。
+        """
         try:
-            cert_der = base64.b64decode(pem_body)
-        except Exception as e:
+            cert_der = _pem_to_der(cert_pem)
+        except ValueError as e:
             return {"valid": False, "error": f"Invalid PEM: {e}"}
 
         # Parse DER structure
@@ -662,16 +837,13 @@ class CertificateService:
         except Exception as e:
             return {"valid": False, "error": f"X.509 parse failed: {e}"}
 
-        # Verify SM2 signature
+        # Verify SM2 signature against the embedded subject key (self-consistency ONLY)
         try:
             tbs_der = parsed["tbs_certificate_der"]
             sig_hex = parsed["signature"]
             pub_key = parsed["public_key"]
 
             if sig_hex and pub_key:
-                # Remove leading 04 (uncompressed point indicator) if present
-                if pub_key.startswith("04"):
-                    pub_key = pub_key[2:]
                 valid = crypto_service.verify(tbs_der, sig_hex, pub_key)
                 parsed["signature_valid"] = valid
             else:
@@ -680,6 +852,15 @@ class CertificateService:
         except Exception as e:
             parsed["signature_valid"] = False
             parsed["signature_error"] = str(e)
+
+        # A106 披露层：单证书端点永远给不出「可信」，只能给出自洽性与误报形状
+        self_signed = parsed.get("issuer") == parsed.get("subject")
+        parsed["self_signed"] = self_signed
+        parsed["trusted"] = False  # 信任判定只属于 verify_chain（有父验签 + 根锚）
+        if parsed.get("signature_valid") and not self_signed:
+            # 签名是拿「自己的」私钥签的，issuer 字段却声称别人签发——正是
+            # 「自签仹冒充 CA 签发」的形状，必须在结论里点名而不是静默 True。
+            parsed["selfsigned_despite_issuer_claim"] = True
 
         return parsed
 

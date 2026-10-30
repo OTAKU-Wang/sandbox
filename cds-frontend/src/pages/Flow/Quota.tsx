@@ -1,7 +1,7 @@
 import { Alert, Card, Collapse, Col, Descriptions, Divider, List, Progress, Row, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { quotaApi, quotaNumber, useQuotaUsage } from '../../services/quotaApi';
+import { quotaNumber, useQuotaUsage } from '../../services/quotaApi';
 import type { QuotaEndpointItem, QuotaSessionItem, QuotaSource } from '../../services/quotaApi';
 import { QueryErrorAlert, CenteredLoading, tableEmpty } from '../../components/Feedback/QueryFeedback';
 import { isLegacySandboxLevel, sandboxLevelLabel } from '../../types/enums';
@@ -106,7 +106,7 @@ function SessionQuotaTable({ session }: { session: QuotaSessionItem }) {
 }
 
 export default function FlowQuota() {
-  const { data, isPending, isError, error, refetch, dataUpdatedAt } = useQuotaUsage();
+  const { data, isPending, isError, error, refetch } = useQuotaUsage();
   const queryClient = useQueryClient();
 
   if (isPending) return <CenteredLoading tip="加载配额用量" />;

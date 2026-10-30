@@ -177,6 +177,9 @@ class PIINERService:
     """
 
     # LAC tag → (PIIType, Severity, confidence) mapping
+    # TODO(A194-pin): blanket TIME→DATE_OF_BIRTH mislabels every temporal
+    # entity as a birth date; the mapping needs evaluation against the real LAC
+    # model (absent here) before it can be re-tuned — pinned, not silently changed.
     _LAC_TAG_MAP: dict[str, tuple] = {
         "PER": (PIIType.PERSON_NAME, Severity.HIGH, 0.9),
         "LOC": (PIIType.ADDRESS, Severity.HIGH, 0.8),
@@ -275,6 +278,13 @@ class PIINERService:
 
         Returns:
             PIIDetectionResult with all detected matches
+
+        A199→A194 fixes: the reported ``ner_engine`` is the engine that actually
+        ran *for this text* (runtime LAC/ML failures downgrade the label to
+        "rule", not just the request-time resolution), and a resolved
+        "regex_only" engine emits zero NER-layer matches (the old gate checked
+        ``enable_ner`` only, so ``ner_engine="off"`` still ran the rule layer
+        while reporting "regex_only" — disclosure violated twice over).
         """
         if not text or not text.strip():
             return PIIDetectionResult(has_pii=False, redacted_text=text, ner_engine=self._active_engine)
@@ -285,16 +295,17 @@ class PIINERService:
         regex_matches = self._detect_regex(text)
         matches.extend(regex_matches)
 
-        # Layer 2: NER detection (if enabled)
-        if self.enable_ner:
-            ner_matches = self._detect_ner(text, regex_matches)
-            matches.extend(ner_matches)
+        # Layer 2: NER detection — dispatched by the RESOLVED engine (A194/N9:
+        # single source of truth; enable_ner already folds into it at init).
+        ner_matches, ran_engine = self._detect_ner(text, regex_matches)
+        matches.extend(ner_matches)
 
-        # Sort by position (start, then end)
-        matches.sort(key=lambda m: (m.start, m.end))
+        # Sort by position (start, then end desc so longer spans lead)
+        matches.sort(key=lambda m: (m.start, -m.end))
 
-        # Remove overlapping matches (keep higher severity, then earlier start)
-        matches = self._resolve_overlaps(matches)
+        # Merge overlapping matches privacy-first (A194/N3-N5: the old
+        # keep-one-winner resolution deleted spans and leaked plaintext)
+        matches = self._resolve_overlaps(matches, text)
 
         # Generate redacted text
         redacted = self._redact(text, matches)
@@ -303,7 +314,7 @@ class PIINERService:
             has_pii=len(matches) > 0,
             matches=matches,
             redacted_text=redacted,
-            ner_engine=self._active_engine,
+            ner_engine=ran_engine,
         )
 
     def _detect_regex(self, text: str) -> list[PIIMatch]:
@@ -322,69 +333,85 @@ class PIINERService:
                 ))
         return matches
 
-    def _detect_ner(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
+    def _detect_ner(self, text: str, regex_matches: list[PIIMatch]) -> tuple[list[PIIMatch], str]:
         """Layer 2: Detect unstructured PII using the resolved NER engine.
 
-        Dispatches on ``self._active_engine`` (set at init). Skips regions
-        already matched by regex to avoid duplicates.
+        Returns (matches, engine_that_actually_ran). A194/N1+N2: a resolved
+        "regex_only" emits nothing, and a runtime model failure reports the
+        fallback ("rule") — the disclosed engine always matches what produced
+        the matches. Skips regions already matched by regex.
         """
-        if self._active_engine == "lac":
-            return self._detect_ner_lac(text, regex_matches)
-        if self._active_engine == "transformers":
-            return self._detect_ner_ml(text, regex_matches)
-        return self._detect_ner_regex(text, regex_matches)
+        if self._active_engine == "regex_only" or not self.enable_ner:
+            return [], "regex_only"
+        if self._active_engine == "lac" and self._lac is not None:
+            try:
+                return self._detect_ner_lac(text, regex_matches), "lac"
+            except Exception as e:
+                logger.warning("LAC NER inference failed, falling back to rule NER (disclosed): %s", e)
+                return self._detect_ner_regex(text, regex_matches), "rule"
+        if self._active_engine == "transformers" and self._ml_pipeline is not None:
+            try:
+                return self._detect_ner_ml(text, regex_matches), "transformers"
+            except Exception as e:
+                logger.warning("ML NER inference failed, falling back to rule NER (disclosed): %s", e)
+                return self._detect_ner_regex(text, regex_matches), "rule"
+        return self._detect_ner_regex(text, regex_matches), "rule"
 
     def _detect_ner_lac(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
         """Layer 2 LAC: Detect PII using the Baidu LAC model (Chinese NER).
 
         LAC returns ``(words, tags)``; we map PER/LOC/GPE/ORG/TIME tags to the
         corresponding PII types. Matches are labelled ``layer="ner_lac"``.
-        If LAC is not loaded (model unavailable), honestly falls back to the
-        rule-based NER layer.
+        Inference failures propagate to ``_detect_ner`` which discloses the
+        fallback (A194/N2 — previously swallowed here while the result still
+        claimed ``ner_engine="lac"``).
         """
-        if not self._lac:
-            return self._detect_ner_regex(text, regex_matches)
-
         matches: list[PIIMatch] = []
         regex_positions: set[int] = set()
         for m in regex_matches:
             regex_positions.update(range(m.start, m.end))
 
-        try:
-            words, tags = self._lac.run(text)
-            pos = 0
-            for word, tag in zip(words, tags):
-                mapped = self._LAC_TAG_MAP.get(tag)
-                if not mapped:
-                    pos = text.find(word, pos)
-                    if pos >= 0:
-                        pos += len(word)
-                    continue
-                pii_type, severity, confidence = mapped
-                start = text.find(word, pos)
-                if start < 0:
-                    continue
-                end = start + len(word)
-                pos = end
-                if any(p in regex_positions for p in range(start, end)):
-                    continue
-                matches.append(PIIMatch(
-                    pii_type=pii_type,
-                    value=word,
-                    start=start,
-                    end=end,
-                    severity=severity,
-                    layer="ner_lac",
-                    confidence=confidence,
-                ))
-        except Exception as e:
-            logger.warning("LAC NER inference failed, falling back to rule NER: %s", e)
-            return self._detect_ner_regex(text, regex_matches)
+        words, tags = self._lac.run(text)
+        pos = 0
+        for word, tag in zip(words, tags):
+            mapped = self._LAC_TAG_MAP.get(tag)
+            if not mapped:
+                pos = text.find(word, pos)
+                # TODO(A194-pin): LAC positions are APPROXIMATED via str.find —
+                # drift and silent drops are possible and only reproducible with
+                # the real model (not in this environment). Pin, not fix, until a
+                # LAC harness exists; redaction still runs on whatever spans come back.
+                if pos >= 0:
+                    pos += len(word)
+                continue
+            pii_type, severity, confidence = mapped
+            if confidence < self._threshold:
+                continue  # A194/N7: threshold was ML-only; LAC honors it too
+            start = text.find(word, pos)
+            if start < 0:
+                continue
+            end = start + len(word)
+            pos = end
+            if any(p in regex_positions for p in range(start, end)):
+                continue
+            matches.append(PIIMatch(
+                pii_type=pii_type,
+                value=word,
+                start=start,
+                end=end,
+                severity=severity,
+                layer="ner_lac",
+                confidence=confidence,
+            ))
 
         return matches
 
     def _detect_ner_ml(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
-        """Layer 2 ML: Detect PII using HuggingFace NER model."""
+        """Layer 2 ML: Detect PII using HuggingFace NER model.
+
+        A194/N2: failures propagate to ``_detect_ner`` so the disclosed engine
+        for the fallback run is "rule", never "transformers".
+        """
         matches: list[PIIMatch] = []
         regex_positions: set[int] = set()
         for m in regex_matches:
@@ -399,39 +426,43 @@ class PIINERService:
             "ORGANIZATION": PIIType.ORGANIZATION,
         }
 
-        try:
-            entities = self._ml_pipeline(text)
-            for ent in entities:
-                if ent.get("score", 0) < self._threshold:
-                    continue
-                entity_group = ent.get("entity_group", "")
-                pii_type = label_map.get(entity_group)
-                if not pii_type:
-                    continue
-                start = int(ent["start"])
-                end = int(ent["end"])
-                # Skip if overlaps with regex match
-                if any(pos in regex_positions for pos in range(start, end)):
-                    continue
-                severity = Severity.HIGH if pii_type == PIIType.PERSON_NAME else Severity.MEDIUM
-                matches.append(PIIMatch(
-                    pii_type=pii_type,
-                    value=ent["word"],
-                    start=start,
-                    end=end,
-                    severity=severity,
-                    layer="ner_ml",
-                    confidence=float(ent["score"]),
-                ))
-        except Exception as e:
-            logger.warning("ML NER inference failed, falling back to regex NER: %s", e)
-            return self._detect_ner_regex(text, regex_matches)
+        entities = self._ml_pipeline(text)
+        for ent in entities:
+            if ent.get("score", 0) < self._threshold:
+                continue
+            entity_group = ent.get("entity_group", "")
+            pii_type = label_map.get(entity_group)
+            if not pii_type:
+                continue
+            start = int(ent["start"])
+            end = int(ent["end"])
+            # Skip if overlaps with regex match
+            if any(pos in regex_positions for pos in range(start, end)):
+                continue
+            severity = Severity.HIGH if pii_type == PIIType.PERSON_NAME else Severity.MEDIUM
+            matches.append(PIIMatch(
+                pii_type=pii_type,
+                value=ent["word"],
+                start=start,
+                end=end,
+                severity=severity,
+                layer="ner_ml",
+                confidence=float(ent["score"]),
+            ))
 
         return matches
 
     def _detect_ner_regex(self, text: str, regex_matches: list[PIIMatch]) -> list[PIIMatch]:
-        """Layer 2 Regex: Detect unstructured PII using rule-based NER patterns."""
+        """Layer 2 Regex: Detect unstructured PII using rule-based NER patterns.
+
+        A194/N7: matches below the configured confidence threshold are dropped
+        here too — the threshold used to be honored only by the ML path, so a
+        raised threshold silently kept rule-layer noise.
+        """
         matches: list[PIIMatch] = []
+
+        def keep(confidence: float) -> bool:
+            return confidence >= self._threshold
 
         # Create a set of positions already covered by regex
         regex_positions: set[int] = set()
@@ -450,7 +481,10 @@ class PIINERService:
                     continue
 
                 # Validate: Chinese names should be 2-4 characters
-                if 2 <= len(name) <= 4 and all('一' <= c <= '鿿' for c in name):
+                # TODO(A194-pin): the patterns accept a zero-width separator, so
+                # "用户体验" false-positives as a person name. FP tuning needs a
+                # labeled corpus and is a human call — pinned, not silently tuned.
+                if 2 <= len(name) <= 4 and all('一' <= c <= '鿿' for c in name) and keep(0.8):
                     matches.append(PIIMatch(
                         pii_type=PIIType.PERSON_NAME,
                         value=name,
@@ -471,15 +505,16 @@ class PIINERService:
                 if any(pos in regex_positions for pos in range(start, end)):
                     continue
 
-                matches.append(PIIMatch(
-                    pii_type=PIIType.ADDRESS,
-                    value=addr,
-                    start=start,
-                    end=end,
-                    severity=Severity.HIGH,
-                    layer="ner",
-                    confidence=0.7,
-                ))
+                if keep(0.7):
+                    matches.append(PIIMatch(
+                        pii_type=PIIType.ADDRESS,
+                        value=addr,
+                        start=start,
+                        end=end,
+                        severity=Severity.HIGH,
+                        layer="ner",
+                        confidence=0.7,
+                    ))
 
         # Organizations
         for pattern in self._ner_patterns.ORGANIZATION_PATTERNS:
@@ -491,15 +526,16 @@ class PIINERService:
                 if any(pos in regex_positions for pos in range(start, end)):
                     continue
 
-                matches.append(PIIMatch(
-                    pii_type=PIIType.ORGANIZATION,
-                    value=org,
-                    start=start,
-                    end=end,
-                    severity=Severity.MEDIUM,
-                    layer="ner",
-                    confidence=0.7,
-                ))
+                if keep(0.7):
+                    matches.append(PIIMatch(
+                        pii_type=PIIType.ORGANIZATION,
+                        value=org,
+                        start=start,
+                        end=end,
+                        severity=Severity.MEDIUM,
+                        layer="ner",
+                        confidence=0.7,
+                    ))
 
         # Date of birth
         for pattern in self._ner_patterns.DOB_PATTERNS:
@@ -511,20 +547,33 @@ class PIINERService:
                 if any(pos in regex_positions for pos in range(start, end)):
                     continue
 
-                matches.append(PIIMatch(
-                    pii_type=PIIType.DATE_OF_BIRTH,
-                    value=dob,
-                    start=start,
-                    end=end,
-                    severity=Severity.MEDIUM,
-                    layer="ner",
-                    confidence=0.9,
-                ))
+                # TODO(A194-pin): DOB_PATTERNS[1] matches ANY bare 年月日 date, so
+                # ordinary event dates get redacted as DATE_OF_BIRTH. Whether to
+                # require birth-context keywords is product semantics — human call.
+                if keep(0.9):
+                    matches.append(PIIMatch(
+                        pii_type=PIIType.DATE_OF_BIRTH,
+                        value=dob,
+                        start=start,
+                        end=end,
+                        severity=Severity.MEDIUM,
+                        layer="ner",
+                        confidence=0.9,
+                    ))
 
         return matches
 
-    def _resolve_overlaps(self, matches: list[PIIMatch]) -> list[PIIMatch]:
-        """Remove overlapping matches, keeping higher severity ones."""
+    def _resolve_overlaps(self, matches: list[PIIMatch], text: str = "") -> list[PIIMatch]:
+        """Merge overlapping matches PRIVACY-FIRST (A194/N3-N5).
+
+        The old "keep the higher-severity one, drop the other" resolution deleted
+        whole spans: a longer/lower-severity member's characters outside the kept
+        match simply stopped being redacted — three loss modes, each leaving
+        plaintext PII. Redaction must cover the UNION of overlapping spans:
+        overlapping members merge into one match spanning [min start, max end),
+        labelled with the most severe member's type/severity (ties: earlier
+        start, longer span), value re-sliced from the source text.
+        """
         if not matches:
             return matches
 
@@ -535,31 +584,40 @@ class PIINERService:
             Severity.LOW: 3,
         }
 
-        result: list[PIIMatch] = []
-        last_end = -1
+        def dominant(a: PIIMatch, b: PIIMatch) -> PIIMatch:
+            return a if severity_order.get(a.severity, 99) <= severity_order.get(b.severity, 99) else b
 
-        for m in matches:
-            if m.start >= last_end:
-                result.append(m)
-                last_end = m.end
-            else:
-                # Overlap — keep higher severity
-                if result and severity_order.get(m.severity, 99) < severity_order.get(result[-1].severity, 99):
-                    result[-1] = m
-                    last_end = m.end
-
-        return result
+        merged: list[PIIMatch] = []
+        for m in sorted(matches, key=lambda x: (x.start, -x.end)):
+            if not merged or m.start >= merged[-1].end:
+                merged.append(m)
+                continue
+            last = merged[-1]
+            dom = dominant(last, m)
+            end = max(last.end, m.end)
+            merged[-1] = PIIMatch(
+                pii_type=dom.pii_type,
+                value=text[last.start:end] if text else dom.value,
+                start=last.start,
+                end=end,
+                severity=dom.severity,
+                layer=dom.layer,
+                confidence=min(last.confidence, m.confidence),
+            )
+        return merged
 
     def _redact(self, text: str, matches: list[PIIMatch]) -> str:
-        """Replace PII matches with redaction markers."""
+        """Replace PII matches with redaction markers.
+
+        A194/N6: relies on non-overlapping spans (guaranteed by the merge) and
+        re-sorts defensively so reverse application can never mis-slice.
+        """
         if not matches:
             return text
 
-        # Build replacement segments in reverse order
-        segments: list[tuple[int, int, str]] = []
-        for m in matches:
-            replacement = f"[REDACTED:{m.pii_type.value}]"
-            segments.append((m.start, m.end, replacement))
+        segments = sorted(
+            ((m.start, m.end, f"[REDACTED:{m.pii_type.value}]") for m in matches),
+        )
 
         # Apply replacements in reverse to preserve positions
         result = text
@@ -580,5 +638,9 @@ try:
         threshold=_settings.PII_NER_CONFIDENCE_THRESHOLD,
         ner_engine=_settings.PII_NER_ENGINE,
     )
-except Exception:
+except Exception as e:
+    # A194: the silent fallback stays (import-time crash would take the process
+    # down) but is now LOUD — a mis-read PII config must not masquerade as
+    # default configuration.
+    logger.warning("PII NER singleton fell back to default config: %s", e)
     pii_ner_service = PIINERService()

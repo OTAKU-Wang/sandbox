@@ -1,6 +1,6 @@
 # alembic/ — schema migration chain (scored ~9, distinct domain: additive-only linear chain with its own async env and two CI parity gates)
 
-22 revisions, linear chain `0000_baseline_all_tables → … → 0021_delivery_bundle_ownership`, one revision per file, naming `NNNN_snake_case_topic`. ~1,933 L total; baseline 789 L (30 `create_table`s), `0019_flow_orchestration` 282 L (SS-15), the rest 31–61 L each.
+34 revisions, linear chain `0000_baseline_all_tables → … → 0033_ocr_webhook_index_convergence` (head moves additively — never quote it as fixed in a test; pin "single head + ancestor" instead, cf. test_ocr_a186b/a170), one revision per file, naming `NNNN_snake_case_topic`. ~1,933 L total; baseline 789 L (30 `create_table`s), `0019_flow_orchestration` 282 L (SS-15), the rest 31–61 L each.
 
 ## STRUCTURE
 ```

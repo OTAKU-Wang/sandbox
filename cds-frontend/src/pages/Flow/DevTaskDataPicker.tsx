@@ -267,6 +267,10 @@ export default function DevTaskDataPicker({ contract, value, onChange }: DevTask
             <button
               key={tab.key}
               type="button"
+              /* A237：药签的尺寸样式挂在 .cds-task-tab 上，不再挂在 `data-testid^='task-tab-'` 上
+                 ——测试钩子是给测试用的，样式靠它等于把外观押在改名上（改名后药签退化成默认按钮，
+                 且没有任何测试会红）。data-testid 保留：现有用例还按它点。 */
+              className="cds-task-tab"
               style={pickerTabStyle(scope === tab.key)}
               data-testid={`task-tab-${tab.key}`}
               aria-pressed={scope === tab.key}

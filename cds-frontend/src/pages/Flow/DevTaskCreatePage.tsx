@@ -298,7 +298,7 @@ export default function DevTaskCreatePage() {
                 />
               </Form.Item>
             </div>
-            <div>
+            <div className="cds-trio-note">
               {/* 图上是浅蓝 alert 卡（💡 标题蓝）；内容不照抄图里无依据的经验值，写合约真实下发的口径。 */}
               <div className="cds-quota-advice">
                 <div className="cds-quota-advice-title"><EnvironmentFilled /> 配额使用建议</div>

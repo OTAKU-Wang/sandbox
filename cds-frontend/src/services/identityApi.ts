@@ -3,10 +3,18 @@ import { unwrapList } from '../utils/unwrapList';
 
 // ─── KMS Key Types ───
 
+/**
+ * A271-FE：`key_type` 现在是后端真值（app/api/kms.py 的键列表/详情逐条回 `key_type`）。
+ * `unknown` 是给「字段缺失/出现了我们不认识的类型」留的诚实档位——旧写法在这里写死 `'dek'`，
+ * 于是 session/kek 键在 UI 上一律显示成 DEK；那是编出来的分类，不是观察到的。
+ */
+export type KmsKeyType = 'dek' | 'session' | 'kek' | 'unknown';
+
 export interface KmsKey {
   key_id: string;
-  key_type: 'dek' | 'session' | 'kek';
+  key_type: KmsKeyType;
   product_id?: string;
+  /** 后端下发才有；缺失时保持 undefined，由 UI 记「未记录」（A271：不许兑成 'SM4'）。 */
   algorithm?: string;
   status: 'active' | 'rotated' | 'revoked' | 'destroyed';
   key_version?: number;
@@ -61,7 +69,9 @@ interface KmsKeyResponse {
   product_id?: string;
   status: KmsKey['status'];
   key_version?: number;
-  algorithm?: string;
+  /** A271-FE：后端逐条回真 key_type（'dek'/'session'/'kek'），前端不再代填。 */
+  key_type?: string | null;
+  algorithm?: string | null;
   usage_count?: number;
   max_usage?: number;
   created_at?: string;
@@ -98,11 +108,20 @@ interface CertificateVerifyResponse {
   issuer?: string;
 }
 
+/** 认识的类型照抄，不认识/缺失一律 `unknown`（不是 'dek'）。 */
+const KMS_KEY_TYPES: readonly string[] = ['dek', 'session', 'kek'];
+const normalizeKeyType = (value: unknown): KmsKeyType =>
+  typeof value === 'string' && KMS_KEY_TYPES.includes(value) ? (value as KmsKeyType) : 'unknown';
+
+/** 算法名同理：后端没给就是没有，不能替它挑一个（'SM4' 是本系统的默认，不是这台机器的读数）。 */
+const normalizeAlgorithm = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() !== '' ? value : undefined;
+
 const normalizeKmsKey = (key: KmsKeyResponse): KmsKey => ({
   key_id: key.key_id,
-  key_type: 'dek',
+  key_type: normalizeKeyType(key.key_type),
   product_id: key.product_id,
-  algorithm: key.algorithm || 'SM4',
+  algorithm: normalizeAlgorithm(key.algorithm),
   status: key.status,
   key_version: key.key_version,
   usage_count: key.usage_count,

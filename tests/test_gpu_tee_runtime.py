@@ -285,3 +285,197 @@ class TestNewDataclasses:
         m = EpochMetrics()
         assert m.total_batches == 0
         assert m.avg_loss == 0.0
+
+
+# ── A132 GPU-TEE 双胞胎：披露、拒绝、标签改实（2026-10-30）─────────────────
+# ①模拟器全部产物自带 is_simulation 并透传 API；②auto 无真硬件响亮拒绝
+# RUNTIME_UNAVAILABLE（SS-13），与显式开关互不越界；③32 字节密钥不再标 SM4。
+
+import ast
+from pathlib import Path
+
+from app.core.errors import CDSError
+
+SIM_SOURCE = Path(__file__).resolve().parent.parent / "app" / "services" / "gpu_tee_simulator.py"
+
+
+class TestA132SimulatorDisclosure:
+    """模拟器证明报告不许走默认值冒充真 GPU-TEE（禁伪造铁律）。"""
+
+    @pytest.mark.asyncio
+    async def test_simulator_attestation_discloses_simulation(self):
+        from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+        report = await GPUTeeSimulator().attest()
+        assert report.is_simulation is True
+        assert report.tee_backend == "cpu_simulation"
+
+    @pytest.mark.asyncio
+    async def test_initialize_gpu_cc_attestation_is_disclosed(self):
+        """initialize_gpu_cc 内部使用的报告同样必须带披露。"""
+        from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+        sim = GPUTeeSimulator()
+        await sim.initialize_gpu_cc("a132-session")
+        assert sim._attestation_report is not None
+        assert sim._attestation_report.is_simulation is True
+        assert sim._attestation_report.tee_backend == "cpu_simulation"
+
+    @pytest.mark.asyncio
+    async def test_all_simulator_artifacts_disclose(self):
+        from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+        sim = GPUTeeSimulator()
+        alloc = await sim.allocate_secure_memory(64)
+        job = await sim.submit_compute(ComputeMode.TRAINING, b"x")
+        metrics = await sim.get_metrics()
+        handle = await sim.initialize_gpu_cc("a132")
+        epoch = await sim.run_training_epoch(handle, [b"a"])
+        assert alloc.is_simulation is True
+        assert job.is_simulation is True
+        assert metrics.is_simulation is True
+        assert epoch.is_simulation is True
+        assert sim.execute_training(config={"epochs": 1}).is_simulation is True
+
+    def test_channel_key_label_is_truthful(self):
+        """③：SM4 真密钥只有 128-bit——32 字节 AES 密钥绝不许再标 SM4-GCM。"""
+        from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+        ch = GPUTeeSimulator().create_secure_channel()
+        assert len(ch.key) == 32  # 256-bit
+        assert ch.algorithm.startswith("AES-256-GCM")
+        assert "SM4 substitute" in ch.algorithm  # 只能以「SM4 替身」身份出现
+        assert ch.algorithm != "SM4-GCM"
+        assert ch.is_simulation is True
+
+    def test_structural_pin_simulator_never_builds_undisclosed_report(self):
+        """结构针：模拟器源文件里每一处共享产物 dataclass 构造都必须显式
+        is_simulation=True——这些 dataclass 默认值是 False（真硬件语义），
+        漏传一个关键字就复活 A132 双胞胎缺陷。AST 解析，重排/重构也躲不掉。"""
+        tree = ast.parse(SIM_SOURCE.read_text(encoding="utf-8"))
+        risky = {"GPUAttestationReport", "SecureAllocation", "ComputeJob", "GPUMetrics", "EpochMetrics"}
+        found = 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in risky:
+                kw = {k.arg for k in node.keywords}
+                assert "is_simulation" in kw, (
+                    f"gpu_tee_simulator.py line {node.lineno}: {node.func.id}(...) 构造缺 is_simulation=True —— 模拟报告必带 is_simulation"
+                )
+                sim_kw = next(k for k in node.keywords if k.arg == "is_simulation")
+                assert isinstance(sim_kw.value, ast.Constant) and sim_kw.value.value is True
+                found += 1
+        assert found >= 5, f"结构针期望至少 5 处产物构造，只找到 {found} —— 构造被改名/移除须同步更新本针"
+
+    def test_simulator_owned_dataclasses_default_to_disclosed(self):
+        """Simulator 专属 dataclass（SecureChannel/TrainingResult）默认必须 True：
+        它们只由模拟器产出，默认 False 就是下一个双胞胎的温床。"""
+        from app.services.gpu_tee_simulator import SecureChannel, TrainingResult
+
+        import datetime as _dt
+        ch = SecureChannel(key=b"0" * 32, created_at=_dt.datetime.now(_dt.timezone.utc))
+        tr = TrainingResult(loss=1.0, epochs=1, duration_ms=1)
+        assert ch.is_simulation is True
+        assert tr.is_simulation is True
+
+
+class TestA132AutoRefusesSilentFallback:
+    """② SS-13 铁律：auto 在无真 GPU-TEE 且未显式开模拟时必须响亮拒绝。"""
+
+    def test_auto_without_opt_in_raises_runtime_unavailable(self, monkeypatch):
+        from app.core.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", False)
+        with pytest.raises(CDSError) as ei:
+            GPUTeeRuntimeFactory.create("auto")
+        assert ei.value.code == "RUNTIME_UNAVAILABLE"
+        assert ei.value.http_status == 400
+        assert ei.value.detail["reason"] == "gpu_tee_real_runtime_missing"
+
+    def test_auto_with_opt_in_selects_disclosed_simulator(self, monkeypatch):
+        from app.core.config import get_settings
+        from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", True)
+        assert isinstance(GPUTeeRuntimeFactory.create("auto"), GPUTeeSimulator)
+
+    def test_flag_does_not_hijack_named_choice_and_vice_versa(self, monkeypatch):
+        """互不越界：开关不改写显式点名，点名也不是 auto 的后门。"""
+        from app.core.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", True)
+        assert isinstance(GPUTeeRuntimeFactory.create("stub"), GPUTeeRuntimeStub)
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", False)
+        assert isinstance(GPUTeeRuntimeFactory.create("local"), GPUTeeRuntimeStub)
+
+    def test_default_runtime_is_none_without_opt_in(self, monkeypatch):
+        """import 即得模拟器同样被禁：未开模拟时默认单例为 None（诚实的没有），
+        而不是一个伪装成硬件的替身。"""
+        from app.core.config import get_settings
+        from app.services import gpu_tee_runtime as gtr
+        from app.services.gpu_tee_runtime import GPUTeeRuntime
+        from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", False)
+        assert gtr._build_default_runtime() is None
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", True)
+        built = gtr._build_default_runtime()
+        assert isinstance(built, GPUTeeRuntime)
+        assert isinstance(built, GPUTeeSimulator)  # 开启模拟时默认单例=披露型模拟器
+
+    def test_shared_artifact_defaults_stay_false_for_real_runtime(self):
+        """新增披露字段默认 False（真硬件语义）——只强不弱：不得反向污染
+        真实现语义（与 pz04 的 AttestationReport 默认值针同构）。"""
+        alloc = SecureAllocation(allocation_id="a", size_bytes=1)
+        job = ComputeJob(job_id="j", mode=ComputeMode.INFERENCE)
+        met = GPUMetrics(gpu_device=0, gpu_model="real", memory_total_mb=1, memory_used_mb=0,
+                         utilization_pct=0.0, temperature_c=1.0, tee_active=True)
+        assert alloc.is_simulation is False
+        assert job.is_simulation is False
+        assert met.is_simulation is False
+        assert EpochMetrics().is_simulation is False
+
+
+class TestA132StubArtifactsDisclose:
+    """stub 与模拟器同族：attest 之外的产物也要自带披露。"""
+
+    @pytest.mark.asyncio
+    async def test_stub_artifacts_disclose(self, runtime):
+        alloc = await runtime.allocate_secure_memory(32)
+        job = await runtime.submit_compute(ComputeMode.ANALYSIS, b"z")
+        metrics = await runtime.get_metrics()
+        handle = await runtime.initialize_gpu_cc("a132-stub")
+        epoch = await runtime.run_training_epoch(handle, [b"b"])
+        assert alloc.is_simulation is True
+        assert job.is_simulation is True
+        assert metrics.is_simulation is True
+        assert epoch.is_simulation is True
+
+
+class TestA132ApiPropagation:
+    """披露沿链透传：security-posture 的 gpu_tee 卡两种状态下都携带 is_simulation 证据。"""
+
+    @pytest.mark.asyncio
+    async def test_posture_gpu_card_carries_is_simulation_evidence(self, client, operator_headers, monkeypatch):
+        from app.core.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", True)
+        resp = await client.get("/api/v1/monitoring/security-posture", headers=operator_headers)
+        assert resp.status_code == 200, resp.text
+        card = next(c for c in resp.json()["capabilities"] if c["id"] == "gpu_tee")
+        assert card["status"] == "software"
+        assert "is_simulation=true" in card["evidence"]
+        assert "is_simulation=true" in card["summary"]
+
+    @pytest.mark.asyncio
+    async def test_posture_gpu_card_when_simulation_disabled_is_honest(self, client, operator_headers, monkeypatch):
+        from app.core.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "GPU_TEE_SIMULATION", False)
+        resp = await client.get("/api/v1/monitoring/security-posture", headers=operator_headers)
+        assert resp.status_code == 200, resp.text
+        card = next(c for c in resp.json()["capabilities"] if c["id"] == "gpu_tee")
+        # 关闭模拟 ≠ 已配置真硬件：不再谎称 configured，按 SS-13 报 risk/block。
+        assert card["status"] == "risk"
+        assert card["release_gate"] == "block"
+        assert "RUNTIME_UNAVAILABLE" in card["summary"]
+        assert "is_simulation=false" in card["evidence"]

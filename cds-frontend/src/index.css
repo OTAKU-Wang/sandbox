@@ -9,6 +9,9 @@
   --cds-purple: #7a5af8;
   --cds-orange: #f77335;
   --cds-primary-soft: #e8f1ff;
+  /* A240：页面底色原本在正文里拄了 3 处字面量（body / .cds-app / 侧栏一侧），
+     而文件头自己写着「组件一律引用这些令牌」——补上令牌，改底色只动这一行。 */
+  --cds-page-bg: #f0f5fb;
   --cds-success-soft: #e8f7ee;
   --cds-purple-soft: #f1ecff;
   --cds-orange-soft: #fff3e8;
@@ -18,7 +21,7 @@ body {
   margin: 0;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #f0f5fb;
+  background: var(--cds-page-bg);
   color: #1f2a37;
 }
 
@@ -28,13 +31,40 @@ body {
 
 .cds-app {
   min-height: 100vh;
-  background: #f0f5fb;
+  background: var(--cds-page-bg);
 }
 
 /* 左栏：白底直接坐在浅灰页面底上（strict-1-home.md §1「左导航卡片 radius 0、**无边框**」：
    x=180 一列除激活块外整列皆白，白与 #f0f5fb 在 x219/x220 直接相接，中间没有分隔线）。 */
 .cds-sidebar {
   background: #ffffff;
+}
+
+/* A253：折回 64 图标栏后唯一的宽态出口。原型里没有折叠件（trigger={null} 就是照真值拆的），
+   但真值也没有「折回去就打不开」这一条——所以控件只在收起态存在，贴在 64 栏底部居中。
+   颜色不用 #a6adb8（A221 同一课：白底上只有 2.26:1），这里要的是看得见能点到的图标钮。 */
+.cds-sidebar .cds-sidebar-expand {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #d4dae3;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #4b5563;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.cds-sidebar .cds-sidebar-expand:hover {
+  color: #1b6ff2;
+  border-color: #1b6ff2;
 }
 
 /* 左栏行距（PNG 1-首页 clusters：墨行 y=99/151/203/254 ⇒ 行距 ≈52）：
@@ -188,7 +218,7 @@ body {
      同宽下旧值 Δ=2 ⇒ 右 padding 抬 25 与 PNG 齐平，左维持 23（x243 实测 Δ0）。 */
   padding: 23px 25px 23px 23px;
   min-height: 280px;
-  background: #f0f5fb;
+  background: var(--cds-page-bg);
 }
 
 /* 内容容器只是布局盒，不是一整块白板：原型（2-1 vline x=250）卡间是 #f0f5fb 底色
@@ -248,7 +278,10 @@ body {
 
 @media (max-width: 1023px) {
   .cds-task-grid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    /* A239：最小轨写死 280px 时容器更窄就不会收缩，而是整条网格溢出（断点里 .cds-content
+       与 .cds-content-inner 各有 12 内距 ⇒ 320 视口可用宽约 272，比 280 还窄）。
+       `min(280px, 100%)` 让最小轨在窄容器里退到 100%，宽端仍是 280 起排。 */
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   }
 }
 
@@ -259,7 +292,11 @@ body {
   flex-direction: column;
   gap: 0;
   padding: 20px 20px 18px;
-  border: none;
+  /* A238：这里原本写 `border: none`，而下面的 :hover 只改 `border-color` —— 宽度为 0 的边框
+     换个颜色不产生任何可见变化，transition 里的 border-color 也在空转，注释里想要的
+     「悬浮蓝描边」其实从未存在（hover 只剩阴影）。基态给 1px 透明边：常态外观不变
+     （antd 的全局 reset 已是 box-sizing: border-box，卡宽 380 的定标不动），hover 才有东西可染。 */
+  border: 1px solid transparent;
   border-radius: 6px;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(25, 36, 54, 0.04);
@@ -384,7 +421,8 @@ body {
   gap: 9px;
 }
 
-/* 图 2-1 三钮等宽满宽、高 36（介于 antd default/large 之间）；
+/* 图 2-1 三钮等宽满宽、高 32（A238：旧注释写 36 是转录残留——上面那行原型读数和代码都是 32，
+   36 既不在图上也不在实现里，留着它按注释复核像素会得出错误结论）；
    钮行用 grid 不用 flex：禁用态包在 Tooltip span 里时，flex basis:0 在部分引擎被内容宽钉住（实测 74-102 不等），grid 1fr 无此问题。 */
 .cds-task-card-foot .ant-btn {
   width: 100%;
@@ -625,9 +663,10 @@ body {
   box-shadow: 0 6px 18px rgba(17, 24, 39, 0.07);
 }
 
-:is(.cds-home, .cds-detail) .ant-card[data-testid^="kpi-"]:hover {
-  transform: translateY(-2px);
-}
+/* A240：这两条原本挂在 `.ant-card[data-testid^="kpi-"]` 上，而这个组合全站匹配 0 个元素——
+   KPI 条用的是自研的 `.cds-kpi-cell`（DevHome.tsx:190），不是带 data-testid 的 antd Card。
+   也就是说「KPI 卡悬浮上浮 2px / 内距 26」从来没发生过，只是看起来像存在。测试钩子和样式钩子
+   得分开：留在这里只会让下一个人以为有这层效果。真要做按 img-specs 定标，别顺手复活。 */
 
 :is(.cds-home, .cds-detail) .ant-card-head {
   min-height: 48px;
@@ -643,9 +682,8 @@ body {
   padding: 16px 20px;
 }
 
-:is(.cds-home, .cds-detail) .ant-card[data-testid^="kpi-"] .ant-card-body {
-  padding: 26px 20px;
-}
+/* A240：同上，`.ant-card[data-testid^="kpi-"] .ant-card-body` 也是空匹配（KPI 条不是 antd Card），
+   这条 26px 内距从未生效，删掉。首页 KPI 的实际内距在 `.cds-kpi-cell`（本文件 :974 一带）。 */
 
 /* 表头：antd 的 small 尺寸规则特异度是 (0,3,2)，这里多绑 .ant-table-wrapper/.ant-table 才能压住 */
 :is(.cds-home, .cds-detail) .ant-table-wrapper .ant-table .ant-table-thead > tr > th {
@@ -673,16 +711,18 @@ body {
   background: #f5f9ff;
 }
 
-:is(.cds-home, .cds-detail) [data-testid^="task-tab-"] {
+/* A240：药签的交互态原先挂在 `[data-testid^="task-tab-"]` 上（测试属性当样式钩子，
+   改名即静默失效）。样式统一走 .cds-task-tab，data-testid 只留给测试。 */
+:is(.cds-home, .cds-detail) .cds-task-tab {
   cursor: pointer;
   transition: box-shadow 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
-:is(.cds-home, .cds-detail) [data-testid^="task-tab-"]:hover {
+:is(.cds-home, .cds-detail) .cds-task-tab:hover {
   box-shadow: inset 0 0 0 1px rgba(32, 112, 240, 0.28);
 }
 
-:is(.cds-home, .cds-detail) [data-testid^="task-tab-"]:focus-visible {
+:is(.cds-home, .cds-detail) .cds-task-tab:focus-visible {
   outline: 2px solid var(--cds-primary);
   outline-offset: 1px;
 }

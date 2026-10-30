@@ -53,6 +53,8 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required - empty disables audit-store auth}
 
   minio:
+    # 钉版本纪律：永不用 :latest。升级归属 = 发布流程人工评审，与 compose×3/
+    # k8s/helm values/deploy 脚本同 tag 一把同升（tests/test_deploy_manifests 钉死同值）。
     image: minio/minio:RELEASE.2025-01-20T14-49-07Z
     command: server /data --console-address ":9001"
     ports:

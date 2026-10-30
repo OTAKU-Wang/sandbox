@@ -240,10 +240,15 @@ def test_rls_sensitivity_policy():
     )
     engine.add_policy(policy)
 
-    # User with secret clearance — no filtering
+    # A133 #18 修复改钉：上限必须真的封顶。旧断言 `where is None`（secret
+    # 用户"无需过滤"）钉住的正是缺陷本身——verify-rls.md 判定「the
+    # max_allowed_level cap silently disables itself whenever the user clears
+    # above it」并明示 must change to filtered-to-≤confidential。
     context = RLSContext(user_clearance="secret")
     where = engine.evaluate_sql(context)
-    assert where is None
+    assert where is not None
+    assert "security_level IN" in where
+    assert "'secret'" not in where  # 上限之下才可见：secret 级数据被挡在策略后
 
     # User with public clearance — filtered
     context = RLSContext(user_clearance="public")

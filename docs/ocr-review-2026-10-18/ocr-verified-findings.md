@@ -531,7 +531,7 @@ with httpx.Client(timeout=timeout, verify=client_verify, cert=client_cert) as cl
 ### A66 `/api/v1/flow` 未进 GROUP_PREFIXES（medium，SS-15 机要面全量 403）
 `main.py:351` 把 flow 挂在 `dependencies=[Depends(require_group("sessions"))]` 上，但 `grep flow app/core/scopes.py` **零命中** ⇒ `resolve_group` 返回 None ⇒ 所有 machine key 在 flow 面（SS-15，SDK v0.3.0 的 40 个操作）一律 403 `unmapped_prefix`，挂载的 scope 依赖成为不可达代码。旁边 `main.py:353-354` 的注释（quota 刻意挂在 `/api/v1/deliveries` 下，因为「未映射前缀会被 `resolve_group` 判为未映射」）证明这条规则当时是已知的，flow 是漏项。修法：往 `sessions` 组补 `"/api/v1/flow"`，或者（若设计上是 human-only）去掉挂载依赖并在 docstring 写明。
 
-### A67 中间件与 deps 的凭据优先级相反（low，自我伤害型 403）
+### A67 中间件与 deps 的凭据优先级相反（low，自我伤害型 403） ✅已修复（2026-10-30）：波次2 lane-b 修复（scopes.effective_key_credential 对齐 deps，钉 test_ocr_a67_credential_priority 5）
 `main.py:259-260` 在 `Authorization` 不是 key 时把它**替换**成 `X-CDS-API-Key`；`deps.py:194-196` 相反，`credentials` 优先。⇒ 人 JWT + 任意残留 key 头的请求会在未映射路径上被当 key 拒 403（路由层本会按人处理）。修法：`if not auth and header_key.startswith("cds_ak_")`。
 
 ### 子代理列的「干净项」（我复看认同，不要再报）
@@ -873,10 +873,10 @@ app/services/agent_service.py:386  f"_AGENT_HTTP_ALLOW = {dict(http_allow or {"d
 ### A104 证书 DER 构造族：产出的 PEM 在 TLCP 活路径上（high）
 我亲读的支撑链：`app/services/tlcp_service.py:336 def _build_cert_pem` → `:348 return certificate_service._build_cert_pem(...)`，而 `tlcp_service.generate_certificate` 由 `POST /api/v1/certificates/generate` 驱动，PEM 写 `/tmp/cds-certs/<id>/cert.pem` 并是 `deploy/cube-node/install.sh:26` 的 `CDS_CUBE_TLS_CERT` 取值源。缺陷本体（子代理逐条给行号并用 `openssl asn1parse` 对过 DER 真值，**我只复验了可达链与函数存在，未逐个重跑 DER 对比**）：INTEGER 编码丢前导零字节、KeyUsage 位序错（终端实体拿到 keyCertSign）且未标 critical、`signatureValue` 写裸 `r||s` 而非 DER `ECDSA-Sig-Value`、扩展解析块因运算符优先级整段死代码。后果：对端严格解析（OpenSSL/BabaSSL 标准链）拒证书，而仓内自解（`_parse_x509_der`）与之同错 ⇒ 自测能过、互操作不能过。修法：改用 `cryptography.x509` 证书 builder（已在 requirements），手写 DER 只留 SM2 签名注入部分。
 
-### A105 输出代理两条真值（潜伏：接线即 high）
+### A105 输出代理两条真值（潜伏：接线即 high） ✅已修复（2026-10-30）：波次2 lane-h（增量 UTF-8 零丢失+64B 边界保留带+flush 定局；Content-Type 免检废除，非文本过审命中即 block；钉 20+契约 4）
 `app_output_proxy.py:150-151` + `streaming_inspector.py:196`：按 4KB 字节切 chunk 后逐块 `decode(errors="ignore")`，跳 chunk 边界的 PII 永不命中、多字节字符被静默丢弃，而 `:178-180` 的全有全无式改写又把受损 body 写回；`app_output_proxy.py:134-136,209-212`：Content-Type 前缀白名单，头缺失/未列举就直接返回（零审查），一个头绕过泄露控制。不可达依据见第二十九批（`requirements.txt` 无 mitmproxy、`proxy_launcher.py` 零调用方），所以计潜伏而不是 high；**任何接线这两个模块的变更必须先修这两条**。
 
-### A106 证书链校验与撤销族（潜伏）
+### A106 证书链校验与撤销族（潜伏） ✅已修复（2026-10-30）：波次2 lane-h（verify_chain 逐环父公钥验签+自签根信任锚+naive tz；CRL 一次性密钥删除改诚实 unsigned；级联失败如实 incomplete+真实计数；钉 20+邻域 83）
 `verify_chain` 从不验父签名、`verify_certificate` 用叶子自己的公钥验自己的签名（自签仹即信）、信任锚条件是“库里任意 `is_ca and issuer == subject` 行”、CRL 每次调用现生成一把一次性密钥签名、`revoke_certificate` 的会话终止失败被吞但仍记 `cascade.complete`。我亲读部分：路由与导入存在（`app/api/certificates.py:176,182`、`app/api/auth.py:491`、`app/services/result_verifier.py:202,227`）；**“`certificates` 表几乎无写入方（`issue_certificate` 无调用方）”是子代理的 grep 结论，我未独立复验**，故整族计潜伏：一旦有代码开始 `issue_certificate`，这些就是高危（证书体系形同自签即信）。
 
 ### A108 资源限额只钳上限：0/负数原样采纳，字符串抛 TypeError，不传时返回共享字典（high，已实测）
@@ -1018,7 +1018,7 @@ app/api/training.py:170 encrypt_checkpoint(...) / :475 list_checkpoints(job_id)
 ```
 活路径由 `training.py` 钉住。四个后果：① 自述的“写入共享存储”不存在，重启即全部消失（不是“不可解密”，是直接没有）；② 多 worker 时每个进程各自一份内存，另一 worker 的 `list_checkpoints` 看到的是空；③ 未传 master_key 时静默 `os.urandom(16)`，无错无告警（配置读成空串也会被当成“没传”）；④ `_checkpoints` 无上限无淘汰，训练循环每 epoch 存一份全量权重密文⇒OOM 面。另 `decrypt_checkpoint` 在 `encryption_iv` 非法/`sm3_hash` 被 `CDS_SM3_FALLBACK_ALLOWED=false` 拦下时抛未捕获异常，而不是按接口约定返回 None。修法：要么接上真存储（加密后写对象存储/卷，元数据进 DB）+ 从 KMS 取主密钥 + 容量上限；要么把这个模块标注为“仅供单测的内存假体”并删掉共享存储的说法。
 
-### A127 stream_audit 三处并发/隐私缺陷，但模块零生产导入方（潜伏）
+### A127 stream_audit 三处并发/隐私缺陷，但模块零生产导入方（潜伏） ✅已修复（2026-10-30）：波次2 lane-a（全状态入锁+PII 值 [REDACTED] 化+缺样本下限 min_window_chunks；量纲错配机制证伪已注记；钉 19）
 `app/services/stream_audit.py:195 stream_audit_agent = StreamAuditAgent()` 是全仓唯一对该模块的引用（grep importers → 0）⇒ 三条均 LATENT，接线即高：① `_window`/`_chunk_counter`/`_callbacks` 是实例可变状态却导出了模块级单例，`append`+驱逐+全量重算+`+=1` 非原子（`chunk_index` 可重复/跳号；`_fire_alerts` 遭历 `_callbacks` 时另一线程 `on_alert` 可拼出运行时错误）；② `ChunkResult.pii_found` 里的 `PIIMatch.value` 是**未脱敏 PII 明文**且随窗口整段保留，与同模块提供 `redacted_data` 的意图相悖；③ 量纲冲突：`pii_density = total_pii / total_chunks` 是“每 chunk 平均条数”，却拿去比“占比阈值”默认 0.1 ⇒ 窗口内出现一条 PII 就是 1.0 > 0.1，告警几乎常开。修法：接线前必须先把 value 换成 `[REDACTED:*]`、密度改按 `含 PII 的 chunk 数 / 总 chunk 数`、单例改每会话实例或加锁。
 
 ### A128 k8s_client 的 RWX 默认 StorageClass 猜选与 exec 透传（潜伏）
@@ -1049,7 +1049,7 @@ app/services/session_lifecycle.py:309     from ... import purge_cycle     # AST 
 ### A131 k_anonymity 只校验首行的准标识符存在性，缺失值归入同一个等价类（潜伏，隐私门可假通过）
 `app/services/k_anonymity.py:95  missing_cols = set(quasi_identifiers) - set(data[0].keys())` 只看第一行，`:104  key = tuple(row.get(qi) for qi in quasi_identifiers)` 把后续行缺列一律读成 `None`（CSV 短行同理，空单元格为 `""`）⇒ 脏数据在 `(age=None, zip=None, ...)` 上聚成同一个等价类，可人为把小组凑到 k 以上，**k-匿名检查虚假通过**。可达性：AST 反向导入闭包显示本模块**零导入方**，活的 k-匿名是另一套实现 `app/services/output_inspection.py:435 check_k_anonymity`（`output_gateway.py:115` 只传递 rules 键名，不导入本模块）⇒ 计潜伏。但请记下一条结构问题：**同一个隐私门有两套实现， reviewed 的这套没人用**，与第二十九批 A73（两套 PDP）完全同族，接线前必须先定唯一实现。修法：逐行校验 QI 存在，缺失走 `evaluated=False`/fail，不要当合法泛化值。
 
-### A132 GPU-TEE 双胞胎：模拟器的证明报告不披露 is_simulation（碰铁律）、auto 分支不回退、SM4 密钥长度标签错（潜伏）
+### A132 GPU-TEE 双胞胎：模拟器的证明报告不披露 is_simulation（碰铁律）、auto 分支不回退、SM4 密钥长度标签错（潜伏） ✅已修复（2026-10-30）：波次2 lane-d（模拟器全产物 is_simulation=True+tee_backend 披露透传 API；auto 无真硬件 RUNTIME_UNAVAILABLE 响亮拒绝；SM4 标签改实 AES-256-GCM 替身口径；AST 结构针+API 透传 14 例，51/51）
 ```
 app/services/gpu_tee_runtime.py:63,75-76   class AttestationReport: is_simulation: bool = False; tee_backend: str = ""
 app/services/gpu_tee_runtime.py:301-302     另一个实现会正确填 is_simulation=True, tee_backend="local_software"
@@ -1059,7 +1059,7 @@ app/services/gpu_tee_runtime.py:474-481,492-494  auto 分支依赖 :494 的 try-
 ```
 可达性：两个模块只相互导入，AST 闭包 `main.py reaches it? : False` ⇒ 现行不可达（接适配器之前先修）。但 `:169-182` 那一条直接撞项目铁律（模拟路径必须用 `is_simulation` 自我声明）：基类已经有这两个字段、同一个仓的兄弟实现也真填了，而模拟器的证明报告用默认值 `is_simulation=False`/`tee_backend=""` 配 `tee_enabled=True, valid=True, signature` 为空 ⇒ 下游无法与真 NVIDIA CC 报告区分，“simulation” 只出现在一行 log 里。修法：`GPUAttestationReport(..., is_simulation=True, tee_backend="simulator")`；`auto` 分支持平回退到 `local` 并告警；密钥字段改名为“AES-256 作为 SM4-GCM 软件等效”或删除“32 bytes SM4”的说法（SM4 密钥固定 128 位）。
 
-### A133 RLS 双子系统 `rls_engine` / `pg_rls_manager`（潜伏：子代理 36 条，我独立复验了可达性）
+### A133 RLS 双子系统 `rls_engine` / `pg_rls_manager`（潜伏：子代理 36 条，我独立复验了可达性） ✅已修复（2026-10-30）：波次2 lane-a（rls_engine 注入唯一深度0原语+上限封顶+fail-closed 全谱；pg_rls_manager FORCE 锁死/DSN 三缺陷/注入面 11 项；收敛结论进两模块头注释：不物理合并，接线前置清单在案；PG 语义远程复验前不宣称已验证；钉 34）
 子代理报 36 条（20+16，含 1 条 critical：FORCE RLS 策略 `TO <session_role>` 单角色会锁死其他所有角色）。结论的根——**两者都不在活路径上**——由我自己重跑 `rev_imports2.py` 证实（不依赖子代理）：`pg_rls_manager` 直接/传递导入方均 NONE（连测试都不导）；`rls_engine` 唯一导入方是 `db_access_proxy`，而 `db_access_proxy` 自身导入方 NONE；`main.py reaches it? : False`。仓内文档也同口径：`docs/spec-implementation-analysis.md:494` “PostgreSQL-in-TEE 完整架构 … 未实现”。⇒ 36 条统一计潜伏，不逐条入表（子代理逐条判定与基线 `pytest tests/test_rls_engine.py tests/test_db_access_proxy.py tests/test_sprint4_services.py` → 50 passed 在 `verify-rls.md`）。接线前必修项取前三：FORCE RLS 角色锁定、策略下发与表名拼接、以及策略缺失时的默认开放语义。
 
 **证伪（不计入条数）**：`rag_service.py:598-599` 的 critical “`repr()` 拼进生成源码 ⇒ 代码注入”不成立，三条反证：① 边界类型是真 `str`——`app/api/sandbox_tasks.py:73  generative_model_id: str | None = None`，FastAPI/pydantic 不会让 `bytes`/自定义 `__repr__` 对象送进来，而 `str` 的 `repr()` 是单行字面量（换行被转义），无法拼出“字面量 + 换行 + 表达式”；② 独立的 AST 门 `validate_rag_runner`（`rag_service.py:618-666`）要求每个参数都是 `ast.Constant`（`_RAG_QUERY` 还额外要求是 `str`）；③ 它随后用解析出的值重新 `build_rag_runner(...)` 并要求 `code == expected`（`:662-664` 不等即拒“tampered or stale”），任何注入字节都会在这一步断掉。真正需要的是防御性约束（对 `generative_model_id` 加格式校验），不是安全事故。
@@ -1126,7 +1126,7 @@ mpc_service.py:97-101   _share_cipher_key = SHA256(AUDIT_ENCRYPTION_KEY or JWT_S
 ```
 逐条：① 分片静态加密的 KEK 直接由 `AUDIT_ENCRYPTION_KEY or JWT_SECRET_KEY` 取 SHA256，与出口审计共用同一秘密、无域分隔（同一 KEK 用于两种用途）、无版本号 ⇒ 轮换一处即弄坏另一处，且没配审计密钥时静默回落到 **JWT 签名密钥**；② `list_keys` 只是为了数分片个数，却把全库所有分片解密到内存（与 A12「可取回全部明文分片」叠加：连列表接口都在接触明文份额）；③ `_load_holders` 无序，拿它做“按位置把 holder 绑到分片下标”的输入，重启/并发后绑定可能错位；④ `get_share` 在孤立分片（key 行已没）上直接 `AttributeError` ⇒ 500；⑤ 32 位主键碰撞后 `_load_key` 的 `scalar_one_or_none` 抛 `MultipleResultsFound` ⇒ 整个密钥不可用；⑥ **两处定级修正**：`% _PRIME` 改变 DEK 的概率约 2^-32/次（子代理定 critical，我降为低概率隐患；真发生表现为 AEAD 解密失败而不是静默错数据）；重复 `share_id` 的危害不是 `_mod_inverse` “返回 0”而是 `pow(0, m-2, m)` 呖返回 0，Lagrange 该项直接贡献 0 ⇒ **不报错的错密钥**（M2/M5 合并后的准确说法）。
 
-### A144 scenario_engine 全部 11 条潜伏，接线即 critical（潜伏）
+### A144 scenario_engine 全部 11 条潜伏，接线即 critical（潜伏） ✅已修复（2026-10-30）：波次2 lane-g（D1-D11 全修 0 钉账：注入 fail-closed 拒、LIMIT 词边界、forbidden/allowed_operations 真执行、笛卡尔拒、子查询收口、format 收口、重复注册拒；钉 19）
 AST 反向导入闭包与子代理双重一致：`scenario_engine` 只被 `tests/test_scenario_engine.py` 导入，无路由、无服务导入方、`cds-frontend/src` 无引用，spec 存在但未实现 ⇒ 11 条全 LATENT。接线前必修首条：模板用关键字黑名单 + `str.format` 拼接而非参数化（`render_sql` 只生成字符串、不执行，所以现在不痛）；其余：先剥关键字再剥注释会静默篡改合法值、`max_output_rows` 靠 `"LIMIT" not in sql.upper()` 子串判、`forbidden_operations` 声明了但不执行、`allowed_operations` 从没被读、`table_count = join_count + 1` 等。列入 A133/A95 那张“接线前先决定接不接”的同一张清单。
 
 ## A-第四十批：锚定子代理（dp_budget / quota_manager / contract_fulfillment / merkle）
@@ -1161,7 +1161,7 @@ app/services/quota_manager.py:96-104   get_limit(): val = await self._redis.get(
 ### A148 `_sm3_fallback_allowed()` 在任何异常时返回 True，把生产诚实门翻成 fail-open（medium-high）
 `app/services/merkle_service.py:27-33`：该函数的职责就是尊重 `CDS_SM3_FALLBACK_ALLOWED`（PZ-04/MR-A14 的生产硬约束），但 `try: return bool(get_settings().SM3_FALLBACK_ALLOWED) / except Exception: return True`。一旦 `get_settings()` 报错（运行时配置被改坏、Settings 校验异常），审计 Merkle 叶子的哈希就静默退回 SHA-256，而调用方 `:45 if not _sm3_fallback_allowed(): raise` 本应拒绝服务。同一个文件其余四条均潜伏：`[3]` 验证明自证（root 来自证明自身）、`[4]` 空输入通过、`[5]` 死回退分支——因为 `generate_proof`/`verify` 全仓无调用方（台账第 633 行已先一步记过 `generate_proof` 无接线）。修法：这个 helper 应 `except Exception: return False`（宁可不签也不假装 SM3），并改成模块启动时读一次。
 
-### A149 三个未接线引擎共 38 条潜伏（潜伏）
+### A149 三个未接线引擎共 38 条潜伏（潜伏） ✅已修复（2026-10-30）：波次2 lane-g（三引擎修 27 族+钉 2：HMAC-SM3 密钥+GENERALIZE 六 fail-open+default-deny 对齐 rego+cooldown/夜间ts/trust 过期；LOG_AND_ALLOW 语义与密钥来源=接线拍板，TODO(A149) 标注；钉入三测试文件）
 `field_mask.py`（11 条：HASH 模式是无盐无密钥摘要、GENERALIZE 处处 fail-open、浅拷贝导致嵌套容器不脱敏且别名调用方数据等）、`alert_engine.py`（7 条：`evaluate()` 无去重/冷却反复告警、`_check_off_hours` 看墙上时钟而非事件时间戳、单例可变状态无锁与无界增长）、`cross_space_policy.py`（9 条：`export_result` 不在 `OPERATION_TRUST_MAP` 里导致默认规则的 VERIFIED 门被绕过、`min_trust_level`/`require_dp_budget` 是死字段、`expires_at` 从不检查、优先级语义反了）。可达性由我自己核对：活的脱敏链是 `output_security.mask_rows_by_field_rules`（`output_gateway.py:163-164`）；`alert_center.py:17` 只导入 `Alert` 数据类；`cross_space_policy` 除自己测试外零导入方。⇒ 与 A95/A131/A133/A144 归入同一张“接线前先拍板”的清单；其中 `field_mask` 的浅拷贝与 `cross_space_policy` 的信任映射缺失属于接线必碎项。
 
 ## A-第四十一批：w2 后半段（联邦/视觉/任务/训练族）——含一次工具自校与一条改判
@@ -1294,7 +1294,7 @@ app/services/unstructured_pipeline.py:99-111  src = Path(task.input_path) → �
 ### A169 webhook 派发窗口会被“已暂停订阅”的滞留行卡住（medium，活路径）
 `app/services/delivery_service.py:175` 先 `.limit(limit)` 取一批待发行，`:186` 才逐行看 `if subscription.status != ACTIVE: continue`。若最旧的一批 pending 行属于被暂停（`MAX_CONSECUTIVE_FAILURES` 自动降级，`:161`）的订阅，它们会反复占满窗口而使**活跃订阅永远排不到**（推送饥饿）。子代理同时推翻了 ocr 的“僵尸 `delivering` 行”那一半：`:126-129` 只 `flush()` 不 commit，崩溃/`CancelledError`（`:150` 的 `except Exception` 接不到）会回滚，PG 里仍是 `pending`/`failed`。修法：把订阅状态下推到 SELECT（join + `status = ACTIVE`），或按“未被成功派发过的行”递增游标取窗。
 
-### A170 模型层的小额真实项（low）
+### A170 模型层的小额真实项（low） ✅已修复（2026-10-30）：波次2 lane-b 0033 迁移收口（两支冗余单列索引 drop+模型成对摘除，钉 test_ocr_a170_index_convergence 3；calls_used 行锁半项=原 A168 根，另账）
 同前缀重复建索引（`webhook.py:33 index=True` 与 `:28` 的具名 `Index`、`watermark_record`/`webhook_delivery` 同型，在 `alembic/versions/0019:211-212` 真的物化了两次）⇒ 写放大与噪声，删除需新 revision（链是 add-only）；`api_endpoint.calls_used`/`quota_total` 与配置列同表且无行锁（属 A168 的根）。`mpc_key`/`compute_run`/`blockchain_anchor` 的 15 条均为潜伏或假（表/列无生产读写方，或列已在新 revision 里）。
 
 ## A-第四十五批：models 子代理补录 + misc 尾批（utils/watermark / SDK 错误解析）
@@ -1305,10 +1305,10 @@ app/services/unstructured_pipeline.py:99-111  src = Path(task.input_path) → �
 ### A172 `utils/watermark.py` 图片水印：`bits_per_channel` 只写不读，验证器永远按 1 bit 解（medium，今天是哑弹）
 `app/utils/watermark.py:132 embed_image_watermark(..., bits_per_channel: int = 1)`（文档写 1-4，`:166 mask = (0xFF << bits_per_channel) & 0xFF`）与 `:197 extract_image_watermark(..., bits_per_channel=1)` 都收这个参数，但 `:265-269 verify_image_watermark(image_bytes, user_id, session_id)` **签名里没它**，固定用默认 1 bpc 解码 ⇒ 任何以 `bits_per_channel>1` 嵌入的图永远返 False（假阴性，而“水印已植入”是对外权属/溯源结论）。今天不爆，因为唯一的活调用方 `app/services/output_inspection.py:510-513` 两边都用默认值（它也没把参数透出来）——一个拿参数就碎的在地雷。ocr 另说的 `:119/:269 expected in extracted` 子串比较：文本水印“长文档里含水印”本就是包含语义（containment 是 by design），图片提取出来的是定长载荷，两种写法几乎等价 ⇒ 这一半降为可读性问题，不进缺陷台账。
 
-### A173 SDK `_parse_error` 只接 `ValueError`，非 dict 的合法 JSON 直接 `AttributeError`（low-medium，活路径）
+### A173 SDK `_parse_error` 只接 `ValueError`，非 dict 的合法 JSON 直接 `AttributeError`（low-medium，活路径） ✅已修复（2026-10-30）：波次2 lane-f（_parse_error json/text 双层捕获+repr 兜底，非 dict 族已由 A76 先修；钉 a173 8 例）
 `sdk/cds_sdk/client.py` `_parse_error`：`payload = resp.json(); detail = payload.get("detail", payload)` 共在一个 `try` 里，而 `except` 只抓 `ValueError`（= JSON 解析失败）。服务端/网关返回合法但非对象的 JSON（`[]` / `"error"` / `null`）时 `payload.get` 抛 `AttributeError` ⇒ 调用方拿到一个与业务无关的崩溃而不是带状态码的 `CDSApiError`，真实的 4xx/5xx 信息被吞（W2 契约里“`SESSION_TERMINATED`=410 必须终止重试”这类判定也就失效了）。下游 `code=... if isinstance(payload, dict)` 倒是防了，唯独最关键的 `detail` 那行没防。修法：先 `resp.json()` 进 try，再 `isinstance(payload, dict)` 分支取 `detail`。
 
-### A174 文档漂移：alembic 实际 head 已到 **0026**，AGENTS.md 与多处文档仍写 0021（low）
+### A174 文档漂移：alembic 实际 head 已到 **0026**，AGENTS.md 与多处文档仍写 0021（low） ✅已修复（2026-10-30）：波次2 lane-f（todo-plan P0-2 对码修正 0032/跟踪态；specs 历史快照按「执行记录不改写」不动）
 `ls alembic/versions | tail` 给到 `0025_notebook_data_resource_ids.py` / `0026_notebook_description.py`；models 子代理另补：0022–0026 只加了 compute_run params / notebooks 列 / bundle 展示列，**没有任何一条补上被评审声称缺失的列或索引**（所以 A171 这类缺约束项确实还没人修）。项目 KB 里“single LINEAR chain 0000→0021”现在只是历史口径，引用前先看目录。
 
 ## A-第四十六批：w3 边缘波次——`cds-volume-plugin` 加密面（cipher.go / config.go）
@@ -1434,7 +1434,7 @@ app/services/output_inspection.py:306  stage_results[SIGNATURE] = bool(sig)
 ```
 降级本身是有披露的（`degraded` 里写了“不是 GM/T 签名”），但同一结果里 `passed` 却把“一个 SM3 摘要”当作“签名阶段通过”计入（`passed` 由 `stage_results` 相与得出，而 `degraded` 不参与），对外（`inspection_to_report` 11 个调用点、合规报告）报的就是“签名已做”。子代理实测：monkeypatch 让 SM2 失败后 `signature` 字段变成摘要且 `passed=True`。第 二重：`except` 分支里自己又调一刃 `sm3_hash` —— 而 `sm3_hash` 在 gmssl 缺失且 `CDS_SM3_FALLBACK_ALLOWED=false` 时（本仓 known 行为）会 `raise RuntimeError` ⇒ 异常从异常处理里逸出，整个审查接口 500（错误路径上的错误）。修法：签名失败就 `stage_results[SIGNATURE] = False`（或把 `passed` 改成“必需阶段集”相与且签名失败时不计入），`except` 内不再做任何可抛的加密运算，降级摘要另存字段并明写“未签名”。
 
-### A194 潜伏族定档（latent，代码事实成立但无生产入口——接线前必修）
+### A194 潜伏族定档（latent，代码事实成立但无生产入口——接线前必修） ✅已修复（2026-10-30）：波次2 lane-g（修 10：off/regex 不产 ner 标签、失败不冒领模型层、重叠隐私优先并集、threshold 全层；钉 4=需真模型/语料/产品语义，TODO(A194-pin)；钉 24）
 - **`pii_ner.py` 14 条全 LATENT**：唯一 importer 是 `stream_audit.py:19`，而 `stream_audit` 在 `app/` 内 0 引用方（本轮 `rev_imports3.py` + `grep "import.*stream_audit"` 两路一致）。但缺陷真实且不是吹毛求疵：`ner_engine="off"` 实测仍产出 `layer=ner` 的命中却上报 `regex_only`（违反“披露实际引擎”的铁律）；重叠消解有三种丢法，实测各留下 25/12/30 个**明文 PII 字符**。一旦 `stream_audit` 接线，就是“逐行审查声称脱敏了但漏字符”。
 - **`mia_probe.py` 10/11 LATENT**：`analyze_batch` 对全疑似样本算出 `risk_score=-498.5` 却判 `safe`（分母口径与 A159 同族），`loss=1.0` 精确复现 `ZeroDivisionError`。接线前需与 `memorization_check` 一起统一分母口径。
 - **`output_inspection` 2 条 + `model_watermark` 2 条 LATENT** 已分别归入 A187/A192 的同一修法（入口校空集/零位）。
@@ -1525,7 +1525,7 @@ pip install -e ./sdk --no-build-isolation --no-deps    → RC=1  Preparing edita
 堆栈里 `read_configuration(filepath, True, ignore_option_errors, dist)` 说明 `ignore_option_errors=True` 只豁免“选项级”错误，`[project]` 表的 schema 校验依旧会抛。
 **口径边界（如实写）**：我只在 setuptools 82.0.1 上测过；本机没有第二个 setuptools 版本可对比（全仓只有 `.venv-gate` 一个 venv），所以“旧版 setuptools 是否只警告不报错”未测。⇒ 两种读法：要么 CI 靠旧版 setuptools 侥幸过，要么这一步本来就是红的（AGENTS.md 写的“CI 全绿”是文档，本轮我没有跑 CI 的证据）。无论哪种，**按 PEP 621 这份文件就是非法的**。修法一行：把 `readme = "README.md"` 移到 `[project]`（`sdk/README.md` 确实存在，已 `ls` 确认）。
 
-### A207 `sdk/pyproject.toml` 其余五条：依赖无上限、无 `py.typed`、版本双来源（low，打包卫生）
+### A207 `sdk/pyproject.toml` 其余五条：依赖无上限、无 `py.typed`、版本双来源（low，打包卫生） ✅已修复（2026-10-30）：波次2 lane-f（httpx/websocket-client 上限、py.typed 入 package-data、版本单源不动；钉 8 例）
 ① `:6 dependencies = ["httpx>=0.27.0"]` 与 `:11 stream = ["websocket-client>=1.6"]` **只有下限**，而 `client.py` 直接依赖 httpx 的 client/异常接口，httpx 还在 0.x（允许破坏性变更）⇒ 建议 `>=0.27,<1.0` / `>=1.6,<2.0`。② 包里**没有 `cds_sdk/py.typed`**（`ls cds_sdk/` → `__init__.py client.py stream.py`）——而这个 SDK 对外自称 typed client，没 `py.typed` 下游 mypy/pyright 拿不到类型。③ 版本双来源：`pyproject.toml:3 version = "0.3.0"` vs `cds_sdk/__init__.py:22 __version__ = "0.2.0"`（即已记的 A154 / AGENTS.md 里的漂移条目，修法：`dynamic = ["version"]` + `version = {attr = "cds_sdk.__version__"}`）。④ `:15 requires = ["setuptools>=68"]` 无上限，把①的构建行为拖在一个浮动点上。⑤ “未装 `websocket-client` 时 `stream_exec` 抛 `CDSError(501)` 而不是裸 `ImportError`”这条降级路径本身是对的（`stream.py::_import_websocket`），但没有回归用例钉住（ocr 说只有 `tests/test_sdk_client.py`）——属测试空白，不是缺陷。
 
 ## A-第五十七批：w4 前端波次首批（`DevTaskCreatePage` 三联动，我逐行亲验）
@@ -1578,7 +1578,7 @@ sdk/cds_sdk/client.py:245 def _request_with_headers(...) → 无此判断，:253
 
 **去重**：`E2-40 trained_models.size_bytes` 与 `E2-73 delivery_bundles.size_bytes` 就是已记的 **A203**（四处 4 字节 `Integer` 体积列）；`E2-84` 版本双源就是 **A154 / A207③**；`E2-87`（标识符不做百分号编码）与 `E2-88`（任务代码/RAG 查询走 query string）另登于 A215/A216。
 
-### A215 SDK 把标识符直接拼进请求路径，不做百分号编码（low，我亲验：全文件无编码调用）
+### A215 SDK 把标识符直接拼进请求路径，不做百分号编码（low，我亲验：全文件无编码调用） ✅已修复（2026-10-30）：波次2 lane-f（_encoding.py quote(safe="")，73 插值点全收口；钉字节级 11 例）
 `sdk/cds_sdk/client.py` 有 **64 处** `f"/…/{x}"` 形式的路径拼接（例：`:304 /api/v1/sandbox-sessions/{session_id}`、`:356 …/terminate`、`:360 …/execute`、`:368 …/exec`），而我 `grep 'quote|urlencode|quote_plus'` 在 `client.py` 与 `stream.py` 里**只命中一处无关的 `shlex.quote`**（`stream.py:58`，那是拼 shell 命令用的）⇒ 路径段确实未做任何百分号编码。当前由服务端 UUID 兑住（UUID 不含需转义字符）⇒ 只有当 ID 变成可含 `/`、`?`、空格的形态（如 slug）才会碎，定 low。
 
 ### A216 SDK 把整段任务代码与 RAG 问句放进 POST 的 **query string**（medium，我亲验行号）
@@ -1592,10 +1592,10 @@ sdk/cds_sdk/client.py:609  params = {"session_id": session_id, "task_type": task
 
 ## A-第五十九批：子代理的 7 条 FALSE 我逐条复审，挖出一条它当「附带说明」的真错
 
-### A217 `ALEMBIC_COMPARE_TYPES` 只认字面 `"1"`：写 `true` / `yes` / `on` 都是**静默关掉**类型对比（low，我亲验）
+### A217 `ALEMBIC_COMPARE_TYPES` 只认字面 `"1"`：写 `true` / `yes` / `on` 都是**静默关掉**类型对比（low，我亲验） ✅已修复（2026-10-30）：波次2 lane-f（alembic/env.py 显式布尔解析，未识别值 fail-closed 抛错；子进程矩阵 17 例。坐标纠偏：唯一读点在 env.py 非 parity 脚本）
 `alembic/env.py:42 COMPARE_TYPES = os.environ.get("ALEMBIC_COMPARE_TYPES", "1") == "1"`。默认开，但取值不是布尔语义：`1` 以外的一切（包括语义上「开」的 `true`/`yes`/`on`）都把类型对比关掉且不报错。OCR 原报把方向说反了（它说写 `false` 会续涌类型误报），子代理用这一行证伪了它；但**反向的坑是真的**：下一个人把 `=0` 改成 `=true` 想「打开严格模式」，得到的是更松。CI 现在写的是 `=0`（`.github/workflows/ci.yml:45`，旁边有注释），与 `:37-41` 的注释口径一致，所以不是现行缺陷，是未来错用的坑。修法：`in ("1","true","yes","on")` 或者直接用 pydantic 的布尔解析。
 
-### A218 `stream_exec(timeout_seconds=…)` 不做校验，直接把 `ValueError` 丢给用户（low，我亲验行号，顺手修正了子代理的坐标）
+### A218 `stream_exec(timeout_seconds=…)` 不做校验，直接把 `ValueError` 丢给用户（low，我亲验行号，顺手修正了子代理的坐标） ✅已修复（2026-10-30）：波次2 lane-f（_validate_stream_args 四参前置校验，零 I/O 发火前；钉 22 例）
 `sdk/cds_sdk/stream.py:135-136 if timeout_seconds is not None: frame["timeout"] = int(timeout_seconds)`（子代理写的 `:130-131` 偏了，那里是 `:128-130` 的 `except Exception → CDSError(502, websocket connect failed)` 转换块，两者不同）。后果：`timeout_seconds="30s"` 抛的是裸 `ValueError: invalid literal for int()`，而同模块对空代码是 `CDSError(400, "command cannot be empty")`（`stream.py:53-55`），对外契约不一致；`0` / `-5` 不校验直接发给服务端。修法：同模块已有的 `CDSError(400, …)` 路径上补一个整数与下限校验。
 
 **复审结论**：剩下五条 FALSE 我逐条读了证据，接受：E2-1（`poolclass=pool.NullPool` ⇒ 引擎不持有连接，无泄漏）、E2-19（`sa.text("false")` 就是本仓声明的惯例，注释已记 SS-14 D-e2e-08）、E2-71（SQLite DDL 事务性 ⇒ `batch_alter_table` 失败整体回滚，不会半重建）、E2-75（子代理跑了真 SQLAlchemy 实验：`{}` / `null` / 从不赋值 三态在 `IS NULL` 上可区分）、E2-90、E2-100（`detail.get("code")` 为 `None` 时短路，产生不了 `"None"` 字符串）。E2-107 不是 FALSE，就是上面的 A218。
@@ -1668,7 +1668,7 @@ deliveryOpenapi.css:65-69  @media (max-width: 1439px) → 2 列；:71-75 @media 
 
 > **订正注记（2026-10-20，轨道 poolC-fecss + 父会话；不改上方原文、不改条目 ID）**：标题的 **1488** 与本节自身加数不一致——按台账自己列出的加数相加是 **1458**，而按 `index.css:187-188` 的实测口径是 **1480**（三个口径差 30px）。落地取的是**两者之间偏上的 `@media (max-width: 1487px)`**（`deliveryOpenapi.css:65` 现状），使 1480 与 1488 两种算法**都落进降级档**，因此无论采哪个口径，1440–1487 这一档都不再横向溢出。台账原文的 1488 不改动，是为了不打乱 fix-queue 重生时的行号/文本基线（扫描器拿标题做键）。本条已按 `max-width: 1487px` 收口，vitest 回归见 `.gate-scratch/evidence/poolC-fecss.md`。
 
-### A227 同一屏的 antd 内部类覆盖族（low，可维护性）
+### A227 同一屏的 antd 内部类覆盖族（low，可维护性） ✅已修复（2026-10-30）：波次2 lane-c（令牌化两支+min-width:0 修溢出+按钮 max-width；css 静态针 18 条防回潮）
 我逐行对过了，ocr 列的六个点都是真存在但危害被说大了：
 - **两处 `> .ant-card-body { padding: 24px }`**（`:6-8`、`:11-13`）重复魔法值 24，依赖 antd 内部类名与注入顺序——顺序博弈我**没实测**，但重复值与内部类耦合是真的；应收拢到一个 `--cds-card-body-padding`。
 - **`:41-43 height: 35px`** 不在 antd 档位（token 32 / lg 40）且 `> .ant-btn` 打按钮组全体；顶部注释又要求「新建接口 h40」⇒ 同一屏 32/35/40 三档。35 是按真值 ink 带推的（注释写得很清楚），所以这是设上的债不是手误。
@@ -1694,7 +1694,7 @@ AuditLog.tsx:400    <Modal className="cds-detail-modal cds-audit-modal" …>   �
 ### A229 日期区间两个输入框定宽 55px，选完值之后文字被裁（medium，我亲验行号）
 `:158-159 .cds-audit-screen .cds-audit-filter .f-range .ant-picker-input:first-child { width: 55px; flex: none; }`，外层 picker 在 `:147`。55px 来由注释写得很清楚：原型**空值占位态**的墨迹宽（只够 4 字占位符）。但 `YYYY-MM-DD` 在 14px 下要 ~74-78px，input 无 ellipsis 能力 ⇒ 一旦真选了日期，值就被截断（筛选仍按完整值生效，但用户看不到自己选的什么）。叠 `flex: none` 不可压，i18n/长文案时整行顶出卡体。定 medium：不是功能错，是用户无法复核自己的输入。修法：`min-width` 给到 88px（picker 220px）并把 180px 只当≥1400 的参考宽。
 
-### A230 本屏的令牌拄贝与结构耦合族（low，含两处 ocr 说大了）
+### A230 本屏的令牌拄贝与结构耦合族（low，含两处 ocr 说大了） ✅已修复（2026-10-30）：波次2 lane-c（--cds-primary 令牌+空表占位行排除染色）
 真存在：`:317-318` 把主色拄了一份 `#1b6ef3`（`index.css:7` 定义的就是 `--cds-primary: #1b6ef3`，同一支）；`:219 > tr:last-child > td` 没排除 `.ant-table-placeholder` ⇒ 空态多一条下边线；`:295 display: contents` 拆 antd 分页（键盘焦点与视觉顺序不一致，且该 `li` 自身 margin 失效）；墨色字面量全文重复 14 处，另有一支体系外 `#5b6472` 用在表头。
 说大了的两处：① F-53 说“若是不同支蓝请在注释里写明差异与理由”——`:353` 注释**已经写了**「4×16 蓝条（x24..28 **#1f70f3**）」，它就是探值探出来的，不是抄错；② F-52 把 `:has()` 当兼容性风险——Chrome 105 / Firefox 121 已是多年前的基线，本仓没有其他 `:has()` 降级路径，不构成现实风险（真风险只剩「包装节点一多 `:has(> …)` 静默失效」那一条）。F-55（依赖共用类 `cds-detail-modal` 同时存在，无人测试）成立但属测试空白。
 
@@ -1731,10 +1731,10 @@ AuditLog.tsx:400    <Modal className="cds-detail-modal cds-audit-modal" …>   �
 ### A235 分页带的「右对齐」判据其实没生效（medium，两路亲验）
 `DevTaskDataPicker.tsx:164` 把 `className: 'cds-task-pager'` 交给 Table 的 pagination（它直接落在 `ul.ant-pagination` 上），而 `node_modules/antd/es/pagination/style/index.js:436` 给它的是 `display: flex`；`devTaskCreate.css:232` 只写了 `text-align: right`——flex 子项不受 `text-align` 支配 ⇒ 「分页带右靠」这条像素判据在真机上并不成立（应该 `justify-content: flex-end`）。同族：分页开了 `size: 'small'`（`:163`），CSS 只钉了 `.ant-pagination-item`（`min-width:30px/height:28px`），全文 `grep item-link` **0 命中** ⇒ mini 档的前后钮与 `jump-prev/next` 尺寸没同步，页码与箭头高矮不齐。两条都是能直接看出来的。
 
-### A236 卡头标题改成 `display: flex` 作废了 antd 自带的省略（low，我亲验）
+### A236 卡头标题改成 `display: flex` 作废了 antd 自带的省略（low，我亲验） ✅已修复（2026-10-30）：波次2 lane-c（卡头标题 min-width:0+省略三件套恢复）
 `:83-87 .ant-card-head-title { display:flex; align-items:center; gap:9px }`——antd 在同一元素上的 `overflow:hidden; white-space:nowrap; text-overflow:ellipsis` 对 flex 容器不生效，而本页卡头副标题是整句（如「合约用于约束模型输出格式与导出通道」）⇒ 宽度不够时不是截断，而是把 `.ant-card-extra` 挤出去。另 `:300-301` 底部操作条 `padding: 16px 3px 16px 24px`（右内距 3px）叠加 TSX `:325` 的 `display:flex; justify-content:space-between` **无 `flex-wrap`** ⇒ 窄档/125% 缩定时左侧文案与「取消/完成」互挤。这两条与 A231/A232 同一病根：钉死值却没给成立区间。
 
-### A237 本文件的债：全局作用域 + 测试钩子当选择器 + 两支品牌蓝（low，我逐条 grep）
+### A237 本文件的债：全局作用域 + 测试钩子当选择器 + 两支品牌蓝（low，我逐条 grep） ✅已修复（2026-10-30）：波次2 lane-c（页面类收作用域+品牌蓝令牌化 --cds-dtc-ink-blue）
 - **全局作用域**：`.cds-mem-stepper`（`:156`）、`.cds-picker-side`、`.cds-quota-advice*` 都定在页面根类之外，而 Vite 打的是全局样式表。**当前无冲突**：这些类名全仓只出现在 `devTaskCreate.css` + `DevTaskCreatePage.tsx` + `DevTaskDataPicker.tsx` ⇒ 记为命名空间风险，不是现行缺陷。
 - **`:224 [data-testid^='task-tab-']` 当样式选择器**（TSX `:271` 逐字对应）：测试重构改名（或删 data-testid）⇒ 药签直接退化成浏览器默认按钮，没有任何测试会因此变红。
 - **两支品牌蓝**：`#1b6ff2` ×5 vs `#1b6ef3` ×3，另有 `DevTaskDataPicker.tsx:40 const PICKER_TAB_BLUE = '#1b6ff2'`（这半条 ocr 归给了 DevTaskCreatePage，实际在隔壁文件，结论不变）。差 1/255 肉眼不可辨，但改主题时必须逐处搜。
@@ -1747,14 +1747,14 @@ AuditLog.tsx:400    <Modal className="cds-detail-modal cds-audit-modal" …>   �
 
 ## A-第六十六批：`index.css` 收尾十条（CSS 集到此判完）
 
-### A238 注释与实现不一致两处，其中一处让设计好的 hover 态根本不存在（low，我亲验）
+### A238 注释与实现不一致两处，其中一处让设计好的 hover 态根本不存在（low，我亲验） ✅已修复（2026-10-30）：波次2 lane-c（border:1px solid transparent 让 hover 态真实存在+注释订正 32）
 - **`:259 .cds-task-card { border: none }` + `:266-267 .cds-task-card:hover { border-color: #bcd4f6 }`**：`border: none` 把宽度归 0，只改 `border-color` 不会产生任何可见变化，`transition` 里的 `border-color` 也是空转 ⇒ 注释里想要的「悬浮蓝描边」从未被实现（hover 只剩阴影）。修法：基态写 `border: 1px solid transparent`（卡宽 380 的定标要把 `box-sizing` 算回去）。
 - **`:380` 注释「三钮等宽满宽、高 36」 vs `:385 height: 32px`**：同一个块里真值注释与代码差 4px，后续按注释复核像素会得出错误结论（旁边那段注释又写「108×32」，36 是转录残留）。
 
-### A239 `auto-fill` 兼容档在窄端会溢出（low，结论同 ocr 但它的算术错了）
+### A239 `auto-fill` 兼容档在窄端会溢出（low，结论同 ocr 但它的算术错了） ✅已修复（2026-10-30）：波次2 lane-c（minmax(min(280px,100%),1fr)）
 `:246-249` 在 `@media (max-width: 1023px)` 里把 `.cds-task-grid` 改成 `repeat(auto-fill, minmax(280px, 1fr))`——最小轨是固定 px，容器不够宽时不会收缩而是直接溢出。ocr 算的是「320 − 12 − 12 = 284」（得出 320 下刚好不够），但移动端断点里**两层都有 12 内距**：`index.css:573-574 .cds-content{padding:12px}` 与 `:577-578 .cds-content-inner{padding:12px}` ⇒ 320 视口可用宽≈**272**（带经典滞动条则 257），溢出带比我算的更宽（≲328，带滞动条 ≲343）。修法一行：`minmax(min(280px, 100%), 1fr)`。
 
-### A240 全局样式的维护族（low，逐条 grep 过）
+### A240 全局样式的维护族（low，逐条 grep 过） ✅已修复（2026-10-30）：波次2 lane-c（死选择器证伪删除：匹配 0 元素，hover/26px 从未存在；.cds-task-tab 真类名+data-testid 保留；--cds-page-bg）
 - **`data-testid` 当样式选择器 5 处**（`index.css` 内 `[data-testid^=]` 计数 = 5，另 `devTaskCreate.css:224` 1 处）：测试属性一改名，hover 位移 / 光标 / 焦点态静默消失，且没有测试会红。与 A237 同一病。
 - **无背景/文本令牌**：`grep -c '#f0f5fb' index.css` = **5**（ocr 写 3，实际更多），且 `--cds-page-bg` / `--cds-bg` **全文不存在**（grep 0 命中）；另 #1d2129/#86909c/#f2f3f5/#f7f9fc 等数十处字面量——而文件头自己声明了「组件一律引用令牌」。
 - **重复选择器块**：`:is(.cds-home, .cds-detail) .ant-card-head` 出现 **5** 次、`.ant-card-head-title` 出现 **4** 次（同一目标分多处覆写，计算值靠顺序）。
@@ -1814,7 +1814,7 @@ components/Layout/DataplaneBanner.tsx:37  if (!dp || dp.enabled) return null;
 ### A246 `/open/v1/${slug}` 不校验不编码（medium，我亲验）
 `pages/Flow/display.ts:227-229 openApiPathForSlug(slug) => `/open/v1/${slug}``：slug 含 `/`、`#`、`?`、`..` 时会改变实际命中的路径（服务层已有的 `openApiCallPathForSlug` 做了同样的拼接，两处都没编码）。前端拼路径不能当安全边界，但也不该把用户输入原样注进 URL；修法：`encodeURIComponent(slug)` + 一个 `[A-Za-z0-9_-]+` 格式前置校验，两处共用一个函数。**补录（第七十六批）：同一机制共 8 处**，另处 `services/mpcApi.ts:47/53/58`、`services/fieldExposureApi.ts:55`、`services/k8sOpsApi.ts:106`（`/ops/logs/${sessionId}`）、`services/outputControlApi.ts:50`（查询串拼接，`session_id`/`epsilon` 都没编码，`&` 可以直接注入额外参数）与 `:53`。
 
-### A247 两条 ocr 报成 high、实测要降级（low）
+### A247 两条 ocr 报成 high、实测要降级（low） ✅已修复（2026-10-30）：波次2 lane-c（Object.hasOwn 防原型键；devDep @vitest/coverage-v8 lead 批准入库 lock 同步）
 - `components/Feedback/errorHints.ts:129-130 if (code && ERROR_HINTS[code])`：`ERROR_HINTS` 是普通字面量（`:19 Record<string, ErrorHint>`），确实会沿原型链命中 `toString`/`constructor`，但命中后拿到的是**函数**，后续读 `.title`/`.action` 只会得到 `undefined` ⇒ 后果是提示空白，不是执行/信息泄露。一行 `Object.hasOwn` 就关掉，但定 high 说重了。
 - `package.json:13 "test:coverage": "vitest run --coverage"` 而 devDependencies 里没有 `@vitest/coverage-v8`（`grep -c coverage-v8 package.json` = **0**）——脚本确实跑不起来，但 `grep -rn 'test:coverage|vitest run --coverage' .github/workflows/` **空命中**，且 AGENTS.md 写明 vitest 不在 CI ⇒ 不是「CI 覆盖率阶段必然失败」，只是一个坏掉的本地脚本。
 
@@ -1839,7 +1839,7 @@ components/Layout/DataplaneBanner.tsx:37  if (!dp || dp.enabled) return null;
 ### A250 卡片可以一边贴「已发布生产」一边提示「没有生产版本」（medium-high，口径我自己对过两个函数）
 `pages/Flow/devTasksModel.ts`：阶段集 `publishedNotebookIds`（`:35-40`）只过 `status === Published && source_notebook_id`，**不过 `env`**；而生产执行入口用的 `publishedProductionByTask`（`:250-256`）过的是 `env !== 'production' || status !== Published` 就跳过，旁边 `:246` 注释还自述「与执行弹窗同口径」。同一份 `workloads` 喂给两个不同口径（`:309-310`），而阶段标签文案就是 `:26 published: { label: '已发布生产' }` ⇒ 只发到 staging 的 notebook 会被贴「已发布生产」，同时同一张卡的生产执行入口弹出 `NO_PRODUCTION_WORKLOAD_REASON`（`:231`「该合约没有 published 的生产版本，需先在负载中心发布」）——同一屏自相矛盾。修法：阶段改吃同一个生产集合，或把标签改成不断言 env 的「已发布」。
 
-### A251 注册成功后不校验响应字段就写登录态（low，ocr 定 high，我降级）
+### A251 注册成功后不校验响应字段就写登录态（low，ocr 定 high，我降级） ✅已修复（2026-10-30）：波次2 lane-c（无凭证不静默 login，明确引导登录）
 `pages/Auth/Register.tsx:18-19`：`const resp = await authApi.register(values); login(resp.user, resp.access_token, resp.refresh_token)` —— 没校验就写态。后果范局限在「后端 200 但字段缺失 → 存入 undefined token → 后续 401 循环」，不会越权也不会绕过鉴权（token 仍需后端认可）；`:24-25` 对 `detail` 是数组的情况做了收窄，剩下没收的是 `detail` 为对象/数字的情况（Antd message 能渲染 object 以外的值，最多提示奇怪）。所以定 low；真要修就一行 `if (!resp?.access_token) throw …`。
 
 ## A-第七十批：面包屑真值表与 antd React 19 补丁（这一批我写了机器比对，也当场修正了自己解析器的错）
@@ -1850,10 +1850,10 @@ components/Layout/DataplaneBanner.tsx:37  if (!dp || dp.enabled) return null;
 去掉 `/login` 与 `/register`（它们本来就在壳外），剩下 **13 个真实页面**打开后面包屑与页内标题都是「运营概览」——用户站在「密钥管理」上看到的是「运营概览」。消费方只有一个：`components/Layout/PageCrumb.tsx:19`（我 grep 了 `getRouteCrumb` 的全部引用）；并且 `grep -rn document.title src/` = **0** ⇒ 错的是页内那一行，不是浏览器标签标题，危害到不了 high。
 **取证过程里我自己错了两次**：第一遍比出「42 条落空」是假的——`App.tsx` 写的是 `path="audit"`（无斜杠）而真值表写 `/audit`，规范化后才对；第二遍比出「0 条落空」也是假的——正则把 `FALLBACK` 的 `prefix: ''` 吃了进来（空前缀命中一切）。两次都是自写解析器静默交出差集，所以最终改成严格逐行解并**把语料规模（26 / 44）跟着结果一起打出来**。
 
-### A253 `trigger={null}` 把侧栏折回去就 Manual 展开不了（low，代码里自带权衡说明）
+### A253 `trigger={null}` 把侧栏折回去就 Manual 展开不了（low，代码里自带权衡说明） ✅已修复（2026-10-30）：波次2 lane-c（折叠态真 button+aria-label，5 钉）
 `MainLayout.tsx:36-40` 是 `collapsed={collapsed} onCollapse={setSidebarCollapsed} collapsedWidth={64} trigger={null}`，而 `Header.tsx` / `Sidebar.tsx` 里 `grep collapsed\|setCollapsed` **0 命中** ⇒ 确实没有任何手动展开入口。但它不是没想到：`:33` 注释原文「所以 `trigger={null}` 只拆钩子，breakpoint 自动收窄留着——**折到 0 菜单就没入口了**」，配套 `collapsedWidth={64}` 保证收起后图标仍可点。所以危害是“不能拉回宽态”，不是“菜单没了”，定 low。
 
-### A254 `antdReact19Patch.ts` 的两条都需要“容器复用”才成立 ⇒ 现阶段记潜伏（low）
+### A254 `antdReact19Patch.ts` 的两条都需要“容器复用”才成立 ⇒ 现阶段记潜伏（low） ✅已修复（2026-10-30）：波次2 lane-c（root/seq 代次校验，二次挂载不误删）
 ```
 :10  host.cdsReactRoot ??= createRoot(container)   ← 缓存在宿主上
 :13-18 return async () => { await setTimeout(0); root.unmount(); }   ← unmount 后从不删 host.cdsReactRoot
@@ -1933,7 +1933,7 @@ cds-frontend/src/pages/ComplianceDisclosure.tsx:145  {report.anchoring.backend_l
 ### A262 互信关系缺 `created_at` 时用「现在」兑底 = 编一个审计时间（medium-high）
 `services/federationApi.ts:59`：`created_at: item.created_at || new Date().toISOString()` —— 后端字段缺失/改名/返回结构变化时，UI 上会出现一个「看起来完全正常」的当前时间。这在其它模块可以是容错，在**跨空间互信记录**上不行：created_at 是证据的一部分，而仓内已经有明文口径反对它：`pages/Flow/devTasksModel.ts:314-315`「时间只在能解析时格式化；解析不了就原样透出，**编不了时间也不装「刚刚」**」，同一个文件旁边 `:55 remote_space_name || ''`、`:58 allowed_operations || []` 用的都是中性兑底。同一批里 A257（缺字段判通过）与 A224（「状态未知」与「已关闭」同色）与本条同根：**不知道的时候要显示“不知道”，不能显示一个好看的值**。修法：类型改 `created_at: string | null`，渲染层走 `formatDevTaskTime` 那一类不编造时间的函数。
 
-### A263 按 id 取合约的 query 只挡 `null` 不挡空串（low）
+### A263 按 id 取合约的 query 只挡 `null` 不挡空串（low） ✅已修复（2026-10-30）：波次2 lane-c（enabled: Boolean(contractId)）
 `pages/Flow/useContractOptions.ts:56-60`：`enabled: contractId !== null`，而 `queryFn: () => contractApi.get(contractId as string)` —— 表单初值 / `row.contract_id ?? ''` / URL query 缺省都会送一个 `''` 进来，发出 `GET /contracts/`，拿到列表（或 404）再喂给 `toContractOption`。`queryKey` 里带的是 `''`，所以不会被缓存掩盖，每次渲染都会真打一发。修法：`enabled: !!contractId`。
 
 ### 证伪 / 降级两条（不要再报）
@@ -1979,13 +1979,13 @@ async def list_shares(key_id: str, db=Depends(get_db), current_user: User = Depe
 ```
 函数体 21 行我全读了：**没有任何权限 helper、没有 owner/租户比对、没有角色要求**（不是我“没看到”，是从 `:206` 进函数到 `:221` 返回只有 404 分支）。对照同文件写侧：`:228 rotate` 与 `:260 destroy` 都是 `Depends(require_roles(UserRole.ADMIN))`，`:94 /split` 与 `:138 /reconstruct` 是 `require_roles(ADMIN, OPERATOR)` —— **只有读侧不设门**。后果不是“多看一眼元数据”：`share_value` 是完整的 Shamir 分片，加上 `index`/`threshold`/`total_shares`，一个**任意登录用户**（curl 即可，不需前端）拿够 `threshold` 份就能在本地离线 Lagrange 插值把密钥重出来，不必调 `/reconstruct`（那个反而是要角色的）。换句话说本仓的密钥托管模型（AGENTS.md：`mpc_service` = Shamir key custodianship，不是 MPC 计算）在读取面上形同虚设。同一缺口还有两处：`:163-166 GET /keys` 也是 `get_current_user` 且 `mpc_service.list_keys(db)` **签名里根本没有 user 参数**，无从过滤 ⇒ 全平台密钥可被任意登录用户枚举；`:184 GET /keys/{key_id}` 同。修法：三处读侧至少 `require_roles(ADMIN, OPERATOR)`，并给 `list_keys` 加上 owner/租户参数；`share_value` 建议根除——分片应该只发给各 holder 自己的通道，不该汇总给一个 API 调用者。
 
-### A269 antdLocale 两条降级为 low（一层脱壳 + 模块加载期无校验）
+### A269 antdLocale 两条降级为 low（一层脱壳 + 模块加载期无校验） ✅已修复（2026-10-30）：波次2 lane-c（unwrapLocale 四层脱壳+assertUsableLocale 抛带来源；jump_to 保住）
 `antdLocale.ts:11-14` 只脱一层：`inner = mod?.default`，仅当 `inner` 带 `locale` 字段才用 `inner`，否则原样返回。两条 ocr 指控（处多层包装、`zhCNModule` 为空时模块加载期就铸成错值）机制上都在，但**最坏后果就是文件头自己写明的那件事**：“全站 antd 内建文案静默回落成英文（空表 No data、分页 10 / page）”；而 `:17 const baseLocale = unwrapLocale(zhCNModule)` 与 `:21-23 {...baseLocale, Pagination: {...baseLocale.Pagination, jump_to: '前往'}}` 对 `undefined` 展开不报错，不会崩。至于 `{default:{default:{…}}}` 多层壳：本仓是 Vite 8 + rolldown，**我没构造出这一形态**，所以按 latent 记，不算现行缺陷。真要动就加一句启动自测：`if (!('locale' in baseLocale)) throw …`（错配在启动时炸比文案默默变英文好）。
 
 ### A270 useCrumbSegments 两条降为 low（latent）
 `components/Layout/useCrumbSegments.ts:6-10`：`const key = segs.join('|'); useEffect(() => { setStack(key ? key.split('|') : []); return () => setStack([]); }, [key, setStack])`。（1）段名含 `|` 会把往返拆坏——但我把真值表里的段名全看过（`routeCrumb.ts` 全是中文词 + `OpenAPI导出`/`新建API` 一类），目前无一带 `|` ⇒ 潜伏；（2）cleanup 无条件 `setStack([])` 写在共享 store 上，同一 `key` 变化时顺序安全（cleanup 先于新 body），但**第二个消费者挂载/卸载会清掉别人的栈** ⇒ 也是潜伏（现在只有一个调用点）。都不是现行缺陷，修时换结构化 key（`JSON.stringify(segs)`）+ 按 owner 隔离即可。
 
-### A271 `normalizeKmsKey` 硬编码 `key_type: 'dek'` / `algorithm || 'SM4'`（low，当前不成立）
+### A271 `normalizeKmsKey` 硬编码 `key_type: 'dek'` / `algorithm || 'SM4'`（low，当前不成立） ✅已修复（2026-10-30）：波次前后端半已修（真 algorithm/key_type/persisted）；波次2 lane-c FE 半删硬编码，未知=「未记录」，静态门禁字面量回潮；钉 7
 `services/identityApi.ts:98-106` 确实写死了两个默认值，但后端 `app/api/kms.py:142` 的键列表返回字段里**根本没有 `key_type`**（只有 `key_version`/`algorithm`/`status` 等），而那个端点列出的本来就是 DEK 集合 ⇒ ocr 说的“丢失 session/kek 类型”在当前 API 形状下无从发生。剩下真的一半是 `algorithm || 'SM4'`：**缺字段时编一个算法名出来**，与 A262（编时间）、A257（缺字段判通过）同根，属于同一个“中性兑底 vs 编造值”的改造（建议这三条一起改）。
 
 ## A-第七十六批：验真弹窗的瞬时假通过与一条证伪
@@ -2001,7 +2001,7 @@ async def list_shares(key_id: str, db=Depends(get_db), current_user: User = Depe
 
 ## A-第七十七批：中低危开始收——未编码类级判定 + `identityApi.ts` 整文件判完
 
-### A273 路径拼接不编码：全仓 112 处（low，类级判定，计数来自机器枚举）
+### A273 路径拼接不编码：全仓 112 处（low，类级判定，计数来自机器枚举） ✅已修复（2026-10-30）：波次2 lane-c（api.ts 拦截器集中 normalizeRequestPath 收口 112 处，幂等+孤%归%25+双斜杠拒；钉 2 文件）
 命令与语料：`grep -rn 'api\.[a-z]*(\s*`[^`]*${' cds-frontend/src/services cds-frontend/src/pages | grep -v encodeURIComponent` ⇒ **112 处**（前 24 条已逐条看过，全部是 `/resource/${id}` 形式，id 来自路由参数或上游响应）。这 112 处是一个仓内约定，不是 112 个缺陷，所以不开 112 条编号：绝大多数 id 由后端签发，拼进路径不构成注入。**真正要修的只有 id/参数可被用户输入控制的那几处**，已在 A246 单列：`outputControlApi.ts:50`（拼查询串，`&` 可直接注入额外参数，最优先）、`display.ts:227`（slug）、`k8sOpsApi.ts:106`（sessionId）、`mpcApi.ts:47/53/58`、`fieldExposureApi.ts:55`。统一修法：`services/` 里加一个 `p(seg)` 助手（`encodeURIComponent` + `[A-Za-z0-9_.:-]+` 前置校验），或直接在 `services/api.ts` 请求拦截器里校路径段，一处收干净比改 112 行现实。
 
 ### A274 `identityApi.ts` 同一个文件里三种解包写法，两种会错（medium-high，我把文件整片读完）
@@ -2133,10 +2133,10 @@ record_hashes.append(crypto_service.sm3_hash(data.encode()))
 ### A291 用 `proof_path.length === 0` 单独下“本批次仅一条”的肯定结论，而同一个响应里就有 `total_leaves`（medium）
 `:291` 已经显示「本批次共 `{proofQuery.data.total_leaves}` 片叶子」（后端 `app/api/audit.py:519 "total_leaves": len(all_hashes)`，`:517 "proof_path": proof.proof_path if proof else []`），但 `:293` 的分支只看 `proof_path.length === 0` 就给出“本批次仅此一条记录，root 即叶子哈希”。后端多叶子却异常返回空路径时，这是一个**与 Merkle 结构相矛盾、但听起来很确定的结论**，而它出现在存证/合规页面上，审计人员会据此跳过独立复核。修法：双条件 `total_leaves === 1`；空路径且 `total_leaves > 1` 时要渲染成“证明数据不完整”而不是结论。
 
-### A292 结论与披露字段来自两个端点，可同屏自相矛盾（low-medium）
+### A292 结论与披露字段来自两个端点，可同屏自相矛盾（low-medium） ✅已修复（2026-10-30）：波次2 lane-c（结论与披露同源 /verify，叶子哈希唯一例外；A/B 路矛盾形状钉）
 `:177` 的 `verdict = deriveVerdict(verifyQuery.data, …)` 只看 `/verify` 的返回；而 `:180-186` 的 `backend/block_number/anchor_id/confirmed/tx_hash/merkle_root` 全部写成 `verifyData?.x ?? proofData?.x`。两个端点的披露不一致时（`/verify` 给 null 或 `pg-log`、`/merkle-proof` 给链上后端），结论按 A 口径、文案按 B 口径。修法：披露字段不从 proof 回退，或两者不一致时显式渲染“两路披露不一致”。
 
-### A293 `ErrorCard` 的按钮与告警两套口径（low）
+### A293 `ErrorCard` 的按钮与告警两套口径（low） ✅已修复（2026-10-30）：波次2 lane-c（canRetry/warning 单一派生，410 优先；配色两档）
 `components/Feedback/ErrorCard.tsx:45-46`：`canRetry = status === 410 ? false : retryable ?? base.retryable`，而 `warning = base.retryable && canRetry`。调用方用 `retryable: true` 覆盖一个映射表里不可重试的错误（如 `VALIDATION_ERROR`）时，`:93` 的重试按钮会出来但 `warning` 不亮 ⇒ 视觉与行为脱节。定 low（口径不一致，不是功能坏），但两套口径应该汇成一处派生。
 
 ### 本批证伪 / 降级四条
@@ -2153,10 +2153,10 @@ record_hashes.append(crypto_service.sm3_hash(data.encode()))
 而 `app/core/security.py:204-210` 的 `CORSMiddleware` 只配了 `allow_origins/allow_methods/allow_headers`，**没有 `expose_headers`** ⇒ 只要前后端不同源，浏览器就不会把 `X-CDS-Output-Review` 交给 JS（`headers` 里根本没这个键）⇒ `parseReviewHeader(null)` 返回 `null` ⇒ 两处消费都不报警。后果：**内容已被后端脱敏（`:1966` 把 content 换成了 `redacted_output`），界面一声不响地当成“审查通过”**，正好踩在项目铁律（模拟/降级必须披露）上。同源的部署（`vite.config.ts:14-20` 的 dev proxy、nginx 同域）看不出来，所以这是一个“测试环境永绿、换拓扑就静默”的坑。
 修法要两端各一半：（1）后端 `expose_headers=["X-CDS-Output-Review", "Content-Disposition"]`；（2）前端把 `review === null` 当成**要显式告知的第三态**（“未能读取审查披露”），不能拿“没报警”当“安全”。
 
-### A295 开发者落地页钉在旧 `/home`，而且测试把这个陈旧值当断言（low，属“假绿”家族）
+### A295 开发者落地页钉在旧 `/home`，而且测试把这个陈旧值当断言（low，属“假绿”家族） ✅已修复（2026-10-30）：波次1 lane-c 已修（homeLandingPath→/，静态门扫字面量）
 `utils/workspace.ts:65 homeLandingPath` 返回 `'/home'`，而 `:15` 自己的注释写明“旧开发者首页 /home 已改为重定向到 '/'（SS-18）”，`App.tsx:107` 就是 `<Route path="home" element={<Navigate to="/" replace />} />` ⇒ 开发者登录要多走一跳重定向。真正要记的是第二层：**`utils/__tests__/workspace.test.ts:83 expect(homeLandingPath(UserRole.DATA_PROVIDER, null)).toBe('/home')`** —— 测试钉住的是已被推翻的行为，改实现一定红，红会被误读成“改坏了”。同文件 `:49 isWorkspaceHome` 的 `pathname === '/home'` 也是同一次变更留下的死分支。
 
-### A296 两个文件的其余条目（合并成一条，不刷编号）
+### A296 两个文件的其余条目（合并成一条，不刷编号） ✅已修复（2026-10-30）：波次2 lane-c（workspace 字面量收口+prune 区分+groupKey 传递+list clamp+真 Error 子类+模板走 p()）
 - `resolveWorkspace` 只拦 `stored === 'admin'` 越权，不校验 `stored` 是否为合法枚举值（M-195，low）。
 - 菜单树的 keyless 三连（M-196/197/317，low）：`!Array.isArray(node.children)` 对“children 是非数组真值”的历史数据会当叶子保留；无 key 的分组重建后 `key` 仍为 `undefined`（antd SubMenu 展不开）；`collectLeafRoutes` 又用 `String(item.key ?? '')` 把它坐实成**空串** groupKey，调用方常见的 `if (groupKey)` 判不到。当前菜单常量都带 key ⇒ 潜伏，但三处应该一起收。
 - `sandboxApi.ts:… 'pending' | 'running' | 'succeeded' | 'failed' | string`（M-301，low-medium）：`| string` 让整个联合退化成 `string`，`op.status === 'succeded'` 这种拼错不会报错 —— 要的是去掉 `| string` 或改成 `(string & {})`。
@@ -2179,7 +2179,7 @@ M-168“所有 409 都被当成输出审查阻断”**在当前调用路径上�
 ### A299 `Spin tip` 在 antd v5 独立用法下不渲染 ⇒ 加载文案从来没出现过（low）
 `components/Feedback/QueryFeedback.tsx` 的 `CenteredLoading` 写 `<Spin tip={tip} size="large" …/>`，而 `cds-frontend/package.json:22` 锁的是 `"antd": "^5.29.3"`：v5 的 `Spin.tip` 只在 nest（包裹 children）/fullscreen 模式下渲染，独立使用不输出文案（并在控制台告警）。修法：改成包裹一个空容器，或自己渲染一行文案。
 
-### A300 `mode` / `reason` 是死字段，而后端把“为什么是控制面档”已经算好了（low）
+### A300 `mode` / `reason` 是死字段，而后端把“为什么是控制面档”已经算好了（low） ✅已修复（2026-10-30）：波次1 后端已带 mode/reason/note；波次2 lane-c 横幅按 mode 出话术，矛盾形状两事实并陈，未知档位照实「未记录」；钉 4
 横幅接口返回 `{enabled, mode, reason, note}`：`capability_matrix.py:320 enabled = bool(get_settings().CUBE_DATAPLANE_ENABLED)`、`:324 "reason": None if enabled else "dataplane_disabled"`。前端的 `DataplaneStatus` 声明了 `mode` 与 `reason` 却**从未读取**，`message` 把“当前部署为控制面档：沙箱执行不可用”硬编码在前端。后端已经把原因送到手边，接上就能把“为什么”说准确（也能挡住以后新增的 mode 取值）。
 
 ### 本批归并 / 降级 / 未验条
@@ -2229,13 +2229,13 @@ M-168“所有 409 都被当成输出审查阻断”**在当前调用路径上�
 ### A309 `masking_applied` 无条件为 true ⇒ 脱敏预览弹窗在说谎（critical-honesty，**后端**）
 `app/api/data_resources.py:373` 无条件返回 `"masking_applied": True`；`_desensitize_csv`（`app/services/test_data_generator.py:199-215`）只掩码 sensitivity∈{pii,sensitive,high} 的列，而上传推断 schema 每列都是 `"sensitivity": "unknown"`（`data_resources.py:55`）⇒ 普通 CSV 实际未脱敏，`DesensitizedPreviewModal.tsx:56-58` 却告诉数商「PII 字段已按策略掩码」。失败测试应写在后端（无 pii 列 ⇒ `masking_applied is False`）。
 
-### A310 `GET /data-resources/` 无分页，前端每页全量下载再 `slice`（low）
+### A310 `GET /data-resources/` 无分页，前端每页全量下载再 `slice`（low） ✅已修复（2026-10-30）：波次前已修（paginated=true 信封 SQL 侧 LIMIT/OFFSET，钉 test_data_resources_masking）——波次2 lane-b 复验
 `app/api/data_resources.py:222-231` 无分页；`dataResourceApi.ts:35` + `DataPipeline.tsx:41`/`ProductCreate.tsx:37` 为拿 count 也付全量（含 `schema_fields`）。
 
-### A311 上传走全局 30s 超时而后端上限 500MB（low）
+### A311 上传走全局 30s 超时而后端上限 500MB（low） ✅已修复（2026-10-30）：波次2 lane-c（UPLOAD_TIMEOUT_MS=300s 常量文件绕 mock 墙，两处上传都接）
 `api.ts:6` 全局 `timeout: 30000`；`data_resources.py:20,151` 上限 500MB；`flow.ts:1477-1553` 已有逐调用放宽超时先例并被 `flow.test.ts:114-115` 钉住，`dataResourceApi.ts:45` 漏了。
 
-### A312 删除接口有响应体但声明 `Promise<void>`，UI 无条件报「删除成功」（low）
+### A312 删除接口有响应体但声明 `Promise<void>`，UI 无条件报「删除成功」（low） ✅已修复（2026-10-30）：波次前已修（响应体如实 storage_deleted/key_destroyed+FE 分支告警）——波次2 lane-c 复核确认不重复加针
 后端返 `{deleted, resource_id, storage_deleted}`（`data_resources.py:294`），`storage_service.py:247-258` 确实会返 `False`（KMS 销毁还被 `except: pass` 吞），而 `ResourceList.tsx:40` 无条件 `message.success('删除成功')`。
 
 ### A313 连接器列表在前端被截到 100 条且游标丢失（medium）
@@ -2324,6 +2324,13 @@ M-168“所有 409 都被当成输出审查阻断”**在当前调用路径上�
 - **模拟路径不是缺陷**：`tee_simulator`/`gpu_tee_runtime`/firecracker sim/`test_data_generator` 按项目铁律属有意特性，一律不按缺陷报；本轮的修向是把「不可用/未验证/未掩码」如实披露，而不是取消模拟。
 
 ## D. 修复状态（2026-10-18 修复轮 · 本机 3.12 `.venv-gate` 口径）
+
+### D 波次补记 · 2026-10-30（波次 1/2，八车道两轮）
+
+已修（本机收口读数见 ci/known-failures.md 2026-10-30 两行）：
+已修：A67 A170 A173 A215 A218 A207 A217 A174 A105 A106 A127 A132 A133 A144 A149 A194 A227 A230 A236 A237 A238 A239 A240 A247 A251 A253 A254 A263 A269 A273 A292 A293 A295 A296 A300 A310 A311 A312 A271
+
+仍开着（下轮修，别当已修）：A168（api_endpoint 计数行锁，A170 的姊妹半项）
 
 判据：只修**本机可验证**的（每组「改前红 / 改后绿」双读数都在盘上日志里）；拿不出本地读数的回退或降级为「待部署验收」。逐组明细见 `ocr-fixes.md`，映射与门读数见 `fix-order.md` 末节。
 

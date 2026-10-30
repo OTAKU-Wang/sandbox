@@ -12,6 +12,7 @@ Fix per ledger: move `readme` up into `[project]`.
 These assertions are pure TOML reads (tomllib), no build backend is invoked —
 the ledger itself refuses to claim "the build fails", so neither do we.
 """
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,22 @@ PYPROJECT = SDK_DIR / "pyproject.toml"
 def _project() -> dict[str, Any]:
     with PYPROJECT.open("rb") as fh:
         return tomllib.load(fh)["project"]
+
+
+def _requirement(req: str) -> tuple[str, set[tuple[str, str]]]:
+    """(name, {(op, version), …})——纯 stdlib PEP 508 解析，只覆盖 name>=x,<y 形状。"""
+    m = re.fullmatch(
+        r"([A-Za-z0-9._-]+)\s*"
+        r"((?:>=|<=|==|~=|!=|>|<)\s*[\w.+-]+"
+        r"(?:\s*,\s*(?:>=|<=|==|~=|!=|>|<)\s*[\w.+-]+)*)",
+        req.strip(),
+    )
+    assert m, f"unparsable requirement: {req!r}"
+    clauses = set()
+    for part in m.group(2).split(","):
+        op, ver = re.match(r"\s*(>=|<=|==|~=|!=|>|<)\s*([\w.+-]+)\s*$", part).groups()
+        clauses.add((op, ver))
+    return m.group(1), clauses
 
 
 def test_readme_is_project_metadata_not_an_extra():
@@ -49,7 +66,23 @@ def test_every_extra_value_is_a_requirement_array():
 
 
 def test_stream_extra_is_the_only_extra_and_keeps_its_requirement():
-    assert _project().get("optional-dependencies") == {"stream": ["websocket-client>=1.6"]}
+    """stream 是唯一 extra，websocket-client 在场且是**有界区间**（A207 口径）。
+
+    A154 本体（extras 必须是需求数组、readme 不是 extra）+ A207 策略（上限）并存。
+    预期从 pyproject 现值派生——旧针钉死字面量 ``websocket-client>=1.6``，
+    A207 加上限后自爆；字面量不再进针，但「无上限回潮」依旧当场红。
+    """
+    extras = _project().get("optional-dependencies")
+    assert extras is not None and set(extras) == {"stream"}, f"stream 应是唯一 extra：{extras!r}"
+    reqs = extras["stream"]
+    assert len(reqs) == 1, f"stream extra 应恰好声明一个依赖：{reqs!r}"
+    name, clauses = _requirement(reqs[0])
+    assert name.lower().replace("_", "-") == "websocket-client", f"stream 依赖易主：{reqs[0]!r}"
+    assert any(op in (">=", ">", "==", "~=") for op, _ in clauses), f"websocket-client 缺下限：{reqs[0]!r}"
+    assert any(op in ("<", "<=") for op, _ in clauses), (
+        f"A207：websocket-client 必须带上限（挡住 2.x 破坏性变更），"
+        f"现值 {reqs[0]!r} 无上限——无上限依赖不许回 package"
+    )
 
 
 def test_readme_file_actually_ships():

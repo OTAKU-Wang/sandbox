@@ -1,0 +1,124 @@
+{{- if .Values.minio.enabled }}
+# P6（2026-10-30）chart 补齐的 MinIO 模板，结构对齐 k8s/minio.yaml（k3s 路径）。
+# 默认不渲染（minio.enabled=false，存量安装继续用外置 MinIO）；开启方式见
+# values.yaml minio 段注释。凭据不落本文件：走 existingSecret 的
+# MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 两键——故意不加 optional：缺键时
+# Pod 卡在 CreateContainerConfigError 而不是无凭据裸奔（fail-closed）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cds.fullname" . }}-minio
+  labels:
+    {{- include "cds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size | quote }}
+  # 同 pvc.yaml 纪律：留空不渲染（空串 = "no StorageClass"，禁掉动态供给）。
+  {{- if .Values.minio.persistence.storageClass }}
+  storageClassName: {{ .Values.minio.persistence.storageClass | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cds.fullname" . }}-minio
+  labels:
+    {{- include "cds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  replicas: 1
+  # PVC 单例（RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating，
+  # 与 k8s/minio.yaml 同款 Recreate 纪律。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cds.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "cds.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+        - name: minio
+          # 升级归属见 values.yaml minio.image 注释：与 compose/k8s/脚本同 tag，
+          # 发布流程人工评审、七副本一把同升。
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.minio.service.port }}
+              name: api
+            - containerPort: {{ .Values.minio.service.consolePort }}
+              name: console
+          command:
+            - minio
+            - server
+            - /data
+            - --console-address
+            - ":{{ .Values.minio.service.consolePort }}"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: MINIO_ROOT_PASSWORD
+          volumeMounts:
+            - name: miniodata
+              mountPath: /data
+          # minio/minio 镜像没有 mc 二进制；/minio/health/live 是镜像自带的
+          # 免凭据存活/就绪端点（与 k8s/minio.yaml 同一教训）。
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: {{ .Values.minio.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: {{ .Values.minio.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+      volumes:
+        - name: miniodata
+          persistentVolumeClaim:
+            claimName: {{ include "cds.fullname" . }}-minio
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cds.fullname" . }}-minio
+  labels:
+    {{- include "cds.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.minio.service.port }}
+      targetPort: api
+      protocol: TCP
+      name: api
+    - port: {{ .Values.minio.service.consolePort }}
+      targetPort: console
+      protocol: TCP
+      name: console
+  selector:
+    app.kubernetes.io/name: {{ include "cds.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: minio
+{{- end }}

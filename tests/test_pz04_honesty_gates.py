@@ -305,3 +305,62 @@ def test_firecracker_qemu_serial_seccomp_retry_allowed(monkeypatch, tmp_path):
     result = runtime._execute_via_qemu_serial(vm, "print(1)", "python")
     assert len(calls) == 2
     assert "--seccomp" not in calls[1]
+
+
+# ─────────── A132 GPU-TEE 双胞胎：模拟器披露 + auto 拒绝（2026-10-30）────────
+
+@pytest.mark.asyncio
+async def test_gpu_simulator_attestation_discloses_simulation():
+    """MR-A12 只修了 stub；双胞胎 simulator 的 attest() 同族缺陷（走 dataclass
+    默认值 is_simulation=False = 冒充真 GPU-TEE）A132 起必须与 stub 同口径。"""
+    from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+    report = await GPUTeeSimulator().attest()
+    assert report.is_simulation is True
+    assert report.tee_backend == "cpu_simulation"
+
+
+def test_gpu_simulator_source_pins_is_simulation_on_every_artifact():
+    """结构针（源码级，与 inspect.getsource 系列同风格）：模拟器文件里所有共享
+    产物 dataclass（默认 False=真硬件语义）的构造必须显式带 is_simulation=True。
+    少一处，CPU 哈希就重新冒充真证明/真训练。"""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "app" / "services" / "gpu_tee_simulator.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    risky = {"GPUAttestationReport", "SecureAllocation", "ComputeJob", "GPUMetrics", "EpochMetrics"}
+    constructions = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in risky
+    ]
+    assert len(constructions) >= 5
+    for node in constructions:
+        kw = {k.arg: k.value for k in node.keywords}
+        assert "is_simulation" in kw, f"line {node.lineno}: {node.func.id} 缺 is_simulation"
+        assert isinstance(kw["is_simulation"], ast.Constant) and kw["is_simulation"].value is True
+
+
+def test_gpu_tee_auto_refuses_silent_fallback(monkeypatch):
+    """SS-13 铁律的 GPU-TEE 分支：真实 CC 运行时不存在 + 未显式开模拟 → auto 必须
+    400 RUNTIME_UNAVAILABLE 响亮拒绝，绝不静默降级到模拟运行时。"""
+    from app.core.errors import CDSError
+    from app.services.gpu_tee_runtime import GPUTeeRuntimeFactory
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "GPU_TEE_SIMULATION", False)
+    with pytest.raises(CDSError) as ei:
+        GPUTeeRuntimeFactory.create("auto")
+    assert ei.value.code == "RUNTIME_UNAVAILABLE"
+    assert ei.value.http_status == 400
+
+
+def test_gpu_tee_channel_key_label_honest_about_sm4():
+    """③标签改实：SM4Cipher 是 AES-256-GCM 替身且密钥 32 字节——SM4 真密钥
+    128-bit，「SM4-GCM + 32B」双重不实标签不许复活（同 A121 DEK 长度门族）。"""
+    from app.services.gpu_tee_simulator import GPUTeeSimulator
+
+    ch = GPUTeeSimulator().create_secure_channel()
+    assert ch.algorithm != "SM4-GCM"
+    assert ch.algorithm.startswith("AES-256-GCM")
+    assert len(ch.key) == 32

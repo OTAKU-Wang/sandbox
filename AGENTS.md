@@ -17,7 +17,7 @@ sandbox/
 │   └── tongsuo-build/  # second vendored Tongsuo — DO NOT EDIT
 ├── deploy/             # NEW: cube-node host bring-up + e2e-remote / local deploy harnesses
 ├── sdk/                # cds_sdk, standalone sync httpx REST client (/api/v1)
-├── alembic/            # migrations, single LINEAR chain 0000→0032, additive-only
+├── alembic/            # migrations, single LINEAR chain 0000→0033, additive-only
 ├── tests/              # 211 .py / 208 collected modules, 45.7k LOC; two-tier CI (gate + informational)
 ├── k8s/                # k3s manifest deploy path (deploy.sh, NodePort 30080/30081)
 ├── helm/               # cds chart (helm/cds), production path (ns cds-system)
@@ -62,7 +62,7 @@ No LSP index exists in this workspace; entries come from the writer digests and 
 | get_settings() | factory | app/core/config.py | backend-wide | lru_cached; tests must cache_clear |
 | SM4Cipher | class | app/utils/crypto.py | 37 importers | AES-256-GCM labeled SM4 in dev/test |
 | pinned_cube_version() | fn | app/services/cube_runtime_adapter.py | cube tests | reads `app/_stubs/cube/_VERSION.json` (9b75d339 / go-sdk-v0.7.3) |
-| CDSClient / CDSError / CDSApiError | exports | sdk/cds_sdk/client.py | all SDK consumers | `__all__`; retries only 429/503 via Retry-After — 410 SESSION_TERMINATED is terminal and deliberately NOT retried (W2); v0.3.0 adds the SS-15 flow surface (40 ops) |
+| CDSClient / CDSError / CDSApiError | exports | sdk/cds_sdk/client.py | all SDK consumers | `__all__`; retries only 429/503 honoring Retry-After (clamped to [0,60]s, missing/absurd -> 1.0s, A173-era fix 2026-10-30) — 410 SESSION_TERMINATED is terminal and deliberately NOT retried (W2); v0.3.0 adds the SS-15 flow surface (40 ops) |
 | mpc_service | service | app/services/ | API | Shamir key custodianship, NOT MPC computation |
 | flowApi / flowKeys | module | cds-frontend/src/services/flow.ts | 21 pages | SS-15 flow surface, ~35 hooks |
 | k8sOpsApi | module | cds-frontend/src/services/ | pages | the one axios deviation |
@@ -70,7 +70,7 @@ No LSP index exists in this workspace; entries come from the writer digests and 
 ## CONVENTIONS
 - Env config: pydantic BaseSettings, `env_prefix="CDS_"`, `.env`; `get_settings()` is lru_cached — tests must `cache_clear`, but prod-mode tests instead monkeypatch the cached `Settings` and `delenv` TESTING/PYTEST_CURRENT_TEST (only test_k8s_n7.py uses cache_clear).
 - API errors follow the W2 contract {code, message, detail, request_id}; `SESSION_TERMINATED`=410 must stop client retries (consumed by cds_sdk).
-- Alembic chain is linear and additive-only (0000→0032; 0019–0021 SS-15, 0022–0026 SS-18/19, 0027–0031 the OCR-review round, 0032 refresh sessions): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
+- Alembic chain is linear and additive-only (0000→0033; 0019–0021 SS-15, 0022–0026 SS-18/19, 0027–0031 the OCR-review round, 0032 refresh sessions, 0033 webhook index convergence): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
 - `tests/conftest.py` (472 L) pins 12 env vars via `os.environ.setdefault` BEFORE importing app.main; never import the app ahead of conftest.
 - KMS wire fields are a cross-language contract: `app/schemas/kms.py` and `cds-volume-plugin/kms.go` must move together (test_kms_volume_keys.py pins the Go field names).
 - Mixed Chinese/English docstrings, user-facing strings, and requirements.txt comments (国密) — keep the mix.
@@ -132,11 +132,11 @@ bash deploy/cube-node/preflight.sh  # then install.sh, then verify.sh --json (ex
 - Prod compose knowingly ships software-simulation switches TRUE until real-hardware acceptance; the FG gate series now runs to FG-017 (Cube node bring-up); registry = docs/mock-remediation-plan.md (MR-A1..A15).
 - Sandbox guest path contract has ONE source of truth: `GUEST_DATA_DIR=/sandbox/data` (readonly declaration), `GUEST_OUTPUT_DIR=/sandbox/output` (the only harvested dir), `GUEST_WORK_DIR=/scratch` (compat-harvested), `GUEST_EXEC_DIR=/results/.cds-exec` (never harvested) in `app/services/cube_runtime_adapter.py`. Declared volumes do not reach the guest on cold start (data is injected over the exec channel), so "readonly" means declaration + harvest exclusion, NOT hypervisor enforcement — never claim stronger. Changing a path must also re-pin the literal mount assertions in `tests/test_cube_runtime_adapter.py`.
 - Stale docs to distrust: the gate-tier file list is parsed LIVE from ci.yml (`.gate-scratch/final_lane.sh` prints `GATE_FILES`) — never quote a hardcoded count in docs; the SDK version is single-sourced from `sdk/pyproject.toml` `[project].version` (A78, 2026-10-20 — the old `__init__.py` 0.2.0 drift is closed and a test forbids a literal `__version__ = "` from returning; specs/ has no ss-14 file (SS-14 = the remote-e2e round, docs/e2e-2026-10-13-remote/); docs naming a frontend `rag` service are dead.
-- k8s/deploy.sh applies 10 of 14 manifests — kafka.yaml / debezium.yaml (CDC) are manual. The helm chart has no MinIO template, and `minio/minio:latest` is unpinned in compose/k8s.
+- k8s/deploy.sh applies 10 of 14 manifests — kafka.yaml / debezium.yaml (CDC) are deliberately manual (deploy.sh header + k8s/README carry the apply commands; a machine gate forbids re-adding them to the apply set). MinIO is pinned `RELEASE.2025-01-20T14-49-07Z` across all six copies and the helm chart gained an optional `minio.enabled` template (default false; existing installs keep external MinIO).
 - contracts/AuditRegistry.sol 访问控制已于 2026-10-20 修复（A195）：`owner` + `authorizedAnchors` + `onlyAnchorer` 修饰符，事件事带 `anchorer`；旧函数名 `anchorRoot` 已不存在，现在的是 `anchorAudit`/`verifyAudit`/`anchoredBy`/`verifyAuditBy`/`setAuthorizedAnchor`。真链 revert 行为仍 HARDWARE-GATED（本机无 solc/web3），门禁是源码级结构断言。
-- Known infra drift: postgres user `cds` vs `cds_admin`; `CDS_LOG_JSON` true (prod compose) vs "false" (helm); 8-col vs 40-col audit_events init SQL.
-- Committed dev artifacts: k8s/secrets.yaml (DEV-ONLY credentials — rotate in any real environment) and logs/cds-egress/access.jsonl (30 real session records).
+- Infra drift CLOSED 2026-10-30 (gated): postgres user single-sourced to `cds` (dev volumes: `ALTER USER cds_admin RENAME TO cds` note in postgres.yaml); `CDS_LOG_JSON` prod posture pinned "true" across compose/k8s/helm/remote_deploy (test_deploy_manifest_gates PROD_POSTURE); 8-col ClickHouse copy was already fixed 10-18. k8s/secrets.yaml is now a <REPLACE_ME> template (real values must never re-enter git — a gate reds on the old literals).
+- Committed dev artifacts: k8s/secrets.yaml is now a placeholder template (2026-10-30) but git HISTORY still contains the old DEV literals — rotate anywhere ever deployed from this branch; history rewrite = lead decision. logs/cds-egress/access.jsonl is git-ignored and was one-way masked (session_id v5) on 2026-10-30.
 - tests/test_e2e_full_lifecycle.py is permanently ignored in CI (hits a real cluster); dev/test DBs bootstrapped by create_all get `alembic stamp head`.
 - Duplication: root product-design.md + CDS-product-design.md are parallel v1.0 product-design docs; docs/implementation-tasks.md / -v2.md / merged-task-plan.md are historical trackers, not live plans; 基础版数据沙箱原型/ (+ .zip) is the external prototype baseline, superseded by specs/prototype-v3.html.
 - tests/e2e_full_test.py is never collected (name misses `test_*.py`); nothing imports test modules — tests/ is a leaf, and it is the only automated gate on cds-volume-plugin/ and deploy/cube-node/ code.
-- Janitor runs dry-run until compliance review (docs/retention.md).
+- Janitor: real-delete mode LANDED 2026-10-30 behind a hardcoded whitelist (alert_records / session_workspace_residue / dev_debug_artifacts only); audit_logs, merkle_leaves, delivery_bundles, data_resources are refused at code level regardless of config. Still OFF in every deploy copy (`CDS_JANITOR_ENABLED="false"`, gated) until the retention.md compliance review signs off.

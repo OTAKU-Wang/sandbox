@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
+import { normalizeRequestPath } from './pathSegment';
 
+// 上传类请求不吃下面这个 30s：口径见 services/timeouts.ts 的 UPLOAD_TIMEOUT_MS（A311）。
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 30000,
@@ -11,6 +13,13 @@ api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // A273 类级收口：路径段该编码的补编码（幂等，已编码的 %XX 不二次编码）；
+  // 中间出现空段（= 某个 id 到手是空串）当场报错，而不是让 `/a//b` 打到别的路由上。
+  // 台账里 112 处 `/resource/${id}` 是仓内约定不是缺陷，所以这一处收口 + services/p()
+  // 才是现实的修法；用户可控的 8 处已由 A246 单点收口（services/__tests__/pathSegments.a246.test.ts）。
+  if (typeof config.url === 'string' && config.url.length > 0) {
+    config.url = normalizeRequestPath(config.url);
   }
   // 实例默认头里的 application/json 会顶掉浏览器为 multipart 自动生成的 boundary，
   // FastAPI 解不出 file 部件 → 上传实测 422（数据上传那一屏因此走不完）。

@@ -75,6 +75,23 @@ spec:
                 secretKeyRef:
                   name: cds-secrets
                   key: CDS_JWT_SECRET_KEY
+            # P6（2026-10-30）：boot 门位强制密钥正式接线（此前只"记在注释里"）。
+            # 列级 DEK 与 MFA TOTP 种子主密钥在 prod 姿态被 validate_security_config
+            # 硬性要求非空（空值拒绝启动）；密钥不进 ConfigMap，只走 cds-secrets。
+            # optional: true 让缺键落在 boot 的可读拒启错误上，而不是 Pod 直接
+            # CreateContainerConfigError（secrets.yaml 模板已含这两键占位）。
+            - name: CDS_COLUMN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: CDS_COLUMN_ENCRYPTION_KEY
+                  optional: true
+            - name: CDS_MFA_SECRET_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: CDS_MFA_SECRET_ENCRYPTION_KEY
+                  optional: true
           envFrom:
             # A302: 生产启动姿态（validate_security_config 的四个 boot gate）集中在
             # ConfigMap，保证 k8s 与 prod compose / helm values / remote_deploy.sh 不漂移。
@@ -215,7 +232,8 @@ spec:
 # 遗留要求（同一个 boot gate 集，不属于本门但是真约束）：生产姿态还要求
 # cds-secrets 里提供 CDS_COLUMN_ENCRYPTION_KEY（16 字节，`openssl rand -hex 16`）
 # 与 CDS_MFA_SECRET_ENCRYPTION_KEY；两者为空时 validate_security_config 仍然拒绝
-# 启动 —— 密钥不能进 ConfigMap，所以只能记在这里。
+# 启动 —— 密钥不能进 ConfigMap。2026-10-30 P6 起这两键已经在本文件 cds-api 的
+# env 里以 secretKeyRef 正式接线（见上方注释），secrets.yaml 模板含占位。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -225,6 +243,9 @@ metadata:
     app: cds-api
 data:
   CDS_DEBUG: "false"
+  # P6 漂移收敛（2026-10-30）：CDS_LOG_JSON 单一真值源 = 生产姿态 "true"，
+  # 与 docker-compose.prod.yml / helm values / remote_deploy.sh 同值（PROD_POSTURE 门钉）。
+  CDS_LOG_JSON: "true"
   CDS_SECCOMP_FALLBACK_ALLOWED: "false"
   CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
   CDS_SM3_FALLBACK_ALLOWED: "false"

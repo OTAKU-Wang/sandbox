@@ -6,10 +6,18 @@ Enforces cross-space data access policies:
 3. Operation Whitelist — only approved operations allowed per trust
 4. DP Budget Check — cross-space queries consume DP budget
 
-Policy rules are evaluated in order; first matching rule wins.
+Decision pipeline (A149: the old docstring promised "rules evaluated in order;
+first matching rule wins" — rules were in fact never consulted for the decision
+itself). Now: trust exists/active/unexpired → trust operation allowlist →
+operation registered in OPERATION_TRUST_MAP (unknown = DENY, default-deny like
+policies/system.rego) → trust level ≥ max(map floor, binding rule floor) →
+sandbox level ≥ binding rule floor → DP budget (rule-declared or caller-supplied).
+The binding rule for an operation is the highest-priority rule whose
+allowed_operations contain it (higher priority number wins; ties by rule_id).
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 
 from app.services.federation_connector import (
@@ -23,6 +31,10 @@ logger = logging.getLogger(__name__)
 class PolicyAction(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
+    # A149: reserved — no evaluate() path produces it today. Wiring an
+    # audit-only "allow with disclosure" tier is a decision for the wiring owner.
+    # TODO(A149): define which rule tier (if any) maps to log_and_allow before this
+    # module is connected to a live path.
     LOG_AND_ALLOW = "log_and_allow"
 
 
@@ -33,6 +45,10 @@ class PolicyReason(str, Enum):
     DP_BUDGET_EXHAUSTED = "dp_budget_exhausted"
     TRUST_SUSPENDED = "trust_suspended"
     NO_TRUST = "no_trust"
+    # A149（additive）：过期信托与「规则要求预算但调用方没给」此前都无脸可现——
+    # 前者根本没有检查（照常 ALLOW），后者是 dead field。
+    TRUST_EXPIRED = "trust_expired"
+    DP_BUDGET_REQUIRED = "dp_budget_required"
     ALLOWED = "allowed"
 
 
@@ -57,11 +73,15 @@ class CrossSpacePolicyRule:
 
 
 # Minimum trust level per operation category
+# A149/P1: `export_result` is whitelisted by the verified-data rule but was absent
+# here, so map.get(op, BASIC) let BASIC trust export results from an L2 sandbox —
+# the VERIFIED gate was bypassable by name omission alone.
 OPERATION_TRUST_MAP: dict[str, TrustLevel] = {
     "read_catalog": TrustLevel.BASIC,
     "search": TrustLevel.BASIC,
     "verify_audit": TrustLevel.BASIC,
     "read_data": TrustLevel.VERIFIED,
+    "export_result": TrustLevel.VERIFIED,
     "write_data": TrustLevel.FULL,
     "train_model": TrustLevel.FULL,
 }
@@ -147,6 +167,19 @@ class CrossSpacePolicyEngine:
                 message=f"Trust is {trust.status.value}",
             )
 
+        # A149/P5: expires_at was declared and persisted but never compared —
+        # an expired trust kept authorizing as if active.
+        if trust.expires_at is not None:
+            expires = trust.expires_at if trust.expires_at.tzinfo else \
+                trust.expires_at.replace(tzinfo=timezone.utc)
+            if expires < datetime.now(timezone.utc):
+                return PolicyDecision(
+                    action=PolicyAction.DENY,
+                    reason=PolicyReason.TRUST_EXPIRED,
+                    message=f"Trust expired at {expires.isoformat()}",
+                    details={"expired_at": expires.isoformat()},
+                )
+
         # Check operation is in trust's allowed list
         if operation not in trust.allowed_operations:
             return PolicyDecision(
@@ -155,23 +188,72 @@ class CrossSpacePolicyEngine:
                 message=f"Operation '{operation}' not in trust allowlist",
             )
 
-        # Check trust level for operation
-        required_trust = OPERATION_TRUST_MAP.get(operation, TrustLevel.BASIC)
+        # A149/P2: unregistered operations used to fall through map.get(op, BASIC)
+        # — a name the engine has never heard of silently got the *lowest* bar.
+        # Default-deny: an operation must be registered in OPERATION_TRUST_MAP.
+        required_trust = OPERATION_TRUST_MAP.get(operation)
+        if required_trust is None:
+            return PolicyDecision(
+                action=PolicyAction.DENY,
+                reason=PolicyReason.OPERATION_NOT_ALLOWED,
+                message=(
+                    f"Operation '{operation}' is not registered in OPERATION_TRUST_MAP — "
+                    "refused fail-closed (A149)"
+                ),
+            )
+
+        # A149/P6: deterministic binding rule — highest priority wins, ties by
+        # rule_id, so decision outcomes never depend on registration order.
+        binding = self._binding_rule(operation)
+
+        # A149/P3: the binding rule's min_trust_level is a real floor now (it was
+        # a dead field), combined with the map requirement via max().
         trust_order = {TrustLevel.NONE: 0, TrustLevel.BASIC: 1, TrustLevel.VERIFIED: 2, TrustLevel.FULL: 3}
-        if trust_order.get(trust.trust_level, 0) < trust_order.get(required_trust, 0):
+        effective_required = required_trust
+        if binding is not None and trust_order[binding.min_trust_level] > trust_order[effective_required]:
+            effective_required = binding.min_trust_level
+        if trust_order.get(trust.trust_level, 0) < trust_order.get(effective_required, 0):
             return PolicyDecision(
                 action=PolicyAction.DENY,
                 reason=PolicyReason.TRUST_LEVEL_INSUFFICIENT,
-                message=f"Operation '{operation}' requires {required_trust.value} trust, have {trust.trust_level.value}",
+                message=f"Operation '{operation}' requires {effective_required.value} trust, have {trust.trust_level.value}",
+                details=self._binding_details(binding),
             )
 
         # Check sandbox level
-        required_sandbox = self._get_min_sandbox_level(operation)
-        if SANDBOX_LEVEL_ORDER.get(sandbox_level, 0) < SANDBOX_LEVEL_ORDER.get(required_sandbox, 0):
+        required_sandbox = binding.min_sandbox_level if binding is not None else "L1"
+        # A149/P7: a typo'd rule level ("L9") used to resolve via get(..., 0) to
+        # "no threshold at all" — fail closed on unknown levels instead.
+        if required_sandbox not in SANDBOX_LEVEL_ORDER:
+            return PolicyDecision(
+                action=PolicyAction.DENY,
+                reason=PolicyReason.SANDBOX_LEVEL_INSUFFICIENT,
+                message=(
+                    f"Binding rule '{binding.rule_id}' declares unknown sandbox level "
+                    f"'{required_sandbox}' — refused fail-closed (A149)"
+                ),
+                details=self._binding_details(binding),
+            )
+        if SANDBOX_LEVEL_ORDER.get(sandbox_level, -1) < SANDBOX_LEVEL_ORDER[required_sandbox]:
             return PolicyDecision(
                 action=PolicyAction.DENY,
                 reason=PolicyReason.SANDBOX_LEVEL_INSUFFICIENT,
                 message=f"Operation '{operation}' requires {required_sandbox} sandbox, have {sandbox_level}",
+                details=self._binding_details(binding),
+            )
+
+        # A149/P4: require_dp_budget was a dead field. When the rule demands a
+        # budget and the caller supplies none, the pre-condition is unverifiable —
+        # refuse (DP_BUDGET_REQUIRED), don't silently skip the check.
+        if binding is not None and binding.require_dp_budget and dp_budget_remaining is None:
+            return PolicyDecision(
+                action=PolicyAction.DENY,
+                reason=PolicyReason.DP_BUDGET_REQUIRED,
+                message=(
+                    f"Rule '{binding.rule_id}' requires a DP budget but none was supplied "
+                    "— refused fail-closed (A149)"
+                ),
+                details=self._binding_details(binding),
             )
 
         # Check DP budget
@@ -180,25 +262,46 @@ class CrossSpacePolicyEngine:
                 action=PolicyAction.DENY,
                 reason=PolicyReason.DP_BUDGET_EXHAUSTED,
                 message="DP privacy budget exhausted",
+                details=self._binding_details(binding),
             )
 
+        # A149/P8: decisions are auditable — which rule bound, what it required.
+        details = self._binding_details(binding)
+        details.update({
+            "operation": operation,
+            "required_trust": effective_required.value,
+            "required_sandbox": required_sandbox,
+        })
         return PolicyDecision(
             action=PolicyAction.ALLOW,
             reason=PolicyReason.ALLOWED,
             message="Access granted",
+            details=details,
         )
 
-    def _get_min_sandbox_level(self, operation: str) -> str:
-        """Get minimum sandbox level for an operation."""
-        for rule in sorted(self._rules, key=lambda r: r.priority, reverse=True):
-            if operation in rule.allowed_operations:
-                return rule.min_sandbox_level
-        return "L1"
+    def _binding_rule(self, operation: str) -> CrossSpacePolicyRule | None:
+        """Highest-priority rule whose allowed_operations cover `operation` (A149/P6)."""
+        candidates = [r for r in self._rules if operation in r.allowed_operations]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda r: (r.priority, r.rule_id))
+
+    @staticmethod
+    def _binding_details(rule: CrossSpacePolicyRule | None) -> dict:
+        if rule is None:
+            return {"rule_id": None}
+        return {"rule_id": rule.rule_id, "rule_priority": rule.priority}
 
     def add_rule(self, rule: CrossSpacePolicyRule):
-        """Add a custom policy rule."""
+        """Add a custom policy rule.
+
+        A149/P6: stored sorted by (-priority, rule_id) — "higher number wins" is
+        now the single documented semantics everywhere (the old add_rule sorted
+        ascending while the lookup scanned descending). Binding itself resolves by
+        max(), so correctness never depends on list order; the sort is cosmetic.
+        """
         self._rules.append(rule)
-        self._rules.sort(key=lambda r: r.priority)
+        self._rules.sort(key=lambda r: (-r.priority, r.rule_id))
 
     def list_rules(self) -> list[CrossSpacePolicyRule]:
         """List all policy rules."""

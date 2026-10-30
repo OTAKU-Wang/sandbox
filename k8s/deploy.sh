@@ -1,6 +1,18 @@
 #!/bin/bash
 # CDS k3s Deployment Script
 # Usage: bash k8s/deploy.sh
+#
+# 有意手动（不是遗漏）：本脚本 apply 10 个清单，kafka.yaml / debezium.yaml
+# （CDC 链路：zookeeper + kafka + debezium-connect）**不**属于本脚本的 apply 集。
+# 理由：CDC 是 opt-in 特性——只有把 cds-secrets 里 CDS_CDC_KAFKA_BROKERS 指到
+# kafka:9092 时才有意义；默认拉起会白付 3 组 JVM（zoo/kafka/connect）的内存，
+# 且 debezium connector 配置属于部署方决策，不该被一条通用 deploy 替你拍板。
+# 需要 CDC 时按序手动 apply：
+#   $KUBECTL apply -f k8s/kafka.yaml      # zookeeper + kafka（先等 Ready）
+#   $KUBECTL apply -f k8s/debezium.yaml   # connect + connector 注册
+# 然后把 cds-secrets 的 CDS_CDC_KAFKA_BROKERS 设为 "kafka:9092" 并
+#   $KUBECTL rollout restart deploy/cds-api -n cds-system
+# 详见 k8s/README.md「CDC：有意手动」。
 
 set -euo pipefail
 

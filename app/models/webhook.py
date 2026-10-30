@@ -30,7 +30,11 @@ class WebhookSubscription(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    # A170: 本列的自动单列索引与上面 ix_webhook_subs_user_status 的最左前缀重复
+    # （0019 物化了两次，纯写放大）。复合索引覆盖单列查询，0033 已把旧库那一支
+    # drop 掉——index=True 必须同步摘除，否则 create_all 与 alembic 头在
+    # verify_schema_parity 下重新发散。
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("contracts.id"))
 
     name: Mapped[str] = mapped_column(String(128), nullable=False)

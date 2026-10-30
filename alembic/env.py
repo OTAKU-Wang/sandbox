@@ -39,7 +39,35 @@ config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"
 # ALEMBIC_COMPARE_TYPES=0 for its SQLite check (table/column/index drift is
 # still detected); real type comparison happens against PostgreSQL (W17
 # environment acceptance).
-COMPARE_TYPES = os.environ.get("ALEMBIC_COMPARE_TYPES", "1") == "1"
+#
+# A217: the old parse (`== "1"`) silently DISABLED type comparison for the
+# values people actually type — `true` / `yes` / `on` were all treated as
+# off, i.e. a mis-set flag quietly downgraded the gate. Explicit boolean
+# parsing now, and an unrecognized value FAILS LOUD (ValueError) instead of
+# silently picking a side: a typo must never turn into a silent false green.
+# Unset keeps the historical default: comparison ON.
+_COMPARE_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_COMPARE_FALSY = frozenset({"0", "false", "no", "off"})
+
+
+def _parse_compare_types(raw: str | None) -> bool:
+    """Parse ALEMBIC_COMPARE_TYPES into a bool; unrecognized values raise."""
+    if raw is None or not raw.strip():
+        return True
+    token = raw.strip().lower()
+    if token in _COMPARE_TRUTHY:
+        return True
+    if token in _COMPARE_FALSY:
+        return False
+    raise ValueError(
+        f"ALEMBIC_COMPARE_TYPES={raw!r} is not a recognized boolean; "
+        f"use one of {sorted(_COMPARE_TRUTHY)} (comparison ON), "
+        f"{sorted(_COMPARE_FALSY)} (comparison OFF), or leave it unset "
+        "(defaults ON) — refusing to guess (A217 fail-closed)"
+    )
+
+
+COMPARE_TYPES = _parse_compare_types(os.environ.get("ALEMBIC_COMPARE_TYPES"))
 
 
 def run_migrations_offline() -> None:

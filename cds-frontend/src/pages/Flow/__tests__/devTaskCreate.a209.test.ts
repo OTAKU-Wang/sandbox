@@ -72,7 +72,7 @@ function specificity(selector: string): [number, number, number] {
   const s = selector.replace(/>|\+|~/g, ' ');
   const ids = (s.match(/#[\w-]+/g) ?? []).length;
   const classes = (s.match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+(\([^)]*\))?/g) ?? []).length;
-  const elements = (s.match(/(^|[\s>+~])(?![*#.\[:])[\w-]+/g) ?? []).length;
+  const elements = (s.match(/(^|[\s>+~])(?![*#.[:]])[\w-]+/g) ?? []).length;
   return [ids, classes, elements];
 }
 

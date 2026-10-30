@@ -20,6 +20,7 @@ spec:
     spec:
       containers:
         - name: minio
+          # 钉版本纪律：永不用 :latest；升级归属 = 发布流程人工评审，七副本同 tag 同升
           image: minio/minio:RELEASE.2025-01-20T14-49-07Z
           imagePullPolicy: IfNotPresent
           ports:

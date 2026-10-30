@@ -35,10 +35,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SecureChannel:
-    """Simulated encrypted channel using SM4."""
-    key: bytes          # SM4 channel key (32 bytes)
-    algorithm: str = "SM4-GCM"
+    """Simulated encrypted channel."""
+    # A132 诚实改标：底层 SM4Cipher（app/utils/crypto.py）实为 AES-256-GCM 的
+    # dev/test 替身，且密钥是 32 字节 = 256-bit——真 SM4 密钥只有 128-bit，
+    # 「SM4 + 32 字节」双重不实，标签必须改实。
+    key: bytes          # 32-byte (256-bit) AES-256-GCM key — NOT a real SM4 key (SM4 = 128-bit)
+    algorithm: str = "AES-256-GCM (dev/test SM4 substitute)"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    is_simulation: bool = True  # A132: 本通道只由模拟器产出，永远是模拟
 
 
 @dataclass
@@ -61,8 +65,9 @@ class GPUTeeSimulator(GPUTeeRuntime):
     sandbox runtime) work identically -- just on CPU rather than GPU.
 
     Features:
-    - Simulated CC mode activation with attestation
-    - SM4-based encrypted channel (same as real GPU-TEE channel)
+    - Simulated CC mode activation with attestation (is_simulation=True on every report)
+    - AES-256-GCM encrypted channel — the dev/test SM4 substitute, NOT real GM crypto
+      (A132: real SM4 keys are 128-bit; this channel carries a 256-bit AES key)
     - CPU-based training loop with gradient clipping
     - DP-SGD noise injection support
     """
@@ -96,14 +101,15 @@ class GPUTeeSimulator(GPUTeeRuntime):
         return True
 
     def create_secure_channel(self) -> SecureChannel:
-        """Create a simulated encrypted channel using SM4.
+        """Create a simulated encrypted channel.
 
         Returns:
-            SecureChannel with a random SM4 key.
+            SecureChannel with a random 256-bit AES-GCM key（dev/test 的 SM4
+            替身——A132 改实：真 SM4 密钥是 128-bit，32 字节密钥不得标 SM4）。
         """
-        key = SM4Cipher().key  # 32-byte random key
-        logger.info("[GPUTeeSim] Secure channel created (SM4-GCM, simulation)")
-        return SecureChannel(key=key, algorithm="SM4-GCM")
+        key = SM4Cipher().key  # 32-byte random key (AES-256-GCM substitute, see utils/crypto)
+        logger.info("[GPUTeeSim] Secure channel created (AES-256-GCM dev/test SM4 substitute, simulation)")
+        return SecureChannel(key=key)
 
     def execute_training(
         self,
@@ -167,7 +173,13 @@ class GPUTeeSimulator(GPUTeeRuntime):
         return GPUTeeStatus.AVAILABLE
 
     async def attest(self) -> GPUAttestationReport:
-        """Perform simulated remote attestation."""
+        """Perform simulated remote attestation.
+
+        A132（PZ-04/MR-A12 的同族补漏）：模拟证明必须像 tee_simulator 的
+        AttestationReport 一样自带 is_simulation=True + tee_backend——此前该报告
+        走 dataclass 默认值 is_simulation=False，等于让 CPU 软件哈希冒充真
+        GPU-TEE 证明，违禁伪造铁律。
+        """
         report_id = str(uuid.uuid4())
         measurement = sm3_hash(f"{report_id}:simulator:{self._gpu_model}".encode())
         report = GPUAttestationReport(
@@ -177,6 +189,8 @@ class GPUTeeSimulator(GPUTeeRuntime):
             tee_enabled=True,
             measurement=measurement,
             valid=True,
+            is_simulation=True,
+            tee_backend="cpu_simulation",
         )
         self._attestation_report = report
         logger.info("[GPUTeeSim] Attestation report generated (simulation): %s", report_id[:8])
@@ -190,6 +204,7 @@ class GPUTeeSimulator(GPUTeeRuntime):
             size_bytes=size_bytes,
             encrypted=True,
             gpu_device=gpu_device,
+            is_simulation=True,  # A132: Python 堆记账，非真加密显存
         )
         self._allocations[alloc_id] = allocation
         self._memory_used += size_bytes
@@ -214,6 +229,7 @@ class GPUTeeSimulator(GPUTeeRuntime):
             gpu_device=gpu_device,
             started_at=datetime.now(timezone.utc),
             completed_at=datetime.now(timezone.utc),
+            is_simulation=True,  # A132: 即时完成，非真 GPU 作业
         )
         self._jobs[job_id] = job
         logger.info("[GPUTeeSim] Compute job %s completed (mode=%s, simulation)", job_id[:8], mode.value)
@@ -234,6 +250,7 @@ class GPUTeeSimulator(GPUTeeRuntime):
             utilization_pct=mem_used_pct * 100,
             temperature_c=35.0,  # Simulated: fixed temperature
             tee_active=self._cc_active,
+            is_simulation=True,  # A132: 软件记账指标，非硬件遥测
         )
 
     async def initialize_gpu_cc(self, session_id: str, config: GPUCCConfig | None = None) -> GPUHandle:
@@ -287,7 +304,7 @@ class GPUTeeSimulator(GPUTeeRuntime):
     ) -> EpochMetrics:
         """Run one training epoch on CPU (simulated GPU-TEE execution)."""
         start = time.monotonic()
-        metrics = EpochMetrics()
+        metrics = EpochMetrics(is_simulation=True)  # A132: CPU 模拟 loss，非真训练证据
 
         for batch in batches:
             # Encrypt and "send" to simulated GPU

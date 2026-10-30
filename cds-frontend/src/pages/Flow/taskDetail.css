@@ -59,7 +59,9 @@
 
 /* 三个按钮按图全部 h38（antd 默认 32），主按钮实心 #1b6ef3；按钮间隙按墨迹 24 */
 .cds-t24 .t24-head-actions .ant-btn {
-  height: 38px;
+  /* A234：38 是图上的量，但写死 `height` 时文案一变长（换英文、加图标）就是裁字而不是撑高；
+     真值说的是「至少这么高」。padding-inline 仍按帧宽定标保留。 */
+  min-height: 38px;
   font-size: 14px;
   /* 图主按钮帧 w123（x1269..1391）：内容 80（图标 14+隙 8+四字 60）+ 两侧 21 ⇒ 122，Δ1 */
   padding-inline: 21px;
@@ -267,8 +269,11 @@
 }
 
 /* A232：值大量是后端原样下发的长串（任务号、合约号、notebook 路径），原本两盒都没有
-   min-width/overflow/overflow-wrap ⇒ 长 token 不换行会直接溢出 #f7f8fa 盒外。 */
-.cds-t24 .t24-field-box {
+   min-width/overflow/overflow-wrap ⇒ 长 token 不换行会直接溢出 #f7f8fa 盒外。
+   A234：这九条与下面 `.t24-quota-box` 原本逐字重复两遍（同一只读盒的两种用法），
+   改一处必漏一处；合成一条，配额盒只补自己那条 `justify-content`。 */
+.cds-t24 .t24-field-box,
+.cds-t24 .t24-quota-box {
   display: flex;
   align-items: center;
   margin-top: 8px;
@@ -311,22 +316,10 @@
 }
 
 /* 配额按 1:1 裁读（2-4-contract-zone）：灰底只读盒 h42（同基本信息），值居左 14px，
-   右端白底描边 G 小片；旧「24px 大号数字」是缩放误读，已换只读盒。 */
+   右端白底描边 G 小片；旧「24px 大号数字」是缩放误读，已换只读盒。
+   形状与 .t24-field-box 同一条（见上），这里只多“值左/单位右”这一条。 */
 .cds-t24 .t24-quota-box {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
-  min-height: 42px;
-  min-width: 0;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  padding: 11px 10px;
-  background: var(--t24-box);
-  border-radius: 6px;
-  color: var(--t24-ink);
-  font-size: 14px;
-  line-height: 20px;
 }
 
 .cds-t24 .t24-quota-g {
@@ -391,14 +384,15 @@
 }
 
 /* 进度条按图：槽 x1080..1375（=面板内宽 296）y1016..1021（h6），槽底 #e3edfb，填充 #1b6ef3 */
+/* A234：这里原本有两套行高——`.ant-progress` 上写 6px、`.t24-mem-bar` 上写 8px，
+   而 TSX 把 `t24-mem-bar` 直接挂在 <Progress/> 根上（同一个元素两类齐飞），特异度 (0,3,1)
+   压过 (0,2,1) ⇒ 真正生效的是 6，注释里说好的「PNG 这块只有 8」是条死规则。
+   合成一条：外层行高按真值 8（包住 Progress 的 div 会继承 22 行高把 6px 槽撑成 22），
+   槽本身的高矮由下面 `.ant-progress-inner` 的 6px 管，两件事不再打架。 */
+.cds-t24 .t24-mem-bar,
 .cds-t24 .t24-mem-bar .ant-progress,
 .cds-t24 .t24-mem-bar.ant-progress {
   margin: 0;
-  line-height: 6px;
-}
-
-/* 包住 Progress 的 div 会继承 22 行高，把 6px 槽撑成 22（实测）；PNG 这块只有 8 */
-.cds-t24 .t24-mem-bar {
   line-height: 8px;
 }
 
@@ -492,6 +486,13 @@
 /* 卡内 Alert（未关联合约等诚实披露）比图多出来，收紧到与表同一内缩 */
 .cds-t24 .ant-alert {
   margin-top: 16px;
+}
+
+/* A234：`font-size: 13px` 原本挂在整条 `.cds-t24 .ant-alert` 上，等于给本页**将来任何**
+   Alert（含嵌在子组件里的）预设了 13px。改成只点名这两类现存的 Alert：卡内的、页头的
+   （弹窗里那条走 portal，本来就在 .cds-t24 之外）。渲染结果一字不变，作用域收回。 */
+.cds-t24 .t24-card .ant-alert,
+.cds-t24 > .ant-alert {
   font-size: 13px;
 }
 

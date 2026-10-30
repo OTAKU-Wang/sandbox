@@ -1,5 +1,6 @@
 import { Suspense, useEffect } from 'react';
 import { Layout } from 'antd';
+import { MenuUnfoldOutlined } from '@ant-design/icons';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import AppHeader from './Header';
@@ -39,7 +40,10 @@ export default function MainLayout() {
       <Layout hasSider>
         {/* 左栏：白底 + 右 1px 分隔线，宽度取原型实测的 ≈220（原型右边界 x≈219）。
             窄屏折到 64 图标栏而不是 0：原型里没有折叠/收起按钮（转录明写导航底部空白、无折叠件），
-            所以 trigger={null} 只拆钩子，breakpoint 自动收窄留着——折到 0 菜单就没入口了。 */}
+            所以 trigger={null} 只拆钩子，breakpoint 自动收窄留着——折到 0 菜单就没入口了。
+            A253 补的是另一半：钩子拆了以后**折回去就再也拉不回宽态**（Header/Sidebar 里
+            没有任何 collapsed 的读端），所以自己补一个只在收起态出现的展开件。宽态照常
+            一个控件都不多，原型真值不动。 */}
         <Sider
           collapsible
           collapsed={collapsed}
@@ -52,6 +56,17 @@ export default function MainLayout() {
           className="cds-sidebar"
         >
           <Sidebar />
+          {collapsed ? (
+            <button
+              type="button"
+              className="cds-sidebar-expand"
+              aria-label="展开导航"
+              title="展开导航"
+              onClick={() => setSidebarCollapsed(false)}
+            >
+              <MenuUnfoldOutlined />
+            </button>
+          ) : null}
         </Sider>
         <Content className="cds-content">
           {/* 面包屑全面化（2026-10-17 定稿）后不再需要页签带；斜杠面包屑统一由 PageCrumb 渲染。 */}

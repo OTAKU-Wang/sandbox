@@ -124,17 +124,6 @@ async function openFieldSelect(fieldLabel: string) {
   return trigger;
 }
 
-async function openSelectByText(marker: string) {
-  const trigger = await waitFor(() => {
-    const found = Array.from(document.querySelectorAll('.ant-select')).find((node) =>
-      node.textContent?.includes(marker));
-    if (!found) throw new Error(`没有文本含「${marker}」的下拉`);
-    return found.querySelector('.ant-select-selector') as Element;
-  });
-  fireEvent.mouseDown(trigger);
-  return trigger;
-}
-
 async function clickOption(label: string) {
   const option = await waitFor(() => {
     const found = Array.from(

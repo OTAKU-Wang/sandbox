@@ -377,6 +377,9 @@ export default function AuditLog() {
           <Space size={12} wrap>
             <button
               type="button"
+              /* A240：这组药签的 hover/光标/焦点态原先挂在 `data-testid^="task-tab-"` 上，
+                 现在样式吃 .cds-task-tab，data-testid 原样留给测试。 */
+              className="cds-task-tab"
               style={tabStyle(!applied.eventType)}
               data-testid="task-tab-all"
               onClick={() => pickTab(undefined)}
@@ -387,6 +390,7 @@ export default function AuditLog() {
               <button
                 key={tab.key}
                 type="button"
+                className="cds-task-tab"
                 style={tabStyle(applied.eventType === tab.key)}
                 data-testid={`task-tab-${tab.key}`}
                 onClick={() => pickTab(applied.eventType === tab.key ? undefined : tab.key)}

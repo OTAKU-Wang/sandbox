@@ -2,14 +2,24 @@
    筛选卡内距 24（PNG 卡体 y122–206、控件行 y139–174）；筛选按钮组贴卡内容右缘（查询像素簇 x1220）；
    主按钮带 h40（新建接口像素 120×40）；外层页签卡内容左缘 268（竖线簇 220–243 + 内距 24）。 */
 
+/* A227：这两处卡身内距原本各拄一遍 `24px`，且都是直接压 antd 内部类 `.ant-card-body`
+   （依赖它的类名与注入顺序）。值收拢到一个令牌：以后改这一屏的卡身内距只动一行，
+   也不会出现「页签卡改了筛选卡没改」的分叉。 */
+:root {
+  --cds-card-body-padding: 24px;
+  /* A227：这里原本硬写 antd 默认的 colorText `rgba(0, 0, 0, 0.88)`。取值照图不动（本屏未接主题切换），
+     但来源收到令牌上——真上暗色/自定义主题时，这一支与 antd 的 colorText 一起换，不会单独留下黑标签。 */
+  --cds-openapi-label-ink: rgba(0, 0, 0, 0.88);
+}
+
 /* 外层承载 Tabs 的卡：内容左缘按图 268（antd small 卡身内距在别处是 12/16，此屏要 24）。 */
 .cds-delivery-tabs-card > .ant-card-body {
-  padding: 24px;
+  padding: var(--cds-card-body-padding);
 }
 
 /* 筛选卡：上下内距 24，字段一行、按钮组贴右。 */
 .cds-openapi-filter > .ant-card-body {
-  padding: 24px;
+  padding: var(--cds-card-body-padding);
 }
 
 .cds-openapi-filter .cds-filter-row {
@@ -23,12 +33,20 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* A227：字段自身不给 `min-width: 0` 时，控件（Select 的定宽）在任何情况下都不肯让位。
+     父行开了 flex-wrap，所以正常收窄是整项换行（不是横向溢出）；真正会顶穿的是
+     「单个字段自身比行还宽」这一种，min-width:0 + 控件可缩就是把这一种兜住。 */
+  min-width: 0;
+}
+
+.cds-openapi-filter .cds-filter-field > * {
+  min-width: 0;
 }
 
 .cds-openapi-filter .cds-filter-label {
   flex: none;
   white-space: nowrap;
-  color: rgba(0, 0, 0, 0.88);
+  color: var(--cds-openapi-label-ink);
 }
 
 .cds-openapi-filter .cds-filter-actions {
@@ -43,6 +61,12 @@
    若把重置也拉到 95，查询左缘会跑到 1208（偏 12px）。高度取 ink 带的 35，不是 antd 的 32。 */
 .cds-openapi-filter .cds-filter-actions > .ant-btn {
   height: 35px;
+}
+
+.cds-openapi-filter .cds-filter-actions > .ant-btn {
+  /* A227：`min-width: 95px` 只保底不封顶，文案一变长（英文/加图标）就把组撑宽，
+     上面注释里 1220 左缘的推算没有任何兑底。加 max-width:100% 让按钮先于行溢出。 */
+  max-width: 100%;
 }
 
 .cds-openapi-filter .cds-filter-actions > .ant-btn-primary {

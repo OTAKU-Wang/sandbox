@@ -54,6 +54,9 @@ PROD_POSTURE = {
     "CDS_HSM_SOFTWARE_FALLBACK_ALLOWED": "false",
     "CDS_SM3_FALLBACK_ALLOWED": "false",
     "CDS_FEDERATION_JWT_KEY_REQUIRED": "true",
+    # P6 漂移收敛（2026-10-30）：true（prod compose）vs false（helm）的旧漂移
+    # 以生产姿态为单一真值源统一，四个生产形态副本由本参数化门整体钉死。
+    "CDS_LOG_JSON": "true",
 }
 
 

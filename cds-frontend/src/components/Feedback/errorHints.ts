@@ -126,7 +126,10 @@ export const ERROR_HINTS: Record<string, ErrorHint> = {
 
 /** 按 W2 码查提示；未知码（含 HTTP_{status} 兼容码）走状态语义回退。 */
 export function hintForCode(code: string | undefined, status?: number): ErrorHint {
-  if (code && ERROR_HINTS[code]) {
+  // A247：`ERROR_HINTS` 是个普通字面量，`ERROR_HINTS['toString']` 会沿原型链拿到函数，
+  // 于是 `{code: 'constructor'}` 这种后端/调用方给的码会走进命中分支，再读出 undefined 的
+  // title/action ⇒ 提示整块空白（不是执行/泄露，但正是「把有码说成没提示」）。查自有属性。
+  if (code && Object.hasOwn(ERROR_HINTS, code)) {
     const h = ERROR_HINTS[code];
     // GONE 契约兜底：即使码名异常，410 也绝不重试
     if (status === 410) return { ...h, retryable: false };

@@ -127,6 +127,7 @@ run cds-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -e CLICKHOUSE_DB=cds_audit -e CLICKHOUSE_USER=cds -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" \
   -p 8123:8123 -p 9000:9000 -v "$(vol clickhouse-data):/var/lib/clickhouse"
 
+# 钉版本纪律：永不用 :latest；升级归属 = 发布流程人工评审，与 compose/k8s/helm 同 tag 同升
 run cds-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -e MINIO_ROOT_USER="${MINIO_ROOT_USER:-cds_minio_admin}" -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   -p 9001:9000 -p 9002:9001 -v "$(vol minio-data):/data" \
@@ -191,6 +192,7 @@ echo "== api =="
 run cds-api cds-api:latest \
   -p 8000:8000 \
   -e CDS_DEBUG="${CDS_DEBUG:-false}" \
+  -e CDS_LOG_JSON=true \
   -e CDS_SECCOMP_FALLBACK_ALLOWED=false \
   -e CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false \
   -e CDS_FEDERATION_ENABLED="${CDS_FEDERATION_ENABLED:-false}" \
