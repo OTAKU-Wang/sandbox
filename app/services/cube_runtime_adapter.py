@@ -898,7 +898,10 @@ class CubeRuntimeAdapter(RuntimeAdapter):
             request.env.append(f"CDS_SESSION_KEY={session_key}")
         started = datetime.now()
         try:
-            client.exec(request)
+            # Cube M4 (cr-2026-10-15 §4): 同步 gRPC Exec 下链 to_thread ——
+            # async def execute() 里裸调会把整个 worker 的事件循环占到
+            # RPC deadline（同文件既有 to_thread 先例风格）。
+            await asyncio.to_thread(client.exec, request)
         except CDSError as exc:
             return {
                 "output": str(exc.message),

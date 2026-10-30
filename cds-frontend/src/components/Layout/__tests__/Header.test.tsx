@@ -105,16 +105,18 @@ describe('顶栏用户下拉（顶栏腾出来的能力都在这里）', () => {
     expect(navigate).toHaveBeenCalledWith('/login');
   });
 
-  it('管理员工台的人在下拉里切到开发者工作台，落点是开发者首页 /home', async () => {
+  it('A295：切到开发者工作台的落点是 index 路由 /（/home 只剩 <Navigate to="/" replace/>，不再白跳一跳）', async () => {
     useWorkspaceStore.setState({ workspace: 'admin' });
     renderWithProviders(<AppHeader />, { route: '/monitoring' });
     openUserMenu();
     fireEvent.click(await screen.findByText('切到开发者工作台'));
+    // 工台开关照旧翻转——变的只是落点，不是分派
     expect(useWorkspaceStore.getState().workspace).toBe('developer');
-    expect(navigate).toHaveBeenCalledWith('/home');
+    expect(navigate).toHaveBeenCalledWith('/');
+    expect(navigate).not.toHaveBeenCalledWith('/home');
   });
 
-  it('已在开发者工作台的人切回管理员工台，落点是运营概览 /', async () => {
+  it('已在开发者工作台的人切回管理员工台，落点同样是 /（由 WorkspaceHome 分派到运营概览）', async () => {
     useWorkspaceStore.setState({ workspace: 'developer' });
     renderWithProviders(<AppHeader />, { route: '/monitoring' });
     openUserMenu();

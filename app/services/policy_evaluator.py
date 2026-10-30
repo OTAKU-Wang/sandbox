@@ -7,13 +7,14 @@ Returns ALLOW/DENY decisions with field-level ACL enforcement.
 import uuid
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.policy_bundle import PolicyBundle
-from app.models.contract import Contract
+from app.models.contract import Contract, ContractStatus
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ POLICY_SOURCE_PYTHON_FALLBACK = "python-fallback"
 POLICY_SOURCE_LOCAL_CHECK = "local-check"
 FALLBACK_CAUSE_UNAVAILABLE = "opa_unavailable"
 FALLBACK_CAUSE_CLIENT_CLOSED = "opa_client_closed"
+
+# A73: audit action disclosing bundles that were EXCLUDED from a decision —
+# 撤销包不参与授权必须「不静默」，排除清单同时进决策对象与这条审计。
+POLICY_BUNDLES_EXCLUDED_ACTION = "policy.bundles_excluded"
 
 
 class Decision(str, Enum):
@@ -59,6 +64,10 @@ class PolicyDecision:
     policy_source: str = "unknown"
     degraded: bool = False
     degraded_reason: str | None = None
+    # A73（additive）：本次决策被排除、未参与判定的包清单，每项
+    # {"policy_id", "cause"}，cause ∈ revoked | contract_terminated | contract_expired。
+    # 非空时同步写审计行 policy.bundles_excluded —— 排除不静默。
+    excluded_bundles: list[dict] = field(default_factory=list)
 
 
 class PolicyEvaluator:
@@ -71,22 +80,66 @@ class PolicyEvaluator:
     """
 
     async def evaluate(self, request: AccessRequest, db: AsyncSession) -> PolicyDecision:
-        """Evaluate an access request against the active policy bundle."""
-        # Load active policy bundle for the contract
+        """Evaluate an access request against the active policy bundle.
+
+        A73: only a bundle that is itself unrevoked AND whose contract is still
+        in force (not TERMINATED, within `valid_until`) may participate in the
+        decision. Revoked/expired bundles are excluded one by one and the
+        exclusion is disclosed — on the decision object AND in an audit row —
+        never silently.
+        """
+        # A73 fail-closed gate at selection time: contract must exist, not be
+        # terminated, and not be past valid_until (closes the window between
+        # expiry and the lifecycle sweep that writes revoked_at).
+        now = datetime.now(timezone.utc)
         result = await db.execute(
             select(PolicyBundle)
-            .where(PolicyBundle.contract_id == request.contract_id)
+            .join(Contract, Contract.id == PolicyBundle.contract_id)
+            .where(
+                PolicyBundle.contract_id == request.contract_id,
+                PolicyBundle.revoked_at.is_(None),
+                Contract.status != ContractStatus.TERMINATED.value,
+                or_(Contract.valid_until.is_(None), Contract.valid_until >= now),
+            )
             .order_by(PolicyBundle.version.desc())
             .limit(1)
         )
         bundle = result.scalar_one_or_none()
 
+        # Everything excluded from that selection, classified + disclosed (A73).
+        excluded = await self._collect_excluded_bundles(db, request.contract_id, now)
+        if excluded:
+            logger.warning(
+                "[A73] %d policy bundle(s) for contract %s EXCLUDED from this "
+                "authorization decision: %s",
+                len(excluded), request.contract_id, excluded,
+            )
+            from app.services.audit_service import audit_service
+
+            await audit_service.log(
+                db, action=POLICY_BUNDLES_EXCLUDED_ACTION, resource_type="policy_bundle",
+                user_id=request.user_id, resource_id=str(request.contract_id),
+                detail={
+                    "excluded_bundles": excluded,
+                    "message": "存在已撤销/过期策略包未参与本次授权决策（A73，不静默披露）",
+                    "operation": request.operation,
+                    "sandbox_mode": request.sandbox_mode,
+                },
+            )
+
         if not bundle:
             logger.warning(f"No policy bundle for contract {request.contract_id}")
+            reason = "No active policy bundle found for contract"
+            if excluded:
+                reason += (
+                    f" — {len(excluded)} revoked/expired bundle(s) excluded "
+                    "from this decision (A73), see policy.bundles_excluded audit"
+                )
             return PolicyDecision(
                 decision=Decision.DENY,
-                reason="No active policy bundle found for contract",
+                reason=reason,
                 policy_source=POLICY_SOURCE_LOCAL_CHECK,
+                excluded_bundles=excluded,
             )
 
         # Verify bundle integrity
@@ -98,6 +151,7 @@ class PolicyEvaluator:
                 decision=Decision.DENY,
                 reason="Policy bundle integrity check failed",
                 policy_source=POLICY_SOURCE_LOCAL_CHECK,
+                excluded_bundles=excluded,
             )
 
         # Try OPA evaluation first
@@ -117,6 +171,8 @@ class PolicyEvaluator:
             decision.degraded = True
             decision.degraded_reason = fallback_cause
 
+        decision.excluded_bundles = excluded
+
         # DP budget check — only apply on successful policy evaluation
         if decision.decision == Decision.ALLOW and request.epsilon_cost > 0:
             budget_check = await self._check_dp_budget(request, db)
@@ -127,9 +183,46 @@ class PolicyEvaluator:
                     policy_source=decision.policy_source,
                     degraded=decision.degraded,
                     degraded_reason=decision.degraded_reason,
+                    excluded_bundles=excluded,
                 )
 
         return decision
+
+    @staticmethod
+    async def _collect_excluded_bundles(
+        db: AsyncSession, contract_id: uuid.UUID, now: datetime
+    ) -> list[dict]:
+        """Classify every bundle of the contract that the fail-closed selection excluded.
+
+        cause 优先级：包自身 revoked_at > 合约 TERMINATED > 合约过 valid_until。
+        仍参与决策的包不在清单里——披露的是「排除了什么」，不是「合约下有包」。
+        """
+        result = await db.execute(
+            select(
+                PolicyBundle.policy_id,
+                PolicyBundle.revoked_at,
+                Contract.status,
+                Contract.valid_until,
+            )
+            .join(Contract, Contract.id == PolicyBundle.contract_id)
+            .where(PolicyBundle.contract_id == contract_id)
+        )
+        excluded: list[dict] = []
+        for policy_id, revoked_at, status, valid_until in result.all():
+            cause = None
+            if revoked_at is not None:
+                cause = "revoked"
+            elif status == ContractStatus.TERMINATED.value:
+                cause = "contract_terminated"
+            elif valid_until is not None:
+                # SQLite round-trips DateTime(timezone=True) naively; assume UTC
+                # before judging expiry against the aware clock.
+                vu = valid_until if valid_until.tzinfo else valid_until.replace(tzinfo=timezone.utc)
+                if vu < now:
+                    cause = "contract_expired"
+            if cause:
+                excluded.append({"policy_id": policy_id, "cause": cause})
+        return excluded
 
     @staticmethod
     def _opa_fallback_cause() -> str:

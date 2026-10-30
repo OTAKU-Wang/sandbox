@@ -30,10 +30,14 @@ export const ROLE_GROUPS = {
   contractReaders: [UserRole.DATA_PROVIDER, UserRole.BUYER, UserRole.REGULATOR, UserRole.ADMIN],
   contractWriters: [UserRole.DATA_PROVIDER],
   sandboxReaders: [UserRole.DATA_PROVIDER, UserRole.BUYER, UserRole.OPERATOR, UserRole.ADMIN],
-  sandboxUsers: [UserRole.BUYER],
+  // 2026-10-30 拍板：沙箱会话按业务流转放开——合同双方（买方/数商）均可开
+  // （后端 sandbox_sessions/dev_sandbox 已同步改为合同当事方判定），组级门相应
+  // 放开两角色；细粒度「是否该合同的当事方」仍由后端把关，前端不重复判。
+  sandboxUsers: [UserRole.BUYER, UserRole.DATA_PROVIDER],
   devSandboxUsers: [UserRole.DATA_PROVIDER],
-  // 在线 Notebook 开发与负载发布：会话只能由合约买方开（后端 fail-closed），
-  // 所以页面必须对 BUYER 开放；数商保留入口是为了自己产品的开发沙箱。
+  // 在线 Notebook 开发与负载发布：会话按合同当事方放开（后端 2026-10-30 口径，
+  // 非买方角色会被后端 403），所以页面必须对 BUYER/数商 开放；数商保留入口
+  // 是为了自己产品的开发沙箱。
   flowDevUsers: [UserRole.DATA_PROVIDER, UserRole.BUYER],
   outputControlReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],
   auditReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],

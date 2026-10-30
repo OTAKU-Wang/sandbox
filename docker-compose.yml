@@ -188,6 +188,9 @@ services:
       CDS_CUBE_TEMPLATE_URL_TTL_SECONDS: "3600"
       CDS_CUBE_TEMPLATE_DIST_RETRY: "2"
       # W12 retention (dry-run default; flip after compliance review)
+      # 2026-10-30 拍板：真删主开关默认 false（生产默认关闭，四处副本同步纪律）；
+      # 白名单类别是代码常量，见 docs/retention.md
+      CDS_JANITOR_ENABLED: "false"
       CDS_RETENTION_JANITOR_ENABLED: "true"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"
       # Round 45+ (spec N2): experimental Merkle batch pipeline, off by default

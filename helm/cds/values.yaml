@@ -59,6 +59,9 @@ api:
     CDS_AGENT_TOKEN_BUDGET: "20000"
     CDS_AGENT_MAX_TOOLS: "4"
     # W12 retention janitor (see docs/retention.md)
+    # 2026-10-30 拍板：真删主开关 JANITOR_ENABLED 默认 false（生产默认关闭）；
+    # 白名单类别是代码常量，受保护类别（审计/存证/交付物/原始数据）代码层硬拒。
+    CDS_JANITOR_ENABLED: "false"
     CDS_RETENTION_JANITOR_ENABLED: "true"
     CDS_AUDIT_LOG_RETENTION_DAYS: "0"
     CDS_MERKLE_LEAF_RETENTION_DAYS: "0"

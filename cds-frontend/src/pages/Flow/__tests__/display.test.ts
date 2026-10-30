@@ -5,6 +5,10 @@ import {
   WORKLOAD_STATUS_META,
   attemptLabel,
   backendFromCellResult,
+  bundleReviewMeta,
+  bundleWatermarkMeta,
+  bundleWatermarkMethodMeta,
+  BUNDLE_WATERMARK_META,
   checkSummary,
   evaluatePublishGate,
   openApiPathForSlug,
@@ -259,5 +263,36 @@ describe('投递辅助', () => {
 
   it('外部调用路径固定前缀', () => {
     expect(openApiPathForSlug('churn-score')).toBe('/open/v1/churn-score');
+  });
+});
+
+describe('成果包水印口径（2026-10-30 背景水印拍板）', () => {
+  it('包级新口径 preview_only 有独立标签，不冒充已嵌入', () => {
+    expect(BUNDLE_WATERMARK_META.preview_only).toBeDefined();
+    expect(bundleWatermarkMeta('preview_only').label).toContain('预览层');
+    expect(bundleWatermarkMeta('preview_only').label).not.toContain('已嵌入');
+  });
+
+  it('包级历史口径逐字不变（只强不弱）', () => {
+    expect(bundleWatermarkMeta('applied').label).toBe('已嵌入水印');
+    expect(bundleWatermarkMeta('partially_applied').label).toBe('部分文件未嵌入');
+    expect(bundleWatermarkMeta('not_applied').label).toBe('未嵌入水印');
+    expect(bundleWatermarkMeta('not_requested').label).toBe('未申请水印');
+    expect(bundleWatermarkMeta(null).label).toBe('未记录');
+    expect(bundleReviewMeta(null).label).toBe('未记录');
+  });
+
+  it('逐文件口径：xlsx 降级与 csv 预览层绝不显示为真内嵌', () => {
+    expect(bundleWatermarkMethodMeta('header_text').label).toContain('降级');
+    expect(bundleWatermarkMethodMeta('header_text').label).not.toContain('已嵌入');
+    expect(bundleWatermarkMethodMeta('preview_only').label).toContain('本体未修改');
+    expect(bundleWatermarkMethodMeta('embedded_watermark').label).toContain('内嵌');
+    expect(bundleWatermarkMethodMeta('zero_width_text').label).toContain('零宽');
+  });
+
+  it('逐文件口径：历史清单没有 watermark_method → 未记录，不反推', () => {
+    expect(bundleWatermarkMethodMeta(undefined).label).toBe('未记录');
+    expect(bundleWatermarkMethodMeta(null).label).toBe('未记录');
+    expect(bundleWatermarkMethodMeta('brand_new_method').label).toBe('brand_new_method'); // 未登记原样透传
   });
 });

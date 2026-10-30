@@ -3,6 +3,11 @@
 // 铁律不变：每个数字都只能来自后端返回；后端没下发成功/失败判定时成功率记「未记录」并给原因，
 // 绝不允许推算成 100%（下面几条锁定用例逐条保留）。只 mock 最外层 HTTP（services/api），
 // services/flow 与页面逻辑都跑真代码。
+//
+// 2026-10-30 拍板③改了成功率的来路：KPI 只许读后端 stats（近 7 天窗口、分母含被拒调用），
+// 前端一条明细都不自己数——ss-19 §10.2 记的「KPI 说 100% 而明细里有失败」就是前端按本页
+// 明细算比例算出来的。KPI 与明细现在也共用同一个 window 参数（同一次查询、同一口径）。
+// 因此下面「明细全成功但 stats 更低」的用例是新增的强断言，旧口径不复活。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
@@ -12,7 +17,7 @@ import { OpenApiMonitorView } from './DeliveryCenter';
 import { formatMinute } from './display';
 import { useCrumbStackStore } from '../../stores/crumbStackStore';
 import { formatDateTime } from '../../services/flow';
-import type { ApiEndpoint, ApiEndpointCall } from '../../services/flow';
+import type { ApiEndpoint, ApiEndpointCall, EndpointCallStats } from '../../services/flow';
 import api from '../../services/api';
 
 // antd 响应式栅格依赖 window.matchMedia（jsdom 未实现）
@@ -75,6 +80,7 @@ function callRow(overrides: Partial<ApiEndpointCall> = {}): ApiEndpointCall {
     endpoint_id: 'ep-1',
     slug: 'churn-score',
     status: 'succeeded',
+    outcome: 'succeeded',
     code: null,
     message: null,
     output_rows: 10,
@@ -88,6 +94,46 @@ function callRow(overrides: Partial<ApiEndpointCall> = {}): ApiEndpointCall {
 }
 
 const listOf = (items: ApiEndpointCall[], total: number) => ({ items, total, page: 1, page_size: 100 });
+
+/**
+ * stats 样板：字段名与后端 `_call_stats` 逐字一致（拍板③：近 7 天、分母含被拒）。
+ * 默认是「窗口内没有调用」的诚实形态（success_rate=null），要出数就得显式覆盖，
+ * 免得哪个用例顺手拿到一个凭空凑出来的成功率。
+ */
+function statsOf(overrides: Partial<EndpointCallStats> = {}): EndpointCallStats {
+  return {
+    window: '7d',
+    window_days: 7,
+    since: '2026-10-23T00:00:00+00:00',
+    until: '2026-10-30T00:00:00+00:00',
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    rejected: 0,
+    success_rate: null,
+    data_available: false,
+    reason: 'no_calls_in_window',
+    denominator: 'succeeded + failed + rejected（含被拒调用，一桶都不排除）',
+    rate_caliber: '成功率 = 成功 / 全部调用；窗口 = 近 7 天；无调用记录时成功率为 null（不是 0，也不是 100）',
+    status_scope: '统计不受明细 status 筛选影响，始终覆盖窗口内全部调用',
+    source: 'audit_logs（带 Merkle 锚定的唯一调用账本）',
+    note: '在鉴权依赖层就被拒的请求不产生调用日志行，这类缺口照实说「不补也不猜」，不把分母做小来抬高成功率',
+    ...overrides,
+  };
+}
+
+/** 带 stats 的完整响应形态（后端 2026-10-30 起恒定下发 stats + window）。 */
+const fullOf = (items: ApiEndpointCall[], total: number, stats: EndpointCallStats) => ({
+  items,
+  total,
+  page: 1,
+  page_size: 100,
+  window: stats.window,
+  window_days: stats.window_days,
+  since: stats.since,
+  until: stats.until,
+  stats,
+});
 
 function renderMonitor() {
   return renderWithProviders(
@@ -125,14 +171,18 @@ beforeEach(() => {
 // 单条最慢 946ms（首条含模块冷启动）。等的一律是「查询落地后的 DOM」，没有固定 sleep；
 // 抬高的只是默认 5s 上限，避免整台机器满载时误红而不是被测行为变了。
 describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
-  it('按端点 ID 打真实的调用明细端点', async () => {
+  it('按端点 ID 打真实的调用明细端点，并带上近 7 天窗口（KPI 与明细共用这一次请求）', async () => {
     get.mockResolvedValue(listOf([], 0));
     renderMonitor();
-    await screen.findByText(/暂无调用明细/);
+    await screen.findByText(/该端点还没有调用明细/);
     expect(get).toHaveBeenCalledWith(
       '/deliveries/openapi/endpoints/ep-1/calls',
-      expect.objectContaining({ params: expect.objectContaining({ page: 1 }) }),
+      expect.objectContaining({
+        params: expect.objectContaining({ page: 1, page_size: 100, window: '7d' }),
+      }),
     );
+    // 一次请求：明细与 stats 同窗口同响应，不存在「KPI 另查一次、另算一套」的空间
+    expect(get.mock.calls.filter((call) => String(call[0]).endsWith('/calls'))).toHaveLength(1);
     // 图上没有筛选控件：PRD 版的状态下拉筛选撤下
     expect(screen.queryByText('全部状态')).not.toBeInTheDocument();
   });
@@ -154,10 +204,10 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
     expect(screen.queryByText('120 ms')).not.toBeInTheDocument();
   });
 
-  it('三宫格与明细表渲染后端下发的真实值：总数取 total，最新时间取明细里最晚一条', async () => {
-    // total 故意与本页行数不同；明细故意不按时间倒序摆，最新那条不在第一行。
+  it('三宫格与明细表渲染后端下发的真实值：总数与成功率取 stats，最新时间取明细里最晚一条', async () => {
+    // stats.total 故意与本页行数不同；明细故意不按时间倒序摆，最新那条不在第一行。
     get.mockResolvedValue(
-      listOf(
+      fullOf(
         [
           callRow({ id: 'call-1', created_at: '2026-10-16T01:00:00.000Z', duration_ms: 1234, client_ip: '203.0.113.9' }),
           callRow({ id: 'call-2', created_at: '2026-10-17T02:30:00.000Z', duration_ms: 22, client_ip: '203.0.113.10' }),
@@ -165,6 +215,7 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
             id: 'call-3',
             created_at: '2026-10-15T09:00:00.000Z',
             status: 'failed',
+            outcome: 'rejected',
             code: 'RATE_LIMITED',
             message: '超过每分钟 60 次限制',
             duration_ms: null,
@@ -173,6 +224,15 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
           }),
         ],
         42,
+        statsOf({
+          total: 42,
+          succeeded: 28,
+          rejected: 9,
+          failed: 5,
+          success_rate: 66.7,
+          data_available: true,
+          reason: null,
+        }),
       ),
     );
     renderMonitor();
@@ -184,11 +244,16 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
     expect(screen.getByText('调用总次数（次）')).toBeInTheDocument();
     expect(screen.getByText('最新调用时间')).toBeInTheDocument();
     expect(screen.getByText('调用成功率')).toBeInTheDocument();
+    // 口径由后端下发、界面照抄：近 7 天 + 分母含被拒（拍板③）
+    expect(screen.getByText(/近 7 天 · succeeded \+ failed \+ rejected（含被拒调用/)).toBeInTheDocument();
+    expect(screen.getByText(/近 7 天内的调用次数（含被拒）/)).toBeInTheDocument();
 
     // 明细表：调用 ID 与状态判定原样出现在表里（图上只有这 4 列）
     expect(screen.getByText('call-1')).toBeInTheDocument();
     expect(screen.getAllByText('调用成功')).toHaveLength(2);
     expect(screen.getByText('限流阻断')).toBeInTheDocument();
+    // 被拒那一桶在明细里数得出来：后端 outcome=rejected ⇒ 行上标「执行前被拒」
+    expect(screen.getByText('执行前被拒')).toBeInTheDocument();
     // 调用时间按图到分钟：与 formatMinute 等价，且不带秒段（不等于到秒的 formatDateTime）
     expect(timeCellTexts()).toEqual([
       formatMinute('2026-10-16T01:00:00.000Z'),
@@ -205,13 +270,13 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
     ).toBeInTheDocument();
   });
 
-  it('明细未带成功/失败判定：成功率记「未记录」并说明原因，不推算成 100%', async () => {
-    // 老数据形态：有 id/时间/耗时，但整批都没有成功或失败判定字段。
+  it('后端没下发 stats：成功率记「未记录」并说明原因，绝不拿明细自己数出来的比例冒充', async () => {
+    // 老响应形态：有明细、有 total，但没有 stats 聚合。
     get.mockResolvedValue(
       listOf(
         [
-          callRow({ id: 'bare-1', status: undefined, code: undefined, message: undefined }),
-          callRow({ id: 'bare-2', status: undefined, code: undefined, message: undefined, created_at: '2026-10-17T05:00:00.000Z' }),
+          callRow({ id: 'bare-1' }),
+          callRow({ id: 'bare-2', created_at: '2026-10-17T05:00:00.000Z' }),
         ],
         7,
       ),
@@ -221,7 +286,7 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
 
     expect(tileValue('monitor-rate')).toContain('未记录');
     expect(tileValue('monitor-rate')).not.toContain('%');
-    expect(screen.getByText(/未带成功\/失败判定/)).toBeInTheDocument();
+    expect(screen.getByText(/后端未下发调用统计/)).toBeInTheDocument();
     // 整个页面里不许出现编造出来的满分
     expect(document.body.textContent).not.toContain('100%');
     // 总数与最新时间仍按后端下发的值渲染，不受成功率缺失影响
@@ -229,28 +294,65 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
     expect(tileValue('monitor-latest')).toBe(formatDateTime('2026-10-17T05:00:00.000Z'));
   });
 
-  it('一条调用都没有：成功率与最新时间都记「未记录」，不写 0%、不写当前时间', async () => {
-    get.mockResolvedValue(listOf([], 0));
+  it('§10.2 病根封死：明细这一页全是成功行，KPI 仍照 stats 说 66.7%，前端不数成 100%', async () => {
+    // 明细只有最近 3 条且都成功；窗口内真实分布是 28/42 成功。旧实现按本页行数算 ⇒ 100%。
+    get.mockResolvedValue(
+      fullOf(
+        [
+          callRow({ id: 'ok-1' }),
+          callRow({ id: 'ok-2', created_at: '2026-10-17T02:30:00.000Z' }),
+          callRow({ id: 'ok-3', created_at: '2026-10-16T08:00:00.000Z' }),
+        ],
+        3,
+        statsOf({
+          total: 42,
+          succeeded: 28,
+          rejected: 9,
+          failed: 5,
+          success_rate: 66.7,
+          data_available: true,
+          reason: null,
+        }),
+      ),
+    );
     renderMonitor();
-    // 先等数据落地再读宫格：空列表下「未记录」也会出现在加载中，不能拿它当数据到位的信号。
-    await screen.findByText(/暂无调用明细/);
+    await screen.findByText('ok-1');
+
+    expect(tileValue('monitor-rate')).toBe('66.7%');
+    expect(document.body.textContent).not.toContain('100%');
+    // 总数同样以窗口内的 stats 为准（含被拒），不是本页 3 行
+    expect(tileValue('monitor-total')).toBe('42');
+    expect(screen.getByText(/近 7 天共 42 次调用（含被拒）/)).toBeInTheDocument();
+  });
+
+  it('窗口内没有调用：成功率与最新时间都记「未记录」，不写 0%、不写当前时间', async () => {
+    get.mockResolvedValue(fullOf([], 0, statsOf()));
+    renderMonitor();
+    // 先等 stats 落地再读宫格：空列表下「未记录」与空态表在加载中就会出现，不能拿它们当数据到位的信号。
+    await screen.findByText(/近 7 天内没有调用记录/);
 
     expect(tileValue('monitor-total')).toBe('0');
     expect(tileValue('monitor-latest')).toBe('未记录');
     expect(tileValue('monitor-rate')).toBe('未记录');
-    expect(screen.getByText(/暂无调用明细/)).toBeInTheDocument();
+    expect(screen.getByText(/近 7 天内没有调用记录/)).toBeInTheDocument();
+    expect(screen.getByText(/该端点还没有调用明细/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('100%');
     expect(document.body.textContent).not.toContain('0%');
     expect(screen.getByText(/数据更新至 未记录/)).toBeInTheDocument();
+    // 说明文字也不能把这两个字面量喂进页面：警报要留给真正的假数字
+    expect(screen.getByText(/近 7 天内没有调用记录/).textContent).not.toMatch(/\d+%/);
   });
 
-  it('后端未下发 total 时按窗口条数兜底，并把口径写在宫格注释里', async () => {
+  it('后端既没下发 stats 也没下发 total：总数记「未记录」，不拿窗口条数冒充', async () => {
     get.mockResolvedValue({ items: [callRow({ id: 'no-total-1' })], page: 1, page_size: 100 });
     renderMonitor();
     await screen.findByText('no-total-1');
 
-    expect(tileValue('monitor-total')).toBe('1');
-    expect(screen.getByText(/后端未下发总数/)).toBeInTheDocument();
+    expect(tileValue('monitor-total')).toBe('未记录');
+    expect(screen.getByText(/后端未下发调用总数/)).toBeInTheDocument();
+    // 窗口没声明 ⇒ 连「近 7 天共 N 次」这种话也不说
+    expect(document.body.textContent).not.toContain('共 1 次调用');
+    expect(tileValue('monitor-rate')).toBe('未记录');
   });
 
   it('KPI 数值照图取主色蓝，卡片带标题与单位后缀，卡间一条 1px 细竖线', async () => {
@@ -275,7 +377,7 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
   it('标题区照图：接口正常/已上线是带底色 chip（列表页才是纯文字），三个按钮齐且图标在位', async () => {
     get.mockResolvedValue(listOf([], 0));
     renderMonitor();
-    await screen.findByText(/暂无调用明细/);
+    await screen.findByText(/该端点还没有调用明细/);
     for (const label of ['接口正常', '已上线']) {
       expect(screen.getByText(label).closest('.ant-tag')).not.toBeNull();
     }
@@ -298,7 +400,7 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
   it('监控视图钻取段 = OpenAPI导出 / 接口监控（壳层统一渲染，2026-10-17 全面包屑定稿）', async () => {
     get.mockResolvedValue(listOf([], 0));
     renderMonitor();
-    await screen.findByText(/暂无调用明细/);
+    await screen.findByText(/该端点还没有调用明细/);
     expect(useCrumbStackStore.getState().stack).toEqual(['OpenAPI导出', '接口监控']);
   });
 
@@ -317,7 +419,21 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
 
   it('明细分页带照图：共 N 条 + 10 条/页 + 前往 __ 页', async () => {
     const rows = Array.from({ length: 12 }, (_, index) => callRow({ id: `call-${index}` }));
-    get.mockResolvedValue(listOf(rows, 18));
+    get.mockResolvedValue(
+      fullOf(
+        rows,
+        18,
+        statsOf({
+          total: 18,
+          succeeded: 14,
+          rejected: 3,
+          failed: 1,
+          success_rate: 77.8,
+          data_available: true,
+          reason: null,
+        }),
+      ),
+    );
     renderMonitor();
     await screen.findByText('call-0');
     expect(screen.getByText('共 12 条')).toBeInTheDocument();
@@ -326,7 +442,7 @@ describe('接口监控页（图 3-3）', { timeout: 20_000 }, () => {
     const jumper = document.querySelector('.ant-pagination-options-quick-jumper') as HTMLElement;
     expect(jumper.textContent).toContain('前往');
     expect(jumper.textContent).toContain('页');
-    // 「共 12 条」是本次取回的窗口条数，后端总数 18 单独写明，不冒充全量
-    expect(screen.getByText(/后端共 18 次调用/)).toBeInTheDocument();
+    // 「共 12 条」是本次取回的窗口条数，窗口总数 18 单独写明并带上含被拒口径，不冒充全量
+    expect(screen.getByText(/近 7 天共 18 次调用（含被拒）/)).toBeInTheDocument();
   });
 });

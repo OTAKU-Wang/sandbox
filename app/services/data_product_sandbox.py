@@ -7,6 +7,7 @@ Supports three development modes:
 
 Session state is stored in Redis for multi-worker persistence.
 """
+import asyncio
 import uuid
 import json
 import logging
@@ -271,7 +272,11 @@ class DataProductDevSandbox:
             return False
 
         if session.container_id:
-            self.runtime.terminate(session.container_id)
+            # cr M4 会话部分（2026-10-30）：runtime.terminate 是同步阻塞调用（慢节点
+            # 可达数十秒），本方法由 session_lifecycle 的后台清扫循环与 dev 会话删除
+            # 路由 await 调用，直接跑会停摆事件循环——与 sandbox_sessions / 
+            # session_lifecycle 既有 to_thread 同一方法下链。
+            await asyncio.to_thread(self.runtime.terminate, session.container_id)
 
         session.status = SessionStatus.TERMINATED.value
         await self._save_session(session)

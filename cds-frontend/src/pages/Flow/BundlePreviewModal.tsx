@@ -1,8 +1,11 @@
 import { Alert, Button, Descriptions, Modal, Table, Tag, Typography } from 'antd';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { flowApi, flowKeys } from '../../services/flow';
 import { CenteredLoading, QueryErrorAlert, getErrorMessage } from '../../components/Feedback/QueryFeedback';
+import PreviewWatermarkOverlay from '../../components/Feedback/PreviewWatermark';
 import { parseCsvPreview } from '../../utils/csvPreview';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Text } = Typography;
 
@@ -12,6 +15,7 @@ interface Props {
 }
 
 export default function BundlePreviewModal({ bundleId, onClose }: Props) {
+  const user = useAuthStore((s) => s.user);
   const previewQuery = useQuery({
     queryKey: [...flowKeys.bundles(null, null, null), 'preview', bundleId],
     queryFn: () => flowApi.previewBundle(bundleId!),
@@ -21,6 +25,16 @@ export default function BundlePreviewModal({ bundleId, onClose }: Props) {
 
   const body = previewQuery.data;
   const preview = parseCsvPreview(body?.data);
+  // 观看时刻随打开定格一次、切换成果包才刷新，水印文本不会每帧漂移。
+  // 时间戳本身不读 bundleId，useMemo 依赖会假用（lint 报 unnecessary dep）——改用
+  // React 官方「渲染期按 props 调整 state」写法：配对记录定格时的包号，变了才重定格。
+  const [captured, setCaptured] = useState<{ forBundle: string | null; at: string }>(() => ({
+    forBundle: bundleId,
+    at: new Date().toISOString(),
+  }));
+  if (captured.forBundle !== bundleId) {
+    setCaptured({ forBundle: bundleId, at: new Date().toISOString() });
+  }
   const columns = preview.columns.map((c) => ({
     title: c === '_extra' ? '未命名列' : c,
     dataIndex: c,
@@ -84,14 +98,20 @@ export default function BundlePreviewModal({ bundleId, onClose }: Props) {
           {preview.reason ? (
             <Alert type="info" showIcon message={preview.reason} />
           ) : (
-            <Table
-              size="small"
-              rowKey={(_, idx) => String(idx)}
-              columns={columns}
-              dataSource={preview.rows}
-              pagination={false}
-              scroll={{ x: 'max-content', y: 420 }}
-            />
+            <PreviewWatermarkOverlay
+              user={user?.username || user?.id || '未知用户'}
+              bundleId={body.bundle_id}
+              capturedAt={captured.at}
+            >
+              <Table
+                size="small"
+                rowKey={(_, idx) => String(idx)}
+                columns={columns}
+                dataSource={preview.rows}
+                pagination={false}
+                scroll={{ x: 'max-content', y: 420 }}
+              />
+            </PreviewWatermarkOverlay>
           )}
         </>
       )}

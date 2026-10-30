@@ -117,14 +117,74 @@ def create_access_token(user_id: uuid.UUID, role: str) -> str:
     return jwt.encode(payload, _effective_jwt_secret_key(), algorithm=settings.JWT_ALGORITHM)
 
 
-def create_refresh_token(user_id: uuid.UUID) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=7)
+def create_refresh_token(
+    user_id: uuid.UUID,
+    jti: str | None = None,
+    expires_at: datetime | None = None,
+) -> str:
+    """Mint a refresh token (CR-2026-10-15 §4.10 / M3).
+
+    ``jti`` is the server-side session handle: every login/rotation passes one
+    that names a ``refresh_sessions`` row, so revocation (logout, rotation,
+    future admin action) has something to point at. A token without ``jti`` is
+    only minted by tests/replays — ``/auth/refresh`` rejects those fail-closed
+    (see the compat policy in ``app.api.auth.refresh_token``).
+    """
+    expire = expires_at or (datetime.now(timezone.utc) + timedelta(days=7))
     payload = {
         "sub": str(user_id),
         "exp": expire,
         "type": "refresh",
     }
+    if jti is not None:
+        payload["jti"] = jti
     return jwt.encode(payload, _effective_jwt_secret_key(), algorithm=settings.JWT_ALGORITHM)
+
+
+async def issue_refresh_session(db: AsyncSession, user_id: uuid.UUID) -> tuple[str, str]:
+    """Mint a jti + its ``refresh_sessions`` row and the matching token (M3).
+
+    Single funnel: login (password, password+MFA), cert login and register all
+    get the same server-side revocable session. ``expires_at`` mirrors the JWT
+    ``exp`` so the row's lifetime is exactly the token's.
+    """
+    from app.models.refresh_session import RefreshSession
+
+    jti = secrets.token_hex(16)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    db.add(RefreshSession(
+        user_id=user_id, jti=jti,
+        issued_at=datetime.now(timezone.utc),
+        expires_at=expires_at, revoked=False,
+    ))
+    await db.flush()
+    return jti, create_refresh_token(user_id, jti=jti, expires_at=expires_at)
+
+
+async def revoke_refresh_session(
+    db: AsyncSession, user_id: uuid.UUID, jti: str, reason: str,
+) -> bool:
+    """Revoke one session row; True when a live row was revoked.
+
+    Rows are never deleted — a revocation must stay findable. Returns False for
+    unknown/foreign/already-revoked jtis (idempotent logout, no oracle into
+    which jtis exist).
+    """
+    from app.models.refresh_session import RefreshSession
+
+    row = (await db.execute(
+        select(RefreshSession).where(
+            RefreshSession.jti == jti,
+            RefreshSession.user_id == user_id,
+            RefreshSession.revoked.is_(False),
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        return False
+    row.revoked = True
+    await db.flush()
+    logger.info("refresh session revoked: user=%s jti=%s reason=%s", user_id, jti, reason)
+    return True
 
 
 def decode_access_token(token: str) -> dict:
@@ -135,6 +195,9 @@ def decode_access_token(token: str) -> dict:
 
 
 def decode_refresh_token(token: str) -> dict:
+    """Verify signature/expiry/type only. Deliberately does NOT require a
+    ``jti`` claim: the compat verdict for pre-rotation tokens is a policy of
+    ``/auth/refresh`` (reject fail-closed), not of the decoder."""
     payload = jwt.decode(token, _effective_jwt_secret_key(), algorithms=[settings.JWT_ALGORITHM])
     if payload.get("type") != "refresh":
         raise ValueError("Invalid token type")

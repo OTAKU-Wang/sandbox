@@ -75,6 +75,31 @@ def _to_ws_url(base_url: str, path: str) -> str:
     return f"{scheme}://{rest}{path}"
 
 
+def _validate_timeout_seconds(value: Any) -> None:
+    """Fail fast on a bad ``timeout_seconds`` BEFORE any network I/O (SDK MINOR).
+
+    The old code reached ``int(timeout_seconds)`` only after the ws-ticket
+    round trip, the websocket connect and the start frame — a garbage value
+    (``"30"``, ``0``, ``-1``) burned a full session round trip and then blew
+    up with a bare ``ValueError`` / ``TypeError`` from inside the generator,
+    after frames may already have been yielded. Raises :class:`ValueError`
+    with an actionable message instead.
+    """
+    if value is None:
+        return
+    # bool is an int subclass; True/False as a timeout is a caller bug.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"timeout_seconds must be a positive number of seconds "
+            f"(int or float), got {value!r} ({type(value).__name__})"
+        )
+    # `not > 0` also rejects NaN.
+    if not value > 0:
+        raise ValueError(
+            f"timeout_seconds must be a positive number of seconds, got {value!r}"
+        )
+
+
 def stream_exec(
     client,
     session_id: str,
@@ -100,7 +125,8 @@ def stream_exec(
         command.
     timeout_seconds:
         Server-side command timeout (clamped server-side to the session
-        exec timeout).
+        exec timeout). Validated up-front — anything that is not a positive
+        int/float raises :class:`ValueError` before any request is sent.
     recv_timeout:
         Seconds to wait for the next frame before giving up.
     _ws_open:
@@ -111,11 +137,17 @@ def stream_exec(
     after a terminal frame (``exit`` / ``blocked`` / ``error``) or when the
     server closes the connection. Silence longer than ``recv_timeout`` is
     reported as a degradation, not as a clean end: the generator raises
-    :class:`CDSError` (504) saying the output was truncated (a sandboxed
-    compile or data pull can be silent for minutes). A ``blocked`` frame means
-    the T5 DLP inspection killed the stream (fail-closed) — treat the output
-    as untrusted and check :meth:`CDSClient.get_session_audit`.
+    :class:`CDSError` (504) carrying the structured marker ``truncated =
+    True`` (SDK MINOR, cr-2026-10-15 §4.7) — consumers branch on the flag,
+    not on message text, so a timeout can never masquerade as complete
+    output (a sandboxed compile or data pull can be silent for minutes).
+    A clean end (terminal frame / server close) never sets the flag.
+    A ``blocked`` frame means the T5 DLP inspection killed the stream
+    (fail-closed) — treat the output as untrusted and check
+    :meth:`CDSClient.get_session_audit`.
     """
+    # SDK MINOR: validate the argument shape before burning a ws-ticket.
+    _validate_timeout_seconds(timeout_seconds)
     ticket_resp = client.request_ws_ticket()
     ticket = ticket_resp.get("ticket") if isinstance(ticket_resp, dict) else None
     if not ticket:
@@ -153,13 +185,19 @@ def stream_exec(
                 # A74: no frame within recv_timeout is a degradation, not a
                 # clean end — it must be disclosed, never reported as "done".
                 if _is_timeout_error(exc):
-                    raise CDSError(
+                    # SDK MINOR (cr-2026-10-15 §4.7): the truncation marker is
+                    # STRUCTURED (`truncated=True` on the error), not just
+                    # message prose — a consumer can branch on the flag and
+                    # never mistakes a stalled stream for complete output.
+                    err = CDSError(
                         504,
                         f"websocket recv timed out after {recv_timeout}s without "
                         f"receiving a frame: output is TRUNCATED (truncated=true) "
                         f"and the command may still be running in the sandbox — "
                         f"raise recv_timeout or fall back to execute()/logs()",
-                    ) from exc
+                    )
+                    err.truncated = True
+                    raise err from exc
                 if _is_closed_error(exc):
                     return
                 raise CDSError(502, f"websocket recv failed: {exc}") from exc

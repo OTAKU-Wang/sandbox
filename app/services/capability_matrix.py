@@ -357,6 +357,165 @@ def dataplane_status() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# 部署真实能力披露（2026-10-30 拍板②）：「这一档在**当前这套部署**上到底能不能用」
+#
+# 与矩阵本身是两件事：矩阵说的是档位的固有能力（与部署无关），这里说的是运行时
+# 注册/门禁真值。判据逐条抄自执行侧的真实门禁，绝不另立一套口径：
+#   - ``l2c`` 适配器只在 ``CUBE_DATAPLANE_ENABLED`` 后注册（sandbox_runtime.py:2404），
+#     且没有 online 节点时创建会话 fail-closed 400 ``RUNTIME_UNAVAILABLE``
+#     （sandbox_sessions.py，SS-13 不降级）→ reason ``dataplane_disabled`` / ``no_ready_node``
+#     与 ``flow_runtime.py`` 的 REASON_MESSAGES 用同一批词。
+#   - 历史档位（L0/L1/L2/L3/k8s）适配器只在 ``SANDBOX_LEGACY_ENABLED`` 或
+#     ``LEGACY_L2_ENABLED`` 后注册（sandbox_runtime.py:2391），创建侧同判据
+#     （sandbox_sessions.py:330 ``LEGACY_LEVEL_RETIRED``）→ reason ``legacy_level_retired``。
+#   - 合约可写档位 = 承载供数下限（``SUPPLY_DATA_LEVELS``，A55）∩ 合约取值域
+#     （``app.schemas.contract.VALID_SANDBOX_LEVELS``），两个都已存在的权威表。
+#
+# **披露能力 ≠ 放宽校验**：这个模块只读，不改任何执行判定；不可满足的请求照旧 400。
+# ---------------------------------------------------------------------------
+
+# 门禁镜像 reason：每个词都**逐字取自**执行侧已登记的 ``detail.reason``
+# （``dataplane_disabled``/``no_ready_node`` 见 app/api/flow_runtime.py 与
+# app/api/sandbox_sessions.py；``legacy_level_retired``/``below_supply_data_floor``
+# 见 app/api/sandbox_sessions.py）。tests/test_deployment_sandbox_levels.py 机检
+# 每个词在 app/ 源码里真实存在，防止披露侧发明一个执行侧没有的理由。
+GATE_MIRROR_REASONS: frozenset[str] = frozenset({
+    "dataplane_disabled",
+    "no_ready_node",
+    "legacy_level_retired",
+    "below_supply_data_floor",
+})
+# 纯披露 reason：描述的是「可用」的来历或取值域事实，执行侧没有对应的拒绝码，
+# 所以只可能出现在文案里，不可能被当成放行凭据。
+DISCLOSURE_ONLY_REASONS: frozenset[str] = frozenset({
+    "legacy_observation_window",
+    "not_in_contract_vocabulary",
+})
+
+
+def _legacy_gate_open(settings) -> bool:
+    """历史档位观察期开关的真值（与 sandbox_runtime.py:2391 同判据）。"""
+    return bool(settings.SANDBOX_LEGACY_ENABLED or settings.LEGACY_L2_ENABLED)
+
+
+def level_availability(ready_nodes: int) -> list[dict]:
+    """每个档位在当前部署上的运行时可用性与合约可写性（按 ``LEVEL_ORDER`` 排序）。
+
+    ``ready_nodes`` 是 online 的 Cube 计算节点数，由调用方（API 层）从节点表查来；
+    本模块不碰数据库，保持可单测。
+    """
+    from app.core.config import get_settings
+    from app.schemas.contract import VALID_SANDBOX_LEVELS
+
+    settings = get_settings()
+    legacy_open = _legacy_gate_open(settings)
+    dataplane_on = bool(settings.CUBE_DATAPLANE_ENABLED)
+
+    rows: list[dict] = []
+    for level in LEVEL_ORDER:
+        meta = dict(LEVEL_METADATA[level])
+        if level == LEVEL_L2C:
+            registered = dataplane_on
+            if not registered:
+                reason: str | None = "dataplane_disabled"
+                disclosure = (
+                    "需 Cube 计算节点：本部署按控制面档交付（CDS_CUBE_DATAPLANE_ENABLED=false），"
+                    "创建会话会返回 400 RUNTIME_UNAVAILABLE（SS-13 单一路径，不降级到进程/bwrap 隔离）"
+                )
+            elif ready_nodes <= 0:
+                reason = "no_ready_node"
+                disclosure = (
+                    "MicroVM 数据面已启用，但当前没有 online 的 Cube 计算节点，"
+                    "创建会话会返回 400 RUNTIME_UNAVAILABLE（请检查节点心跳与 deploy/cube-node/）"
+                )
+            else:
+                reason = None
+                disclosure = f"生产默认档位：Cube MicroVM（SS-13 单一路径），当前 online 节点 {ready_nodes} 个"
+        else:
+            registered = legacy_open
+            if not registered:
+                reason = "legacy_level_retired"
+                disclosure = (
+                    "SS-13 起执行面只有 MicroVM 单一路径，该档位已退役："
+                    "需 CDS_SANDBOX_LEGACY_ENABLED=true 观察期开关（生产禁止开启），"
+                    "否则创建会话返回 400 LEGACY_LEVEL_RETIRED"
+                )
+            else:
+                reason = "legacy_observation_window"
+                disclosure = (
+                    "开发环境 / 观察期档位：本部署开启了历史档位观察期开关"
+                    "（CDS_SANDBOX_LEGACY_ENABLED 或 CDS_LEGACY_L2_ENABLED，生产禁止开启）"
+                )
+
+        floor_ok = can_carry_supply_data(level)
+        vocabulary_ok = level in VALID_SANDBOX_LEVELS
+        if not floor_ok:
+            contract_reason: str | None = "below_supply_data_floor"
+            contract_note = (
+                f"不可写入合约：低于平台供数下限（可承载契约供数的档位只有 {'/'.join(SUPPLY_DATA_LEVELS)}），"
+                "装载真实供数的会话在该档位会被 400 拒绝"
+            )
+        elif not vocabulary_ok:
+            contract_reason = "not_in_contract_vocabulary"
+            contract_note = "不可写入合约：不在合约取值域（app/schemas/contract.py VALID_SANDBOX_LEVELS）内"
+        else:
+            contract_reason = None
+            contract_note = None
+
+        rows.append({
+            **meta,
+            "level": level,
+            "registered": registered,
+            "runtime_available": registered and not (level == LEVEL_L2C and reason == "no_ready_node"),
+            "reason": reason,
+            "disclosure": disclosure,
+            "supply_data_eligible": floor_ok,
+            "contract_selectable": floor_ok and vocabulary_ok,
+            "contract_reason": contract_reason,
+            "contract_note": contract_note,
+        })
+    return rows
+
+
+def sandbox_levels_payload(ready_nodes: int) -> dict:
+    """``GET /api/v1/meta/sandbox-levels`` 的响应体（只读披露，不含任何放行决定）。"""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    rows = level_availability(ready_nodes)
+    by_level = {row["level"]: row for row in rows}
+
+    # 推荐档：按 SUPPLY_DATA_LEVELS 的强度序（l2c → L3）取第一个「可写合约且当前可执行」的档；
+    # 一个都没有时回落到产品默认 l2c（合约授权是控制面动作，允许先签后部署节点），
+    # 但披露字段照实说「当前不可执行」，不粉饰。
+    recommended = next(
+        (lv for lv in SUPPLY_DATA_LEVELS
+         if by_level[lv]["contract_selectable"] and by_level[lv]["runtime_available"]),
+        LEVEL_L2C,
+    )
+    dev_level = settings.DEV_SANDBOX_LEVEL
+    dev_row = by_level.get(dev_level)
+    return {
+        "levels": rows,
+        "recommended_level": recommended,
+        "recommended_disclosure": by_level[recommended]["disclosure"],
+        "supply_data_levels": list(SUPPLY_DATA_LEVELS),
+        "dev_sandbox_level": {
+            "level": dev_level,
+            "known": dev_row is not None,
+            "runtime_available": bool(dev_row and dev_row["runtime_available"]),
+            "disclosure": dev_row["disclosure"] if dev_row else f"未知档位 {dev_level!r}，不在能力矩阵取值域内",
+        },
+        "ready_nodes": ready_nodes,
+        "dataplane": dataplane_status(),
+        "note": (
+            "口径：只披露当前部署的真实能力，不改变任何执行判定；"
+            "不可满足的请求照旧按 SS-13 fail-closed 400 拒绝，披露能力 ≠ 降级隔离"
+        ),
+    }
+
+
 def get_capability_matrix() -> dict:
     """Return the full matrix payload: ``{"matrix": {...}, "levels": {...}}``.
 

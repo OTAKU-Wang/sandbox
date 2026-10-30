@@ -108,6 +108,7 @@ import {
   attemptLabel,
   bundleReviewMeta,
   bundleWatermarkMeta,
+  bundleWatermarkMethodMeta,
   openApiPathForSlug,
   responseStatusColor,
   statusMeta,
@@ -382,11 +383,15 @@ function DatasetBundleTab({ contractId }: { contractId: string | null }) {
               <Descriptions.Item label="成果包 ID">{bundle.bundle_id}</Descriptions.Item>
               <Descriptions.Item label="总大小">{formatBytes(bundle.size_bytes)}</Descriptions.Item>
               <Descriptions.Item label="水印">
-                {bundle.watermark_applied ? <Tag color="green">已嵌入水印</Tag> : <Tag color="orange">后端报告未加水印</Tag>}
+                {bundleWatermarkMeta(bundle.watermark_status).label === '未记录'
+                  ? (bundle.watermark_applied
+                      ? <Tag color="green">已嵌入水印</Tag>
+                      : <Tag color="orange">后端报告未加水印</Tag>)
+                  : <Tag color={bundleWatermarkMeta(bundle.watermark_status).color}>{bundleWatermarkMeta(bundle.watermark_status).label}</Tag>}
               </Descriptions.Item>
               <Descriptions.Item label="文件数">{bundle.files?.length ?? 0}</Descriptions.Item>
             </Descriptions>
-            <Table<{ name: string; size_bytes: number }>
+            <Table<{ name: string; size_bytes: number; watermark_method?: string | null }>
               rowKey="name"
               size="small"
               pagination={false}
@@ -395,9 +400,26 @@ function DatasetBundleTab({ contractId }: { contractId: string | null }) {
               columns={[
                 { title: '文件', dataIndex: 'name' },
                 { title: '大小', dataIndex: 'size_bytes', width: 120, render: (size: number) => formatBytes(size) },
+                {
+                  title: '水印口径',
+                  dataIndex: 'watermark_method',
+                  width: 220,
+                  render: (method: string | null | undefined) => {
+                    const meta = bundleWatermarkMethodMeta(method);
+                    return <Tag color={meta.color}>{meta.label}</Tag>;
+                  },
+                },
               ]}
             />
-            {!bundle.watermark_applied && (
+            {bundle.watermark_status === 'preview_only' && (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginTop: 12 }}
+                message="本包为「仅预览层水印」：文件本体未修改（csv/tsv 纯文本改字节会破坏解析），水印只在平台在线预览层叠加。"
+              />
+            )}
+            {!bundle.watermark_applied && bundle.watermark_status !== 'preview_only' && bundle.watermark_status !== 'not_requested' && (
               <Alert
                 type="warning"
                 showIcon
@@ -1269,7 +1291,18 @@ function CallStatusTag({ call }: { call: ApiEndpointCall }) {
   const known = call.code ? statusMeta(CALL_FAILURE_CODE_META, call.code) : null;
   const useCode = Boolean(call.code && known && known.label !== call.code);
   const tag = <Tag color={useCode ? known!.color : base.color}>{useCode ? known!.label : base.label}</Tag>;
-  return call.message ? <Tooltip title={call.message}>{tag}</Tooltip> : tag;
+  // 后端的三桶判定（_call_bucket）原样透出：让 KPI 里「被拒」那一桶在明细里数得出来。
+  const rejected = call.outcome === 'rejected';
+  if (!rejected) return call.message ? <Tooltip title={call.message}>{tag}</Tooltip> : tag;
+  const hint = `该调用没进沙箱执行就被挡下（准入拒绝），但仍计入成功率分母——与被拒也算数同一条口径${call.message ? `。原因：${call.message}` : ''}`;
+  return (
+    <Tooltip title={hint}>
+      <Space size={4}>
+        {tag}
+        <Tag color="orange">执行前被拒</Tag>
+      </Space>
+    </Tooltip>
+  );
 }
 
 function MetricTile({
@@ -1429,16 +1462,14 @@ export function OpenApiMonitorView({
             testId="monitor-total"
             icon={<DashboardOutlined />}
             title="调用总次数（次）"
-            hint="取后端下发的调用总数（数据源为带 Merkle 锚定的审计日志计数），不是本页行数。"
+            hint="取后端下发的窗口内调用总数（数据源为带 Merkle 锚定的审计日志计数，含被拒调用），不是本页行数。"
             value={metrics.total != null ? String(metrics.total) : UNKNOWN_TEXT}
             note={
               metrics.total == null
-                ? '后端未下发调用总数'
-                : metrics.totalIsFallback
-                  ? `后端未下发总数，按本次返回的 ${metrics.windowCount} 条计`
-                  : metrics.windowCount < metrics.total
-                    ? `明细取最近 ${metrics.windowCount} 条`
-                    : '后端下发的调用总数'
+                ? '后端未下发调用总数（stats 与 total 都没有，不按明细条数推算）'
+                : metrics.statsMissing
+                  ? `响应 total；窗口统计未下发，成功率不做推算（明细 ${metrics.windowCount} 条）`
+                  : `${metrics.windowLabel || '本次查询'}内的调用次数（含被拒）；明细取最近 ${metrics.windowCount} 条`
             }
           />
           <MetricTile
@@ -1455,7 +1486,7 @@ export function OpenApiMonitorView({
             divider
             icon={<CheckCircleOutlined />}
             title="调用成功率"
-            hint="只按后端下发的成功/失败判定计算；一条判定都没有时记「未记录」，不按全成功推算。"
+            hint="直接取后端 stats.success_rate：近 7 天窗口、分母含被拒调用（成功/全部）。窗口内没有调用记录时记「未记录」，不折成 0% 也不折成 100%。"
             value={metrics.successRate != null ? `${metrics.successRate}%` : UNKNOWN_TEXT}
             note={metrics.rateNote}
           />
@@ -1490,8 +1521,11 @@ export function OpenApiMonitorView({
       >
         <div style={{ marginBottom: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            指标与明细读同一个窗口：最多取最近 {OPENAPI_CALLS_WINDOW} 条调用（后端单页上界）
-            {metrics.total != null && metrics.total > metrics.windowCount ? `，后端共 ${metrics.total} 次调用` : ''}
+            指标与明细是同一次查询：窗口 {metrics.windowLabel || UNKNOWN_TEXT}，明细最多取最近 {OPENAPI_CALLS_WINDOW} 条（后端单页上界）
+            {/* 窗口没声明时这句整段不出现：不知道窗口就不说「窗口内共 N 次」。 */}
+            {metrics.statsMissing || metrics.total == null || !metrics.windowLabel || metrics.total <= metrics.windowCount
+              ? ''
+              : `，${metrics.windowLabel}共 ${metrics.total} 次调用（含被拒）`}
           </Text>
         </div>
         {callsQuery.isError && (

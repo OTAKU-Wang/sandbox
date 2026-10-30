@@ -159,6 +159,11 @@ services:
       CDS_AGENT_MAX_TOOLS: "4"
       # W12 retention: audit/merkle keep-forever; alerts 180d. dry-run stays
       # true until a compliance review flips it explicitly.
+      # 2026-10-30 拍板：真删主开关 JANITOR_ENABLED 默认 false（生产默认关闭）；
+      # 只有白名单类别（alert_records / session_workspace_residue /
+      # dev_debug_artifacts）可被真删，audit/merkle/交付物 bundle/原始数据资源
+      # 在代码层永久硬拒，配置翻不动（docs/retention.md）。
+      CDS_JANITOR_ENABLED: "false"
       CDS_RETENTION_JANITOR_ENABLED: "true"
       CDS_AUDIT_LOG_RETENTION_DAYS: "0"
       CDS_MERKLE_LEAF_RETENTION_DAYS: "0"

@@ -29,7 +29,7 @@ from app.services.audit_service import audit_service
 from app.services.capability_matrix import LEVEL_METADATA, SUPPLY_DATA_LEVELS, can_carry_supply_data
 from app.services.kms_service import kms_service
 from app.services.compliance_report import disclosure_fields
-from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits, attestation_required_for_level as _attestation_required_for_level, attestation_from_provision as _attestation_from_provision, attestation_from_session as _attestation_from_session
+from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, try_reserve_tenant_usage, release_tenant_usage, get_resource_limits, attestation_required_for_level as _attestation_required_for_level, attestation_from_provision as _attestation_from_provision, attestation_from_session as _attestation_from_session
 from app.services.session_state_machine import session_state_machine
 from app.models.kms import KeyDistribution, KeyMetadata, KeyType, KeyStatus
 from app.models.network_policy import NetworkPolicy
@@ -283,8 +283,19 @@ async def _validate_session_contract(
         raise HTTPException(status_code=404, detail="Contract not found")
     if contract.status not in (ContractStatus.ACTIVE.value, ContractStatus.SIGNED.value):
         raise HTTPException(status_code=400, detail=f"Contract is {contract.status}")
-    if current_user.id != contract.buyer_id and not _can_operate_sessions(current_user):
-        raise HTTPException(status_code=403, detail="Only the contract buyer can create a session for this contract")
+    # 2026-10-30 用户拍板：合同双方均可开发（可信数据空间业务流转）——沙箱是
+    # 「卖方开发数据产品 → 连接器登记上架 → 买方购买后经沙箱调用产品服务」的场所，
+    # 买卖任一方都是这条流转的在事方，权限按业务流转（合同当事方）判定，不按
+    # 买/卖方角色一刀切。旧口径只放行 buyer，卖方（provider）连自己供数的合同
+    # 都开不了会话，与流转事实矛盾。
+    # 现状边界：平台没有「被授权主体」授权基础设施可放行——app/models 里不存在
+    # grant/authorization 类模型；AppCredential 是网关数据面（gateway）的应用凭据、
+    # FieldExposureRequest 是列级字段申请、FederationTrust 是跨空间信任，均不是
+    # 「可替合同开第三方会话」的主体授权。此类设施落地时在此处追加放行。
+    # 隔离不变量不随本决定放宽：session.data_product_id ∈ contract.product_ids、
+    # 档位下限（SS-13）、模式/操作条款、时长条款全部照旧在下方把关。
+    if current_user.id not in (contract.buyer_id, contract.provider_id) and not _can_operate_sessions(current_user):
+        raise HTTPException(status_code=403, detail="Only the contract buyer or provider can create a session for this contract")
     if str(body.data_product_id) not in [str(pid) for pid in contract.product_ids]:
         raise HTTPException(status_code=400, detail="Data product not covered by this contract")
 
@@ -410,174 +421,199 @@ async def create_sandbox_session(
             QuotaType.GPU_SECONDS: int((contract.max_duration_hours or 24) * 3600),
         })
 
-    # Check tenant resource quota
+    # A109（2026-10-30 接入）：原子预留租户用量，再进 provision。旧写法
+    # `check_tenant_quota` + provision 成功后 `update_tenant_usage` 是 check-then-act：
+    # 两个副本可以各自读到「还放得下」而双双放行、双双记账，租户配额被击穿。
+    # `try_reserve_tenant_usage` 改为「先 HINCRBY 自己这笔 → 读回合成真值 → 超阈
+    # 回滚自己那笔并拒」：超额直接 429 QUOTA_EXCEEDED（复用现有错误码，见
+    # app/core/errors.py），预留成功即先把这笔用量记在租户账上。
+    # 预留成功后任何没有落成运行会话的路径都必须精确回滚自己这一笔：
+    # `_release_reservation` 用闭包标志保证 exactly-once（异常路径与显式回滚
+    # 路径不双扣；会话落成后预留转正，由 session_lifecycle 终止时释放）。
     limits = get_resource_limits(body.sandbox_level)
-    allowed, reason = check_tenant_quota(
+    reserved, reserve_reason = await try_reserve_tenant_usage(
         str(current_user.id),
         cpu_cores=limits["cpu_cores"],
         memory_mb=limits["memory_mb"],
         disk_mb=limits["disk_mb"],
     )
-    if not allowed:
-        raise QuotaExceeded(f"资源配额不足: {reason}")
+    if not reserved:
+        raise QuotaExceeded(f"资源配额不足: {reserve_reason}")
 
-    # L2' (Cube) data-plane gate (SS-10 CB-01): honest rejection when the
-    # dataplane is off or no eligible node exists → 400 RUNTIME_UNAVAILABLE.
-    cube_node = None
-    if body.sandbox_level == "l2c":
-        from app.core.config import get_settings
-        from app.core.errors import CDSError
-        from app.services.cube_runtime_adapter import select_cube_node, pinned_cube_version
+    reservation_held = True
 
-        if not get_settings().CUBE_DATAPLANE_ENABLED:
-            raise CDSError(
-                "MicroVM 沙箱数据面未启用或未就绪（需先完成 Cube 计算节点部署并开启"
-                " CDS_CUBE_DATAPLANE_ENABLED）；按 SS-13 不降级到进程隔离执行",
-                code="RUNTIME_UNAVAILABLE",
-                http_status=400,
-                detail={"reason": "dataplane_disabled"},
-            )
-        # SS-13: tee_policy=tee_required narrows selection to TEE-capable
-        # nodes (capabilities.tee in {tdx, sev_snp}); no such node → honest
-        # 400 TEE_NODE_UNAVAILABLE.
-        require_tee = body.tee_policy == "tee_required"
-        cube_node = await select_cube_node(
-            db, runtime_version=pinned_cube_version(), template_id=body.template,
-            require_tee=require_tee,
-        )
-        if cube_node is None:
-            if require_tee:
-                raise CDSError(
-                    "no TEE-capable cube node is available (tee_policy=tee_required)",
-                    code="TEE_NODE_UNAVAILABLE",
-                    http_status=400,
-                    detail={"reason": "no_tee_node", "tee_policy": body.tee_policy},
-                )
-            raise CDSError(
-                "no eligible cube node (no online node with a matching runtime_version + cubelet endpoint)",
-                code="RUNTIME_UNAVAILABLE",
-                http_status=400,
-                detail={"reason": "no_eligible_node"},
-            )
-        # SS-13: persist the per-session trust root from the selected node's
-        # TEE capability — honest: missing/malformed capability means "none"
-        # (no per-VM TEE), never an upgraded claim.
-        _caps = cube_node.get("capabilities") or {}
-        _tee = _caps.get("tee", "none") if isinstance(_caps, dict) else "none"
-        session.trust_root = _tee if isinstance(_tee, str) else "none"
-
-    # Provision sandbox container
-    runtime = await get_sandbox_manager()
-    # N7: k8s sessions attach shared volumes as RWX PVCs (host binds are
-    # bwrap-only); resolve mounts up front so the pod spec carries them.
-    volume_mounts = None
-    if body.sandbox_level == "k8s":
-        try:
-            from app.services import shared_volumes
-            volume_mounts = await shared_volumes.resolve_mounts(db, session.id)
-        except Exception as e:
-            logger.warning("[Session] shared volume mount resolution failed: %s", e)
-            volume_mounts = []
-    volume_dek_ref = None
-    # SS-14 RT-07: 会话数据（l2c 产品数据注入源）。无条件初始化 —— 注入块在
-    # l2c 分支之外引用它（见下方 inject_session_data 处），非 Cube 适配器
-    # （测试 dummy/未来运行时）不能让它未绑定（UnboundLocalError 实测）。
-    session_data: bytes | None = None
-    if body.sandbox_level == "l2c":
-        from app.models.data_resource import DataResource
-        from app.services.cube_runtime_adapter import CubeRuntimeAdapter
-        from app.services.storage_service import storage_service
-
-        adapter = runtime.get_adapter(body.sandbox_level)
-        if isinstance(adapter, CubeRuntimeAdapter):
-            if product.resource_id is not None:
-                res_row = await db.execute(
-                    select(DataResource).where(DataResource.id == product.resource_id)
-                )
-                res = res_row.scalar_one_or_none()
-                if res is not None and res.storage_path:
-                    # 同步 MinIO 下载 + KMS 解密走 to_thread, 不占事件循环。
-                    session_data = await asyncio.to_thread(
-                        storage_service.download, res.storage_path
-                    )
-            if session_data is None:
-                session.status = SessionStatus.FAILED.value
-                session.error_message = ("l2c session requires a published product "
-                                         "with an uploaded data resource (fail-closed)")
-                db.add(session)
-                await db.commit()
-                raise CDSError(
-                    "l2c session requires a published product with an uploaded "
-                    "data resource (fail-closed)",
-                    code="INTERNAL_ERROR",
-                    http_status=500,
-                )
-            # SS-14 RT-07 (2026-10-14): 卷预建 + DEK ref 异步准备（卷面 httpx 走
-            # 线程、DEK 回查走主循环, 见 CubeRuntimeAdapter.prepare_session_volume）。
-            try:
-                volume_dek_ref = await adapter.prepare_session_volume(
-                    str(session.id), session_data
-                )
-            except CDSError as exc:
-                session.status = SessionStatus.FAILED.value
-                session.error_message = str(exc)
-                db.add(session)
-                await db.commit()
-                raise
-
-    # SS-14 RT-07 (2026-10-14): 同步 provision（内含 gRPC create）必须离事件循环 ——
-    # cubelet 建沙箱时插件 Attach 会回调本 API 的 KMS /distribute（解 DEK）;
-    # 若 gRPC 阻塞事件循环则循环依赖死锁（插件 20s 超时 → Attach 拒绝）。
-    # DB 访问已全部走 SyncDbBridge（独立 loop+引擎）, 跨线程 native 段错误源
-    # （_run_sync 新 loop 复用共享 asyncpg 引擎）已消除。
-    # Provisioning callbacks are cross-connection: the cubelet plugin calls
-    # back into this API's /kms/distribute (and the egress policy loader reads
-    # AppCredential/Contract rows) while this request is still open, so the
-    # session row must be committed before the provision call — an uncommitted
-    # row is invisible to those readers (and a nested service session closing
-    # its own connection would discard it).
-    await db.commit()
-
-    provision_result = await asyncio.to_thread(
-        runtime.provision,
-        session_id=session.id,
-        level=body.sandbox_level,
-        data_path="",
-        timeout=body.timeout_seconds,
-        user_id=str(current_user.id),
-        volume_mounts=volume_mounts,
-        cube_node=cube_node,
-        volume_dek_ref=volume_dek_ref,
-    )
-    session.container_id = provision_result.get("container_id")
-    session.status = provision_result.get("status", SessionStatus.RUNNING.value)
-    from app.core.metrics import record_session_transition
-
-    record_session_transition(SessionStatus.PROVISIONING.value, session.status)
-    if provision_result.get("error") or not session.container_id or session.status == SessionStatus.FAILED.value:
-        session.status = SessionStatus.FAILED.value
-        session.error_message = provision_result.get("error") or "Sandbox provision failed"
-        await db.flush()
-        await db.refresh(session)
-        await audit_service.log(
-            db, action="sandbox.create_failed", resource_type="sandbox_session",
-            user_id=current_user.id, session_id=session.id,
-            detail={
-                "sandbox_level": body.sandbox_level,
-                "sandbox_mode": body.sandbox_mode,
-                "data_product_id": str(body.data_product_id),
-                "error": session.error_message,
-            },
-        )
-        return SandboxSessionResponse.model_validate(session)
-    else:
-        # Track tenant resource usage
-        update_tenant_usage(
+    def _release_reservation() -> None:
+        nonlocal reservation_held
+        if not reservation_held:
+            return
+        reservation_held = False
+        release_tenant_usage(
             str(current_user.id),
             cpu_cores=limits["cpu_cores"],
             memory_mb=limits["memory_mb"],
             disk_mb=limits["disk_mb"],
         )
+
+    try:
+        # L2' (Cube) data-plane gate (SS-10 CB-01): honest rejection when the
+        # dataplane is off or no eligible node exists → 400 RUNTIME_UNAVAILABLE.
+        cube_node = None
+        if body.sandbox_level == "l2c":
+            from app.core.config import get_settings
+            from app.core.errors import CDSError
+            from app.services.cube_runtime_adapter import select_cube_node, pinned_cube_version
+
+            if not get_settings().CUBE_DATAPLANE_ENABLED:
+                raise CDSError(
+                    "MicroVM 沙箱数据面未启用或未就绪（需先完成 Cube 计算节点部署并开启"
+                    " CDS_CUBE_DATAPLANE_ENABLED）；按 SS-13 不降级到进程隔离执行",
+                    code="RUNTIME_UNAVAILABLE",
+                    http_status=400,
+                    detail={"reason": "dataplane_disabled"},
+                )
+            # SS-13: tee_policy=tee_required narrows selection to TEE-capable
+            # nodes (capabilities.tee in {tdx, sev_snp}); no such node → honest
+            # 400 TEE_NODE_UNAVAILABLE.
+            require_tee = body.tee_policy == "tee_required"
+            cube_node = await select_cube_node(
+                db, runtime_version=pinned_cube_version(), template_id=body.template,
+                require_tee=require_tee,
+            )
+            if cube_node is None:
+                if require_tee:
+                    raise CDSError(
+                        "no TEE-capable cube node is available (tee_policy=tee_required)",
+                        code="TEE_NODE_UNAVAILABLE",
+                        http_status=400,
+                        detail={"reason": "no_tee_node", "tee_policy": body.tee_policy},
+                    )
+                raise CDSError(
+                    "no eligible cube node (no online node with a matching runtime_version + cubelet endpoint)",
+                    code="RUNTIME_UNAVAILABLE",
+                    http_status=400,
+                    detail={"reason": "no_eligible_node"},
+                )
+            # SS-13: persist the per-session trust root from the selected node's
+            # TEE capability — honest: missing/malformed capability means "none"
+            # (no per-VM TEE), never an upgraded claim.
+            _caps = cube_node.get("capabilities") or {}
+            _tee = _caps.get("tee", "none") if isinstance(_caps, dict) else "none"
+            session.trust_root = _tee if isinstance(_tee, str) else "none"
+
+        # Provision sandbox container
+        runtime = await get_sandbox_manager()
+        # N7: k8s sessions attach shared volumes as RWX PVCs (host binds are
+        # bwrap-only); resolve mounts up front so the pod spec carries them.
+        volume_mounts = None
+        if body.sandbox_level == "k8s":
+            try:
+                from app.services import shared_volumes
+                volume_mounts = await shared_volumes.resolve_mounts(db, session.id)
+            except Exception as e:
+                logger.warning("[Session] shared volume mount resolution failed: %s", e)
+                volume_mounts = []
+        volume_dek_ref = None
+        # SS-14 RT-07: 会话数据（l2c 产品数据注入源）。无条件初始化 —— 注入块在
+        # l2c 分支之外引用它（见下方 inject_session_data 处），非 Cube 适配器
+        # （测试 dummy/未来运行时）不能让它未绑定（UnboundLocalError 实测）。
+        session_data: bytes | None = None
+        if body.sandbox_level == "l2c":
+            from app.models.data_resource import DataResource
+            from app.services.cube_runtime_adapter import CubeRuntimeAdapter
+            from app.services.storage_service import storage_service
+
+            adapter = runtime.get_adapter(body.sandbox_level)
+            if isinstance(adapter, CubeRuntimeAdapter):
+                if product.resource_id is not None:
+                    res_row = await db.execute(
+                        select(DataResource).where(DataResource.id == product.resource_id)
+                    )
+                    res = res_row.scalar_one_or_none()
+                    if res is not None and res.storage_path:
+                        # 同步 MinIO 下载 + KMS 解密走 to_thread, 不占事件循环。
+                        session_data = await asyncio.to_thread(
+                            storage_service.download, res.storage_path
+                        )
+                if session_data is None:
+                    session.status = SessionStatus.FAILED.value
+                    session.error_message = ("l2c session requires a published product "
+                                             "with an uploaded data resource (fail-closed)")
+                    db.add(session)
+                    await db.commit()
+                    raise CDSError(
+                        "l2c session requires a published product with an uploaded "
+                        "data resource (fail-closed)",
+                        code="INTERNAL_ERROR",
+                        http_status=500,
+                    )
+                # SS-14 RT-07 (2026-10-14): 卷预建 + DEK ref 异步准备（卷面 httpx 走
+                # 线程、DEK 回查走主循环, 见 CubeRuntimeAdapter.prepare_session_volume）。
+                try:
+                    volume_dek_ref = await adapter.prepare_session_volume(
+                        str(session.id), session_data
+                    )
+                except CDSError as exc:
+                    session.status = SessionStatus.FAILED.value
+                    session.error_message = str(exc)
+                    db.add(session)
+                    await db.commit()
+                    raise
+
+        # SS-14 RT-07 (2026-10-14): 同步 provision（内含 gRPC create）必须离事件循环 ——
+        # cubelet 建沙箱时插件 Attach 会回调本 API 的 KMS /distribute（解 DEK）;
+        # 若 gRPC 阻塞事件循环则循环依赖死锁（插件 20s 超时 → Attach 拒绝）。
+        # DB 访问已全部走 SyncDbBridge（独立 loop+引擎）, 跨线程 native 段错误源
+        # （_run_sync 新 loop 复用共享 asyncpg 引擎）已消除。
+        # Provisioning callbacks are cross-connection: the cubelet plugin calls
+        # back into this API's /kms/distribute (and the egress policy loader reads
+        # AppCredential/Contract rows) while this request is still open, so the
+        # session row must be committed before the provision call — an uncommitted
+        # row is invisible to those readers (and a nested service session closing
+        # its own connection would discard it).
+        await db.commit()
+
+        provision_result = await asyncio.to_thread(
+            runtime.provision,
+            session_id=session.id,
+            level=body.sandbox_level,
+            data_path="",
+            timeout=body.timeout_seconds,
+            user_id=str(current_user.id),
+            volume_mounts=volume_mounts,
+            cube_node=cube_node,
+            volume_dek_ref=volume_dek_ref,
+        )
+        session.container_id = provision_result.get("container_id")
+        session.status = provision_result.get("status", SessionStatus.RUNNING.value)
+        from app.core.metrics import record_session_transition
+
+        record_session_transition(SessionStatus.PROVISIONING.value, session.status)
+        if provision_result.get("error") or not session.container_id or session.status == SessionStatus.FAILED.value:
+            _release_reservation()  # A109: provision 失败 = 会话没落成，精确回滚自己那笔预留
+            session.status = SessionStatus.FAILED.value
+            session.error_message = provision_result.get("error") or "Sandbox provision failed"
+            await db.flush()
+            await db.refresh(session)
+            await audit_service.log(
+                db, action="sandbox.create_failed", resource_type="sandbox_session",
+                user_id=current_user.id, session_id=session.id,
+                detail={
+                    "sandbox_level": body.sandbox_level,
+                    "sandbox_mode": body.sandbox_mode,
+                    "data_product_id": str(body.data_product_id),
+                    "error": session.error_message,
+                },
+            )
+            return SandboxSessionResponse.model_validate(session)
+    except BaseException:
+        # A109: 预留之后、会话落成之前的任何异常路径（l2c 数据面门 400、卷预建
+        # fail-closed、commit/provision 抛错、任务取消）都必须把自己那笔预留退回
+        # 再让异常穿过去；闭包标志保证与显式回滚分支之间不会双扣。
+        _release_reservation()
+        raise
+
+    # 走到这里会话已 provision 成功：预留正式转为占用，释放责任移交会话生命周期
+    # （terminate 路由 / session_lifecycle.terminate_session），预留端与释放端成对。
 
     attestation_record = _attestation_record_from_provision(provision_result)
     if attestation_record:
@@ -595,12 +631,7 @@ async def create_sandbox_session(
             await asyncio.to_thread(runtime.terminate, session.container_id)
         except Exception as e:
             logger.warning("[sandbox] Container rollback after attestation denial failed: %s", e)
-        release_tenant_usage(
-            str(current_user.id),
-            cpu_cores=limits["cpu_cores"],
-            memory_mb=limits["memory_mb"],
-            disk_mb=limits["disk_mb"],
-        )
+        _release_reservation()  # A109: 本路径没落成运行会话，精确退预留（闭包防双扣）
         session.container_id = None
         session.status = SessionStatus.FAILED.value
         session.error_message = "Sandbox attestation quote missing; key distribution denied"
@@ -633,12 +664,7 @@ async def create_sandbox_session(
             await asyncio.to_thread(runtime.terminate, session.container_id)
         except Exception as e:
             logger.warning("[sandbox] Container rollback after key distribution failure failed: %s", e)
-        release_tenant_usage(
-            str(current_user.id),
-            cpu_cores=limits["cpu_cores"],
-            memory_mb=limits["memory_mb"],
-            disk_mb=limits["disk_mb"],
-        )
+        _release_reservation()  # A109: 本路径没落成运行会话，精确退预留（闭包防双扣）
         session.container_id = None
         session.status = SessionStatus.FAILED.value
         session.error_message = "Session key distribution failed"
@@ -672,12 +698,7 @@ async def create_sandbox_session(
                 await asyncio.to_thread(runtime.terminate, session.container_id)
             except Exception as e:
                 logger.warning("[sandbox] Container rollback after data injection failure failed: %s", e)
-            release_tenant_usage(
-                str(current_user.id),
-                cpu_cores=limits["cpu_cores"],
-                memory_mb=limits["memory_mb"],
-                disk_mb=limits["disk_mb"],
-            )
+            _release_reservation()  # A109: 注入失败回滚，精确退预留（闭包防双扣）
             session.container_id = None
             session.status = SessionStatus.FAILED.value
             session.error_message = f"Session data injection into sandbox failed: {inject_error}"

@@ -6,6 +6,7 @@ External trusted data spaces can:
 3. Create contracts for data product access
 4. Proxy sandbox sessions for secure data usage
 """
+import asyncio
 import json
 import uuid
 import hashlib
@@ -492,7 +493,9 @@ async def connector_create_session(
         session.error_message = "Session key distribution failed"
         termination_error = None
         try:
-            if not runtime.terminate(session.container_id):
+            # cr M4（2026-10-30，lead 裁定归 lane-b）：runtime.terminate 同步可阻塞
+            # 数十秒，事件循环不得被失败回滚钉住——与 sandbox_sessions A33 同一先例。
+            if not await asyncio.to_thread(runtime.terminate, session.container_id):
                 termination_error = "runtime terminate returned false"
         except Exception as e:
             termination_error = str(e)
@@ -719,7 +722,8 @@ async def connector_terminate_session(
             session.ended_at = datetime.now(timezone.utc)
             if session.container_id:
                 runtime = await get_sandbox_manager()
-                runtime.terminate(session.container_id)
+                # cr M4（2026-10-30，lead 裁定归 lane-b）：慢节点 terminate 下线程。
+                await asyncio.to_thread(runtime.terminate, session.container_id)
 
     await db.flush()
     return {"connector_session_id": str(connector_session_id), "status": "terminated"}

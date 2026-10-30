@@ -17,6 +17,7 @@ When contract ends:
 10. Destroy all session keys
 11. Generate compliance report
 """
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
@@ -240,7 +241,10 @@ class ContractFulfillmentService:
 
         if session.container_id:
             try:
-                if not runtime.terminate(session.container_id):
+                # cr M4（2026-10-30，lead 裁定归 lane-b）：runtime.terminate 同步可
+                # 阻塞数十秒（Cube Detach 还会回调本 API），半程回滚不得停摆事件
+                # 循环——与 sandbox_sessions A33 / session_lifecycle 同一先例。
+                if not await asyncio.to_thread(runtime.terminate, session.container_id):
                     problems.append(
                         f"runtime terminate returned false for container {session.container_id}"
                     )

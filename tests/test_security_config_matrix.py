@@ -329,3 +329,39 @@ def test_prod_mfa_secret_key_set_passes(monkeypatch):
     settings = _prod_baseline(monkeypatch)  # baseline already sets the key
     issues = settings.validate_security_config()
     assert not any("MFA_SECRET" in i for i in issues)
+
+
+def test_prod_janitor_category_out_of_set_raises(monkeypatch):
+    """2026-10-30 拍板：CDS_JANITOR_CATEGORIES 选集外（含受保护类别）= 启动拒。
+    受保护类别（audit_logs/merkle_leaves/delivery_bundles/data_resources）的
+    永久保留是代码白名单之外的硬拒，配置连「尝试删除」都买不到。"""
+    settings = _prod_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "JANITOR_CATEGORIES", "alert_records,audit_logs")
+    with pytest.raises(ValueError, match="JANITOR_CATEGORIES"):
+        settings.validate_security_config()
+
+
+def test_janitor_category_gate_is_not_prod_only(monkeypatch):
+    """同一集外配置在 dev/TESTING 姿态也必须拒启动——白名单是代码常量，
+    不是生产专属偏好（gate 位于 validate_security_config 的 is_prod 早退之前）。"""
+    settings = get_settings()  # TESTING env still pinned — non-prod posture
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "k" * 40)
+    monkeypatch.setattr(settings, "JANITOR_CATEGORIES", "data_resources")
+    with pytest.raises(ValueError, match="JANITOR_CATEGORIES"):
+        settings.validate_security_config()
+
+
+def test_janitor_defaults_master_off_and_whitelist_subset_ok(monkeypatch):
+    """默认姿态读数：真删主开关关 + dry-run 默认；合法的白名单子集不报错不告警。
+
+    读数必须取全新 Settings()（类默认值）：lru_cached 单例会被
+    test_retention_janitor.py 里对共享实例的直接赋值（既有泄漏）污染，
+    同进程批量跑时拿单例断言默认值就是伪失败。
+    """
+    from app.core.config import Settings
+
+    fresh = Settings()
+    assert fresh.JANITOR_ENABLED is False
+    assert fresh.RETENTION_JANITOR_DRY_RUN is True
+    monkeypatch.setattr(fresh, "JANITOR_CATEGORIES", "alert_records,dev_debug_artifacts")
+    assert fresh.validate_janitor_config() == []

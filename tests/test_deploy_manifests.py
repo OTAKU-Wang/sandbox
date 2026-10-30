@@ -109,3 +109,39 @@ def test_prod_compose_has_no_unresolved_env_placeholders():
                     placeholders.add(name)
     missing = [p for p in sorted(placeholders) if p not in env_example]
     assert not missing, f"prod compose placeholders not documented in .env.example: {missing}"
+
+
+# ── 2026-10-30 拍板：janitor 真删主开关默认关（docs/retention.md 白名单章节） ──
+def test_janitor_real_delete_master_switch_off_in_every_deploy_copy():
+    """CDS_JANITOR_ENABLED must read "false" in all four manifest copies plus the
+    two scripted deploy paths (local / e2e-remote mirror compose 1:1).
+
+    Production default-off is the pin: real deletion additionally needs the
+    code-constant category whitelist and an explicit dry-run flip — the switch
+    here is the first gate, so any copy drifting to "true" silently arms it.
+    """
+    for rel in ("docker-compose.yml", "docker-compose.prod.yml"):
+        env = yaml.safe_load(_read(rel))["services"]["cds-api"]["environment"]
+        assert env.get("CDS_JANITOR_ENABLED") == "false", f"{rel} janitor switch drifted"
+    values = yaml.safe_load(_read("helm/cds/values.yaml"))
+    assert values["api"]["env"].get("CDS_JANITOR_ENABLED") == "false", "helm values janitor switch"
+    cm = next(
+        d for d in yaml.safe_load_all(_read("k8s/cds-app.yaml"))
+        if d and d.get("kind") == "ConfigMap" and d["metadata"]["name"] == "cds-app-env"
+    )
+    assert cm["data"].get("CDS_JANITOR_ENABLED") == "false", "k8s cds-app-env janitor switch"
+    for script in ("deploy/local/local_deploy.sh", "deploy/e2e-remote/remote_deploy.sh"):
+        assert '-e CDS_JANITOR_ENABLED="false"' in _read(script), f"{script} janitor switch"
+
+
+def test_prod_compose_retention_keeps_forever_and_dry_run():
+    """审计/存证永久保留 + dry-run 默认不许在 prod compose 里被翻（铁律：
+    retention 0 = 永远，export-and-archive only；真删另有代码白名单硬守卫）。"""
+    env = yaml.safe_load(_read("docker-compose.prod.yml"))["services"]["cds-api"]["environment"]
+    assert env.get("CDS_RETENTION_JANITOR_DRY_RUN") == "true"
+    assert env.get("CDS_AUDIT_LOG_RETENTION_DAYS") == "0"
+    assert env.get("CDS_MERKLE_LEAF_RETENTION_DAYS") == "0"
+    values = yaml.safe_load(_read("helm/cds/values.yaml"))["api"]["env"]
+    assert values.get("CDS_RETENTION_JANITOR_DRY_RUN") == "true"
+    assert values.get("CDS_AUDIT_LOG_RETENTION_DAYS") == "0"
+    assert values.get("CDS_MERKLE_LEAF_RETENTION_DAYS") == "0"

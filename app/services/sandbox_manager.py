@@ -195,6 +195,23 @@ _manager_lock = asyncio.Lock()
 # callers; every mutation is written through to the Redis hash
 # ``cds:tenant_quota:{user_id}`` so usage survives restarts and is visible
 # to replicas. restore_tenant_quotas() seeds the dict back from Redis.
+#
+# ── 配额双实现收敛选型（2026-10-30, A109 收尾, lane-b）────────────────────────
+# 仓内存在两份 Redis 配额实现，**域不同，不是一次重复实现**，收敛结论如下：
+#   1) 本模块 = 租户级「基础设施用量」唯一真值（cpu/mem/disk 聚合，
+#      HINCRBY 增量合成 + restore/rebuild/flush 对账面）：暴露面 main.py 启动
+#      恢复、quota.py 只读展示、session_lifecycle 终止释放、sandbox_sessions
+#      创建预留（A109 原子预留 try_reserve_tenant_usage）；测试 3 个文件，含
+#      门禁 test_tenant_quota_persistence.py 与专项 test_ocr_a108_a109_*。
+#   2) quota_manager.py = 会话级「数据量配额」（rows/bytes/api/gpu/dp/duration）
+#      与网关日配额（Lua 原子脚本 + A146 strict-read 降级披露）：7 个生产文件
+#      在用（gateway/quota/connectors/contract_fulfillment/sandbox_sessions/
+#      main 等），3 个测试文件含 A146 门禁。键空间、语义（限额是会话条款 vs
+#      租户默认）、恢复路径都不同——互相转发等于删功能，故两份都保留、各司其域。
+#   3) 真正的同域重复 = 本模块内 check_tenant_quota + update_tenant_usage 的
+#      check-then-act 对（A109 已标注非原子）vs try_reserve_tenant_usage：
+#      2026-10-30 起会话创建路径改走原子预留，这两个函数生产路径零调用，
+#      降级为 LEGACY（仅供测试与非 API 场景直读直写），不得再接入生产写路径。
 _tenant_quotas: dict[str, dict] = {}
 # A109: 尚未合成进 Redis 的**增量**（不是快照）。Redis 侧一律用 HINCRBY 叠加，
 # 所以多副本并发写只会把用量相加，谁也不会拿自己的本地快照覆盖对方的用量；
@@ -331,7 +348,13 @@ async def flush_quota_persistence() -> None:
 
 
 def update_tenant_usage(user_id: str, cpu_cores: int = 0, memory_mb: int = 0, disk_mb: int = 0):
-    """Update aggregated resource usage for a tenant."""
+    """Update aggregated resource usage for a tenant.
+
+    **LEGACY（2026-10-30 收敛）**：与 `check_tenant_quota` 分开调用构成
+    check-then-act（A109 击穿点），会话创建生产路径已改走
+    `try_reserve_tenant_usage`；本函数现仅存留给测试与非 API 记账场景，
+    新生产写路径禁止再接入。
+    """
     delta = {
         "used_cpu_cores": int(cpu_cores or 0),
         "used_memory_mb": int(memory_mb or 0),
@@ -344,6 +367,10 @@ def update_tenant_usage(user_id: str, cpu_cores: int = 0, memory_mb: int = 0, di
 
 def check_tenant_quota(user_id: str, cpu_cores: int, memory_mb: int, disk_mb: int) -> tuple[bool, str]:
     """Check if a tenant has enough quota for a new session (local, non-atomic).
+
+    **LEGACY（2026-10-30 收敛）**：会话创建生产路径已改走原子预留，生产代码
+    零调用（仅测试引用）；门禁 test_tenant_quota_persistence.py 直接 import
+    本函数对，删除会砸门禁，故降级保留而非删除。
 
     Returns (allowed, reason). 这是快速预筛；**跨副本真值请用
     `await try_reserve_tenant_usage(...)`**，本函数与 `update_tenant_usage` 分开

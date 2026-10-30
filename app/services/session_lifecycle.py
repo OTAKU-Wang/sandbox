@@ -303,12 +303,16 @@ async def session_cleanup_loop(interval_seconds: float = 300.0) -> None:
                     logger.error("[SessionLifecycle] Node stale detection failed: %s", e)
                 # W12: retention janitor rides the same sweep (same cadence,
                 # fewer background tasks); it self-audits.
+                # 2026-10-30 拍板：真删主开关 JANITOR_ENABLED 默认 false（生产
+                # 默认关闭），与兼容副闸 RETENTION_JANITOR_ENABLED 同时为 true
+                # 才调度；真删还受白名单类别 + dry-run 双闸（docs/retention.md）。
                 janitor_results: dict[str, int] = {}
                 try:
                     from app.core.config import get_settings
                     from app.services.retention_janitor import purge_cycle
 
-                    if get_settings().RETENTION_JANITOR_ENABLED:
+                    _janitor_cfg = get_settings()
+                    if _janitor_cfg.JANITOR_ENABLED and _janitor_cfg.RETENTION_JANITOR_ENABLED:
                         janitor_results = await purge_cycle(db)
                 except Exception as e:
                     logger.error("[SessionLifecycle] Retention janitor failed: %s", e)

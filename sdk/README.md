@@ -182,8 +182,14 @@ print(agent.invoke_open_endpoint("<slug>", {"input": {"day": "2026-10-15"}}))
 
 ## 重试与错误
 
-- `429` / `503` 自动重试（最多 `max_retries` 次，尊重 `Retry-After`）。
+- `429` / `503` 自动重试（仅幂等读 GET/HEAD/OPTIONS；最多 `max_retries` 次）。
+  等待时长**按服务端 `Retry-After` 退避**，上限 60s（缺头回退 1s）——旧实现的 5s 硬截断
+  与本文档相悖，已修（cr-2026-10-15 §4.7）；写请求收到 429/503 不自动重发（防重复落库）。
 - `410 SESSION_TERMINATED` **不重试**：这是终态（W2 错误契约要求客户端遇 410 停止重试），
   重试只会反复打一个已死的会话。
 - 非 2xx 一律抛 `CDSError(status_code, detail)`；W2 错误契约响应抛 `CDSApiError`，
   含 `code` / `message` / `request_id` / `retry_after`。
+- WS 流式 exec（`stream_exec`）：静默超过 `recv_timeout` 抛 `CDSError(504)` 且
+  `err.truncated is True`（结构化截断标记，不靠文案判别）；干净收尾（exit/blocked/error
+  终帧或服务端关闭）不置该标记。`timeout_seconds` 在服务端执行前校验，非正数/非数值
+  直接抛 `ValueError`。

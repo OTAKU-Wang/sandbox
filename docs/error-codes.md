@@ -14,7 +14,7 @@
 
 | code | HTTP | 触发场景 | 用户提示（zh） | 下一步 |
 |---|---|---|---|---|
-| `AUTH_MFA_REQUIRED` | 401 | MFA 已确认用户登录时缺少 mfa_code，或 TOTP/恢复码不正确（PZ-10 双轨，`auth.py` 登录门禁） | 需要完成双因素验证 | 打开身份验证器输入 TOTP，或使用恢复码；均不可用时联系管理员 |
+| `AUTH_MFA_REQUIRED` | 401 | MFA 已确认用户登录时缺少 mfa_code，或 TOTP/恢复码不正确（PZ-10 双轨，`auth.py` 登录门禁）；`/auth/refresh` 的 MFA 重验门：会话签发早于账号 MFA 确认时刻，密码态旧会话不得免二因子续期（CR §4.10，`detail.reason=mfa_revalidation_required`） | 需要完成双因素验证 | 打开身份验证器输入 TOTP，或使用恢复码；均不可用时联系管理员 |
 | `SESSION_TERMINATED` | 410 Gone | 会话已终态（terminated/completed/failed/expired），或 W9 自动 resume 被治理契约阻断（唯一抛出点 `sandbox_sessions.py:~1454`） | 会话已终止，数据不可恢复 | 不要重试；如需数据联系管理员（审计保留） |
 | `SESSION_STATE_CONFLICT` | 409 | 状态不允许该操作（如 SUSPENDED 态执行、终态 pause/terminate；`sandbox_sessions.py` 各状态校验点，W2 接线后替代原 400） | 会话当前状态不允许该操作 | 先 resume/refresh 再操作（提示当前状态，见 `message`） |
 | `OPERATION_LOCKED` | 503 + Retry-After | 操作互斥（如同会话回滚进行中重复触发） | 另一操作进行中 | 按 Retry-After 等待后自动重试 |

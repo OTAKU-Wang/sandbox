@@ -445,10 +445,22 @@ export interface DatasetBundleRequest {
 
 export interface DatasetBundle {
   bundle_id: string;
-  files: { name: string; size_bytes: number }[];
+  files: {
+    name: string;
+    size_bytes: number;
+    /**
+     * 逐文件水印口径（2026-10-30 背景水印拍板）：embedded_watermark（docx 真内嵌）/
+     * header_text（xlsx 诚实降级，非真背景水印）/ preview_only（csv/tsv 本体未动，仅预览层）/
+     * zero_width_text（文本零宽）；未加水印或注入失败为 null。历史响应无此字段。
+     */
+    watermark_method?: string | null;
+  }[];
   size_bytes: number;
   download_url: string | null;
   watermark_applied: boolean;
+  /** 包级口径：applied / partially_applied / not_applied / not_requested / preview_only。 */
+  watermark_status?: string | null;
+  watermark_legend?: Record<string, string>;
 }
 
 export interface BundlePreview {
@@ -584,6 +596,8 @@ export interface ApiEndpointCall {
   slug: string;
   /** 后端只写 succeeded / failed；其他取值原样透出，不并入成功率。 */
   status?: string | null;
+  /** 后端 `_call_bucket` 的三桶判定（succeeded / rejected / failed），与 stats 同一判据。 */
+  outcome?: string | null;
   /** 仅失败行有值：delivery_service 里真实 raise 的 EndpointUnavailable.code。 */
   code?: string | null;
   message?: string | null;
@@ -595,46 +609,122 @@ export interface ApiEndpointCall {
   created_at?: string | null;
 }
 
-/** 明细一次取回的窗口条数：与后端 page_size 上界（le=100）对齐，成功率口径就是这最近若干条。 */
+/** 明细一次取回的窗口条数：与后端 page_size 上界（le=100）对齐。 */
 export const OPENAPI_CALLS_WINDOW = 100;
+
+/**
+ * 拍板③（2026-10-30）：KPI 的统计窗口固定「近 7 天」，且**明细与 KPI 传同一个 window 参数**。
+ * 后端把 stats 和 items 放在同一个响应、同一份 WHERE 上算（app/api/deliveries.py），
+ * 就是为了堵掉 ss-19 §10.2 记的「KPI 说 100% 而明细里有失败」——那正是分两次查、
+ * 各算各的口径出来的。
+ */
+export const OPENAPI_CALLS_STATS_WINDOW = '7d';
 
 export interface ApiEndpointCallListParams {
   status?: ApiEndpointCallStatus | '';
+  /** 'all' | '7d' | '30d'，后端 pattern 校验；缺省 'all'（SS-18 原行为）。 */
+  window?: string;
   page?: number;
   page_size?: number;
 }
 
+/** 后端 `_call_stats` 下发的分桶统计——成功率的唯一来源，前端不再自己数明细行。 */
+export interface EndpointCallStats {
+  window: string;
+  window_days: number | null;
+  since: string | null;
+  until: string | null;
+  total: number;
+  succeeded: number;
+  failed: number;
+  /** 执行前就被拒的调用（准入拒绝码），照样计入分母。 */
+  rejected: number;
+  /** 成功 / 全部调用（含被拒）；窗口内没有调用时为 null——不是 0，也不是 100。 */
+  success_rate: number | null;
+  data_available: boolean;
+  reason: string | null;
+  /** 口径文案由后端写，界面照抄，禁止前端另写一套说法。 */
+  denominator: string;
+  rate_caliber: string;
+  status_scope: string;
+  source: string;
+  vocabulary?: {
+    actions?: string[];
+    failure_markers?: string[];
+    rejection_markers?: string[];
+    refusal_codes?: string[];
+    execution_failure_codes?: string[];
+  };
+  note?: string;
+}
+
+/** GET /deliveries/openapi/endpoints/{id}/calls 的响应（items + 同口径 stats）。 */
+export interface EndpointCallListPayload extends PaginatedResponse<ApiEndpointCall> {
+  window?: string | null;
+  window_days?: number | null;
+  since?: string | null;
+  until?: string | null;
+  stats?: EndpointCallStats | null;
+}
+
 export interface EndpointCallMetrics {
-  /** 调用总次数：取响应 total（后端对审计日志做的 count）。 */
+  /** 调用总次数：优先 stats.total（窗口内全部调用，含被拒），其次响应 total，都没有就是 null。 */
   total: number | null;
-  /** total 缺失时按窗口条数兜底，口径要在界面上说清楚。 */
-  totalIsFallback: boolean;
-  /** 本次返回的明细条数（成功率与最新时间的计算窗口）。 */
+  /** total 是从哪一层取到的——界面上要把口径说清楚，取不到就什么都不说。 */
+  totalSource: 'stats' | 'response';
+  /** 本次返回的明细条数（只有「最新调用时间」从明细行取）。 */
   windowCount: number;
   /** 最新调用时间：窗口内 created_at 的最大值，不从当前时间推算。 */
   latestAt: string | null;
-  /** 调用成功率（%）；没有成功/失败判定时为 null，由界面渲染「未记录」。 */
+  /** 调用成功率（%），直接取后端 stats.success_rate；缺失即 null（界面渲染「未记录」）。 */
   successRate: number | null;
-  /** 一句话口径：成功率怎么算的，或者为什么算不出来。 */
+  /** 一句话口径：成功率按什么算的，或者为什么算不出来。 */
   rateNote: string;
+  /** 统计窗口的人话说法（由后端 window_days 派生）。 */
+  windowLabel: string;
+  succeeded: number | null;
+  failed: number | null;
+  rejected: number | null;
+  /** true = 后端没下发 stats（老后端或请求未带回），此时成功率一律「未记录」。 */
+  statsMissing: boolean;
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**
- * 指标 3 宫格的口径全部收在这一个纯函数里，页面不再自行算数。
+ * 监控 3 宫格的口径全部收在这一个纯函数里，页面不再自行算数。
  *
- * 成功率只认响应里真的带 succeeded/failed 判定的行：一条判定都没有就返回 null
- * （界面渲染「未记录」+ 原因），绝不用「有明细 ⇒ 全成功」反推成 100%。
+ * 拍板③（2026-10-30）两条硬约束：
+ * ① 成功率只认后端 `stats.success_rate`（近 7 天、分母含被拒调用）。旧实现是按本页
+ *    返回的明细行数算比例——明细受分页/筛选影响，与「调用成功率」根本不是同一件事，
+ *    也正是「KPI 100% 与明细有失败并存」的成因。现在前端一条都不自己数。
+ * ② stats 缺失或窗口内没有调用 ⇒ successRate 是 null（界面「未记录」），
+ *    禁把缺数折成 0% 或 100%。
  */
 export function computeEndpointCallMetrics(
-  payload: PaginatedResponse<ApiEndpointCall> | null | undefined,
+  payload: EndpointCallListPayload | null | undefined,
 ): EndpointCallMetrics {
   if (!payload) {
-    return { total: null, totalIsFallback: false, windowCount: 0, latestAt: null, successRate: null, rateNote: '调用数据尚未返回，不做推算' };
+    return {
+      total: null,
+      totalSource: 'response',
+      windowCount: 0,
+      latestAt: null,
+      successRate: null,
+      rateNote: '调用数据尚未返回，不做推算',
+      windowLabel: '',
+      succeeded: null,
+      failed: null,
+      rejected: null,
+      statsMissing: true,
+    };
   }
   const items = (Array.isArray(payload.items) ? payload.items : []).filter(Boolean);
   const windowCount = items.length;
-  const backendTotal = typeof payload.total === 'number' && Number.isFinite(payload.total) ? payload.total : null;
 
+  // 「最新调用时间」后端不下发聚合值，只能从明细行取最大值；其余指标一律读 stats。
   let latestAt: string | null = null;
   for (const row of items) {
     const at = row.created_at;
@@ -644,31 +734,47 @@ export function computeEndpointCallMetrics(
     if (latestAt == null || stamp > new Date(latestAt).getTime()) latestAt = at;
   }
 
-  const rated = items.filter((row) => row.status === OPENAPI_CALL_STATUS.Succeeded || row.status === OPENAPI_CALL_STATUS.Failed);
-  const windowSuffix = backendTotal != null && backendTotal > windowCount ? `（共 ${backendTotal} 次，只取最近 ${windowCount} 条）` : '';
+  const windowDays = finiteOrNull(payload.window_days);
+  const windowLabel = windowDays != null ? `近 ${windowDays} 天` : payload.window === 'all' ? '全部时间' : '';
+  const responseTotal = finiteOrNull(payload.total);
+  const stats = payload.stats && typeof payload.stats === 'object' ? payload.stats : null;
 
-  if (rated.length === 0) {
+  if (!stats) {
     return {
-      total: backendTotal ?? windowCount,
-      totalIsFallback: backendTotal == null,
+      total: responseTotal,
+      totalSource: 'response',
       windowCount,
       latestAt,
       successRate: null,
-      rateNote:
-        windowCount === 0
-          ? '该端点暂无调用明细，成功率无从计算'
-          : `返回的 ${windowCount} 条明细未带成功/失败判定，成功率不做推算`,
+      rateNote: '后端未下发调用统计（stats），成功率不做推算——明细自己数出来的比例与统计口径不是同一件事',
+      windowLabel,
+      succeeded: null,
+      failed: null,
+      rejected: null,
+      statsMissing: true,
     };
   }
 
-  const succeeded = rated.filter((row) => row.status === OPENAPI_CALL_STATUS.Succeeded).length;
+  const statsTotal = finiteOrNull(stats.total);
+  const rate = finiteOrNull(stats.success_rate);
+  const scope = windowLabel || '该窗口';
   return {
-    total: backendTotal ?? windowCount,
-    totalIsFallback: backendTotal == null,
+    total: statsTotal ?? responseTotal,
+    totalSource: statsTotal != null ? 'stats' : 'response',
     windowCount,
     latestAt,
-    successRate: Math.round((succeeded / rated.length) * 1000) / 10,
-    rateNote: `按 ${rated.length} 条带判定的调用计${windowSuffix}`,
+    successRate: rate,
+    rateNote:
+      rate == null
+        // 措辞刻意避开裸写的「0%/100%」：全站用例靠整页文本扫这两个字面量当警报，
+        // 说明文字自己撞上去会让警报哑掉。
+        ? `${scope}内没有调用记录：成功率记「未记录」，既不折成 0 也不折成满分`
+        : `${scope} · ${stats.denominator}`,
+    windowLabel,
+    succeeded: finiteOrNull(stats.succeeded),
+    failed: finiteOrNull(stats.failed),
+    rejected: finiteOrNull(stats.rejected),
+    statsMissing: false,
   };
 }
 
@@ -1619,17 +1725,20 @@ export const flowApi = {
     api.delete(`/deliveries/openapi/endpoints/${id}`) as unknown as Promise<void>,
 
   /**
-   * 端点调用明细（PRD 3-3 / SS-18 §8 P0-③）。数据源是带 Merkle 锚定的审计日志，后端不另建影子表；
+   * 端点调用明细 + 同口径统计（PRD 3-3 / SS-18 §8 P0-③ / 2026-10-30 拍板③）。
+   * 数据源是带 Merkle 锚定的审计日志，后端不另建影子表；
    * 在鉴权层就被拒的请求本来没有日志行，后端不补也不猜，前端同样不补。
+   * ``window`` 同时决定明细与 stats 的窗口，KPI 与明细因此天然同口径。
    */
-  listEndpointCalls: (id: string, params?: ApiEndpointCallListParams): Promise<PaginatedResponse<ApiEndpointCall>> =>
+  listEndpointCalls: (id: string, params?: ApiEndpointCallListParams): Promise<EndpointCallListPayload> =>
     api.get(`/deliveries/openapi/endpoints/${id}/calls`, {
       params: {
         status: params?.status || undefined,
+        window: params?.window || undefined,
         page: params?.page ?? 1,
         page_size: params?.page_size ?? 20,
       },
-    }) as unknown as Promise<PaginatedResponse<ApiEndpointCall>>,
+    }) as unknown as Promise<EndpointCallListPayload>,
 };
 
 // ---------------------------------------------------------------------------
@@ -1784,8 +1893,24 @@ export const flowKeys = {
   webhooks: (contractId?: string | null) => ['flow', 'delivery', 'webhooks', contractId ?? null] as const,
   deliveries: (id: string, status?: string | null) => ['flow', 'delivery', 'webhook', id, 'deliveries', status ?? null] as const,
   endpoints: (contractId?: string | null) => ['flow', 'delivery', 'endpoints', contractId ?? null] as const,
-  endpointCalls: (id?: string | null, status?: string | null, page?: number | null, pageSize?: number | null) =>
-    ['flow', 'delivery', 'endpoint', id ?? null, 'calls', status ?? null, page ?? 1, pageSize ?? OPENAPI_CALLS_WINDOW] as const,
+  endpointCalls: (
+    id?: string | null,
+    status?: string | null,
+    page?: number | null,
+    pageSize?: number | null,
+    window?: string | null,
+  ) =>
+    [
+      'flow',
+      'delivery',
+      'endpoint',
+      id ?? null,
+      'calls',
+      status ?? null,
+      page ?? 1,
+      pageSize ?? OPENAPI_CALLS_WINDOW,
+      window ?? 'all',
+    ] as const,
   openapi: (contractId: string) => ['flow', 'delivery', 'openapi', contractId] as const,
   bundles: (contractId?: string | null, page?: number | null, pageSize?: number | null) =>
     ['flow', 'delivery', 'bundles', contractId ?? null, page ?? 1, pageSize ?? 20] as const,
@@ -2084,10 +2209,11 @@ export const useDeleteEndpoint = createFlowMutationHook(
  */
 export function useEndpointCalls(endpointId: string | null, status?: ApiEndpointCallStatus | null) {
   return useQuery({
-    queryKey: flowKeys.endpointCalls(endpointId, status, 1, OPENAPI_CALLS_WINDOW),
+    queryKey: flowKeys.endpointCalls(endpointId, status, 1, OPENAPI_CALLS_WINDOW, OPENAPI_CALLS_STATS_WINDOW),
     queryFn: () =>
       flowApi.listEndpointCalls(endpointId as string, {
         status: status || undefined,
+        window: OPENAPI_CALLS_STATS_WINDOW,
         page: 1,
         page_size: OPENAPI_CALLS_WINDOW,
       }),

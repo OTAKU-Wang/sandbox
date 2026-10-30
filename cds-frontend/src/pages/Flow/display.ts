@@ -253,10 +253,29 @@ export const BUNDLE_WATERMARK_META: Record<string, StatusMeta> = {
   partially_applied: { color: 'orange', label: '部分文件未嵌入' },
   not_applied: { color: 'red', label: '未嵌入水印' },
   not_requested: { color: 'default', label: '未申请水印' },
+  // 2026-10-30 背景水印拍板新增：纯文本数据表文件本体未改，水印只在预览层——
+  // 既不算「已嵌入」，也不是「该嵌没嵌」的失败，独立口径诚实展示。
+  preview_only: { color: 'blue', label: '仅预览层水印' },
 };
 
 /** 这两列上线前打的包为 NULL：如实说「未记录」，不从包体反推。 */
 const BUNDLE_UNRECORDED: StatusMeta = { color: 'default', label: '未记录' };
+
+/**
+ * 逐文件水印口径（后端 MANIFEST.files[].watermark_method，2026-10-30 背景水印拍板）。
+ * header_text / preview_only 是「非真背景水印」的诚实档位：文案里绝不出现「已嵌入背景水印」。
+ */
+export const BUNDLE_WATERMARK_METHOD_META: Record<string, StatusMeta> = {
+  embedded_watermark: { color: 'green', label: '背景水印已内嵌（OOXML）' },
+  zero_width_text: { color: 'green', label: '零宽文本水印已内嵌' },
+  header_text: { color: 'gold', label: '降级：页眉文本水印（非背景）' },
+  preview_only: { color: 'blue', label: '仅预览层（文件本体未修改）' },
+};
+
+/** 未登记取值原样透传（display.ts 惯例）；null=没有水印口径，显示「未记录」。 */
+export function bundleWatermarkMethodMeta(value: string | null | undefined): StatusMeta {
+  return value ? statusMeta(BUNDLE_WATERMARK_METHOD_META, value) : BUNDLE_UNRECORDED;
+}
 
 export function bundleReviewMeta(value: string | null | undefined): StatusMeta {
   return value ? statusMeta(BUNDLE_REVIEW_META, value) : BUNDLE_UNRECORDED;

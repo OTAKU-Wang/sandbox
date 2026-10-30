@@ -152,6 +152,19 @@ class Settings(BaseSettings):
     RETENTION_JANITOR_DRY_RUN: bool = True
     RETENTION_JANITOR_BATCH: int = 1000
 
+    # 2026-10-30 拍板（docs/retention.md）：janitor 先只对「确定安全的类别」真删。
+    # JANITOR_ENABLED 是真删主开关，默认 false —— 生产默认关闭；会话清理循环要求
+    # 它与 RETENTION_JANITOR_ENABLED（兼容副闸）同时为 true 才调度 janitor。
+    JANITOR_ENABLED: bool = False
+    # 真删类别子集：只能从代码常量 REAL_DELETE_WHITELIST（app/services/
+    # retention_janitor.py）里选，空 = 全部白名单类别。选集外（包括受保护类别
+    # audit_logs/merkle_leaves/delivery_bundles/data_resources）= 启动报错
+    # fail-closed —— 受保护类别的永久保留是代码硬守卫，配置连「尝试」都买不到。
+    JANITOR_CATEGORIES: str = ""
+    # 文件系统白名单类别的保留天数（两者都在白名单内，受 JANITOR_ENABLED 管）
+    WORKSPACE_RESIDUE_RETENTION_DAYS: int = 30
+    DEV_ARTIFACT_RETENTION_DAYS: int = 14
+
     # Round 45+ (spec N2): Merkle batch pipeline (Redis Stream worker in
     # app/services/merkle_pipeline.py) is an experimental async batch-anchoring
     # mode, DISABLED by default — the audit path uses the synchronous
@@ -420,6 +433,29 @@ class Settings(BaseSettings):
             )
         return issues
 
+    def validate_janitor_config(self) -> list[str]:
+        """Fail-closed boot gate for the janitor real-delete whitelist (2026-10-30).
+
+        Raises ValueError when CDS_JANITOR_CATEGORIES names anything outside the
+        code whitelist — including the protected categories (audit_logs /
+        merkle_leaves / delivery_bundles / data_resources, retention 0 = forever,
+        export-and-archive only). This gate is NOT prod-only: an out-of-set
+        selection aborts startup in every environment, because the whitelist is
+        a code constant, not a preference.
+        """
+        from app.services.retention_janitor import parse_janitor_categories
+
+        active = parse_janitor_categories(self.JANITOR_CATEGORIES)
+        issues = []
+        if self.JANITOR_ENABLED and not self.RETENTION_JANITOR_DRY_RUN:
+            issues.append(
+                "WARN: janitor real-delete armed (JANITOR_ENABLED=true, "
+                f"RETENTION_JANITOR_DRY_RUN=false) for categories {sorted(active)}; "
+                "protected categories (audit logs / Merkle leaves / delivery "
+                "bundles / data resources) stay hard-refused in code forever"
+            )
+        return issues
+
     def validate_security_config(self) -> list[str]:
         """Validate the full security-relevant configuration (gap T12).
 
@@ -431,6 +467,9 @@ class Settings(BaseSettings):
         backend).
         """
         issues = self.validate_jwt_security()
+        # 2026-10-30: janitor 白名单集外配置的启动拒——放在 is_prod 早退之前，
+        # 任何环境选集外都拒绝启动（fail-closed，不受生产判定影响）。
+        issues.extend(self.validate_janitor_config())
         is_prod = not self.DEBUG and os.environ.get("TESTING") != "1" and not os.environ.get("PYTEST_CURRENT_TEST")
         if not is_prod:
             return issues

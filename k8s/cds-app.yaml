@@ -229,6 +229,10 @@ data:
   CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
   CDS_SM3_FALLBACK_ALLOWED: "false"
   CDS_FEDERATION_JWT_KEY_REQUIRED: "true"
+  # 2026-10-30 拍板（docs/retention.md）：janitor 真删主开关，生产默认关闭；
+  # 白名单类别是 app/services/retention_janitor.py 的代码常量，audit_logs /
+  # merkle_leaves / delivery_bundles / data_resources 永久硬拒，配置翻不动。
+  CDS_JANITOR_ENABLED: "false"
 ---
 # Prod 姿态下 main.py 跳过 create_all，schema 只能由 Alembic 建；没有这一步
 # cds-api 会在空库上起来然后 500。与 deploy/e2e-remote/remote_deploy.sh 的

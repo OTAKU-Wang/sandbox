@@ -171,7 +171,13 @@ async def _resolve_dev_contract(
             status_code=403,
             detail=f"Contract status '{contract.status}' does not permit sandbox access",
         )
-    if contract.provider_id != current_user.id:
+    # 2026-10-30 用户拍板：合同双方均可开发（可信数据空间业务流转）。旧实现只放行
+    # provider（文案却写着 party，口径与文案互相矛盾），与 sandbox_sessions.
+    # _validate_session_contract 同一次改动：合同当事方（buyer | provider）都是
+    # 「开发」这条业务流转的在事方。产品所有权门（上方 Not the owner of this
+    # data product）是资源归属不变量，不随本决定放宽；「被授权主体」基础设施现状
+    # 不存在，边界见 sandbox_sessions._validate_session_contract 的同名注释。
+    if current_user.id not in (contract.buyer_id, contract.provider_id):
         raise HTTPException(status_code=403, detail="Not a party to this contract")
     covered_ids = [str(p) for p in (contract.product_ids or [])]
     if str(data_product.id) not in covered_ids:

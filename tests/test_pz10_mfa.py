@@ -3,7 +3,8 @@
 Covers: enroll→verify→login-with-MFA happy path, AUTH_MFA_REQUIRED on
 missing/invalid code, one-shot recovery codes + re-enroll via /mfa/recover,
 PATCH role enum validation, the tightened register role whitelist, the
-0012_user_mfa migration, and the SM2 cert-login second factor.
+0012_user_mfa migration, the 0032_refresh_sessions migration (M3 jti table +
+user_mfa.confirmed_at), and the SM2 cert-login second factor.
 """
 import os
 import subprocess
@@ -313,10 +314,50 @@ def test_migration_0012_user_mfa_up(tmp_path):
     inspector = inspect(engine)
     assert "user_mfa" in inspector.get_table_names()
     cols = {c["name"] for c in inspector.get_columns("user_mfa")}
+    # confirmed_at arrived with revision 0032_refresh_sessions (MFA↔session
+    # binding, CR §4.10). The exact-set contract stays exact: the set only
+    # grows when a revision legitimately adds a column — never by loosening to
+    # a subset check.
     assert cols == {
         "user_id", "totp_secret_encrypted", "confirmed",
-        "recovery_codes_encrypted", "created_at",
+        "recovery_codes_encrypted", "confirmed_at", "created_at",
     }
+
+
+@pytest.mark.slow
+def test_migration_0032_refresh_sessions_up(tmp_path):
+    """0032 builds refresh_sessions (M3 revocation) with the exact column set
+    and a genuinely-enforced UNIQUE jti — asserted by double-inserting a jti,
+    because SQLite does not reflect inline UNIQUE constraints via the
+    inspector, so only the insert behaviour proves the constraint exists."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    db = tmp_path / "m3.db"
+    env = {**os.environ, "CDS_DATABASE_URL": f"sqlite+aiosqlite:///{db}"}
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    engine = create_engine(f"sqlite:///{db}")
+    inspector = inspect(engine)
+    assert "refresh_sessions" in inspector.get_table_names()
+    cols = {c["name"] for c in inspector.get_columns("refresh_sessions")}
+    assert cols == {"id", "user_id", "jti", "issued_at", "expires_at", "revoked"}
+
+    jti = uuid.uuid4().hex
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO refresh_sessions (id, user_id, jti, issued_at, expires_at, revoked)"
+            " VALUES (:id, :uid, :jti, '2026-10-30 00:00:00', '2026-11-06 00:00:00', 0)"
+        ), {"id": uuid.uuid4().hex, "uid": uuid.uuid4().hex, "jti": jti})
+        with pytest.raises(IntegrityError):
+            conn.execute(text(
+            "INSERT INTO refresh_sessions (id, user_id, jti, issued_at, expires_at, revoked)"
+            " VALUES (:id, :uid, :jti, '2026-10-30 00:00:01', '2026-11-06 00:00:00', 0)"
+            ), {"id": uuid.uuid4().hex, "uid": uuid.uuid4().hex, "jti": jti})
 
 
 # ── SM2 cert login second factor ─────────────────────────────────────

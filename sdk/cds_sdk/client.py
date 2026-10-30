@@ -31,7 +31,16 @@ class CDSError(RuntimeError):
 
     New code should catch :class:`CDSApiError`, which exposes the W2 error
     contract fields (code / request_id / retry_after).
+
+    ``truncated`` is a structured degradation marker: it is ``True`` only on
+    errors whose payload is known to be cut short (today: a WS stream
+    stalled past ``recv_timeout`` — see :mod:`cds_sdk.stream`). Consumers
+    branch on this flag instead of message text, so truncated output can
+    never masquerade as complete (SDK MINOR, cr-2026-10-15 §4.7).
     """
+
+    #: structured truncation marker — False unless a producer set it (stream.py).
+    truncated: bool = False
 
     def __init__(self, status_code: int, detail: Any, url: str = ""):
         self.status_code = status_code
@@ -80,11 +89,23 @@ class CDSApiError(CDSError):
         self.headers = headers or {}
 
 
+_RETRY_AFTER_CAP_SECONDS = 60.0
+
+
 def _retry_after_seconds(resp: httpx.Response) -> float:
+    """Parse the ``Retry-After`` header, clamped into [0, 60] seconds.
+
+    MAJOR-7 (cr-2026-10-15 §4.7): the backoff honours Retry-After as the docs
+    promise (README: 尊重 ``Retry-After``) — the old 5s clip silently ignored
+    any server-requested wait beyond 5s. The one remaining bound is a
+    defensive 60s cap: this is a *synchronous* client and a longer sleep
+    would block the caller past the point of usefulness of a retry loop.
+    A missing/unparseable header falls back to 1s.
+    """
     ra = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
     if ra is not None:
         try:
-            return max(0.0, float(ra))
+            return min(max(0.0, float(ra)), _RETRY_AFTER_CAP_SECONDS)
         except ValueError:
             pass
     return 1.0
@@ -275,7 +296,11 @@ class CDSClient:
 
         Retries are limited to idempotent reads (GET/HEAD/OPTIONS) on 429/503;
         a write that gets 429/503 raises :class:`CDSApiError` undelivered-by-
-        retry, with ``retry_after`` from the response header.
+        retry, with ``retry_after`` from the response header. The wait between
+        attempts honours the server's ``Retry-After`` header — the documented
+        contract (MAJOR-7 fixed the old 5s clip that contradicted it), capped
+        at 60s, falling back to 1s when the header is absent. 410
+        SESSION_TERMINATED stays terminal and is never retried (W2).
         """
         has_token = bool(token)
         has_app = bool(app_id or app_secret)
@@ -320,7 +345,7 @@ class CDSClient:
         retries = kwargs.pop("_retries", self._max_retries)
         resp = self._client.request(method, path, **kwargs)
         if _is_retryable(method, resp.status_code, retries):
-            time.sleep(min(_retry_after_seconds(resp), 5.0))
+            time.sleep(_retry_after_seconds(resp))
             return self._request(method, path, _retries=retries - 1, **kwargs)
         if resp.status_code >= 400:
             raise _parse_error(resp, path)
@@ -335,7 +360,7 @@ class CDSClient:
         retries = kwargs.pop("_retries", self._max_retries)
         resp = self._client.request(method, path, **kwargs)
         if _is_retryable(method, resp.status_code, retries):
-            time.sleep(min(_retry_after_seconds(resp), 5.0))
+            time.sleep(_retry_after_seconds(resp))
             return self._request_with_headers(method, path, _retries=retries - 1, **kwargs)
         # A212: this channel used to return the error body as success-shaped data.
         if resp.status_code >= 400:
@@ -813,9 +838,15 @@ class CDSClient:
         streaming exec — other levels raise :class:`CDSApiError` with
         guidance to fall back to :meth:`execute` or :meth:`logs` polling.
         Requires the optional ``websocket-client`` dependency.
+        ``timeout_seconds`` is validated before any request: a non-positive
+        or non-numeric value raises :class:`ValueError` up-front. A stream
+        that stalls past ``recv_timeout`` raises :class:`CDSError` (504)
+        with ``truncated = True`` — never a silent "complete" end.
         """
         from . import stream as _stream
 
+        # Validate before the first network call (get_session below).
+        _stream._validate_timeout_seconds(timeout_seconds)
         session = self.get_session(session_id)
         level = session.get("sandbox_level") if isinstance(session, dict) else None
         if level not in _stream.SUPPORTED_STREAM_LEVELS:

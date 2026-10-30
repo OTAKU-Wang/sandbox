@@ -58,11 +58,19 @@ export function resolveGreetingName(user?: { username?: string | null; organizat
 }
 
 /**
- * 登录后的落地路径（顶栏品牌与面包屑「首页」共用）：能进开发者工台的人落开发者首页，
- * 其余落管理员工台的运营概览。
+ * 登录后的落地路径（顶栏品牌、面包屑「首页」与工台切换共用）。
+ *
+ * A295（2026-10-30）：旧实现给开发者工台返回 '/home'，而 App.tsx:113 早已把 `/home`
+ * 改成 `<Navigate to="/" replace/>`（SS-18 把开发者首页提到 index 路由）。于是开发者点
+ * 「首页」或切工台都会先落进一条**只做跳转的兼容路由**再被 replace 回 '/'：地址栏闪一下、
+ * history 多一跳，页面还是同一个 WorkspaceHome。落地页因此钉在真实存在的 index 路由上。
+ * 工台分派不在这里做，由 index 路由的 WorkspaceHome 按 resolveWorkspace(role, stored) 分派
+ * （开发者 → FlowDevHome，其余 → Dashboard），所以落点与角色无关，本函数不再需要入参。
+ * '/home' 本身保留为重定向（旧收藏/旧文档不 404），isWorkspaceHome 与 routeCrumb 仍认它，
+ * 那是「跳转途中」的口径，不是落点。
  */
-export function homeLandingPath(role: RoleLike, stored: Workspace | null): string {
-  return resolveWorkspace(role, stored) === 'developer' ? '/home' : '/';
+export function homeLandingPath(): string {
+  return '/';
 }
 
 type MenuKey = string | number | bigint;

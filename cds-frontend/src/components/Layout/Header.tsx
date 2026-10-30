@@ -41,7 +41,9 @@ export default function AppHeader() {
       label: target === 'admin' ? '切到管理员工台' : '切到开发者工作台',
       onClick: () => {
         setWorkspace(target);
-        navigate(homeLandingPath(role, target));
+        // A295：落点是 index 路由 '/'，由 WorkspaceHome 按切换后的工台分派首页；
+        // 过去开发者落 /home，而那条路由早已只剩 <Navigate to="/" replace/>，白跳一跳。
+        navigate(homeLandingPath());
       },
     });
   }

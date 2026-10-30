@@ -260,19 +260,50 @@ async def test_create_sandbox_session_rejects_missing_contract(client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_create_sandbox_session_rejects_non_buyer_contract_user(client: AsyncClient, auth_headers: dict, db_session, make_user, publish_product):
+async def test_create_sandbox_session_rejects_non_contract_party(client: AsyncClient, auth_headers: dict, db_session, make_user, publish_product):
+    # 2026-10-30 用户拍板：合同双方（buyer|provider）均可开会话；非当事方仍 403。
+    # 旧测试的"非买方"其实是本合同的 provider（auth_headers 就是产品属主），
+    # 按新口径必须放行——所以这里的主体换成真正的第三方，并把拒绝面钉到新文案。
+    product_id, contract, _ = await _create_contract_bound_product(
+        client, auth_headers, db_session, make_user, publish_product
+    )
+    outsider_headers, _ = await make_user("buyer", "session_outsider")
+
+    resp = await client.post(
+        "/api/v1/sandbox-sessions",
+        json={"data_product_id": product_id, "contract_id": str(contract.id)},
+        headers=outsider_headers,
+    )
+
+    assert resp.status_code == 403
+    assert "Only the contract buyer or provider" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_session_contract_provider_allowed(client: AsyncClient, auth_headers: dict, db_session, make_user, publish_product, monkeypatch):
+    # 2026-10-30 用户拍板：合同双方均可开发——provider 对自己供数的合同建会话必须能过门。
+    import app.api.sandbox_sessions as sandbox_sessions_api
+
+    runtime = DummySandboxRuntime()
+
+    async def fake_get_sandbox_manager():
+        return runtime
+
+    monkeypatch.setattr(sandbox_sessions_api, "get_sandbox_manager", fake_get_sandbox_manager)
+
     product_id, contract, _ = await _create_contract_bound_product(
         client, auth_headers, db_session, make_user, publish_product
     )
 
     resp = await client.post(
         "/api/v1/sandbox-sessions",
-        json={"data_product_id": product_id, "contract_id": str(contract.id)},
+        json={"data_product_id": product_id, "contract_id": str(contract.id), "sandbox_level": "L3"},
         headers=auth_headers,
     )
 
-    assert resp.status_code == 403
-    assert "Only the contract buyer" in resp.json()["detail"]
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "running"
+    assert resp.json()["contract_id"] == str(contract.id)
 
 
 @pytest.mark.asyncio

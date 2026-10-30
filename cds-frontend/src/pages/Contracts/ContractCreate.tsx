@@ -5,7 +5,10 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { contractApi } from '../../services/contractApi';
 import { dataProductApi } from '../../services/dataProductApi';
 import { usersApi } from '../../services/usersApi';
-import { SandboxLevel, sandboxLevelLabel } from '../../types/enums';
+import { contractLevelFootnote, contractLevelOptions, metaApi, SANDBOX_LEVELS_UNDISCLOSED } from '../../services/metaApi';
+// 档位标签的唯一来源是部署能力披露端点（metaApi.getSandboxLevels）。
+// 这里过去从 types/enums 里取 SandboxLevel.L2C 当固定默认值——那正是 dev compose
+// 把 DEV_SANDBOX_LEVEL 设成 L3 之后本机必 400 的根因（拍板②，2026-10-30）。
 import FlowConfigFields from '../Flow/FlowConfigFields';
 import {
   DEFAULT_COMPUTE_TZ,
@@ -53,6 +56,30 @@ export default function ContractCreate() {
     queryKey: ['buyer-options'],
     queryFn: () => usersApi.options({ role: 'buyer', limit: 100 }),
   });
+
+  // 拍板②（2026-10-30）：档位选项与披露文案来自「当前部署真实能力」只读披露端点，
+  // 不再在表单里硬编码一个 disabled 的 l2c —— 那是 dev compose（DEV_SANDBOX_LEVEL=L3）
+  // 本机必 400 的直接原因（specs/ss-19-full-platform-docker-e2e.md §10.1-4）。
+  const { data: levelDisclosure } = useQuery({
+    queryKey: ['sandbox-levels'],
+    queryFn: () => metaApi.getSandboxLevels(),
+    staleTime: 60_000,
+  });
+  const levelOptions = contractLevelOptions(levelDisclosure);
+  const watchedLevels = Form.useWatch('allowed_sandbox_levels', form);
+  const levelFootnote = contractLevelFootnote(levelDisclosure, watchedLevels);
+
+  // 披露到齐后把默认值对齐到「这台部署真能跑」的档位；用户动过就绝不覆盖。
+  // 读不到披露时一次都不猜：字段保持不上行，由后端按其声明的默认档落库。
+  const autoAppliedLevel = useRef<string | null>(null);
+  useEffect(() => {
+    const recommended = levelDisclosure?.recommended_level;
+    if (!recommended || autoAppliedLevel.current === recommended) return;
+    autoAppliedLevel.current = recommended;
+    if (!form.isFieldTouched('allowed_sandbox_levels')) {
+      form.setFieldsValue({ allowed_sandbox_levels: [recommended] });
+    }
+  }, [form, levelDisclosure?.recommended_level]);
 
   // 记录已建成的合约 id：流程配置是第二次请求，失败时不能让用户以为整单未创建
   const createdContractRef = useRef<string | null>(null);
@@ -167,7 +194,8 @@ export default function ContractCreate() {
           onFinish={onFinish}
           initialValues={{
             contract_type: 'data_query',
-            allowed_sandbox_levels: [SandboxLevel.L2C],
+            // 档位不预填：默认值来自部署能力披露的 recommended_level（见上面的 effect），
+            // 读不到披露时保持空 = 该字段不上行，由后端按它声明的默认档落库。
             allowed_sandbox_modes: ['query'],
             allowed_operations: ['read', 'analyze'],
             max_duration_hours: 24,
@@ -232,11 +260,45 @@ export default function ContractCreate() {
               placeholder="输入标签后回车或逗号分隔"
             />
           </Form.Item>
-          <Form.Item name="allowed_sandbox_levels" label="允许沙箱级别"
-            tooltip="SS-13 起执行面只有 MicroVM 单一路径：合约固定授权 l2c。历史级别（L0/L1/L2/L3/k8s）已从合约面收敛掉，仅在存量会话里只读展示。">
+          <Form.Item
+            name="allowed_sandbox_levels"
+            label="允许沙箱级别"
+            tooltip="选项与披露都取自本部署的能力披露（只读端点 /meta/sandbox-levels）。合约只是授权：执行时后端逐项硬校验，当前跑不起来的档位照旧按 SS-13 返回 400，披露能力不等于放宽校验。"
+            extra={
+              <div style={{ marginTop: 6 }}>
+                {levelFootnote.map((line) => (
+                  <div key={line} style={{ fontSize: 12, lineHeight: '18px', color: 'rgba(0,0,0,0.45)' }}>
+                    {line}
+                  </div>
+                ))}
+              </div>
+            }
+          >
             <Select
-              disabled
-              options={[{ value: SandboxLevel.L2C, label: sandboxLevelLabel(SandboxLevel.L2C) }]}
+              mode="multiple"
+              // 读不到披露就如实显示「未记录」并保持不可选：宁可让用户等一下重试，
+              // 也不替用户编一个档位（旧实现硬编码 l2c 就是本机 400 的根因）。
+              disabled={!levelOptions.length}
+              placeholder={levelOptions.length ? '选择本部署可授权的沙箱档位' : SANDBOX_LEVELS_UNDISCLOSED}
+              optionFilterProp="label"
+              options={levelOptions.map((option) => ({
+                value: option.value,
+                label: `${option.label}${option.runtime_available ? '' : '（当前部署不可执行）'}`,
+                disclosure: option.disclosure,
+              }))}
+              // 选项里直接把后端的披露文案写在第二行：勾之前就得看得见「为什么跑不起来」，
+              // 而不是等人去悬停原生 title。合约只是授权，勾选不代表执行会放行。
+              optionRender={(option) => (
+                <div style={{ padding: '2px 0' }}>
+                  <div className="cds-level-option-label">{option.data.label}</div>
+                  <div
+                    className="cds-level-option-note"
+                    style={{ fontSize: 12, lineHeight: '18px', color: 'rgba(0,0,0,0.45)', whiteSpace: 'normal' }}
+                  >
+                    {option.data.disclosure}
+                  </div>
+                </div>
+              )}
             />
           </Form.Item>
           <Form.Item name="allowed_sandbox_modes" label="允许沙箱模式">

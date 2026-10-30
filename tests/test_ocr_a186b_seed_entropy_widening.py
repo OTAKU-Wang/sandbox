@@ -70,12 +70,23 @@ def _insert_plaintext_seed(db_path: Path, seed: int) -> str:
     return row_id
 
 
-def test_chain_has_exactly_one_head_and_it_is_0031():
-    """alembic 历史线性只增不改：加宽必须是新的单头，不是分叉。"""
+def test_chain_has_exactly_one_head_and_0031_stays_on_the_linear_trunk():
+    """alembic 历史线性只增不改：0031 之后每加一个合法 revision，「头恰等于
+    0031」都会红一次——那是把历史快照当契约。正确的钉子是两条：**全链恒单头**
+    （只有分叉才会多头）且 **0031 永远在 head 的祖先历史里**（有人改写/抹除
+    已发布历史才会红）。2026-10-30 由 0032 落地时的全量红（heads 变
+    ['0032_refresh_sessions (head)']）触发的形状修正，断言只强不弱。
+    """
     result = _alembic(Path(":memory:"), "heads")
     assert result.returncode == 0, result.stdout + result.stderr
     heads = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
-    assert heads == [f"{REVISION} (head)"], heads
+    assert len(heads) == 1, heads
+    hist = _alembic(Path(":memory:"), "history")
+    assert hist.returncode == 0, hist.stdout + hist.stderr
+    assert any(
+        ln.strip().startswith(f"{REVISION} ->") or f" -> {REVISION}" in ln
+        for ln in hist.stdout.splitlines()
+    ), f"{REVISION} 不在 head 的祖先历史里：\n{hist.stdout}"
 
 
 @pytest.mark.slow

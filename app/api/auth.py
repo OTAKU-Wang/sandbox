@@ -6,10 +6,12 @@ import os
 import secrets
 import time
 import uuid
+from datetime import datetime, timezone
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -17,10 +19,15 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.errors import CDSError
 from app.core import challenge_store
+from app.models.refresh_session import RefreshSession
 from app.models.user import User, UserRole
 from app.models.user_mfa import UserMFA
 from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse, UserRoleChangeRequest
-from app.services.auth_service import register_user, authenticate_user, create_access_token, create_refresh_token, decode_refresh_token, decode_cert_challenge, create_cert_challenge, get_user_by_id
+from app.services.auth_service import (
+    register_user, authenticate_user, create_access_token,
+    decode_refresh_token, decode_cert_challenge, create_cert_challenge, get_user_by_id,
+    issue_refresh_session, revoke_refresh_session,
+)
 from app.services.audit_service import audit_service
 from app.services.crypto_service import crypto_service
 
@@ -32,6 +39,13 @@ ALL_USER_ROLES = frozenset({
     UserRole.DATA_PROVIDER, UserRole.BUYER, UserRole.OPERATOR,
     UserRole.REGULATOR, UserRole.ADMIN,
 })
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite round-trips DateTime(timezone=True) as naive UTC; PostgreSQL is
+    already aware. Normalize before any comparison (same convention as
+    app/api/audit.py::_as_utc)."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 # ── PZ-10: MFA (TOTP) helpers ────────────────────────────────────────
@@ -130,6 +144,18 @@ class MfaRecoverRequest(BaseModel):
     recovery_code: str = Field(..., min_length=1, max_length=32)
 
 
+class LogoutRequest(BaseModel):
+    """Revoke the refresh session carried by this token (M3).
+
+    Optional by design (lead 拍板 2026-10-30): existing front-end logout calls
+    post an empty body — that stays a legal logout + audit, it simply cannot
+    name a jti to revoke (the FE clears its stored refresh token locally, so
+    the renewal path dies client-side too). The token-carrying form is what
+    revocation-aware clients (SDK) should use.
+    """
+    refresh_token: str | None = Field(None, min_length=16, max_length=4096)
+
+
 class CertLoginRequest(BaseModel):
     username: str
     cert_pem: str
@@ -175,7 +201,7 @@ async def register(body: UserCreate, request: Request, db: AsyncSession = Depend
         ip_address=request.client.host if request.client else None,
     )
     access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
+    _, refresh_token = await issue_refresh_session(db, user.id)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=UserResponse.model_validate(user))
 
 
@@ -230,29 +256,194 @@ async def login(body: UserLogin, request: Request, db: AsyncSession = Depends(ge
         detail={"username": body.username},
         ip_address=request.client.host if request.client else None,
     )
+    # M3: a successful login — including passing the MFA gate above — is born
+    # as a revocable server-side session (jti row), never as a bare JWT.
     access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
+    _, refresh_token = await issue_refresh_session(db, user.id)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=UserResponse.model_validate(user))
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(body: dict, db: AsyncSession = Depends(get_db)):
-    """Exchange a refresh token for a new access+refresh token pair."""
+async def refresh_token(body: dict, request: Request, db: AsyncSession = Depends(get_db)):
+    """Exchange a refresh token for a new access+refresh token pair.
+
+    CR-2026-10-15 §4.10 (M3, 生产门): signature verification alone proved the
+    token was minted here, not that it is still honoured. Every pass now goes
+    through the ``refresh_sessions`` row named by the token's ``jti``:
+
+    * the row must exist, belong to the token subject, be unrevoked and
+      unexpired — logout/rotation revocation takes effect on the next use;
+    * **rotation**: the presenting session is revoked and a fresh jti/session
+      is minted in the same transaction (single-use refresh tokens);
+    * **MFA re-verification** (user 拍板 2026-10-30): if the account's MFA is
+      confirmed and this session was issued before the MFA confirmation, the
+      token predates the second factor — renewing it would let a pre-MFA
+      (password-only) capture keep the account alive forever, so the request
+      returns 401 ``AUTH_MFA_REQUIRED`` and a fresh MFA login is mandatory.
+
+    Legacy compat policy (pre-0032 tokens carry no jti): rejected
+    **fail-closed** with 401. An un-revocable refresh token is exactly the
+    defect being fixed; grandfathering it back in would defer the fix for the
+    token's remaining lifetime (max 7 days, self-healing). Users re-login once.
+
+    Audit discipline: only *signature-valid* refusals are audited
+    (``user.refresh_denied``) — auditing undecodable garbage would hand an
+    unauthenticated caller a cheap audit-table write amplifier.
+    """
     token = body.get("refresh_token")
     if not token:
         raise HTTPException(status_code=400, detail="refresh_token required")
+    ip = request.client.host if request.client else None
     try:
         payload = decode_refresh_token(token)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
+    signed = {
+        "detail": {"username": None, "reason": None, "jti": payload.get("jti")},
+    }
+
+    async def _deny(reason: str, exc: HTTPException | CDSError, user_id=None) -> NoReturn:
+        signed["detail"]["reason"] = reason
+        await audit_service.log_standalone(
+            action="user.refresh_denied", resource_type="user", user_id=user_id,
+            detail=signed["detail"], ip_address=ip,
+        )
+        raise exc
+
+    # ── jti is mandatory: pre-0032 tokens are refused (see policy above) ──
+    jti = payload.get("jti")
+    if not jti:
+        await _deny("missing_jti", HTTPException(
+            status_code=401,
+            detail="Refresh token predates session binding (no jti); log in again",
+        ))
+
     user = await get_user_by_id(db, uuid.UUID(payload["sub"]))
     if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
+        await _deny("user_not_found_or_inactive",
+                    HTTPException(status_code=401, detail="User not found or inactive"),
+                    user_id=payload.get("sub"))
+    signed["detail"]["username"] = user.username
 
+    row = (await db.execute(
+        select(RefreshSession).where(RefreshSession.jti == jti)
+    )).scalar_one_or_none()
+    if row is None:
+        # Valid signature but no row: forged jti, or the row's owner changed
+        # under a re-provisioned DB. Either way there is nothing to honour.
+        await _deny("unknown_jti",
+                    HTTPException(status_code=401, detail="Invalid or expired refresh token"),
+                    user_id=user.id)
+    if row.user_id != user.id:
+        await _deny("jti_subject_mismatch",
+                    HTTPException(status_code=401, detail="Invalid or expired refresh token"),
+                    user_id=user.id)
+    if row.revoked:
+        # Revoked: post-rotation replay or a logout that beat this request.
+        await _deny("revoked_jti",
+                    HTTPException(status_code=401, detail="Refresh token revoked"),
+                    user_id=user.id)
+    if _as_utc(row.expires_at) <= datetime.now(timezone.utc):
+        await _deny("session_expired",
+                    HTTPException(status_code=401, detail="Invalid or expired refresh token"),
+                    user_id=user.id)
+
+    # ── MFA re-verification gate ──
+    mfa = await _get_mfa(db, user.id)
+    if mfa and mfa.confirmed:
+        # confirmed_at is NULL only for rows confirmed before column 0032 —
+        # created_at is the honest lower bound (row precedes confirmation).
+        confirmed_at = _as_utc(mfa.confirmed_at or mfa.created_at)
+        if _as_utc(row.issued_at) < confirmed_at:
+            await _deny("mfa_confirmed_after_session", CDSError(
+                "This session predates the account's MFA confirmation; "
+                "re-authenticate with the second factor",
+                code="AUTH_MFA_REQUIRED", http_status=401,
+                detail={"username": user.username, "reason": "mfa_revalidation_required"},
+            ), user_id=user.id)
+
+    # ── rotation: this session is spent the moment it is honoured ──
+    # Conditional UPDATE, not a read-modify-write: two concurrent refreshes of
+    # the same jti must not BOTH rotate. `revoked=false` in the WHERE clause
+    # makes single-use a database-level guarantee; the loser gets rowcount 0.
+    rotation = await db.execute(
+        update(RefreshSession)
+        .where(RefreshSession.id == row.id, RefreshSession.revoked.is_(False))
+        .values(revoked=True)
+    )
+    await db.flush()
+    if rotation.rowcount != 1:
+        await _deny("revoked_jti_race",
+                    HTTPException(status_code=401, detail="Refresh token revoked"),
+                    user_id=user.id)
+    await audit_service.log(
+        db, action="user.refresh", resource_type="user", user_id=user.id,
+        detail={"username": user.username, "rotated_jti": jti}, ip_address=ip,
+    )
     access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=UserResponse.model_validate(user))
+    _, refresh_token_new = await issue_refresh_session(db, user.id)
+    return TokenResponse(
+        access_token=access_token, refresh_token=refresh_token_new,
+        user=UserResponse.model_validate(user),
+    )
+
+
+@router.post("/logout")
+async def logout(
+    body: LogoutRequest | None = None,
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the refresh session carried by the presented token (M3).
+
+    Two shapes, both audited as ``user.logout``:
+    * with ``refresh_token`` — requires a signature-valid token whose subject
+      is the caller (logging out must itself be authenticated; one stolen
+      refresh token cannot evict its owner's other sessions) and revokes that
+      one jti. Idempotent: already-revoked or legacy jti-less tokens return
+      ``revoked=false`` without error.
+    * without a body — the pre-existing front-end logout contract: nothing
+      server-side is revoked (``revoked=false``), the client drops its tokens.
+      Kept honest and legal on purpose so wiring the FE later is opt-in, not a
+      breaking change (lead 拍板 2026-10-30).
+
+    Honest limits (disclosed, not faked): the ACCESS token is a stateless JWT
+    and stays valid until its short ``JWT_EXPIRE_MINUTES`` expiry — this
+    endpoint revokes the *renewal path*, not in-flight bearer use. There is no
+    push/email channel in this repo, so revocation is observable through the
+    audit trail (``user.logout``), not through a notification.
+    """
+    ip = request.client.host if request and request.client else None
+    jti = None
+    revoked = False
+    if body and body.refresh_token:
+        try:
+            payload = decode_refresh_token(body.refresh_token)
+        except Exception:
+            await audit_service.log_standalone(
+                action="user.logout_denied", resource_type="user", user_id=current_user.id,
+                detail={"username": current_user.username, "reason": "invalid_refresh_token"},
+                ip_address=ip,
+            )
+            raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+        if payload.get("sub") != str(current_user.id):
+            await audit_service.log_standalone(
+                action="user.logout_denied", resource_type="user", user_id=current_user.id,
+                detail={"username": current_user.username, "reason": "token_subject_mismatch"},
+                ip_address=ip,
+            )
+            raise HTTPException(status_code=403, detail="Refresh token belongs to another account")
+        jti = payload.get("jti")
+        if jti:
+            revoked = await revoke_refresh_session(db, current_user.id, jti, reason="logout")
+    await audit_service.log(
+        db, action="user.logout", resource_type="user", user_id=current_user.id,
+        detail={"username": current_user.username, "jti": jti, "revoked": revoked},
+        ip_address=ip,
+    )
+    return {"revoked": revoked}
 
 
 @router.get("/me", response_model=UserResponse)
@@ -391,6 +582,7 @@ async def mfa_enroll(
     ip = request.client.host if request.client else None
     secret = _new_totp_secret()
     mfa = await _get_mfa(db, current_user.id)
+    was_confirmed = mfa is not None and mfa.confirmed
     if mfa is not None and mfa.confirmed:
         code = body.code if body else None
         proved = False
@@ -419,6 +611,7 @@ async def mfa_enroll(
         db.add(mfa)
     mfa.totp_secret_encrypted = _encrypt_mfa(secret)
     mfa.confirmed = False
+    mfa.confirmed_at = None
     mfa.recovery_codes_encrypted = None
     await db.flush()
 
@@ -426,6 +619,24 @@ async def mfa_enroll(
         db, action="mfa.enroll", resource_type="user", user_id=current_user.id,
         ip_address=request.client.host if request.client else None,
     )
+    # §4.11 (用户拍板 2026-10-30: 允许关闭，但必须留痕): overwriting a
+    # CONFIRMED enrollment takes the account out of second-factor enforcement
+    # for as long as it stays unconfirmed. The A14 proof gate means this can
+    # only be the owner acting with the live factor — but a legitimate
+    # downgrade is still a downgrade, so it gets its own named, high-risk
+    # audit event instead of hiding inside mfa.enroll.
+    if was_confirmed:
+        await audit_service.log(
+            db, action="user.mfa_disabled", resource_type="user", user_id=current_user.id,
+            resource_id=str(current_user.id),
+            detail={
+                "username": current_user.username,
+                "reason": "confirmed_enrollment_reset_via_re_enroll",
+                "high_risk": True,
+                "note": "账号自此次起在 /mfa/verify 前回到仅密码登录；未确认窗口不影响已登录会话的既有鉴权。",
+            },
+            ip_address=ip,
+        )
     return {"secret": secret, "otpauth_uri": _otpauth_uri(current_user.username, secret), "confirmed": False}
 
 
@@ -450,6 +661,10 @@ async def mfa_verify(
 
     recovery_codes = _generate_recovery_codes(settings.MFA_RECOVERY_CODE_COUNT)
     mfa.confirmed = True
+    # M3 MFA-gate input: sessions issued before THIS instant stop being
+    # renewable (see refresh_token). Deliberately stamped even on
+    # re-confirmation — re-confirming is re-establishing enforcement.
+    mfa.confirmed_at = datetime.now(timezone.utc)
     mfa.recovery_codes_encrypted = _encrypt_mfa(json.dumps(recovery_codes))
     await db.flush()
 
@@ -485,6 +700,7 @@ async def mfa_recover(
     mfa = await _get_mfa(db, current_user.id)
     if not mfa:
         raise HTTPException(status_code=400, detail="Not enrolled: call POST /auth/mfa/enroll first")
+    was_confirmed = bool(mfa.confirmed)
     remaining = await _consume_recovery_code(db, mfa, body.recovery_code)
     if remaining is None:
         raise HTTPException(status_code=400, detail="Invalid or already-used recovery code")
@@ -492,6 +708,7 @@ async def mfa_recover(
     secret = _new_totp_secret()
     mfa.totp_secret_encrypted = _encrypt_mfa(secret)
     mfa.confirmed = False
+    mfa.confirmed_at = None
     await db.flush()
 
     await audit_service.log(
@@ -499,6 +716,22 @@ async def mfa_recover(
         detail={"remaining_recovery_codes": len(remaining)},
         ip_address=request.client.host if request.client else None,
     )
+    # §4.11 留痕: spending a recovery code also ends second-factor enforcement
+    # until /mfa/verify (the unconfirmed window the docstring above names).
+    # High-risk audit event, same contract as the re-enroll downgrade.
+    if was_confirmed:
+        await audit_service.log(
+            db, action="user.mfa_disabled", resource_type="user", user_id=current_user.id,
+            resource_id=str(current_user.id),
+            detail={
+                "username": current_user.username,
+                "reason": "confirmed_enrollment_reset_via_recovery_code",
+                "high_risk": True,
+                "remaining_recovery_codes": len(remaining),
+                "note": "恢复码重登记后在 /mfa/verify 前回到仅密码登录。",
+            },
+            ip_address=request.client.host if request.client else None,
+        )
     return {
         "secret": secret,
         "otpauth_uri": _otpauth_uri(current_user.username, secret),
@@ -596,5 +829,5 @@ async def cert_login(body: CertLoginRequest, request: Request, db: AsyncSession 
         ip_address=request.client.host if request.client else None,
     )
     access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
+    _, refresh_token = await issue_refresh_session(db, user.id)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=UserResponse.model_validate(user))

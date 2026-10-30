@@ -67,6 +67,36 @@ class ReconstructRequest(BaseModel):
     share_ids: list[str] = Field(..., min_length=2)
 
 
+class KeyDestructionTrailRequest(BaseModel):
+    """MAJOR-3 (cr-2026-10-15 §4): 轮换/销毁 = 高危操作, 审计留痕必须能回答
+    "谁授权做的"。契约形状参考 PZ-09/PZ-10 角色 PATCH 的 reason/ticket_id
+    (app/schemas/high_risk_operation.py), 但两字段对本端点为**可选** ——
+    既有调用方(含前端旧版)不带 body 的 POST 必须继续 200, 只是旧调用不再
+    看起来像"已留痕": 缺失时审计 detail 会显式标 reason_missing/
+    ticket_id_missing, 高危留痕不再假象。
+    """
+
+    reason: str | None = Field(default=None, min_length=8, max_length=500)
+    ticket_id: str | None = Field(default=None, max_length=128)
+
+
+def _trail_detail(detail: dict, body: KeyDestructionTrailRequest | None) -> dict:
+    """Merge the optional reason/ticket_id into the audit detail (MAJOR-3).
+
+    Absent values are recorded as explicit ``*_missing`` flags rather than
+    silently dropped — the audit row then states what evidence it lacks.
+    """
+    if body is not None and body.reason:
+        detail["reason"] = body.reason
+    else:
+        detail["reason_missing"] = True
+    if body is not None and body.ticket_id:
+        detail["ticket_id"] = body.ticket_id
+    else:
+        detail["ticket_id_missing"] = True
+    return detail
+
+
 class ShareResponse(BaseModel):
     share_id: str
     key_id: str
@@ -238,10 +268,15 @@ async def list_shares(
 @router.post("/keys/{key_id}/rotate")
 async def rotate_key(
     key_id: str,
+    body: KeyDestructionTrailRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Rotate a key — generate new shares."""
+    """Rotate a key — generate new shares.
+
+    MAJOR-3: optional ``reason``/``ticket_id`` body (PZ-09 role-PATCH shape,
+    both optional here for wire compatibility) lands in the audit detail.
+    """
     old_key = await mpc_service.get_key(db, key_id)
     if not old_key:
         raise HTTPException(status_code=404, detail="Key not found")
@@ -254,7 +289,7 @@ async def rotate_key(
     await audit_service.log(
         db, action="mpc.key.rotate", resource_type="mpc_key",
         user_id=current_user.id, resource_id=key_id,
-        detail={"new_key_id": new_key.key_id},
+        detail=_trail_detail({"new_key_id": new_key.key_id}, body),
     )
 
     return KeyResponse(
@@ -270,10 +305,15 @@ async def rotate_key(
 @router.post("/keys/{key_id}/destroy")
 async def destroy_key(
     key_id: str,
+    body: KeyDestructionTrailRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Destroy a key — mark destroyed and crypto-erase all shares."""
+    """Destroy a key — mark destroyed and crypto-erase all shares.
+
+    MAJOR-3: optional ``reason``/``ticket_id`` body (PZ-09 role-PATCH shape,
+    both optional here for wire compatibility) lands in the audit detail.
+    """
     destroyed = await mpc_service.destroy_key(db, key_id)
     if not destroyed:
         raise HTTPException(status_code=404, detail="Key not found")
@@ -281,7 +321,7 @@ async def destroy_key(
     await audit_service.log(
         db, action="mpc.key.destroy", resource_type="mpc_key",
         user_id=current_user.id, resource_id=key_id,
-        detail={"persisted": True},
+        detail=_trail_detail({"persisted": True}, body),
     )
 
     return {"key_id": key_id, "destroyed": True, "persisted": True}

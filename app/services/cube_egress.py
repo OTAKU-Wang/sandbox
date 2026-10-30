@@ -27,6 +27,7 @@ cannot resolve is SKIPPED and disclosed (never fabricated — 禁伪造).
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -273,7 +274,10 @@ async def _apply_network_policy_to_cube(
     )
     request.annotations["cube.master.update_action"] = "network"
     try:
-        client.update(request)
+        # Cube M4 (cr-2026-10-15 §4): 同步 gRPC 客户端（cube_node_client 的
+        # stub 是 blocking 的）不得在事件循环上直调 —— Update 下链 to_thread,
+        # 与 cube_runtime_adapter 的既有 to_thread 先例同风格。
+        await asyncio.to_thread(client.update, request)
     except CDSError as exc:
         # 沙箱已不存在的指纹: ContainerNotFound 映射, 或上游 Update 对已销毁
         # cubebox 的 Get 失败 —— cubelet update.go:94 把 store 查找错误原样

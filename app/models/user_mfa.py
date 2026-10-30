@@ -30,6 +30,15 @@ class UserMFA(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     recovery_codes_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # CR §4.10 (user decision 2026-10-30): when the CURRENT confirmation
+    # happened. The refresh gate rejects sessions issued before this instant —
+    # "I turned MFA on" must invalidate the password-only sessions that
+    # predate it. NULL on rows created before the column existed (unknown
+    # exact instant; the gate falls back to created_at, a documented lower
+    # bound) and on unconfirmed enrollments (enroll/recover clear it).
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

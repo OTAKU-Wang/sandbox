@@ -3,7 +3,7 @@ import json
 import secrets
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.audit import AUDIT_FAILURE_MARKERS, audit_outcome
 from app.core.database import get_db
 from app.core.deps import get_business_user
 from app.core.errors import CDSError
@@ -34,12 +35,34 @@ from app.schemas.flow import (
 from app.services import delivery_service as dv
 from app.services import workflow_service as wf
 from app.services.audit_service import audit_service
+from app.utils.office_watermark import (
+    WATERMARK_METHOD_DOCX,
+    WATERMARK_METHOD_PREVIEW_ONLY,
+    WATERMARK_METHOD_TEXT_STEGO,
+    WATERMARK_METHOD_XLSX_HEADER,
+    embed_docx_background_watermark,
+    embed_xlsx_header_watermark,
+)
 from app.utils.watermark import embed_text_watermark, generate_watermark
 
 router = APIRouter()
 
 MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 TEXT_WATERMARK_SUFFIXES = (".txt", ".md", ".json", ".jsonl")
+# 2026-10-30 拍板：Office 文件走「背景水印」。docx 有真背景水印能力（OOXML 页眉 VML
+# WordArt）；xlsx 没有——诚实降级为页眉文本 + docProps 自定义属性（header_text）；
+# csv/tsv 这类纯文本数据表没有"背景"概念，文件字节一个不动，水印只活在平台在线
+# 预览层（preview_only）。清单与交付中心列表按这三档如实标注，绝不合并口径。
+# .jsonl 保留更强的零宽内嵌水印（存量能力，只强不弱），不降级为 preview_only。
+DOCX_WATERMARK_SUFFIXES = (".docx",)
+XLSX_WATERMARK_SUFFIXES = (".xlsx",)
+PREVIEW_WATERMARK_SUFFIXES = (".csv", ".tsv")
+WATERMARK_LEGEND = {
+    WATERMARK_METHOD_TEXT_STEGO: "不可见零宽字符水印（文本类，文件字节已改写）",
+    WATERMARK_METHOD_DOCX: "OOXML 页眉背景水印（VML WordArt，斜向半透明，文件字节已改写）",
+    WATERMARK_METHOD_XLSX_HEADER: "降级：打印页眉文本 + docProps 自定义属性（OOXML 表格无背景水印能力，非真背景水印）",
+    WATERMARK_METHOD_PREVIEW_ONLY: "文件本体未修改；水印仅由平台在线预览层叠加（当前用户+时间+包号）",
+}
 VALID_EVENTS = {e.value for e in WebhookEvent}
 
 
@@ -179,11 +202,25 @@ def _t5_review_status(manifest_files: list[dict[str, Any]]) -> str:
 
 
 def _watermark_status(requested: bool, manifest_files: list[dict[str, Any]]) -> str:
-    """内容水印只注入文本文件（二进制注入会破坏解析），所以 applied 只在包内全部文件都是文本时成立。"""
+    """包级水印口径（向后兼容扩展，2026-10-30 背景水印拍板）。
+
+    - ``applied`` / ``partially_applied`` / ``not_applied`` / ``not_requested``：与
+      SS-18 原语义逐字一致——``applied`` 仍要求包内**全部**文件的字节都被写入过水印
+      （零宽文本、docx 背景 WordArt、xlsx 页眉文本都算写进了文件字节）。
+    - ``preview_only``（新增）：申请了水印，但包里没有任何文件的字节被改写，且全部
+      文件都是标了 ``watermark_method=preview_only`` 的纯文本数据表（csv/tsv）——
+      水印只存在于平台在线预览层。既不能谎称 ``applied``，也不该按"该嵌没嵌"记
+      ``not_applied``。
+    - 兼容：历史清单字典没有 ``watermark_method`` 键时只按 ``watermark_applied`` 聚合，
+      与 SS-18 落库口径逐位一致（tests/test_ss18_bundle_columns.py 钉住）。
+    """
     if not requested:
         return "not_requested"
     applied = sum(1 for item in manifest_files if item.get("watermark_applied"))
     if not applied:
+        preview_only = sum(1 for item in manifest_files if item.get("watermark_method") == WATERMARK_METHOD_PREVIEW_ONLY)
+        if preview_only and preview_only == len(manifest_files):
+            return WATERMARK_METHOD_PREVIEW_ONLY
         return "not_applied"
     return "applied" if applied == len(manifest_files) else "partially_applied"
 
@@ -206,6 +243,10 @@ async def create_dataset_bundle(
 
     bundle_id = uuid.uuid4()
     watermark = generate_watermark(str(current_user.id), str(session.id))
+    generated_at = datetime.now(timezone.utc).isoformat()
+    # 可见水印文本（docx 背景 WordArt / xlsx 页眉 / 前端预览层共用同一口径）：
+    # 成果包编号 + 时间戳 + 主体（打包人用户 ID）。
+    wm_visible = f"{bundle_id} | {generated_at} | user:{current_user.id}"
     manifest_files: list[dict[str, Any]] = []
     buffer = io.BytesIO()
     total = 0
@@ -249,26 +290,51 @@ async def create_dataset_bundle(
                 raise CDSError("交付包超过 512MB 上限，请分批交付或走数据产品通道", code="BUNDLE_TOO_LARGE", http_status=413)
             name = entry["name"]
             applied = False
+            method: str | None = None
             reason = "数据文件不注入不可见水印，避免破坏下游解析"
-            if body.watermark and name.lower().endswith(TEXT_WATERMARK_SUFFIXES):
-                try:
-                    data = embed_text_watermark(data.decode("utf-8"), watermark).encode("utf-8")
-                    applied = True
-                    reason = "已注入按买方+会话生成的不可见文本水印"
-                except Exception as exc:
-                    reason = f"水印注入失败，按原文交付: {exc}"
+            if body.watermark:
+                lowered = name.lower()
+                if lowered.endswith(TEXT_WATERMARK_SUFFIXES):
+                    try:
+                        data = embed_text_watermark(data.decode("utf-8"), watermark).encode("utf-8")
+                        applied = True
+                        method = WATERMARK_METHOD_TEXT_STEGO
+                        reason = "已注入按买方+会话生成的不可见文本水印"
+                    except Exception as exc:
+                        reason = f"水印注入失败，按原文交付: {exc}"
+                elif lowered.endswith(DOCX_WATERMARK_SUFFIXES):
+                    try:
+                        data = embed_docx_background_watermark(data, wm_visible)
+                        applied = True
+                        method = WATERMARK_METHOD_DOCX
+                        reason = "已注入 OOXML 背景水印：页眉 VML WordArt（斜向 -45°、半透明、页面居中、文字下层），文件字节已改写"
+                    except Exception as exc:
+                        reason = f"docx 背景水印注入失败（不是合法 OOXML 容器等），按原文交付: {exc}"
+                elif lowered.endswith(XLSX_WATERMARK_SUFFIXES):
+                    try:
+                        data = embed_xlsx_header_watermark(data, wm_visible)
+                        applied = True
+                        method = WATERMARK_METHOD_XLSX_HEADER
+                        reason = "诚实降级：OOXML 表格没有背景水印概念——已写打印页眉文本（oddHeader 居中段）+ docProps 自定义属性，非真背景水印"
+                    except Exception as exc:
+                        reason = f"xlsx 页眉水印注入失败，按原文交付: {exc}"
+                elif lowered.endswith(PREVIEW_WATERMARK_SUFFIXES):
+                    method = WATERMARK_METHOD_PREVIEW_ONLY
+                    reason = "纯文本数据表：文件字节未动（改一个字节都可能破坏下游解析）；水印由平台在线预览层叠加（当前用户+时间+包号），下载件不含水印"
             zf.writestr(f"files/{name}", data)
-            manifest_files.append({"name": name, "size_bytes": len(data), "data_rows": data_rows, "watermark_applied": applied, "watermark_note": reason, "output_review": review["status"], "output_findings": review["findings"]})
+            manifest_files.append({"name": name, "size_bytes": len(data), "data_rows": data_rows, "watermark_applied": applied, "watermark_method": method, "watermark_note": reason, "output_review": review["status"], "output_findings": review["findings"]})
         manifest = {
             "bundle_id": str(bundle_id),
             "contract_id": str(contract.id),
             "contract_no": contract.contract_no,
             "session_id": str(session.id),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at,
             "generated_by": str(current_user.id),
             "file_count": len(manifest_files),
             "files": manifest_files,
-            "watermark_scope": "text-files-only",
+            "watermark_scope": "office-embedded+text-stego+preview-layer",
+            "watermark_text": wm_visible,
+            "watermark_legend": WATERMARK_LEGEND,
             "output_review_scope": "utf-8 文本文件已过 T5 出口审查；二进制文件未送审（status=skipped_binary）",
             "output_findings_total": total_findings,
             "output_review_skipped_binary": skipped_binary,
@@ -307,7 +373,8 @@ async def create_dataset_bundle(
         "size_bytes": len(payload),
         "download_url": f"/api/v1/deliveries/dataset/{bundle_id}/download",
         "watermark_applied": any(f["watermark_applied"] for f in manifest_files),
-        "watermark_scope": "text-files-only",
+        "watermark_scope": "office-embedded+text-stego+preview-layer",
+        "watermark_legend": WATERMARK_LEGEND,
         "output_review": {"findings_total": total_findings, "skipped_binary": skipped_binary, "empty": empty_files, "scope": "utf-8 text files"},
         "t5_review_status": t5_review_status,
         "watermark_status": watermark_status,
@@ -333,6 +400,8 @@ async def list_dataset_bundles(
 
     只下发交付包表已落库的字段：T5 审查状态、内容水印状态与数据表行数是打包当时落在行上的
     结论（SS-18 §8 P0-②）；这两列之前的包为 NULL，按「未记录」下发，不从包体反推。
+    水印状态自 2026-10-30 起多一个 ``preview_only`` 取值（纯文本数据表包：文件字节未动，
+    水印只在平台在线预览层）——历史取值语义不变，前端读不认识的取值原样展示。
     """
     query = (
         select(DeliveryBundle, Contract.contract_no)
@@ -982,6 +1051,51 @@ async def delete_openapi_endpoint(endpoint_id: uuid.UUID, db: AsyncSession = Dep
 OPENAPI_CALL_ACTIONS = ("openapi.call", "openapi.call_failed")
 OPENAPI_CALL_BY_STATUS = {"succeeded": ("openapi.call",), "failed": ("openapi.call_failed",)}
 
+# ---------------------------------------------------------------------------
+# 拍板③（2026-10-30）：成功率 = 近 7 天窗口内「成功 / 全部调用（分母含被拒调用）」。
+#
+# 词表全部从 app/ 真实字面量派生，禁止在这里发明动作词或错误码：
+#   · 成功/失败的唯一判据 = ``app/api/audit.py::audit_outcome``（失败标记集
+#     ``AUDIT_FAILURE_MARKERS = failed/denied/rejected/blocked``）。审计里没有
+#     「结果」列，结果只由动作名派生，这条规则由 tests/test_audit_query_filters.py 机检，
+#     本端点不另立口径（与 app/api/flow_runtime.py::_audit_window_counts 同一做法）。
+#   · 「被拒」= 失败里**没进沙箱执行**的那一类：动作名命中拒绝标记（denied/rejected/blocked，
+#     当前 openapi 侧还没有这类动作名，留作前向兼容），或失败行的 ``detail.code`` 是
+#     ``OPENAPI_REFUSAL_CODES`` 里的准入拒绝码。执行后才失败的
+#     （WORKLOAD_FAILED / OUTPUT_BLOCKED）算 failed，不算被拒。
+#   ``tests/test_openapi_call_stats.py`` 机检：拒绝码必须出现在
+#   ``delivery_service.execute_endpoint`` 里创建沙箱会话**之前**，执行失败码必须出现在
+#   之后 —— 这样「被拒/失败」的分界不是一句注释，而是被源码顺序钉住的事实。
+# ---------------------------------------------------------------------------
+
+OPENAPI_CALLS_WINDOW_DAYS = 7
+# 拒绝类标记：失败标记集里去掉「执行失败」那一个，剩下的三个都是「没跑起来就被挡下」。
+OPENAPI_REJECTION_MARKERS: tuple[str, ...] = tuple(
+    marker for marker in AUDIT_FAILURE_MARKERS if marker != "failed"
+)
+# 准入拒绝码（app/services/delivery_service.py::execute_endpoint 在 create_sandbox_session 之前 raise）
+OPENAPI_REFUSAL_CODES: tuple[str, ...] = (
+    "ENDPOINT_DISABLED",
+    "RATE_LIMITED",
+    "QUOTA_EXCEEDED",
+    "WORKLOAD_UNAVAILABLE",
+    "CALLER_UNKNOWN",
+)
+# 执行后失败码（同一函数里，会话已经建起来之后才可能抛）
+OPENAPI_EXECUTION_FAILURE_CODES: tuple[str, ...] = ("WORKLOAD_FAILED", "OUTPUT_BLOCKED")
+
+
+def _call_bucket(action: str | None, code: str | None) -> str:
+    """一条调用日志归到 succeeded / rejected / failed 三桶之一（三者互斥、并集为全部）。"""
+    if audit_outcome(action) == "success":
+        return "succeeded"
+    lowered = (action or "").lower()
+    if any(marker in lowered for marker in OPENAPI_REJECTION_MARKERS):
+        return "rejected"
+    if (code or "") in OPENAPI_REFUSAL_CODES:
+        return "rejected"
+    return "failed"
+
 
 async def _load_endpoint(db: AsyncSession, endpoint_id: uuid.UUID, user: User) -> ApiEndpoint:
     res = await db.execute(select(ApiEndpoint).where(ApiEndpoint.id == endpoint_id))
@@ -993,15 +1107,21 @@ async def _load_endpoint(db: AsyncSession, endpoint_id: uuid.UUID, user: User) -
 
 
 def _call_dict(entry: AuditLog, endpoint: ApiEndpoint) -> dict[str, Any]:
-    """调用明细一行 = 一条审计日志：失败行没有输出行数/耗时，保持 None，不按 0 交付。"""
+    """调用明细一行 = 一条审计日志：失败行没有输出行数/耗时，保持 None，不按 0 交付。
+
+    ``outcome`` 用与 ``stats`` 同一个判据（``_call_bucket``）：明细里的「被拒」和
+    KPI 里的被拒数是同一批行，不是两处各数一遍。
+    """
     detail = entry.detail or {}
     failed = entry.action == "openapi.call_failed"
+    code = detail.get("code") if failed else None
     return {
         "id": str(entry.id),
         "endpoint_id": str(endpoint.id),
         "slug": detail.get("slug") or endpoint.slug,
         "status": "failed" if failed else "succeeded",
-        "code": detail.get("code") if failed else None,
+        "outcome": _call_bucket(entry.action, code),
+        "code": code,
         "message": detail.get("message") if failed else None,
         "output_rows": detail.get("output_rows"),
         "duration_ms": detail.get("duration_ms"),
@@ -1012,29 +1132,113 @@ def _call_dict(entry: AuditLog, endpoint: ApiEndpoint) -> dict[str, Any]:
     }
 
 
+CALL_WINDOWS: dict[str, int | None] = {
+    "all": None,
+    "7d": OPENAPI_CALLS_WINDOW_DAYS,
+    "30d": 30,
+}
+
+
+async def _call_stats(
+    db: AsyncSession,
+    *,
+    scoped: list,
+    window: str,
+    since: datetime | None,
+    now: datetime,
+) -> dict[str, Any]:
+    """同一窗口条件下**全部调用动作**的分桶统计（成功 / 失败 / 被拒 + 成功率）。
+
+    - 不受明细的 ``status`` 筛选影响：成功率说的是「这个端点的调用有多成功」，
+      不该因为用户在明细里勾了「只看失败」就变成 0%。口径写在 ``status_scope`` 里。
+    - 分母 = succeeded + failed + rejected（拍板③：含被拒调用）。一桶都不排除。
+    - ``total == 0`` 时 ``success_rate`` 必须是 ``null``，不是 0 也不是 100：
+      「没记录」和「全失败/全成功」是三种不同的事实（前端渲染「未记录」）。
+    - 分组在 SQL 里做（一个聚合查询），判定在 Python 里做（复用 audit_outcome +
+      本模块词表），与 GET /api/v1/audit/records?outcome=failure 逐行一致。
+    """
+    code_expr = AuditLog.detail["code"].as_string()
+    rows = (
+        await db.execute(
+            select(AuditLog.action, code_expr, func.count())
+            .where(*scoped, AuditLog.action.in_(OPENAPI_CALL_ACTIONS))
+            .group_by(AuditLog.action, code_expr)
+        )
+    ).all()
+    buckets = {"succeeded": 0, "failed": 0, "rejected": 0}
+    for action, code, count in rows:
+        buckets[_call_bucket(action, code)] += int(count or 0)
+    total = sum(buckets.values())
+    succeeded = buckets["succeeded"]
+    return {
+        "window": window,
+        "window_days": CALL_WINDOWS[window],
+        "since": since.isoformat() if since else None,
+        "until": now.isoformat(),
+        "total": total,
+        "succeeded": succeeded,
+        "failed": buckets["failed"],
+        "rejected": buckets["rejected"],
+        "success_rate": round(succeeded * 100.0 / total, 1) if total else None,
+        "data_available": total > 0,
+        "reason": None if total else "no_calls_in_window",
+        # 口径披露（前端照抄展示，不再各自解释）
+        "denominator": "succeeded + failed + rejected（含被拒调用，一桶都不排除）",
+        "rate_caliber": (
+            f"成功率 = 成功 / 全部调用；窗口 = {'近 ' + str(CALL_WINDOWS[window]) + ' 天' if CALL_WINDOWS[window] else '全部时间'}"
+            "；无调用记录时成功率为 null（不是 0，也不是 100）"
+        ),
+        "status_scope": "统计不受明细 status 筛选影响，始终覆盖窗口内全部调用",
+        "source": "audit_logs（带 Merkle 锚定的唯一调用账本）",
+        "vocabulary": {
+            "actions": list(OPENAPI_CALL_ACTIONS),
+            "failure_markers": list(AUDIT_FAILURE_MARKERS),
+            "rejection_markers": list(OPENAPI_REJECTION_MARKERS),
+            "refusal_codes": list(OPENAPI_REFUSAL_CODES),
+            "execution_failure_codes": list(OPENAPI_EXECUTION_FAILURE_CODES),
+        },
+        "note": (
+            "在鉴权依赖层就被拒的请求（无权限 / 无效凭据）不产生调用日志行，"
+            "这类缺口照实说「不补也不猜」，不把分母做小来抬高成功率"
+        ),
+    }
+
+
 @router.get("/openapi/endpoints/{endpoint_id}/calls")
 async def list_openapi_endpoint_calls(
     endpoint_id: uuid.UUID,
     status_filter: str | None = Query(None, alias="status", pattern="^(succeeded|failed)$"),
+    window: str = Query("all", pattern="^(all|7d|30d)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_business_user),
 ):
-    """端点调用明细（SS-18 §8 P0-③）。
+    """端点调用明细 + **同一次查询算出的**调用统计（SS-18 §8 P0-③ / 2026-10-30 拍板③）。
 
     数据面每次调用都写在带 Merkle 锚定的审计日志上（openapi.call / openapi.call_failed，
     resource_type=api_endpoint），这里按 (action, resource_type, resource_id) 精确读那份日志，
     不再另建一张无人锚定的影子调用表。归属口径与端点增删改同源（_load_contract → _is_party）。
 
     在依赖层就被拒掉的请求（无权限 / 无效凭据）本来没有调用日志行，这里不补也不猜。
+
+    ``stats`` 与 ``items`` 在同一个响应里、同一份窗口条件上算出来：ss-19 §10.2 记的
+    「KPI 说 100% 而明细里有失败」正是 KPI 与明细分两次查、各算各的口径出来的。现在
+    监控页的 KPI 只能读 ``stats``，明细只能读 ``items``，两者共享 ``window``。
+    统计的窗口口径默认近 7 天（``window=7d``）；``window=all`` 保持 SS-18 原全量明细行为，
+    统计随之变成全量并在 ``window`` 字段里照实写 "all"，不假装还是 7 天。
     """
     endpoint = await _load_endpoint(db, endpoint_id, current_user)
+    now = datetime.now(timezone.utc)
+    since = None if CALL_WINDOWS[window] is None else now - timedelta(days=CALL_WINDOWS[window])
+    scoped = [
+        AuditLog.resource_type == "api_endpoint",
+        AuditLog.resource_id == str(endpoint.id),
+    ]
+    if since is not None:
+        scoped.append(AuditLog.created_at >= since)
     wanted = OPENAPI_CALL_BY_STATUS[status_filter] if status_filter else OPENAPI_CALL_ACTIONS
-    stmt = (
-        select(AuditLog)
-        .where(AuditLog.resource_type == "api_endpoint", AuditLog.resource_id == str(endpoint.id), AuditLog.action.in_(wanted))
-    )
+    stmt = select(AuditLog).where(*scoped, AuditLog.action.in_(wanted))
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
     res = await db.execute(
         stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -1044,4 +1248,9 @@ async def list_openapi_endpoint_calls(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "window": window,
+        "window_days": CALL_WINDOWS[window],
+        "since": since.isoformat() if since else None,
+        "until": now.isoformat(),
+        "stats": await _call_stats(db, scoped=scoped, window=window, since=since, now=now),
     }

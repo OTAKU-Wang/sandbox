@@ -17,7 +17,7 @@ sandbox/
 │   └── tongsuo-build/  # second vendored Tongsuo — DO NOT EDIT
 ├── deploy/             # NEW: cube-node host bring-up + e2e-remote / local deploy harnesses
 ├── sdk/                # cds_sdk, standalone sync httpx REST client (/api/v1)
-├── alembic/            # migrations, single LINEAR chain 0000→0031, additive-only
+├── alembic/            # migrations, single LINEAR chain 0000→0032, additive-only
 ├── tests/              # 211 .py / 208 collected modules, 45.7k LOC; two-tier CI (gate + informational)
 ├── k8s/                # k3s manifest deploy path (deploy.sh, NodePort 30080/30081)
 ├── helm/               # cds chart (helm/cds), production path (ns cds-system)
@@ -70,7 +70,7 @@ No LSP index exists in this workspace; entries come from the writer digests and 
 ## CONVENTIONS
 - Env config: pydantic BaseSettings, `env_prefix="CDS_"`, `.env`; `get_settings()` is lru_cached — tests must `cache_clear`, but prod-mode tests instead monkeypatch the cached `Settings` and `delenv` TESTING/PYTEST_CURRENT_TEST (only test_k8s_n7.py uses cache_clear).
 - API errors follow the W2 contract {code, message, detail, request_id}; `SESSION_TERMINATED`=410 must stop client retries (consumed by cds_sdk).
-- Alembic chain is linear and additive-only (0000→0031; 0019–0021 SS-15, 0022–0026 SS-18/19, 0027–0031 the OCR-review round): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
+- Alembic chain is linear and additive-only (0000→0032; 0019–0021 SS-15, 0022–0026 SS-18/19, 0027–0031 the OCR-review round, 0032 refresh sessions): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
 - `tests/conftest.py` (472 L) pins 12 env vars via `os.environ.setdefault` BEFORE importing app.main; never import the app ahead of conftest.
 - KMS wire fields are a cross-language contract: `app/schemas/kms.py` and `cds-volume-plugin/kms.go` must move together (test_kms_volume_keys.py pins the Go field names).
 - Mixed Chinese/English docstrings, user-facing strings, and requirements.txt comments (国密) — keep the mix.

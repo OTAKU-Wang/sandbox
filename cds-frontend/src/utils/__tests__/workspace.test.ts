@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   canAccessAdminWorkspace,
@@ -10,6 +12,53 @@ import {
   resolveWorkspace,
 } from '../workspace';
 import { UserRole } from '../../types/enums';
+import { getRouteCrumb, HOME_CRUMB } from '../../components/Layout/routeCrumb';
+
+/** 本池的 import.meta.url 不是 file: scheme，静态门只能从 cwd 往上找源文件（同 DataplaneBanner.a297）。 */
+function repoRoot(): string {
+  let dir = process.cwd();
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'src'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`找不到 cds-frontend 根目录（cwd=${process.cwd()}）`);
+}
+
+const ROOT = repoRoot();
+
+function readSource(rel: string): string {
+  const file = join(ROOT, rel);
+  if (!existsSync(file)) throw new Error(`找不到源文件 ${rel}`);
+  return readFileSync(file, 'utf8');
+}
+
+/**
+ * 把 '/home' 当**字面量**写进产品代码的文件，减去三条合法口径：
+ * App.tsx 的重定向、routeCrumb 与 workspace.ts 的「跳转途中」面包屑/首页判定。
+ * 测试文件不参与（本文件自己就要提到这个名字）。
+ */
+function sourceFilesUsingHomeLiteral(): string[] {
+  const transit = new Set(['src/App.tsx', 'src/components/Layout/routeCrumb.ts', 'src/utils/workspace.ts']);
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '__tests__') continue;
+        walk(abs);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const relPath = relative(ROOT, abs).split(sep).join('/');
+      if (transit.has(relPath)) continue;
+      if (readFileSync(abs, 'utf8').includes("'/home'")) hits.push(relPath);
+    }
+  };
+  walk(join(ROOT, 'src'));
+  return hits;
+}
 
 const menu = [
   { key: '/' },
@@ -79,13 +128,23 @@ describe('SS-18 顶栏与左栏的真值助手', () => {
     expect(resolveGreetingName(null)).toBe('');
   });
 
-  it('登录后落点：开发者工台落 /home（开发者首页），管理员工台落 /', () => {
-    expect(homeLandingPath(UserRole.DATA_PROVIDER, null)).toBe('/home');
-    // 业务角色残留 admin 偏好 → resolveWorkspace 回落 developer，落点跟着回开发者首页
-    expect(homeLandingPath(UserRole.DATA_PROVIDER, 'admin')).toBe('/home');
-    expect(homeLandingPath(UserRole.OPERATOR, 'developer')).toBe('/home');
-    expect(homeLandingPath(UserRole.OPERATOR, 'admin')).toBe('/');
-    expect(homeLandingPath(undefined, null)).toBe('/home');
+  it('A295 登录后落点：两个工台都落真实存在的 index 路由 /，没人落在只做跳转的 /home', () => {
+    // 旧实现按工台返回 '/home' | '/'，而 App.tsx 里 `/home` 早就是 <Navigate to="/" replace/>
+    // （SS-18 把开发者首页提到 index 路由）。落点钉在 '/home' 等于每次点首页都白跳一跳，
+    // 地址栏还会先闪一条不存在于菜单口径里的路由。工台分派在 WorkspaceHome 做，与落点无关。
+    expect(homeLandingPath()).toBe('/');
+    expect(isWorkspaceHome(homeLandingPath())).toBe(true);
+    // '/' 必须还是那张按工台分派的 index：面包屑/页签走首页样式（标题画在内容卡里，顶栏不出面包屑）
+    expect(getRouteCrumb(homeLandingPath())).toBe(HOME_CRUMB);
+  });
+
+  it('A295 静态门：/home 只准当重定向 transit，源码里不得再有把它当落点的导航', () => {
+    const app = readSource('src/App.tsx');
+    // 兼容路由本身要留着（旧收藏、旧文档链接不能 404）
+    expect(app).toMatch(/<Route path="home" element=\{<Navigate to="\/" replace \/>\} \/>/);
+    // 但除「重定向 / 面包屑 transit / 首页判定 transit」这三处口径之外，谁都不许再跳去 /home
+    const offenders = sourceFilesUsingHomeLiteral();
+    expect(offenders).toEqual([]);
   });
 
   it('选中态：精确命中优先，子路由按最长前缀命中并回报所属分组', () => {

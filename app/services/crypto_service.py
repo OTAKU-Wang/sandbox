@@ -35,13 +35,72 @@ class SM2Signature:
     signature: str    # 128 hex chars (r: 64 + s: 64)
 
 
+# ─── SM2 密文定宽框架与 gmssl 底层工具（docs/cr-2026-10-15-review.md §4.12）──────
+# 本机实测锚（.venv gmssl 3.2.2 纯 Python 版，2026-10-30 探针）：
+#  1) CryptSM2.encrypt / CryptSM2.decrypt 的**第一行都是 `data.hex()`** —— 输入硬性要求
+#     **bytes**；喂 hex str 必炸 `AttributeError: 'str' object has no attribute 'hex'`
+#     （旧注释 "gmssl expects hex string input" 方向正好写反，是远程 300/300 解密失败的根因）。
+#  2) 密文总宽 = C1(64B，无 04 前缀) + C3(32B) + C2(len(明文))；gmssl.decrypt 按固定偏移
+#     `data[0:128hex]` 切 C1，而 C1/C2 裸 hex 一旦丢前导零宽度就掉到 96+n 以下（远程 py3.12
+#     镜像曾记录 8 字节明文出 103/104/105 变长，§4.12），固定偏移随即错位。本机 3.2.2 已用
+#     '%064x%064x' 定宽填充（300/300 恒 104），但 decrypt 只计算 C3、**不比对**——实测篡改
+#     C2 区返回静默垃圾而非报错。因此：加密侧从严——自己校验宽度，不合格就换随机数重试
+#     （gmssl 每次 encrypt 内部重取随机 k，重试即换 k），绝不出变长密文；解密侧宽容——
+#     bytes/hex str、04 前缀都收，接受前自行重算 C3 验证，其余全部清晰抛错。
+#  3) 构造函数 `public_key.lstrip("04")` 按字符集 {0,4} 删前导字符而非删前缀：x 坐标以
+#     0/4 开头的公钥会被过度剥离（实测 128→125），随后 _kg 崩 TypeError 或验签 False——
+#     全量跑「gmssl SM2 稀有单发」（test_result_verifier::test_valid_signature、
+#     test_p0_8_9_10 DEK 用例，每密钥对约 1/256）的另一来源。一律空公钥构造后覆写归一值。
+_SM2_COORD_HEX = 64        # 单坐标宽度（hex 字符）
+_SM2_C1_HEX = 128          # C1 = x||y，无 04 前缀
+_SM2_C3_HEX = 64           # C3 = SM3 摘要
+_SM2_ENCRYPT_MAX_ATTEMPTS = 64  # 换随机数重试上限；丢前导零每坐标约 1/256，落空概率 ≈ (1/256)^64
+
+
+def _sm2_unavailable(op: str) -> RuntimeError:
+    """gmssl 缺失时的 SM2 fail-closed 报错（批 A：只响亮拒绝，绝不静默降级）。
+
+    文案给出修复路径并钉死开关口径：SM2 面没有任何降级开关，
+    CDS_SM3_FALLBACK_ALLOWED 只管 sm3_hash() 的 SHA-256 降级披露（PZ-04/MR-A14），
+    永远不覆盖 SM2 sign/verify/encrypt/decrypt。
+    """
+    return RuntimeError(
+        f"SM2 operation '{op}' is unavailable: the gmssl library is not installed. "
+        "Fix: pip install 'gmssl>=3.2.2' (requirements.txt already pins it). SM2 has NO "
+        "software fallback and no switch can enable one — CDS_SM3_FALLBACK_ALLOWED only "
+        "gates the disclosed SHA-256 fallback of sm3_hash() (PZ-04/MR-A14); it deliberately "
+        "never covers SM2 sign/verify/encrypt/decrypt (国密诚实性: refuse loudly, never fake)."
+    )
+
+
+def _sm2_normalize_public_key(public_key: str) -> str:
+    """公钥归一：接受 128 hex（裸 x||y）或 130 hex（04 前缀），统一为小写裸 128。"""
+    pub = public_key.strip().lower()
+    if len(pub) == _SM2_C1_HEX + 2 and pub.startswith("04"):
+        pub = pub[2:]  # 去且仅去一次 04 前缀 —— 不交给 lstrip("04")
+    if len(pub) != _SM2_C1_HEX or any(c not in "0123456789abcdef" for c in pub):
+        raise ValueError(
+            "Invalid SM2 public key: expected 128 hex chars (bare x||y) or 130 with a 04 "
+            f"prefix, got a {len(public_key)}-char value"
+        )
+    return pub
+
+
+def _sm2_new_crypt(private_key: str, public_key: str):
+    """构造 CryptSM2 并绕开构造函数 `lstrip("04")` 的公钥过度剥离（见上方实测锚 3）。"""
+    crypt = _sm2.CryptSM2(private_key=private_key or "", public_key="")
+    if public_key:
+        crypt.public_key = _sm2_normalize_public_key(public_key)
+    return crypt
+
+
 class CryptoService:
     """SM2/SM3 cryptographic operations for contract signing and verification."""
 
     def generate_keypair(self) -> SM2KeyPair:
         """Generate an SM2 key pair using the SM2 curve parameters."""
         if not _HAS_GMSSL:
-            raise RuntimeError("gmssl library not installed — cannot generate SM2 keys")
+            raise _sm2_unavailable("generate_keypair")
 
         import os
         ecc_table = _sm2.default_ecc_table
@@ -73,10 +132,11 @@ class CryptoService:
             public_key: 128-char hex public key (uncompressed, no 04 prefix)
         """
         if not _HAS_GMSSL:
-            raise RuntimeError("gmssl library not installed — cannot sign with SM2")
+            raise _sm2_unavailable("sign")
 
         import os
-        signer = _sm2.CryptSM2(private_key=private_key, public_key=public_key)
+        public_key = _sm2_normalize_public_key(public_key)
+        signer = _sm2_new_crypt(private_key, public_key)
         # SM2 signing requires a Z value (user ID hash) per GM/T 0009
         # Default user ID: "1234567812345678" (standard default)
         digest_hex = self._sm3_hash_with_z(data, public_key)
@@ -101,9 +161,10 @@ class CryptoService:
             public_key: 128-char hex public key (uncompressed, no 04 prefix)
         """
         if not _HAS_GMSSL:
-            raise RuntimeError("gmssl library not installed — cannot verify SM2 signature")
+            raise _sm2_unavailable("verify")
 
-        verifier = _sm2.CryptSM2(private_key="", public_key=public_key)
+        public_key = _sm2_normalize_public_key(public_key)
+        verifier = _sm2_new_crypt("", public_key)
         digest_hex = self._sm3_hash_with_z(data, public_key)
         digest_bytes = bytes.fromhex(digest_hex)
         return verifier.verify(signature, digest_bytes)
@@ -166,44 +227,151 @@ class CryptoService:
     def sm2_encrypt(self, plaintext: bytes, public_key: str) -> bytes:
         """Encrypt data with SM2 public key (GM/T 0003).
 
-        Args:
-            plaintext: Raw bytes to encrypt
-            public_key: 128-char hex public key (uncompressed, no 04 prefix)
+        定宽契约（§4.12，加密侧从严）：返回值总宽**恒等于** ``96 + len(plaintext)`` 字节
+        —— C1 64B（两坐标各 32 字节零填充，无 04 前缀）+ C3 32B + C2 len(plaintext)B。
+        实现选择「校验宽度、不合格就换随机数重试」：gmssl 每次 encrypt 内部重取随机 k，
+        本机 3.2.2 本就定宽（300/300 恒宽，重试为纯安全网），而对曾出 103/104/105 变长的
+        库版本，重试直到两坐标满宽为止（每坐标落前导零约 1/256，64 次仍不合格的概率可忽略），
+        杜绝同长明文出变长密文——变长密文会被 decrypt 的固定偏移切片静默错位。
 
-        Returns:
-            SM2 ciphertext bytes (C1||C3||C2 format)
+        C3 检查段的排列次序跟随所装 gmssl 的 mode（3.2.x 默认 mode=0 即 C1||C2||C3，更早
+        构建为 C1||C3||C2）；sm2_decrypt 依同一 mode 自适应解析，故本函数不再按旧 docstring
+        谎称固定 C1||C3||C2。
+
+        Args:
+            plaintext: 非空 bytes
+            public_key: 128 hex（裸 x||y），亦接受 130 hex（04 前缀）
+
+        Raises:
+            RuntimeError: gmssl 缺失，或 64 次重试仍不能产出定宽密文（响亮拒绝，不出半成品）
+            ValueError: 空明文 / 公钥不合法
         """
         if not _HAS_GMSSL:
-            raise RuntimeError("gmssl library not installed — cannot encrypt with SM2")
+            raise _sm2_unavailable("sm2_encrypt")
+        if not isinstance(plaintext, (bytes, bytearray)):
+            raise ValueError(f"SM2 plaintext must be bytes, got {type(plaintext).__name__}")
+        if not plaintext:
+            raise ValueError("SM2 refuses an empty plaintext: C2 width 0 cannot be parsed back by any decrypt side")
 
-        crypt = _sm2.CryptSM2(private_key="", public_key=public_key)
-        encrypted = crypt.encrypt(plaintext)
-        # gmssl returns hex string, convert to bytes
-        if isinstance(encrypted, str):
-            return bytes.fromhex(encrypted)
-        return encrypted
+        crypt = _sm2_new_crypt("", public_key)
+        expected = (_SM2_C1_HEX + _SM2_C3_HEX) // 2 + len(plaintext)
+        last_reason = "no attempt ran"
+        for _ in range(_SM2_ENCRYPT_MAX_ATTEMPTS):
+            try:
+                encrypted = crypt.encrypt(bytes(plaintext))  # 实测：入参必须是 bytes
+            except (TypeError, ValueError, AttributeError) as exc:
+                last_reason = f"gmssl.encrypt raised {type(exc).__name__}: {exc}"
+                continue
+            if encrypted is None:
+                last_reason = "gmssl.encrypt returned None (KDF degenerate branch, t == 0)"
+                continue
+            if isinstance(encrypted, str):
+                # 某些构建返回裸 hex 串；奇数长度/非 hex 即宽度失守的信号 → fromhex 失败计入重试
+                try:
+                    encrypted = bytes.fromhex(encrypted)
+                except ValueError as exc:
+                    last_reason = f"gmssl.encrypt returned unparsable hex ({exc})"
+                    continue
+            if len(encrypted) == expected:
+                return encrypted
+            last_reason = (f"variable-width ciphertext: {len(encrypted)} bytes != fixed {expected} "
+                           f"(unpadded C1/C2 coordinate — §4.12 defect signature)")
+        raise RuntimeError(
+            f"SM2 encryption failed to produce fixed-width ciphertext after "
+            f"{_SM2_ENCRYPT_MAX_ATTEMPTS} fresh-random attempts — last: {last_reason}. "
+            f"Refusing to emit a variable-width blob: the decrypt side slices C1 at a fixed "
+            f"offset and would silently mis-decode it (CR 2026-10-15 §4.12)."
+        )
 
-    def sm2_decrypt(self, ciphertext: bytes, private_key: str, public_key: str) -> bytes:
+    def sm2_decrypt(self, ciphertext, private_key: str, public_key: str) -> bytes:
         """Decrypt SM2 ciphertext with private key (GM/T 0003).
 
-        Args:
-            ciphertext: SM2 ciphertext bytes (C1||C3||C2 format)
-            private_key: 64-char hex private key
-            public_key: 128-char hex public key (uncompressed, no 04 prefix)
+        解密侧宽容、验收从严（§4.12 兼容口径）：
+        - 输入收 bytes 或 hex str（KMS ``sm2_encrypted_key`` 结果字段是 hex str，DB 列
+          ``sm2_encrypted_payload`` 与 ``export_sm2_ciphertext()`` 是 bytes，两种都是真实入口）；
+        - 容忍 C1 带 04 前缀的密文（作为第二候选解析，由 C3 验证裁决）；
+        - gmssl decrypt 返回 None（KDF 退化分支）或内部崩溃 → 显式抛清晰错误，绝不返回 None；
+        - **自行重算 C3 比对**后才放行（实测 gmssl.decrypt 只算不比对，篡改密文会静默返回
+          垃圾明文）；
+        - 历史变长密文（旧库丢坐标前导零的 103/105 字节族）无法可靠恢复切分，C3 必然失配
+          → 清晰抛错而不是吐垃圾。数据无损结论的依据：该密文是**只写不读**通道 ——
+          ``kms_service._sm2_decrypt`` 在 app/ 内零调用者，恢复器 ``kms_recovery`` 只把
+          sm2_encrypted_payload 原样塞回内存字典供 KEK 通道使用，全仓没有任何解密消费点
+          （grep 钉死，见 §4.12 影响面核实），故历史包袱 ≈ 0。
 
         Returns:
-            Decrypted plaintext bytes
+            通过 C3 验证的明文字节
+
+        Raises:
+            RuntimeError: gmssl 缺失
+            ValueError: 输入不合法，或所有宽容解析路径都不能通过 C3 验证
         """
         if not _HAS_GMSSL:
-            raise RuntimeError("gmssl library not installed — cannot decrypt with SM2")
+            raise _sm2_unavailable("sm2_decrypt")
+        if isinstance(ciphertext, (bytes, bytearray)):
+            ct_hex = bytes(ciphertext).hex()
+        elif isinstance(ciphertext, str):
+            ct_hex = ciphertext.strip().lower()
+        else:
+            raise ValueError(f"SM2 ciphertext must be bytes or hex str, got {type(ciphertext).__name__}")
+        try:
+            ct_bytes = bytes.fromhex(ct_hex)
+        except ValueError as exc:
+            raise ValueError(f"SM2 ciphertext is not even-length hex ({exc})") from exc
+        pk = private_key.strip().lower()
+        if len(pk) != _SM2_COORD_HEX or any(c not in "0123456789abcdef" for c in pk):
+            raise ValueError(f"SM2 private key must be 64 hex chars, got {len(private_key)}")
 
-        crypt = _sm2.CryptSM2(private_key=private_key, public_key=public_key)
-        # gmssl expects hex string input
-        ct_hex = ciphertext.hex() if isinstance(ciphertext, bytes) else ciphertext
-        decrypted = crypt.decrypt(ct_hex)
-        if isinstance(decrypted, str):
-            return bytes.fromhex(decrypted)
-        return decrypted
+        crypt = _sm2_new_crypt(pk, public_key)
+        # 3.2.x 默认 mode=0（C2 在前）；更早无 mode 属性的构建为 C1||C3||C2
+        mode = getattr(crypt, "mode", 1)
+
+        candidates = [ct_hex]
+        if ct_hex.startswith("04") and len(ct_hex) >= 2 + (_SM2_C1_HEX + _SM2_C3_HEX) // 2 * 2 + 2:
+            candidates.append(ct_hex[2:])  # 宽容：04 前缀的 C1（如标准 wire/其他实现产出）
+
+        reasons: list[str] = []
+        min_len = (_SM2_C1_HEX + _SM2_C3_HEX) // 2 + 1  # C1+C3+至少 1B 明文
+        if len(ct_bytes) < min_len:
+            reasons.append(
+                f"ciphertext is {len(ct_bytes)}B < minimum {min_len}B (C1 64B + C3 32B + C2 ≥1B)")
+        for h in candidates:
+            if len(h) < min_len * 2:
+                continue
+            try:
+                decrypted = crypt.decrypt(ct_bytes if h is ct_hex else bytes.fromhex(h))  # 实测：decrypt 要求 bytes
+            except (TypeError, ValueError, AttributeError, IndexError) as exc:
+                reasons.append(f"gmssl.decrypt raised {type(exc).__name__}: {exc}")
+                continue
+            if decrypted is None:
+                reasons.append("gmssl.decrypt returned None (KDF degenerate branch, t == 0)")
+                continue
+            plaintext = bytes.fromhex(decrypted) if isinstance(decrypted, str) else decrypted
+            # C3 自验证：C3 = SM3(x2 || M || y2)，其中 x2||y2 = d·C1
+            try:
+                xy = crypt._kg(int(pk, 16), h[:_SM2_C1_HEX])
+                if not xy or len(xy) != _SM2_C1_HEX:
+                    raise ValueError("C1 is not a parseable curve point at the fixed offset")
+                x2 = "%064x" % int(xy[:_SM2_COORD_HEX], 16)
+                y2 = "%064x" % int(xy[_SM2_COORD_HEX:_SM2_C1_HEX], 16)
+                expect_c3 = _sm3.sm3_hash(list(bytes.fromhex(x2 + plaintext.hex() + y2)))
+            except (TypeError, ValueError, AttributeError) as exc:
+                reasons.append(f"C3 recheck failed ({type(exc).__name__}: {exc})")
+                continue
+            got_c3 = h[_SM2_C1_HEX:_SM2_C1_HEX + _SM2_C3_HEX] if mode else h[-_SM2_C3_HEX:]
+            if expect_c3 != got_c3:
+                reasons.append(
+                    "C3 mismatch — ciphertext was tampered/truncated, or carries a legacy "
+                    "variable-width C1 that fixed-offset parsing cannot recover")
+                continue
+            return plaintext
+        raise ValueError(
+            "SM2 decryption failed for every tolerated parse ("
+            + "; ".join(reasons or ["empty candidate set"])
+            + "). Fixed-width blobs produced by this service decrypt cleanly; legacy "
+            "variable-width blobs (the 103/104/105-byte family, CR 2026-10-15 §4.12) cannot "
+            "be re-split unambiguously and are rejected loudly instead of returning garbage."
+        )
 
     # ─── 跨方签名原文的字节锁（OCR-A110 critical / OCR-A255）───────────────────
     # `|` 分隔字段、`,` 分隔 purpose_scope 元素。字段里出现分隔符就能拼出与另一组
