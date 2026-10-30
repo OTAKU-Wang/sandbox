@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import uuid
 from typing import AsyncGenerator
@@ -74,6 +75,31 @@ test_engine = create_async_engine(
     echo=False,
 )
 test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+# A192x (P4-1): harness self-heal. A lifespan-running test's shutdown cancels
+# task_pipeline pollers mid-query; SQLAlchemy treats the CancelledError as
+# connection-fatal and TERMINATES the DBAPI connection — fatal for this
+# harness, because the whole suite shares ONE StaticPool connection (the
+# pipeline's poller must see the fixtures' uncommitted flushes, so sessions
+# cannot be isolated on their own connection). We neutralise ONLY the
+# terminate step for this engine: the invalidated pool record still hands new
+# checkouts a fresh in-memory connection, while pre-cancel sessions keep their
+# (still open) old connection, so teardown rollbacks/drops of the test that
+# cancelled succeed instead of dying with "no active connection". The orphaned
+# old in-memory DB dies with the test. Loud warning per fork: if a full-suite
+# reading ever shows forks OUTSIDE lifespan-stop windows, that is a new
+# mid-test connection killer to chase.
+_pool_logger = logging.getLogger("tests.conftest.a192x")
+
+
+def _a192x_noop_terminate(dbapi_connection):  # noqa: ARG001 — signature fixed by SQLAlchemy
+    _pool_logger.warning(
+        "[A192x] connection terminate neutralised (suite harness); new checkouts "
+        "fork to a fresh in-memory DB until the next setup_db"
+    )
+
+
+test_engine.sync_engine.dialect.do_terminate = _a192x_noop_terminate  # type: ignore[method-assign]
 
 # Patch the module-level engine so lifespan uses the test DB
 original_engine = db_module.engine
@@ -167,41 +193,100 @@ _install_test_cube_client()
 # master EnsureVolume + plugin KMS registration + PutVolumeData over the unix
 # socket) — hardware-bound, fail-closed by design. In the suite the node
 # dataplane is the TestCubeNodeClient stand-in above, so the volume-precreate
-# half of the flow gets its own stand-in here (same import-time pattern; no
-# unit test exercises the real method, verified by grep). The session-data
-# contract (product must carry an uploaded data resource) stays enforced for
-# real: fixtures upload a resource instead of bypassing the check.
+# half of the flow gets its own stand-in — P1a-6 (cr §4/tests MAJOR-1): the
+# stand-in used to be an IMPORT-TIME PERMANENT class-attribute overwrite,
+# which made the real method unreachable for the whole session with no
+# restore path. It is now a per-test monkeypatch (autouse, so default
+# behavior is byte-for-byte the same for every existing test) that pytest
+# unwinds after each test; tests asking for the `real_session_volume`
+# fixture get the untouched real method instead. The session-data contract
+# (product must carry an uploaded data resource) stays enforced for real:
+# fixtures upload a resource instead of bypassing the check.
 from app.services.cube_runtime_adapter import CubeRuntimeAdapter
+
+# Captured BEFORE any test-layer patching — this is the product method.
+_REAL_PREPARE_SESSION_VOLUME = CubeRuntimeAdapter.prepare_session_volume
 
 
 async def _test_prepare_session_volume(self, session_id: str, data: bytes) -> str:
     return f"vault:v1:test-{session_id}"
 
 
-CubeRuntimeAdapter.prepare_session_volume = _test_prepare_session_volume
+@pytest.fixture(autouse=True)
+def _cube_volume_precreate_stub(request, monkeypatch):
+    """Per-test volume-precreate stand-in (P1a-6). Skipped for tests that
+    opt into `real_session_volume`; monkeypatch restores the class default
+    (= the real method) at teardown, so nothing is permanently patched."""
+    if "real_session_volume" in request.fixturenames:
+        return
+    monkeypatch.setattr(CubeRuntimeAdapter, "prepare_session_volume", _test_prepare_session_volume)
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture
+def real_session_volume(monkeypatch):
+    """P1a-6 opt-in: run the REAL CubeRuntimeAdapter.prepare_session_volume.
+
+    The two hardware-bound edge RPCs (_master_ensure_volume → cube master
+    HTTP, _put_volume_data → node plugin unix socket) still need per-test
+    fakes; the orchestration itself (fail-closed gates, DEK re-check against
+    the DB, return of the plugin key ref) runs for real. See
+    tests/test_p1a6_volume_precreate_real.py.
+    """
+    monkeypatch.setattr(CubeRuntimeAdapter, "prepare_session_volume", _REAL_PREPARE_SESSION_VOLUME)
+    return _REAL_PREPARE_SESSION_VOLUME
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def setup_db():
+async def _quiesce_background_singletons():
+    """A192x (P4-1): drain process-wide background singletons at the END of each
+    test, after every DB fixture has already released the shared connection.
+
+    Why this exists: an API test that submits a pipeline task leaves the
+    task_pipeline poller/dispatcher running on the session loop. The next
+    lifespan-running test's shutdown calls ``task_pipeline.stop()``, whose
+    cancellation lands mid-SELECT; SQLAlchemy treats the CancelledError as
+    connection-fatal and TERMINATES the DBAPI connection — with the suite's
+    single shared StaticPool connection that kills the whole harness
+    (ci/known-failures.md A192x: "1 ERROR after test_agent_api"). Stopping the
+    pipeline here instead means (a) lifespan shutdowns see an already-stopped
+    no-op, and (b) any terminate lands after the teardown's drop_all, so the
+    invalidated record simply reconnects empty for the next test — which is
+    exactly the state every test starts from anyway.
+
+    Ordering is enforced by setup_db depending on this fixture (setup first ⇒
+    teardown last). We also await the fire-and-forget cancel of in-flight
+    execution tasks so no cancellation can straggle into the NEXT test's
+    create_all. Same spirit as the autouse process-global resets elsewhere
+    (``_clean_ss12_state``).
+    """
+    yield
+    import asyncio as _asyncio
+
+    from app.services.task_pipeline import task_pipeline
+
+    running = list(task_pipeline._running.values())
+    try:
+        await task_pipeline.stop()
+    except Exception as exc:  # quiescing must never itself fail a test
+        logging.getLogger(__name__).warning("task_pipeline quiesce failed: %s", exc)
+    if running:
+        await _asyncio.gather(*running, return_exceptions=True)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def setup_db(_quiesce_background_singletons):
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    # A192x 取证（未采纳的修改）：pytest-asyncio 1.x 不采纳下方遗留的 session 级
-    # event_loop，每个用例一个新循环，而 StaticPool 只有一条连接——它生在哪个
-    # 循环上就只能在那个循环上用，跨循环复用会在 teardown 里炸
-    # "no active connection" / "Event loop is closed"（现场：test_agent_api 之后的
-    # 启动披露类用例）。试过在本 teardown 里 `await test_engine.dispose()`
-    # 归还连接，定向配对从 1 error 变成 10 error（StaticPool 下其他存活会话
-    # 一起失去连接）⇒ 已回退，修法需重设装置层循环/池策略，见 ci/known-failures.md。
+    # A192x 收口（P4-1, 2026-10-30）：本套件此前每用例一个新循环，而 StaticPool
+    # 只有一条连接——它生在哪个循环上就只能在那个循环上用，跨循环复用在上一个
+    # lifespan dispose 之后的 teardown 里炸（现场：test_agent_api 之后的启动披露
+    # 用例）。修法 = pyproject 把 test/fixture 的 loop scope 钉到 session（全席
+    # 一个循环，正是下方曾存在的 session 级 event_loop 遗留 fixture 的设计意图，
+    # pytest-asyncio 1.4 已不采纳该写法，此处删除）。这里不再做任何 dispose：
+    # 台账实测 teardown dispose 会让 StaticPool 上其他存活会话同失连接（净负）。
 
 
 @pytest_asyncio.fixture

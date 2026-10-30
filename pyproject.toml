@@ -1,5 +1,18 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# A192x (P4-1): pin ONE event loop for the whole session. The suite's DB
+# harness is an in-memory SQLite StaticPool (conftest) — by design ONE
+# connection shared across every test, which presumes a single loop (the
+# legacy session-scoped event_loop fixture expressed exactly this, and
+# pytest-asyncio >=1.0 stopped honoring it, so every test got a fresh loop
+# while the pooled connection stayed bound to the loop that created it —
+# teardown of anything touching the engine after a lifespan dispose then
+# died cross-loop, cf. ci/known-failures.md A192x). These two options are
+# the supported pytest-asyncio (>=0.26) replacement: session-scope loops
+# for tests AND async fixtures. Tests that deliberately spin their own
+# loops (asyncio.run / new_event_loop) are unaffected.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 timeout = 600
 markers = [
