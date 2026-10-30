@@ -16,10 +16,33 @@ _env = Environment(
 )
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+# OCR A83 defense-in-depth for the legacy pages. They are already off by default and
+# rejected at startup in production, but when the gate is open (dev/demo) the pages
+# write API data into innerHTML and keep the console Bearer in localStorage — so any
+# residual injection must not be able to (a) load script from an outside origin,
+# (b) POST the token to an outside origin, or (c) be framed. `'unsafe-inline'` is
+# required because every page ships its script inline.
+_PAGE_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
 
 def _render(template_name: str) -> HTMLResponse:
     html = _env.get_template(template_name).render()
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers=dict(_PAGE_HEADERS))
 
 
 @router.get("/identities", response_class=HTMLResponse)

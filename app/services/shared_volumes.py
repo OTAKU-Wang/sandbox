@@ -49,7 +49,9 @@ async def attach(
         raise CDSError(f"Volume not found: {volume_id}", code="VOLUME_NOT_FOUND", http_status=404)
     if volume.owner_id != owner_id:
         raise CDSError("Not your volume", code="FORBIDDEN", http_status=403)
-    effective_ro = volume.read_only if read_only is None else read_only
+    # A84: the declared read-only flag is an invariant of the volume, not a default —
+    # a caller may only mount it *more* strictly, never downgrade it to writable.
+    effective_ro = volume.read_only or (read_only if read_only is not None else False)
     attachment = SharedVolumeAttachment(
         session_id=session_id, volume_id=volume_id, read_only=effective_ro
     )

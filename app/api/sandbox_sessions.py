@@ -26,6 +26,7 @@ from app.models.sandbox_session import SandboxSession, SessionStatus, SandboxLev
 from app.models.audit_log import AuditLog
 from app.schemas.sandbox_session import SandboxExecRequest, SandboxExecuteRequest, SandboxSessionCreate, SandboxSessionResponse
 from app.services.audit_service import audit_service
+from app.services.capability_matrix import LEVEL_METADATA, SUPPLY_DATA_LEVELS, can_carry_supply_data
 from app.services.kms_service import kms_service
 from app.services.compliance_report import disclosure_fields
 from app.services.sandbox_manager import validate_resource_limits, is_session_expired, get_sandbox_manager, check_tenant_quota, update_tenant_usage, release_tenant_usage, get_resource_limits, attestation_required_for_level as _attestation_required_for_level, attestation_from_provision as _attestation_from_provision, attestation_from_session as _attestation_from_session
@@ -238,6 +239,36 @@ async def _execute_runtime_with_context(
     return await runtime.execute(container_id, code, language, **kwargs)
 
 
+# A55b（A55 的兄弟入口，owner-dpsandbox 交回）：这里原本只有「合约档位成员校验」——
+# 合约写 L0 就放行 L0，隔离下限交由合约数据决定。`CDS_SANDBOX_LEGACY_ENABLED=true`
+# （观察期/开发环境的既有开关）时，SS-13 的 l2c-only 门也不兜这条路径，于是「一纸只放行
+# L0 的合约」就能把供数会话建在进程隔离上（实测：201 + container + 会话密钥已下发）。
+# 强度序用 A55 落在 capability_matrix 的唯一权威判据 `can_carry_supply_data`，本处不另抄
+# 阶梯；矩阵自己也写明 L0「开发调试用，不可写入合约」。违规按 SS-13 一律 400 拒绝，
+# 绝不静默升档，也绝不因为「合约同意了」就放行更弱的档；拒绝点排在 provision 与密钥下发之前。
+def _reject_sub_floor_supply_data_level(level: str, allowed_levels: list[str]) -> None:
+    if can_carry_supply_data(level):
+        return
+    reason = (
+        "level_deprecated"
+        if LEVEL_METADATA.get(level, {}).get("deprecated")
+        else "below_supply_data_floor"
+    )
+    raise CDSError(
+        f"Sandbox session for contract data may not run at '{level}': the supply-data "
+        "isolation floor is a platform invariant and is never relaxed by contract data "
+        "(SS-13: refuse, never silently run at another level)",
+        code="LEGACY_LEVEL_RETIRED",
+        http_status=400,
+        detail={
+            "sandbox_level": level,
+            "reason": reason,
+            "supply_data_levels": list(SUPPLY_DATA_LEVELS),
+            "contract_allowed_sandbox_levels": allowed_levels,
+        },
+    )
+
+
 async def _validate_session_contract(
     db: AsyncSession,
     body: SandboxSessionCreate,
@@ -257,9 +288,12 @@ async def _validate_session_contract(
     if str(body.data_product_id) not in [str(pid) for pid in contract.product_ids]:
         raise HTTPException(status_code=400, detail="Data product not covered by this contract")
 
-    allowed_levels = {level.strip() for level in (contract.allowed_sandbox_levels or "").split(",") if level.strip()}
+    allowed_levels = [level.strip() for level in (contract.allowed_sandbox_levels or "").split(",") if level.strip()]
     if allowed_levels and body.sandbox_level not in allowed_levels:
         raise HTTPException(status_code=400, detail=f"Sandbox level '{body.sandbox_level}' not allowed by contract")
+    # A55b: 成员校验之后还要过平台下限——条款为空（该列可空）时同样要过，否则「合约没写」
+    # 就等于回到客户端自由选档。
+    _reject_sub_floor_supply_data_level(body.sandbox_level, allowed_levels)
 
     session_mode = body.sandbox_mode
     if not _mode_allowed_by_contract(session_mode, contract.allowed_sandbox_modes):
@@ -557,7 +591,8 @@ async def create_sandbox_session(
     if _attestation_required_for_level(body.sandbox_level) and not attestation:
         kms_service.destroy_key(session_key_result["key_id"])
         try:
-            runtime.terminate(session.container_id)
+            # A33: 同步 terminate 可阻塞数十秒，不得占事件循环（同 :1044 / session_lifecycle.py:79）。
+            await asyncio.to_thread(runtime.terminate, session.container_id)
         except Exception as e:
             logger.warning("[sandbox] Container rollback after attestation denial failed: %s", e)
         release_tenant_usage(
@@ -594,7 +629,8 @@ async def create_sandbox_session(
     if not distributed_key:
         kms_service.destroy_key(session_key_result["key_id"])
         try:
-            runtime.terminate(session.container_id)
+            # A33: 同上——回滚清理阶段整段事件循环不得被一个失败请求钉住。
+            await asyncio.to_thread(runtime.terminate, session.container_id)
         except Exception as e:
             logger.warning("[sandbox] Container rollback after key distribution failure failed: %s", e)
         release_tenant_usage(
@@ -632,7 +668,8 @@ async def create_sandbox_session(
         if inject_error is not None:
             kms_service.destroy_key(session_key_result["key_id"])
             try:
-                runtime.terminate(session.container_id)
+                # A33: 注入失败的回滚同样走 to_thread。
+                await asyncio.to_thread(runtime.terminate, session.container_id)
             except Exception as e:
                 logger.warning("[sandbox] Container rollback after data injection failure failed: %s", e)
             release_tenant_usage(
@@ -1082,6 +1119,41 @@ async def terminate_sandbox_session(
     return SandboxSessionResponse.model_validate(session)
 
 
+# A155: 引擎「建了策略」不等于「执行面在执行」。`create_policy` 会返回宿主 netns /
+# iptables 链名并落 `policy_applied` 审计，但执行面钩子（`get_bwrap_netns_args` /
+# `get_dns_env_vars` / `check_connection`）在全仓没有任何调用者 ⇒ 域名/IP 白名单在每条
+# 路径上都没被执行，真正生效的是运行时的 `--unshare-net` 全禁。只有数据面确认推送
+# （`enforced_by=cube_dataplane`）才允许对外声明「已执行」。
+_ENFORCED_BY_DATAPLANE = "cube_dataplane"
+
+
+def _network_enforcement_disclosure(mode: str | None, policy_result: dict | None) -> dict | None:
+    """把引擎返回的「建了哪些产物」换算成「执行面到底在执行什么」。"""
+    if policy_result is None:
+        return None
+    enforced_by = policy_result.get("enforced_by")
+    enforced = enforced_by == _ENFORCED_BY_DATAPLANE
+    disclosure = dict(policy_result)
+    disclosure["enforced"] = enforced
+    disclosure["enforced_by"] = enforced_by
+    disclosure["allowlist_in_force"] = bool(enforced and policy_result.get("mode") == "allowlist")
+    disclosure["effective_mode"] = policy_result.get("mode") if enforced else "deny_all"
+    disclosure["disclosure"] = (
+        "数据面已确认推送，策略在执行"
+        if enforced
+        else "A155: 引擎已登记策略，但运行时未消费 netns/DNS/逐连接钩子——"
+             "allowlist 开未执行，会话实际隔离为 --unshare-net 全禁(deny_all)"
+    )
+    return disclosure
+
+
+def _enforcement_for_audit(disclosure: dict | None) -> dict | None:
+    """A155: 审计只留判定结果，不把未执行的产物当作证据。"""
+    if disclosure is None:
+        return None
+    return {k: disclosure[k] for k in ("enforced", "enforced_by", "allowlist_in_force", "effective_mode")}
+
+
 @router.put("/{session_id}/network-policy")
 async def update_network_policy(
     session_id: uuid.UUID,
@@ -1116,6 +1188,24 @@ async def update_network_policy(
         )
         db.add(net_policy)
 
+    # A36: remove_policy 会真拆宿主侧 netns/iptables/DKMS 授权，拆完就必须能建回来；
+    # 先把当前生效的策略抓下来（下面就要改 ORM对象），失败时用它补偿：previous_config 重建
+    # 运行面，previous_orm 把控制面那一行还原回旧值（不能只靠外层事务回滚兜底）。
+    _POLICY_FIELDS = (
+        "mode", "allowed_ips", "allowed_domains", "allowed_ports", "dns_proxy_enabled",
+        "max_connections_per_second", "max_bandwidth_bytes_per_second", "active",
+    )
+    previous_orm = {field: getattr(net_policy, field, None) for field in _POLICY_FIELDS}
+    previous_config = NetworkPolicyConfig(
+        mode=net_policy.mode or "deny_all",
+        allowed_ips=list(net_policy.allowed_ips or []),
+        allowed_domains=list(net_policy.allowed_domains or []),
+        allowed_ports=list(net_policy.allowed_ports or []),
+        dns_proxy_enabled=bool(net_policy.dns_proxy_enabled),
+        max_connections_per_second=int(net_policy.max_connections_per_second or 10),
+        max_bandwidth_bytes_per_second=int(net_policy.max_bandwidth_bytes_per_second or 0),
+    )
+
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(net_policy, field, value)
@@ -1143,7 +1233,47 @@ async def update_network_policy(
     )
     policy_result = None
     if net_policy.active:
-        policy_result = await network_policy_engine.create_policy(str(session.id), config, db=db)
+        try:
+            policy_result = await network_policy_engine.create_policy(str(session.id), config, db=db)
+        except Exception as e:
+            # A36: 旧策略已被上面的 remove_policy 拆掉，失败就补偿回去，
+            # 不得留下「库里有策略、运行面空白」。审计走独立连接：本请求事务
+            # 随 raise 回滚，同事务写审计会被吞掉。
+            restored = False
+            try:
+                await network_policy_engine.create_policy(str(session.id), previous_config, db=db)
+                restored = True
+            except Exception as restore_err:
+                logger.error(
+                    "[A36] network policy rollback failed for %s — session left with NO enforcement: %s",
+                    session.id, restore_err,
+                )
+            # A36: 控制面也不得留下半截新策略——把这一行还原回旧值，让「这次 PUT 没生效」
+            # 在内存、事务、库里三个口径上一致，而不是依赖调用方的事务回滚语义。
+            for field, value in previous_orm.items():
+                setattr(net_policy, field, value)
+            await db.flush()
+            await audit_service.log_standalone(
+                action="sandbox.update_network_policy_failed", resource_type="sandbox_session",
+                user_id=current_user.id, session_id=session.id,
+                detail={
+                    "requested_mode": config.mode,
+                    "previous_mode": previous_config.mode,
+                    "previous_restored": restored,
+                    "error": str(e)[:500],
+                },
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": "Network policy update failed",
+                    "session_id": str(session.id),
+                    "previous_restored": restored,
+                    "detail": str(e)[:300],
+                },
+            )
+
+    enforcement = _network_enforcement_disclosure(net_policy.mode, policy_result)
 
     await db.flush()
     await db.refresh(net_policy)
@@ -1156,10 +1286,11 @@ async def update_network_policy(
             "allowed_ips": net_policy.allowed_ips,
             "allowed_domains": net_policy.allowed_domains,
             "active": net_policy.active,
+            "enforcement": _enforcement_for_audit(enforcement),
         },
     )
 
-    return {"network_policy": NetworkPolicyResponse.model_validate(net_policy), "enforcement": policy_result}
+    return {"network_policy": NetworkPolicyResponse.model_validate(net_policy), "enforcement": enforcement}
 
 
 @router.get("/{session_id}/network-policy", response_model=NetworkPolicyResponse)
@@ -1667,6 +1798,125 @@ def _session_workspace_or_400(session: SandboxSession) -> Path:
 # /scratch = 工作区（兼容期仍参与采集, 逐文件标源目录）, /sandbox/data = 授权数据（不采集）。
 # 注: “不采集”不等于“写不了”—— 上游冷启动不把声明卷挂进 guest, 真只读约不到 hypervisor 层,
 # 真正的出域约束由 T5 出口网关承担（诚实披露, 见 specs/ss-18-prototype-alignment.md §2）.
+# A35 + A32 (2026-10-19): 容器内那段程序把「参数」和「代码」彻底分开。
+#   A32 —— 旧写法用 f-string 把用户可控的文件名直拼进要在 guest 里执行的源码
+#          （`open(dir+'/{name}',...)`），文件名里的 `'；…#` 就能闭合字符串执行任意 Python，
+#          而这段由 API 自拼的源码**永远不过 code_scanner**，静态扫描 + `sandbox.code_scan_rejected`
+#          审计口径被整条绕过。现在参数（含文件名与载荷）整体 base64 进一个 JSON 门，
+#          源码里不再出现任何用户可控字面量。
+#   A35 —— 四个 op 过去各自解释 exec 结果（upload 从不看结果、list 把 traceback 逐行吐掉后
+#          当成"空目录"、delete 只认 exit 3、download 的 `splitlines()[-1]` 在 0 字节文件上
+#          IndexError、混入诊断行时 binascii.Error）。现在共用 `_l2c_exec_failure` 一套判定 +
+#          显式哨兵：失败一律 502，缺文件一律 404，空文件/空目录与失败可区分。
+# A37 (2026-10-19): 接口自身的单文件字节上限。旧写法 `await file.read()` 先把整份上传体
+# 缓冲进 API 进程内存，本文件里没有任何字节上限（服务层 SESSION_FILE_MAX_BYTES 与 l2c 的
+# 256KB exec 通道上限都在读完之后才判），少量并发大文件即可 OOM。上限现在在**读体之前**
+# 生效，并按分块读取边读边判，超限根本进不了写入通道。
+MAX_SESSION_UPLOAD_BYTES = 50 * 1024 * 1024
+UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
+# l2c 上传走 exec 参数面（base64）：256KB 编码上限 ⇒ 196608 原始字节。
+L2C_EXEC_MAX_BYTES = 256 * 1024 * 3 // 4
+
+
+async def _read_upload_capped(file: UploadFile, limit: int) -> bytes:
+    """A37: 分块读到 limit 就 413 —— 不得先整份缓冲再判上限。"""
+    buf = bytearray()
+    while True:
+        chunk = await file.read(min(UPLOAD_READ_CHUNK_SIZE, limit + 1))
+        if not chunk:
+            return bytes(buf)
+        buf.extend(chunk)
+        if len(buf) > limit:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "error": "file too large for session upload",
+                    "filename": file.filename or "",
+                    "limit_bytes": limit,
+                    "read_bytes": len(buf),
+                },
+            )
+
+
+_L2C_NOT_FOUND = "CDS404"
+_L2C_DATA = "CDSDATA"
+_L2C_LIST_BEGIN = "CDSLISTBEGIN"
+_L2C_LIST_END = "CDSLISTEND"
+
+_GUEST_FILE_PROGRAM = r"""
+import base64, json, os, sys
+
+_a = json.loads(base64.b64decode("{args}").decode("utf-8"))
+_op = _a["op"]
+_name = _a["name"]
+
+def _hit():
+    for _d in _a["candidates"]:
+        _p = os.path.join(_d, _name) if _name else ""
+        if _p and os.path.isfile(_p):
+            return _p
+    return ""
+
+if _op == "upload":
+    os.makedirs(_a["write_dir"], exist_ok=True)
+    open(os.path.join(_a["write_dir"], _name), "wb").write(base64.b64decode(_a["data"]))
+elif _op == "download":
+    _p = _hit()
+    if not _p:
+        print("CDS404")
+    else:
+        print("CDSDATA" + base64.b64encode(open(_p, "rb").read()).decode("utf-8"))
+elif _op == "list":
+    print("CDSLISTBEGIN")
+    for _d, _t in _a["harvest"]:
+        if not os.path.isdir(_d):
+            continue
+        for _n in sorted(os.listdir(_d)):
+            if os.path.isfile(os.path.join(_d, _n)):
+                print(_t + "\t" + _n)
+    print("CDSLISTEND")
+elif _op == "delete":
+    _p = _hit()
+    if not _p:
+        sys.exit(3)
+    os.remove(_p)
+else:
+    sys.exit(2)
+"""
+
+
+def _l2c_exec_failure(result: dict) -> str:
+    """A35: 四个 op 共用的「这一趟 exec 算不算失败」判定；空串 = 成功。
+
+    只看 exec 通道自身的事实（error 字段 / 退出码）——业务语义（缺文件等）由各 op
+    在调用本判定**之前**用哨兵先行处理。
+    """
+    err = result.get("error")
+    if err:
+        return f"exec error: {str(err)[:200]}"
+    code = result.get("exit_code")
+    if code not in (0, None):
+        return f"guest exit_code={code}"
+    return ""
+
+
+def _l2c_guest_code(op: str, name: str, write_dir: str, candidates: tuple, harvest: tuple,
+                    data: bytes = b"") -> str:
+    """把 op 的全部参数编成一个 base64 JSON 门，塞进固定的容器内程序。"""
+    import base64 as _b64
+
+    args = {
+        "op": op,
+        "name": name,
+        "write_dir": write_dir,
+        "candidates": list(candidates),
+        "harvest": [[d, tag] for d, tag in harvest],
+        "data": _b64.b64encode(data or b"").decode("ascii"),
+    }
+    blob = _b64.b64encode(json.dumps(args).encode("utf-8")).decode("ascii")
+    return _GUEST_FILE_PROGRAM.format(args=blob)
+
+
 async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", data: bytes | None = None,
                        where: str = "") -> dict:
     from app.services import session_files as sf
@@ -1677,53 +1927,89 @@ async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", dat
     # SS-18 (2026-10-16): 目录口径收敛到 cube_runtime_adapter 的 GUEST_*/HARVEST_DIRS。
     #   where=""          读按优先级自动解析 (/sandbox/output → /scratch), 写落 /sandbox/output
     #   where="output"     仅 /sandbox/output（产物, 原型口径）
-    #   where="workspace" 仅 /scratch（工作区, 兼容期）
+    #   where="workspace"  仅 /scratch（工作区, 兼容期）
     from app.services.cube_runtime_adapter import HARVEST_DIRS
 
     if where not in ("", "output", "workspace"):
         raise HTTPException(status_code=400, detail=f"unknown file dir: {where}")
     write_dir = {tag: d for d, tag in HARVEST_DIRS}[where or "output"]
     candidates = tuple(d for d, _tag in HARVEST_DIRS) if not where else (write_dir,)
+    harvest = tuple((d, tag) for d, tag in HARVEST_DIRS if not where or d == write_dir)
     runtime = await get_sandbox_manager()
     adapter = runtime.get_adapter("l2c")
     if not isinstance(adapter, CubeRuntimeAdapter):
         raise HTTPException(status_code=400, detail="l2c data plane not enabled")
-    if op == "upload":
-        import base64
 
-        b64 = base64.b64encode(data or b"").decode("ascii")
-        # 256KB 上限: 经 exec 参数面传输, 超出应走数据卷（数据产品面）。
-        if len(b64) > 256 * 1024:
+    if op == "upload":
+        # 256KB 编码上限: 经 exec 参数面传输, 超出应走数据卷（数据产品面）。
+        # A37: 接口层已在读体时按 L2C_EXEC_MAX_BYTES 封顶（413），这里是不经接口层的兜底。
+        if len(data or b"") > L2C_EXEC_MAX_BYTES:
             raise HTTPException(status_code=400, detail="file too large for the exec channel (>256KB); use data products for large files")
-        code = ("import base64,os;"
-                f"os.makedirs({write_dir!r},exist_ok=True);"
-                f"open({write_dir!r}+'/{name}','wb').write(base64.b64decode('{b64}'))")
+        code = _l2c_guest_code("upload", name, write_dir, candidates, harvest, data or b"")
         result = await adapter.execute(session.container_id, code, "python", timeout=120)
-    elif op == "download":
-        code = ("import base64,os;"
-                f"_c=[d+'/{name}' for d in {candidates!r} if os.path.isfile(d+'/{name}')];"
-                "print(base64.b64encode(open(_c[0],'rb').read()).decode()) "
-                "if _c else print('CDS404')")
+        failure = _l2c_exec_failure(result)
+        if failure:
+            raise HTTPException(status_code=502, detail=f"l2c file upload failed: {failure}")
+        return {"uploaded": name, "size": len(data or b"")}
+
+    if op == "download":
+        code = _l2c_guest_code("download", name, write_dir, candidates, harvest)
         result = await adapter.execute(session.container_id, code, "python", timeout=120)
-        if result.get("exit_code") != 0 or "error" in result:
-            raise HTTPException(status_code=502, detail=f"l2c file download failed: {result.get('error') or result.get('output', '')[:200]}")
-        out = (result.get("output") or "").strip()
-        if out.startswith("CDS404"):
+        out = result.get("output") or ""
+        marks = [ln.strip() for ln in out.splitlines()]
+        if _L2C_NOT_FOUND in marks:
             raise HTTPException(status_code=404, detail="file not found")
+        failure = _l2c_exec_failure(result)
+        if failure:
+            raise HTTPException(status_code=502, detail=f"l2c file download failed: {failure}")
+        # A35: 载荷只认 CDSDATA 哨兵行（前后的诊断行不参与取数），0 字节文件是空载荷
+        #      而不是 splitlines()[-1] 的 IndexError；解不开 base64 是 502 而不是 500。
+        payload = None
+        for ln in marks:
+            if ln.startswith(_L2C_DATA):
+                payload = ln[len(_L2C_DATA):]
+        if payload is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"l2c file download returned no payload marker: {out[:200]!r}",
+            )
         import base64 as _b64
 
-        return {"data": _b64.b64decode(out.splitlines()[-1])}
-    elif op == "list":
-        code = ("import os;"
-                f"_h={[(d, t) for d, t in HARVEST_DIRS if not where or d == write_dir]!r};"
-                "_r=[t+'\\t'+n for d,t in _h if os.path.isdir(d) for n in sorted(os.listdir(d)) "
-                "if os.path.isfile(os.path.join(d,n))];"
-                "print(os.linesep.join(_r))")
+        try:
+            raw = _b64.b64decode(payload, validate=True)
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"l2c file download payload is not base64: {e}",
+            )
+        return {"data": raw}
+
+    if op == "list":
+        code = _l2c_guest_code("list", name, write_dir, candidates, harvest)
         result = await adapter.execute(session.container_id, code, "python", timeout=60)
-        out = (result.get("output") or "").strip()
+        failure = _l2c_exec_failure(result)
+        if failure:
+            raise HTTPException(status_code=502, detail=f"l2c file list failed: {failure}")
+        out = result.get("output") or ""
+        raw_lines = out.splitlines()
+        marks = [ln.strip() for ln in raw_lines]
+        # A35: 没有采集信封就是采集失败 —— 旧写法把「读不到」和「目录是空的」混成
+        #      同一个 {"files": []}（静默同义，踩 honest-degradation 铁律）。
+        if _L2C_LIST_BEGIN not in marks or _L2C_LIST_END not in marks:
+            raise HTTPException(
+                status_code=502,
+                detail=f"l2c file list produced no collection envelope: {out[:200]!r}",
+            )
+        lo = marks.index(_L2C_LIST_BEGIN)
+        hi = len(marks) - 1 - marks[::-1].index(_L2C_LIST_END)
+        if hi <= lo:
+            raise HTTPException(
+                status_code=502,
+                detail=f"l2c file list envelope is malformed: {out[:200]!r}",
+            )
         entries: list[dict] = []
         seen: set[str] = set()
-        for line in out.splitlines():
+        for line in raw_lines[lo + 1:hi]:
             if not line.strip() or "\t" not in line:
                 continue
             tag, fname = line.split("\t", 1)
@@ -1732,16 +2018,18 @@ async def _l2c_file_op(session: SandboxSession, op: str, filename: str = "", dat
             seen.add(fname)
             entries.append({"name": fname, "dir": tag})
         return {"files": [e["name"] for e in entries], "entries": entries}
-    elif op == "delete":
-        code = ("import os;"
-                f"_c=[d+'/{name}' for d in {candidates!r} if os.path.isfile(d+'/{name}')];"
-                "os.remove(_c[0]) if _c else __import__('sys').exit(3)")
+
+    if op == "delete":
+        code = _l2c_guest_code("delete", name, write_dir, candidates, harvest)
         result = await adapter.execute(session.container_id, code, "python", timeout=60)
         if result.get("exit_code") == 3:
             raise HTTPException(status_code=404, detail="file not found")
+        failure = _l2c_exec_failure(result)
+        if failure:
+            raise HTTPException(status_code=502, detail=f"l2c file delete failed: {failure}")
         return {"deleted": name}
-    else:  # pragma: no cover
-        raise HTTPException(status_code=400, detail="unknown op")
+
+    raise HTTPException(status_code=400, detail="unknown op")
 
 
 async def _session_dek(session: SandboxSession) -> bytes | None:
@@ -1898,8 +2186,12 @@ async def upload_session_file(
     """
     session = await _load_operable_session(db, session_id, current_user)
     _active_or_suspended(session)
-    if session.sandbox_level == "l2c":
-        data = await file.read()
+    # A37: 上限按落点选取并在读体之前生效（l2c 受 exec 参数面 256KB 编码上限约束）。
+    is_l2c = session.sandbox_level == "l2c"
+    data = await _read_upload_capped(
+        file, L2C_EXEC_MAX_BYTES if is_l2c else MAX_SESSION_UPLOAD_BYTES
+    )
+    if is_l2c:
         result = await _l2c_file_op(session, "upload", file.filename or "", data, where="workspace")
         await audit_service.log(
             db, action="sandbox.file_upload", resource_type="sandbox_session",
@@ -1912,7 +2204,6 @@ async def upload_session_file(
     workspace = _session_workspace_or_400(session)
     dek = await _session_dek(session)
 
-    data = await file.read()
     from app.services import session_files as sf
 
     try:

@@ -33,9 +33,42 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.services.sandbox_security import GuestSecrets
 
 logger = logging.getLogger(__name__)
+
+
+# === A96d：客侧密钥带外投递（复用 sandbox_security.GuestSecrets，A96 同类缺陷第四处）===
+# bwrap 的参数与 ssh 的远端命令串都在 exec 之前就写进了 argv，同 UID 的任意进程可以从
+# /proc/<pid>/cmdline 读到明文 ⇒ 会话密钥 / DEK 一律不进 argv：argv 里只留变量个数，
+# 值经 exec（ssh 时是 ssh 的 stdin）交给客侧 bootstrap。拿不到通道时客侧 bootstrap 以
+# rc=97 拒绝执行并自报原因 —— 宁可执行失败，绝不静默无密钥跑成。
+def _secret_pairs(session_key: str | None, env_vars: dict[str, str] | None) -> list[tuple[str, str]]:
+    """本层需要送进客侧的密钥环境变量（与 sandbox_security.build_bwrap_args 同一集合）。"""
+    from app.services.sandbox_security import SECRET_ENV_NAMES
+
+    pending: list[tuple[str, str]] = []
+    if session_key:
+        pending.append(("CDS_SESSION_KEY", session_key))
+    if env_vars:
+        for name in SECRET_ENV_NAMES:
+            value = env_vars.get(name)
+            if value:
+                pending.append((name, value))
+    return pending
+
+
+def _new_guest_secrets(pairs: list[tuple[str, str]] | None = None):
+    """建一条一次性带外通道（投递过即耗尽，重试必须重建）。"""
+    from app.services.sandbox_security import GuestSecrets
+
+    secrets = GuestSecrets()
+    if pairs:
+        secrets.extend(pairs)
+    return secrets
 
 
 def _seccomp_fallback_allowed() -> bool:
@@ -414,7 +447,8 @@ class FirecrackerRuntime:
                                session_key: str | None = None,
                                env_vars: dict[str, str] | None = None,
                                isolate_network: bool = True,
-                               dns_proxy_port: int | None = None) -> tuple[list[str], int | None]:
+                               dns_proxy_port: int | None = None,
+                               secrets: "GuestSecrets | None" = None) -> tuple[list[str], int | None]:
         """Build hardened bwrap args for simulation-mode isolation (L3-grade).
 
         Matches sandbox_security.build_bwrap_args security level:
@@ -506,22 +540,181 @@ class FirecrackerRuntime:
             args += ["--seccomp", str(seccomp_fd)]
 
         # Environment variables
-        if session_key:
-            args += ["--setenv", "CDS_SESSION_KEY", session_key]
+        # A96d: 会话密钥与 DEK 只经带外通道走，绝不入 argv（argv 里只出现变量个数）
+        from app.services.sandbox_security import (
+            GUEST_SECRET_ARGV0,
+            GUEST_SECRET_BOOTSTRAP,
+            SECRET_ENV_NAMES,
+        )
+
+        pending = _secret_pairs(session_key, env_vars)
+        secret_count = 0
+        if pending:
+            if secrets is None:
+                logger.warning(
+                    "A96d: 未传 GuestSecrets 带外通道，%d 个会话密钥/DEK 不经 argv 投递；"
+                    "客侧 bootstrap 将以 rc=97 拒绝执行（不降级、不泄漏）",
+                    len(pending),
+                )
+                secret_count = len(pending)
+            else:
+                secrets.extend(pending)
+                secret_count = len(secrets)
 
         if env_vars:
             for k, v in env_vars.items():
+                if k in SECRET_ENV_NAMES:
+                    continue
                 args += ["--setenv", k, v]
 
         args += ["--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin"]
 
         # Command to execute
         if language == "python":
-            args += ["python3", code_file]
+            guest_cmd = ["python3", code_file]
         else:
-            args += ["bash", code_file]
+            guest_cmd = ["bash", code_file]
+
+        if secret_count:
+            args += [
+                "sh", "-c", GUEST_SECRET_BOOTSTRAP, GUEST_SECRET_ARGV0, str(secret_count),
+                *guest_cmd,
+            ]
+        else:
+            args += guest_cmd
 
         return args, seccomp_fd
+
+    @staticmethod
+    def _spawn_guest(cmd: list[str], secrets, timeout: int,
+                     extra_fds: tuple[int, ...] = ()) -> subprocess.CompletedProcess:
+        """跑一次客侧命令。有密钥 ⇒ Popen(stdin=PIPE) + deliver() 带外投递；否则沿用 subprocess.run。"""
+        if secrets is None or not len(secrets):
+            return subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, pass_fds=extra_fds
+            )
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            pass_fds=extra_fds,
+        )
+        try:
+            secrets.deliver(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                raise
+        finally:
+            secrets.close()
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+    def _run_sim_bwrap_leg(
+        self,
+        workspace: Path,
+        code_file: str,
+        language: str,
+        session_key: str | None,
+        env_vars: dict[str, str] | None,
+        effective_timeout: int,
+    ) -> dict:
+        """构造并执行一次加固 bwrap 客侧命令（A96d：密钥只走带外通道，不进 argv）。
+
+        返回 {"output", "exit_code"}。seccomp 不可用时的重试仍受
+        CDS_SECCOMP_FALLBACK_ALLOWED 门控（PZ-04/MR-A13）；带外通道是一次性的，
+        所以重试复用 argv（其中只有变量个数）但必须重建通道。
+        """
+        from app.services.sandbox_security import close_seccomp_fd
+
+        pairs = _secret_pairs(session_key, env_vars)
+        secrets = _new_guest_secrets() if pairs else None
+        if secrets is not None:
+            cmd, seccomp_fd = self._build_sim_bwrap_args(
+                workspace, code_file, language,
+                session_key=session_key, env_vars=env_vars, secrets=secrets,
+            )
+        else:
+            cmd, seccomp_fd = self._build_sim_bwrap_args(
+                workspace, code_file, language,
+                session_key=session_key, env_vars=env_vars,
+            )
+        extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
+        try:
+            result = self._spawn_guest(cmd, secrets, effective_timeout, extra_fds)
+            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
+                if _seccomp_fallback_allowed():
+                    cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
+                    retry_secrets = _new_guest_secrets(pairs) if pairs else None
+                    result = self._spawn_guest(cmd_no_seccomp, retry_secrets, effective_timeout)
+                else:
+                    logger.warning(
+                        "[firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false)"
+                    )
+                    return {
+                        "output": (
+                            "SECURITY ERROR: seccomp unavailable and "
+                            "CDS_SECCOMP_FALLBACK_ALLOWED=false — refusing to retry "
+                            "without seccomp. Original error: " + (result.stderr or "").strip()
+                        ),
+                        "exit_code": result.returncode,
+                    }
+            return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
+        except subprocess.TimeoutExpired:
+            return {"output": f"Execution timed out ({effective_timeout}s)", "exit_code": -1}
+        except Exception as e:
+            return {"output": str(e), "exit_code": -1}
+        finally:
+            close_seccomp_fd(seccomp_fd)
+
+    @staticmethod
+    def _ssh_remote_command(
+        interpreter: str,
+        remote_path: str,
+        session_key: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        secrets=None,
+    ) -> str:
+        """拼 ssh 的远端命令串（A96d：本机 ssh 进程的 argv 同样公开 ⇒ 密钥不进命令串）。
+
+        非密钥变量仍按 `K=V ` 前缀；密钥改由客侧 bootstrap 从 stdin（即 ssh 转发的
+        本进程 stdin）读取。secrets=None 且确有密钥时照旧挂 bootstrap 但无处投递值，
+        远端以 rc=97 拒绝执行 —— 不降级、不泄漏。
+        """
+        import shlex
+
+        from app.services.sandbox_security import (
+            GUEST_SECRET_ARGV0,
+            GUEST_SECRET_BOOTSTRAP,
+            SECRET_ENV_NAMES,
+        )
+
+        pending = _secret_pairs(session_key, env_vars)
+        count = 0
+        if pending:
+            if secrets is None:
+                logger.warning(
+                    "A96d: ssh 执行腿未传 GuestSecrets 带外通道，%d 个会话密钥/DEK 不经 argv 投递；"
+                    "客侧 bootstrap 将以 rc=97 拒绝执行（不降级、不泄漏）",
+                    len(pending),
+                )
+                count = len(pending)
+            else:
+                secrets.extend(pending)
+                count = len(secrets)
+
+        plain = {k: v for k, v in (env_vars or {}).items() if k not in SECRET_ENV_NAMES}
+        env_prefix = "".join(f"{k}={shlex.quote(str(v))} " for k, v in plain.items())
+        guest_cmd = f"{shlex.quote(interpreter)} {shlex.quote(remote_path)}"
+        if count:
+            guest_cmd = (
+                f"sh -c {shlex.quote(GUEST_SECRET_BOOTSTRAP)} "
+                f"{GUEST_SECRET_ARGV0} {count} {guest_cmd}"
+            )
+        return f"{env_prefix}{guest_cmd}"
 
     @staticmethod
     def _seccomp_retry_needed(stderr: str, seccomp_fd: int | None) -> bool:
@@ -646,61 +839,21 @@ class FirecrackerRuntime:
         code_file = Path(vm.workspace) / "tmp" / f"exec.{ext}"
         code_file.write_text(code)
 
-        try:
-            # Use bwrap for namespace isolation in simulation mode
-            workspace = Path(vm.workspace)
-            cmd, seccomp_fd = self._build_sim_bwrap_args(
-                workspace,
-                f"/workspace/tmp/exec.{ext}",
-                language,
-                session_key=session_key,
-                env_vars=env_vars,
-            )
-            extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
-            from app.services.sandbox_security import close_seccomp_fd
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
-            finally:
-                close_seccomp_fd(seccomp_fd)  # 单次 fd，用完归还（见 get_seccomp_bpf_fd）
-            # Retry without seccomp if kernel doesn't support it — gated by
-            # CDS_SECCOMP_FALLBACK_ALLOWED (PZ-04/MR-A13, S4 closed), same as
-            # sandbox_runtime. When denied, the exec fails honestly instead of
-            # silently degrading isolation.
-            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
-                if _seccomp_fallback_allowed():
-                    cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                    result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
-                else:
-                    duration = int((time.monotonic() - start) * 1000)
-                    logger.warning(
-                        "[firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for %s", vm.vm_id
-                    )
-                    return ExecutionResult(
-                        output=(
-                            "SECURITY ERROR: seccomp unavailable and "
-                            "CDS_SECCOMP_FALLBACK_ALLOWED=false — refusing to retry "
-                            "without seccomp. Original error: " + (result.stderr or "").strip()
-                        ),
-                        exit_code=result.returncode,
-                        duration_ms=duration,
-                        vm_id=vm.vm_id,
-                    )
-            duration = int((time.monotonic() - start) * 1000)
-            return ExecutionResult(
-                output=result.stdout + result.stderr,
-                exit_code=result.returncode,
-                duration_ms=duration,
-                vm_id=vm.vm_id,
-            )
-        except subprocess.TimeoutExpired:
-            return ExecutionResult(
-                output=f"Execution timed out ({effective_timeout}s)",
-                exit_code=-1,
-                duration_ms=effective_timeout * 1000,
-                vm_id=vm.vm_id,
-            )
-        except Exception as e:
-            return ExecutionResult(output=str(e), exit_code=-1, duration_ms=0, vm_id=vm.vm_id)
+        result = self._run_sim_bwrap_leg(
+            Path(vm.workspace),
+            f"/workspace/tmp/exec.{ext}",
+            language,
+            session_key,
+            env_vars,
+            effective_timeout,
+        )
+        duration = int((time.monotonic() - start) * 1000)
+        return ExecutionResult(
+            output=result["output"],
+            exit_code=result["exit_code"],
+            duration_ms=duration,
+            vm_id=vm.vm_id,
+        )
 
     def _execute_via_ssh(
         self,
@@ -720,23 +873,35 @@ class FirecrackerRuntime:
         scp_cmd = ["scp", "-o", "StrictHostKeyChecking=no", code_file, f"root@{vm.ip_address}:/tmp/exec.{ext}"]
         subprocess.run(scp_cmd, capture_output=True, timeout=10)
 
-        # Execute
-        env_prefix = ""
-        merged_env = dict(env_vars or {})
-        if session_key:
-            merged_env["CDS_SESSION_KEY"] = session_key
-        if merged_env:
-            import shlex
-            env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in merged_env.items()) + " "
+        # Execute（A96d：ssh 的参数串就在本机 argv 里 ⇒ 密钥走带外通道，经 ssh 的 stdin 投递）
+        pairs = _secret_pairs(session_key, env_vars)
+        secrets = _new_guest_secrets() if pairs else None
+        remote_cmd = self._ssh_remote_command(
+            interpreter, f"/tmp/exec.{ext}", session_key, env_vars, secrets
+        )
         ssh_cmd = [
             "ssh",
             "-o",
             "StrictHostKeyChecking=no",
             f"root@{vm.ip_address}",
-            f"{env_prefix}{interpreter} /tmp/exec.{ext}",
+            remote_cmd,
         ]
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=effective_timeout)
+        try:
+            if secrets is not None:
+                secrets.push()
+                result = subprocess.run(
+                    ssh_cmd, capture_output=True, text=True,
+                    timeout=effective_timeout, stdin=secrets.stdin_fd,
+                )
+            else:
+                result = subprocess.run(
+                    ssh_cmd, capture_output=True, text=True, timeout=effective_timeout
+                )
+        finally:
+            if secrets is not None:
+                secrets.close()
         return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
+
 
     def _execute_via_serial(
         self,
@@ -812,44 +977,14 @@ class FirecrackerRuntime:
         code_file = Path(vm.workspace) / "tmp" / f"exec.{ext}"
         code_file.write_text(code)
 
-        try:
-            workspace = Path(vm.workspace)
-            cmd, seccomp_fd = self._build_sim_bwrap_args(
-                workspace,
-                f"/workspace/tmp/exec.{ext}",
-                language,
-                session_key=session_key,
-                env_vars=env_vars,
-            )
-            extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
-            from app.services.sandbox_security import close_seccomp_fd
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, pass_fds=extra_fds)
-            finally:
-                close_seccomp_fd(seccomp_fd)  # 单次 fd，用完归还（见 get_seccomp_bpf_fd）
-            # Retry without seccomp if kernel doesn't support it — gated by
-            # CDS_SECCOMP_FALLBACK_ALLOWED (PZ-04/MR-A13, S4 closed).
-            if result.returncode != 0 and self._seccomp_retry_needed(result.stderr, seccomp_fd):
-                if _seccomp_fallback_allowed():
-                    cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                    result = subprocess.run(cmd_no_seccomp, capture_output=True, text=True, timeout=effective_timeout)
-                else:
-                    logger.warning(
-                        "[firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for %s", vm.vm_id
-                    )
-                    return {
-                        "output": (
-                            "SECURITY ERROR: seccomp unavailable and "
-                            "CDS_SECCOMP_FALLBACK_ALLOWED=false — refusing to retry "
-                            "without seccomp. Original error: " + (result.stderr or "").strip()
-                        ),
-                        "exit_code": result.returncode,
-                    }
-            return {"output": result.stdout + result.stderr, "exit_code": result.returncode}
-        except subprocess.TimeoutExpired:
-            return {"output": f"Execution timed out ({effective_timeout}s)", "exit_code": -1}
-        except Exception as e:
-            return {"output": str(e), "exit_code": -1}
+        return self._run_sim_bwrap_leg(
+            Path(vm.workspace),
+            f"/workspace/tmp/exec.{ext}",
+            language,
+            session_key,
+            env_vars,
+            effective_timeout,
+        )
 
     def transfer_file(self, vm: VMInstance, local_path: str, vm_path: str) -> bool:
         """Transfer a file into the VM.

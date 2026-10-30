@@ -40,6 +40,21 @@ fi
 chmod 600 "$ENV_FILE"
 set -a; source "$ENV_FILE"; set +a
 
+# A89: the JWT key must be hard-checked here. `-e CDS_JWT_SECRET_KEY=""` is NOT "unset"
+# as far as the app is concerned: pydantic gets an empty string, which differs from the
+# settings default, so auth_service signs every token with an empty secret. And this env
+# file is only generated once — a /tmp/cds-local.env left by an older version of this
+# script has no CDS_JWT_SECRET_KEY at all. Refuse the deploy (before any docker call)
+# instead of falling back to any key; the stack is dev but the tokens are real.
+for v in CDS_JWT_SECRET_KEY CDS_KMS_SERVICE_TOKEN CDS_CUBE_AUDIT_SERVICE_TOKEN CDS_CUBE_TEMPLATE_SIGNING_KEY; do
+  if [ -z "${!v:-}" ]; then
+    echo "FATAL: $v is empty or missing in $ENV_FILE — delete that file and re-run to regenerate it"; exit 1
+  fi
+done
+if [ "${#CDS_JWT_SECRET_KEY}" -lt 32 ]; then
+  echo "FATAL: CDS_JWT_SECRET_KEY is ${#CDS_JWT_SECRET_KEY} bytes — HS256 needs >= 32 (RFC 7518 3.2); delete $ENV_FILE and re-run"; exit 1
+fi
+
 run() {
   local name="$1" image="$2"; shift 2
   local args=() cmd=() seen=0 a
@@ -93,9 +108,14 @@ run l-postgres postgres:16-alpine \
   -e POSTGRES_DB=cds -e POSTGRES_USER=cds -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   -v "l_cds_pgdata:/var/lib/postgresql/data"
 
+# A286: noeviction — this Redis holds sessions, rate-limit counters and login
+# short-state; allkeys-lru evicted them under memory pressure. Cap stays so pressure
+# becomes a disclosed write refusal (see app/core/security.py) rather than an OOM-kill.
+# Same policy as the other five deploy copies; every docker flag stays before the image
+# and the container command stays after `--`.
 run l-redis redis:7-alpine \
   -v "l_cds_redis:/data" \
-  -- redis-server --port 6380 --requirepass "$REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy allkeys-lru
+  -- redis-server --port 6380 --requirepass "$REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy noeviction
 
 # ClickHouse: the official image does NOT recognize CLICKHOUSE_HTTP_PORT /
 # CLICKHOUSE_PORT (they were silently ignored: the server kept listening on
@@ -120,7 +140,7 @@ run l-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -- server /data --address "127.0.0.1:9010" --console-address "127.0.0.1:9011"
 
 run l-opa openpolicyagent/opa:latest \
-  -- run --server --addr=0.0.0.0:8181 --log-level=info
+  -- run --server --addr=127.0.0.1:8181 --log-level=info
 
 run l-vault hashicorp/vault:1.17-flat \
   --cap-add IPC_LOCK \

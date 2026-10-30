@@ -1,10 +1,12 @@
 # CDS Middleware — Production-grade local deployment
 # Usage: docker compose -f docker-compose.middleware.yml up -d
-# A303 (batch-87): every credential is ${VAR:?...} — the previous committed
-# fallbacks (${POSTGRES_PASSWORD:-CdsSecureP@ss2026} etc.) were public
-# credentials in the repo: a missing .env entry booted the "secure" stack on a
-# password anyone could read from git history. Same fix as A283 on the prod
-# file: compose fails at parse time, before any container is created.
+# A303 (batch-87): every credential uses the required-interpolation form
+# (dollar-brace VAR:?reason — see docker-compose.prod.yml's A283 header for the
+# same wording). The previous committed fallbacks — a VAR with a ":-default"
+# sample password baked into the file — were public credentials in the repo: a
+# missing .env entry booted the "secure" stack on a password anyone could read
+# from git history. Same fix as A283 on the prod file: compose fails at parse
+# time, before any container is created.
 # Variable names are locked against .env.example (tests gate).
 version: "3.9"
 
@@ -40,6 +42,9 @@ services:
         -c log_min_duration_statement=500
 
   # ── Redis (caching + quota counters + session store) ───────
+  # A286: quota counters / sessions are NOT cache — with allkeys-lru a full maxmemory
+  # evicted them (rate limit silently opening, users dropped). noeviction below; the cap
+  # stays so pressure surfaces as a disclosed write refusal instead of an OOM-killed container.
   redis:
     image: redis:7-alpine
     container_name: cds-redis
@@ -51,7 +56,7 @@ services:
     command: >
       redis-server
         --maxmemory 512mb
-        --maxmemory-policy allkeys-lru
+        --maxmemory-policy noeviction
         --save 60 1000
         --appendonly yes
         --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - Redis would otherwise take its committed fallback}

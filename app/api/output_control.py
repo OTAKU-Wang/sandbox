@@ -14,6 +14,17 @@ from app.services.output_gateway import output_gateway, OutputPolicy, VALID_FORM
 from app.services.audit_service import audit_service
 
 router = APIRouter()
+
+# Ad-hoc owner claims (A21 item 3): caller-chosen output-control ids (labels that
+# are NOT sandbox session rows) are bound to whoever used them first, so a second
+# user cannot post under someone else's id. These tables used to be unbounded
+# module-level dicts — any authenticated caller could grow them without limit by
+# presenting fresh ids. `_OWNER_CLAIM_CAP` bounds them, oldest claim first. They
+# stay process-local caches, which is precisely why a claim may only ever back an
+# *ad-hoc* label: an id shaped like a session is resolved against the sessions
+# table and is never claimed here.
+_OWNER_CLAIM_CAP = 4096
+
 _dp_budget_owners: dict[str, str] = {}
 _output_session_owners: dict[str, str] = {}
 
@@ -22,40 +33,23 @@ def _can_manage_output_control(user: User) -> bool:
     return user.role in (UserRole.ADMIN, UserRole.OPERATOR)
 
 
-async def _authorize_dp_budget_session(
-    db: AsyncSession,
-    session_id: str,
-    current_user: User,
-    *,
-    create_if_missing: bool = False,
-) -> None:
-    await _authorize_owned_session_id(
-        db,
-        session_id,
-        current_user,
-        owner_store=_dp_budget_owners,
-        resource_name="DP budget",
-        create_if_missing=create_if_missing,
-    )
+def _claim_owner(store: dict[str, str], session_id: str, user_id: str) -> None:
+    """Record (or refresh) an ad-hoc owner claim, keeping the store bounded.
+
+    Insertion order is the eviction order; re-claiming moves the id to the young
+    end, so an actively used session is not evicted by its own age.
+    """
+    store.pop(session_id, None)
+    store[session_id] = user_id
+    while len(store) > _OWNER_CLAIM_CAP:
+        store.pop(next(iter(store)), None)
 
 
-async def _authorize_output_session(
-    db: AsyncSession,
-    session_id: str | None,
-    current_user: User,
-    *,
-    create_if_missing: bool = True,
-) -> None:
-    if not session_id:
-        return
-    await _authorize_owned_session_id(
-        db,
-        session_id,
-        current_user,
-        owner_store=_output_session_owners,
-        resource_name="output control",
-        create_if_missing=create_if_missing,
-    )
+def _as_session_uuid(session_id: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(session_id))
+    except (TypeError, ValueError):
+        return None
 
 
 async def _authorize_owned_session_id(
@@ -65,33 +59,143 @@ async def _authorize_owned_session_id(
     *,
     owner_store: dict[str, str],
     resource_name: str,
-    create_if_missing: bool = False,
+    allow_ad_hoc_claim: bool = False,
 ) -> None:
+    """Bind an output-control operation to a session the caller may act on.
+
+    Fail-closed (A21): an id shaped like a sandbox session must exist as one and
+    belong to the caller. It used to fall through to the claim table instead, so
+    guessing an unused session id minted ownership for the guesser and locked the
+    real owner out with 403 afterwards — an authorization failure had been turned
+    into a grant of ownership. Only ids that cannot be sessions (caller-chosen
+    labels) reach the claim table, and only where `allow_ad_hoc_claim` is set.
+    """
     if _can_manage_output_control(current_user):
         return
 
-    try:
-        session_uuid = uuid.UUID(str(session_id))
-    except (TypeError, ValueError):
-        session_uuid = None
-
-    if session_uuid:
+    session_uuid = _as_session_uuid(session_id)
+    if session_uuid is not None:
         session = await db.get(SandboxSession, session_uuid)
-        if session:
-            if session.user_id != current_user.id:
-                raise HTTPException(status_code=403, detail=f"Not your {resource_name} session")
-            return
-
-    owner_id = owner_store.get(session_id)
-    if owner_id:
-        if owner_id != str(current_user.id):
+        if session is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{resource_name} session {session_id} not found",
+            )
+        if session.user_id != current_user.id:
             raise HTTPException(status_code=403, detail=f"Not your {resource_name} session")
         return
 
-    if create_if_missing:
-        owner_store[session_id] = str(current_user.id)
+    owner_id = owner_store.get(session_id)
+    if owner_id is not None:
+        if owner_id != str(current_user.id):
+            raise HTTPException(status_code=403, detail=f"Not your {resource_name} session")
+        # Keep the claim young: eviction is by age, not by hit count.
+        _claim_owner(owner_store, session_id, str(current_user.id))
         return
-    raise HTTPException(status_code=404, detail=f"{resource_name} session {session_id} not found")
+
+    if allow_ad_hoc_claim:
+        _claim_owner(owner_store, session_id, str(current_user.id))
+        return
+    raise HTTPException(
+        status_code=404, detail=f"{resource_name} session {session_id} not found"
+    )
+
+
+async def _authorize_dp_budget_session(
+    db: AsyncSession,
+    session_id: str,
+    current_user: User,
+    *,
+    allow_ad_hoc_claim: bool = False,
+) -> None:
+    await _authorize_owned_session_id(
+        db,
+        session_id,
+        current_user,
+        owner_store=_dp_budget_owners,
+        resource_name="DP budget",
+        allow_ad_hoc_claim=allow_ad_hoc_claim,
+    )
+
+
+async def _authorize_output_session(
+    db: AsyncSession,
+    session_id: str | None,
+    current_user: User,
+    *,
+    allow_ad_hoc_claim: bool = True,
+) -> None:
+    if not session_id:
+        raise HTTPException(
+            status_code=404,
+            detail="output control session_id is required",
+        )
+    await _authorize_owned_session_id(
+        db,
+        session_id,
+        current_user,
+        owner_store=_output_session_owners,
+        resource_name="output control",
+        allow_ad_hoc_claim=allow_ad_hoc_claim,
+    )
+
+
+async def _require_bound_output_session(
+    db: AsyncSession,
+    session_id: str | None,
+    current_user: User,
+) -> str:
+    """A21: a data release must be bound to a session the caller owns.
+
+    Without the binding neither the ownership check nor the governing contract
+    can be resolved, and `build_output_policy(db, None)` hands back the platform
+    default allowance — so omitting `session_id` (or inventing a label) was a one
+    field escape from a stricter contract, which Gap E1 forbids. The release path
+    therefore accepts only a real session; ad-hoc labels are refused too.
+
+    Returns the (now known to be present) session id.
+    """
+    try:
+        if not session_id:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "session_id is required: an unbound output release would bypass "
+                    "session ownership and the contract's output allowance"
+                ),
+            )
+        await _authorize_output_session(
+            db, session_id, current_user, allow_ad_hoc_claim=False
+        )
+    except HTTPException as exc:
+        await _audit_denial("output_gateway_denied", current_user, session_id, exc)
+        raise
+    return session_id
+
+
+async def _audit_denial(
+    action: str,
+    current_user: User,
+    session_id: str | None,
+    exc: HTTPException,
+) -> None:
+    """Leave an audit trail for a refusal, outside the request transaction.
+
+    `get_db` rolls the request session back when an endpoint raises, so an
+    in-transaction `audit_service.log` before the raise would be swallowed in
+    production.
+    """
+    await audit_service.log_standalone(
+        action=action,
+        resource_type="output",
+        resource_id=session_id,
+        user_id=current_user.id,
+        detail={
+            "reason": str(exc.detail),
+            "status_code": exc.status_code,
+            "session_id": session_id,
+        },
+    )
 
 
 class InspectRequest(BaseModel):
@@ -130,7 +234,11 @@ async def inspect_output(
 
     Stages: Format → DLP Scan → DP → Watermark → Signature → Approval
     """
-    await _authorize_output_session(db, body.session_id, current_user)
+    try:
+        await _authorize_output_session(db, body.session_id, current_user)
+    except HTTPException as exc:
+        await _audit_denial("output_inspection_denied", current_user, body.session_id, exc)
+        raise
     result = output_inspector.inspect(
         body.output,
         str(current_user.id),
@@ -197,7 +305,13 @@ async def init_dp_budget(
     db: AsyncSession = Depends(get_db),
 ):
     """Initialize DP budget for a sandbox session."""
-    await _authorize_dp_budget_session(db, session_id, current_user, create_if_missing=True)
+    try:
+        await _authorize_dp_budget_session(
+            db, session_id, current_user, allow_ad_hoc_claim=True
+        )
+    except HTTPException as exc:
+        await _audit_denial("dp_budget_denied", current_user, session_id, exc)
+        raise
     dp_engine.init_budget(session_id, epsilon)
     return {"session_id": session_id, "epsilon_allocated": epsilon}
 
@@ -209,9 +323,40 @@ async def get_dp_budget(
     db: AsyncSession = Depends(get_db),
 ):
     """Get remaining DP budget for a session."""
-    await _authorize_dp_budget_session(db, session_id, current_user)
-    remaining = dp_engine.get_remaining(session_id)
-    return {"session_id": session_id, "epsilon_remaining": remaining}
+    try:
+        await _authorize_dp_budget_session(
+            db, session_id, current_user, allow_ad_hoc_claim=True
+        )
+    except HTTPException as exc:
+        await _audit_denial("dp_budget_denied", current_user, session_id, exc)
+        raise
+    # A192e 口径。这个端点走的是 ledger 的同步快路：能连上预算后端时它是跨进程的（Redis），
+    # 只有连不上时才是进程内的——所以旧注释说的「process-local」已不是事实。更要紧的是
+    # `budget_tracked` 答不了「还剩多少」：可读且不够、与根本读不到，两者都回 remaining=0.0，
+    # 于是「无法核实」在 API 上被说成「已耗尽」。第三态由 `budget_state` 回答
+    # （sufficient / exhausted / unverified / unallocated，与 InspectionResult.dp_budget_state
+    # 同一词汇表），`budget_source` 说清数字来源。本路径仍不保存分配总量，所以仍报未知
+    # 而不是从「还剩多少」反推一个总量出来。
+    from app.services.dp_budget import dp_budget_ledger
+
+    state = dp_budget_ledger.budget_state_sync(session_id)
+    if state["source"] == "unverified":
+        budget_state = "unverified"
+    elif not state["tracked"]:
+        budget_state = "unallocated"
+    else:
+        budget_state = "sufficient" if state["remaining"] > 0 else "exhausted"
+
+    return {
+        "session_id": session_id,
+        # 读不到时剩余量是未知，不是 0：别把未核实压成一个可算术的数字。
+        "epsilon_remaining": None if budget_state == "unverified" else state["remaining"],
+        "epsilon_allocated": None,
+        "budget_tracked": state["tracked"],
+        "budget_state": budget_state,
+        "budget_source": state["source"],
+        "budget_authoritative": state["authoritative"],
+    }
 
 
 @router.post("/reconstruction-check")
@@ -300,14 +445,14 @@ async def process_output_gateway(
     request may only narrow the contract's allowance, never widen it
     (previously max_output_rows/formats were caller-supplied and trusted).
     """
-    await _authorize_output_session(db, body.session_id, current_user)
+    session_id = await _require_bound_output_session(db, body.session_id, current_user)
 
     from app.services.output_policy import (
         build_output_policy,
         session_contract_id,
         clamp_gateway_request,
     )
-    contract_id = await session_contract_id(db, body.session_id) if body.session_id else None
+    contract_id = await session_contract_id(db, session_id)
     contract_policy = await build_output_policy(db, contract_id)
     effective_rows, effective_formats = clamp_gateway_request(
         body.max_output_rows, body.allowed_output_formats, contract_policy,
@@ -331,14 +476,14 @@ async def process_output_gateway(
         output_format=body.output_format,
         policy=policy,
         user_id=str(current_user.id),
-        session_id=body.session_id or "",
+        session_id=session_id,
     )
 
     await audit_service.log(
         db,
         action="output_gateway_pass" if result.success else "output_gateway_fail",
         resource_type="output",
-        resource_id=body.session_id,
+        resource_id=session_id,
         user_id=current_user.id,
         detail={
             "success": result.success,

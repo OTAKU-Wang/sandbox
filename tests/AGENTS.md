@@ -20,7 +20,7 @@
 - In-memory SQLite + `StaticPool`; conftest patches `app.core.database.engine`/`async_session` and sets `app.router.lifespan_context = None`.
 - Env is pinned BEFORE app import: `TESTING=1` plus four RELAXED fail-closed switches (`CDS_KMS_REQUIRE_ATTESTATION=false`, `CDS_DEV_SANDBOX_REQUIRE_CONTRACT=false`, `CDS_K8S_USE_PYTHON_CLIENT=false`, `CDS_TRAINING_REQUIRE_TORCH=false`). The suite baseline deliberately runs dev-relaxed; ENFORCEMENT is covered by dedicated tests that monkeypatch the cached `Settings` (then `get_settings.cache_clear()`).
 - Redis-backed logic is faked with `fakeredis[lua]` (lua extra needed for EVAL); monkeypatch module-private targets like `app.services.k8s_sandbox._kubectl`, `app.core.redis._redis_client`.
-- CI is two-tier: a fixed **gate list of 34 files that MUST be green** (`.github/workflows/ci.yml`; `ci/known-failures.md` still says 24 — stale), then the full suite `pytest tests/ -q --ignore=tests/test_e2e_full_lifecycle.py || true` is informational with a `ci/known-failures.md` baseline — the failure count must not grow; on timeout, find the hang, never raise the limit to mask it.
+- CI is two-tier: a fixed **gate list of 40 files that MUST be green** (`.github/workflows/ci.yml` is the single source; the count is machine-locked by `tests/test_ci_workflow_policy.py` and declared in `ci/known-failures.md` — both currently say 40, remote lane 2026-10-19 parsed `GATE_FILES=40`), then the full suite `pytest tests/ -q --ignore=tests/test_e2e_full_lifecycle.py || true` is informational with a `ci/known-failures.md` baseline — the failure count must not grow; on timeout, find the hang, never raise the limit to mask it.
 - conftest pins 12 env vars with `os.environ.setdefault` BEFORE `from app.main import app`: `TESTING=1`, the four relaxed switches above, plus the SS-10/13/14 set (`CDS_LEGACY_L2_ENABLED`, `CDS_CUBE_DATAPLANE_ENABLED`, `CDS_SANDBOX_LEGACY_ENABLED`, `CDS_ALLOW_ADMIN_SELF_REGISTER`, `CDS_CUBE_NODE_TLS_CA`, `CDS_CUBE_TEMPLATE_SIGNING_KEY`, `CDS_CUBE_RESULTS_DIR`, `CDS_TRAINING_ALLOW_SIMULATION`) — each carries a comment naming its spec tag and where enforcement is tested. Edit order matters: the pins must precede the app import.
 - Prod-mode tests do NOT `cache_clear`: they `monkeypatch.setattr(get_settings(), …)` the cached instance and `delenv` both `TESTING` and `PYTEST_CURRENT_TEST` so `validate_security_config()` believes it is in prod (`test_security_config_matrix`, `test_pz04_honesty_gates`, `test_pz01_sft_real`). Only `test_k8s_n7.py` calls `get_settings.cache_clear()`.
 - Line 1 of a new module docstring carries its ledger tag (`SS-10 CB-0n`, `SS-12`/`SS-13`/`SS-15`, `PZ-0n`, `P0-*`, `MR-A*`, `N*`/`W*`/`Gap *`, `D-e2e-*`, `Round 39/40/45`) — grep the tag to find the spec. Docstrings and comments are mixed Chinese/English.
@@ -50,8 +50,12 @@
 python -m pytest -q tests/test_rag_service.py        # asyncio auto, 600s timeout guard
 python -m pytest tests/ -q -m "not slow"             # skip migration-chain / schema-parity time
 python -m pytest tests/ -q --ignore=tests/test_e2e_full_lifecycle.py || true   # informational tier
-# Gate tier: the 34 files listed in .github/workflows/ci.yml must be green.
+# Gate tier: the 40 files listed in .github/workflows/ci.yml must be green (count locked by test_ci_workflow_policy).
 # Authoritative numbers come from the REMOTE py3.12 production-derived image harness,
 # NOT this venv — see the 2026-10-15 row of ci/known-failures.md and
 # docs/cr-2026-10-15-review.md §5 (local runs are iteration-only oracles).
+#   [口径更新 2026-10-19] 用户改为「在不影响我本地网络的情况下 在我本地进行开发测试」：
+#   日常回归改在本机跑（进程内 SQLite + fakeredis，子进程剥代理变量，不碰本机网络配置），
+#   远程 harness 仍留给硬件相关验证（真 MicroVM / TEE / 链）。两套读数必须并存上报，
+#   并披露本机 Python 3.14 vs 生产镜像 3.12 的注解求值盲区。见 docs/agent-handoff-2026-10-19.md。
 ```

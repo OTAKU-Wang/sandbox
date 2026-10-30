@@ -465,7 +465,7 @@ class TestFirecrackerSimBwrapHardening:
         assert args[sys_idx - 1] == "--tmpfs"
 
     def test_sim_bwrap_session_key_env(self, tmp_path):
-        """Firecracker sim bwrap injects session key via --setenv."""
+        """A96d: firecracker sim bwrap 的会话密钥不再经 argv 投递（无通道即 fail-closed）。"""
         from app.services.firecracker_runtime import FirecrackerRuntime
         workspace = tmp_path / "ws"
         workspace.mkdir()
@@ -478,8 +478,32 @@ class TestFirecrackerSimBwrapHardening:
             language="python", session_key="test-key-abc",
         )
         assert "--setenv" in args
-        key_idx = args.index("CDS_SESSION_KEY")
-        assert args[key_idx + 1] == "test-key-abc"
+        # 改前这根针钉的是 `--setenv CDS_SESSION_KEY <明文>`，即缺陷本身：同 UID 进程
+        # 读 /proc/<pid>/cmdline 就能拿走会话密钥。配对改写为钉「argv 零密钥」。
+        joined = "\x00".join(args)
+        assert "test-key-abc" not in joined
+        assert "CDS_SESSION_KEY" not in args
+        from app.services.sandbox_security import GUEST_SECRET_ARGV0
+        # 无通道时仍安装客侧 bootstrap：由客侧 rc=97 拒绝执行，不静默无密钥跑成
+        assert GUEST_SECRET_ARGV0 in args
+
+    def test_sim_bwrap_session_key_out_of_band_channel(self, tmp_path):
+        """A96d: 有带外通道时密钥进通道，argv 里既无值也无变量名。"""
+        from app.services.firecracker_runtime import FirecrackerRuntime
+        from app.services.sandbox_security import GUEST_SECRET_ARGV0, GuestSecrets
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        for sub in ("input", "output", "tmp"):
+            (workspace / sub).mkdir()
+        secrets = GuestSecrets()
+        args, _ = FirecrackerRuntime._build_sim_bwrap_args(
+            workspace=workspace, code_file="/workspace/tmp/exec.py",
+            language="python", session_key="test-key-abc", secrets=secrets,
+        )
+        assert "test-key-abc" not in "\x00".join(args)
+        assert "CDS_SESSION_KEY" not in args
+        assert secrets.names == ("CDS_SESSION_KEY",)
+        assert GUEST_SECRET_ARGV0 in args
 
     def test_sim_bwrap_env_vars(self, tmp_path):
         """Firecracker sim bwrap injects custom env vars."""

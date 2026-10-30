@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
+from app.core.path_security import PathTraversalError, safe_resolve_within, sanitize_filename
 from app.models.user import User, UserRole
 from app.models.pipeline_task import PipelineTask, PipelineTaskStatus, PipelineTaskType
 from app.services.unstructured_pipeline import pipeline, PipelineResult
@@ -42,6 +43,77 @@ class PipelineResultResponse(BaseModel):
     error: str | None = None
 
 
+class PipelineUploadResponse(BaseModel):
+    file_path: str
+    filename: str
+    size_bytes: int
+
+
+def _stage_upload(user_id, upload: UploadFile) -> tuple[Path, str]:
+    """A3①: 落盘上传文件 —— 文件名必须净化，落点必须在上传根内，同名不得互相覆盖。
+
+    旧实现是 ``UPLOAD_ROOT / uid / file.filename`` 后直接 ``open(..., "wb")``：
+    ``Path`` 的 ``/`` 语义下 ``../../x`` 会逃逸出上传根、绝对文件名会丢掉整个前缀，
+    带路径分隔的文件名则把 ``open()`` 打进 500；同名即同文件 ⇒ 先上传方的数据蒸发。
+    现在：``sanitize_filename`` 取最后一段并去掉前导点，再用 ``safe_resolve_within``
+    做拒绝式的包含校验（refuse-by-default），文件名前加唯一前缀保证同名不覆盖。
+    """
+    try:
+        name = sanitize_filename(upload.filename or "")
+    except PathTraversalError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid filename: {exc}")
+
+    user_dir = UPLOAD_ROOT / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    # 唯一前缀：两次同名上传必须是两个文件（A3 同名静默覆盖）
+    staged_name = f"{uuid.uuid4().hex[:12]}-{name}"
+    try:
+        file_path = safe_resolve_within(UPLOAD_ROOT, f"{user_id}/{staged_name}")
+    except PathTraversalError as exc:  # 净化后仍越界 ⇒ 拒绝，不落盘
+        raise HTTPException(status_code=400, detail=f"Upload path escapes the upload root: {exc}")
+
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(upload.file, f)
+    return file_path, name
+
+
+def _resolve_pipeline_input(input_path: str) -> Path:
+    """A3②/A165①: ``process-path`` 的 input_path 必须解析在上传根内。
+
+    拒绝式（refuse-by-default）包含校验 —— ADMIN/OPERATOR 也不能让流水线读取任意宿主
+    路径（旧实现只有一个 ``Path(input_path).exists()``，等于零约束，还能把别人目录整体
+    copytree 进任务）：
+    - 显式 ``..`` 遍历段＝逃逸尝试，无论目标存在与否一律 400；
+    - 解析结果落在上传根外：目标存在 ⇒ 400 明确拒绝；目标不存在 ⇒ 沿用 404
+      （既不读取，也不额外泄露根外是否存在文件）；
+    - 上传根内的相对路径是合法输入，解析成绝对路径后交给流水线。
+    """
+    if not input_path.strip():
+        raise HTTPException(status_code=400, detail="input_path is empty")
+    if "\x00" in input_path:
+        raise HTTPException(status_code=400, detail="Invalid input_path")
+    if ".." in Path(input_path).parts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"input_path contains traversal segments and is refused: {input_path}",
+        )
+    try:
+        resolved = safe_resolve_within(UPLOAD_ROOT, input_path)
+    except PathTraversalError:
+        if (UPLOAD_ROOT / input_path).exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"input_path must resolve inside the upload root {UPLOAD_ROOT}: {input_path}",
+            )
+        raise HTTPException(status_code=404, detail=f"Input path not found: {input_path}")
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail=f"Input path not found: {input_path}")
+    if resolved == UPLOAD_ROOT.resolve():
+        # 上传根本身＝包内所有用户目录，递上去就是整库 copytree（A165① 的跨租户读）
+        raise HTTPException(status_code=400, detail="input_path must be a file or directory inside the upload root, not the root itself")
+    return resolved
+
+
 @router.post("/upload-and-process")
 async def upload_and_process(
     file: UploadFile = File(...),
@@ -54,12 +126,8 @@ async def upload_and_process(
     if task_type not in ("ocr", "asr", "video", "document", "dicom"):
         raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}. Must be one of: ocr, asr, video, document, dicom")
 
-    # Save upload
-    user_dir = UPLOAD_ROOT / str(current_user.id)
-    user_dir.mkdir(parents=True, exist_ok=True)
-    file_path = user_dir / file.filename
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # Save upload (A3①: sanitised filename, containment-checked, never overwriting)
+    file_path, _safe_name = _stage_upload(current_user.id, file)
 
     # Create DB task record
     task_id = f"pipe-{uuid.uuid4().hex[:12]}"
@@ -116,22 +184,22 @@ async def process_local_path(
     if task_type not in ("ocr", "asr", "video", "document", "dicom"):
         raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}")
 
-    if not Path(input_path).exists():
-        raise HTTPException(status_code=404, detail=f"Input path not found: {input_path}")
+    # A3②/A165①: 先做上传根包含校验，再谈存在性 —— 越界一律拒绝，不进入流水线
+    source = _resolve_pipeline_input(input_path)
 
     task_id = f"pipe-{uuid.uuid4().hex[:12]}"
     db_task = PipelineTask(
         task_id=task_id,
         task_type=task_type,
         status=PipelineTaskStatus.PENDING.value,
-        input_path=input_path,
+        input_path=str(source),
         options={"max_retries": max_retries},
         user_id=current_user.id,
     )
     db.add(db_task)
     await db.flush()
 
-    in_memory_task = pipeline.submit_task(task_type, input_path, options={"max_retries": max_retries, "user_id": str(current_user.id)})
+    in_memory_task = pipeline.submit_task(task_type, str(source), options={"max_retries": max_retries, "user_id": str(current_user.id)})
     result = await pipeline.execute_task(in_memory_task.task_id)
 
     db_task.status = PipelineTaskStatus.COMPLETED.value if result.success else PipelineTaskStatus.FAILED.value
@@ -150,6 +218,29 @@ async def process_local_path(
         duration_ms=result.duration_ms,
         error=result.error,
     )
+
+
+@router.post("/upload", response_model=PipelineUploadResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
+):
+    """Stage one upload inside the upload root (A3①) — returns its stored path.
+
+    只落盘、不执行；返回的 ``file_path`` 可以交给 ``/process-path`` 处理（该端点
+    同样只接受上传根内的路径）。
+    """
+    file_path, safe_name = _stage_upload(current_user.id, file)
+    size = file_path.stat().st_size
+
+    await audit_service.log(
+        db, action="pipeline.upload", resource_type="pipeline_task",
+        user_id=current_user.id, resource_id=safe_name,
+        detail={"filename": safe_name, "size_bytes": size},
+    )
+
+    return PipelineUploadResponse(file_path=str(file_path), filename=safe_name, size_bytes=size)
 
 
 @router.get("/tasks")

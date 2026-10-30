@@ -110,8 +110,12 @@ async function verifyCert(id) {
 
 async function revokeCert(id) {
     if (!confirm('确认吊销此证书？将级联挂起关联 DEK 和会话。')) return;
+    // A242: DELETE /api/v1/certificates/{id} 要求 HighRiskOperationRequest 体
+    // （reason 必填 ≥8 字）——对话框自己收集并显式传给 API.del，不蹭客户端兜底。
+    const reason = (prompt('吊销原因（必填，至少 8 字，将写入审计）：') || '').trim();
+    if (reason.length < 8) { alert('吊销原因至少 8 字，已取消'); return; }
     try {
-        await API.del(`/api/v1/certificates/${id}`);
+        await API.del(`/api/v1/certificates/${id}`, { reason });
         loadCerts();
     } catch (e) { alert('吊销失败: ' + e.message); }
 }

@@ -20,43 +20,58 @@ logger = logging.getLogger(__name__)
 SessionState = SessionStatus
 
 # Valid state transitions
+#
+# A123: REVOKED (key revoked) is an externally visible terminal status with its
+# own advertised description, so it must have incoming edges — otherwise every
+# attempt to actually enter it fails validation. The sources are exactly the
+# live states the key-revocation cascade queries
+# (sandbox_runtime.terminate_sessions_by_key selects PENDING/KEY_DISTRIBUTING/
+# PROVISIONING/READY/RUNNING/SUSPENDED): those are the states a revocation can
+# strike. Terminal states keep no outgoing edges, so a settled session is never
+# rewritten by a later revocation.
 VALID_TRANSITIONS: dict[SessionStatus, set[SessionStatus]] = {
     SessionStatus.PENDING: {
         SessionStatus.KEY_DISTRIBUTING,
         SessionStatus.PROVISIONING,
         SessionStatus.FAILED,
         SessionStatus.TERMINATED,
+        SessionStatus.REVOKED,
     },
     SessionStatus.KEY_DISTRIBUTING: {
         SessionStatus.PROVISIONING,
         SessionStatus.FAILED,
         SessionStatus.TERMINATED,
+        SessionStatus.REVOKED,
     },
     SessionStatus.PROVISIONING: {
         SessionStatus.READY,
         SessionStatus.RUNNING,
         SessionStatus.FAILED,
         SessionStatus.TERMINATED,
+        SessionStatus.REVOKED,
     },
     SessionStatus.READY: {
         SessionStatus.RUNNING,
         SessionStatus.FAILED,
         SessionStatus.TERMINATED,
         SessionStatus.SUSPENDED,
+        SessionStatus.REVOKED,
     },
     SessionStatus.RUNNING: {
         SessionStatus.COMPLETED,
         SessionStatus.FAILED,
         SessionStatus.TERMINATED,
         SessionStatus.SUSPENDED,
+        SessionStatus.REVOKED,
     },
     SessionStatus.SUSPENDED: {
         SessionStatus.READY,
         SessionStatus.RUNNING,
         SessionStatus.TERMINATED,
         SessionStatus.FAILED,
+        SessionStatus.REVOKED,
     },
-    # Terminal states
+    # Terminal states — no outgoing edges (REVOKED is reachable, never exitable)
     SessionStatus.COMPLETED: set(),
     SessionStatus.FAILED: set(),
     SessionStatus.TERMINATED: set(),
@@ -124,8 +139,12 @@ class SessionStateMachine:
             raise ValueError(result.error)
 
     def get_allowed_transitions(self, current: SessionStatus) -> set[SessionStatus]:
-        """Get all valid transitions from current state."""
-        return VALID_TRANSITIONS.get(current, set())
+        """Get all valid transitions from current state (a caller-owned copy).
+
+        A122: never hand out the table's internal set — a caller mutating the
+        result would permanently rewrite the shared state machine.
+        """
+        return set(VALID_TRANSITIONS.get(current, ()))
 
     def is_terminal(self, status: SessionStatus) -> bool:
         """Check if a status is terminal."""

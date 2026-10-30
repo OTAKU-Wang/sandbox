@@ -2,8 +2,18 @@
 // The report is a *view* of ocr-verified-findings.md: every A## entry is carried
 // verbatim, so no finding can be dropped by re-summarising.
 import { existsSync } from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dir = process.env.TMP_OUT || "C:/Users/清彧/AppData/Local/Temp/ocr-cds";
+// 换机修正：同 scan-gates.mjs——原先写死 Windows 临时目录，离开那台机 ENOENT。
+// 报告是台账的**视图**，默认与台账同目录；跨目录试跑用 TMP_OUT 覆盖。
+const dir = process.env.TMP_OUT || path.dirname(fileURLToPath(import.meta.url));
+// 原始收割件（上一台机器 OCR 会话产物，**未入库**）在本机不可再生：波次/覆盖统计是它的
+// 派生视图，缺件时只诚实标注不可用，绝不拄旧数字冒充本轮读数。
+// ⚠ 缺件时**不要**对本目录直接重生：那些节已提交的历叵内容是上一轮的真实覆盖记录，
+//   重生会把它们换成上面的缺件声明（10-19 实测：34 行差异）。先看 RC 后再写回。
+const HAS_RAW = existsSync(dir + "/ocr-findings.json");
+const DISC_RAW = "_（本节不可用：`ocr-findings.json` 是上一台机器 OCR 会话的收割产物，未入库，本机不可再生；缺件时不保留旧数字冒充本轮读数）_";
 const ledger = await Bun.file(dir + "/ocr-verified-findings.md").text();
 const lines = ledger.split("\n");
 
@@ -60,7 +70,7 @@ out.push("## 1. 覆盖范围\n");
 out.push("| 波次 | 范围 | 状态 | ocr 计划评审 | 其中产出了发现 |");
 out.push("|---|---|---|---|---|");
 const plan = existsSync(dir + "/wave-plan.json") ? await Bun.file(dir + "/wave-plan.json").json() : {};
-{
+if (!HAS_RAW) { out.push(DISC_RAW); } else {
   const allRaw = await Bun.file(dir + "/ocr-findings.json").json();
   const waveOf = (sp) => {
     if (!sp) return null;
@@ -109,7 +119,7 @@ if (existsSync(dir + "/coverage.json")) {
   out.push("4. **五波路径之外的 " + A.outsideWaves.length + " 个可评审文件**（包含启动装配入口 `app/main.py`）——已单开 **w6-residue** 波次补扫：" + (w6j ? w6txt : "**扫描中**（`--concurrency 4`，日志 `w6-residue.log`）；本节与台账的最终版以它跑完为准。") + "清单：" + A.outsideWaves.slice(0, 24).map(p => "`" + p + "`").join("、") + (A.outsideWaves.length > 24 ? " 等" : "") + "。");
     out.push("6. **非代码工件**：w6 补漏扫到 `specs/prototype-v3.html` 产出 29 条（它是已被 `基础版数据沙箱原型/` 图片取代的原型基线文档，AGENTS.md 记为 superseded），**按文档处理、不作缺陷入账**；同理 `cds-frontend/index.html` 的模板注释类。构建配置类（`cds-frontend/package.json` 11 条、`eslint.config.js` 12 条、`tsconfig.*.json`、`alembic.ini` 8 条）尚未逐条判读，列在本节未完成里。");
     out.push("5. **前端只判到高危层，中低危与 w5 运维面仍未复验**。CSS 类 72 条判完（台账批次五十七~六十六：64 成立 / 3 FALSE / 5 潜伏）；逻辑类 critical/high 73 条逐条读到盘上（台账 A243-A272，含 2 条 critical），中低危 373 条**只切片未逐条复验**，构建配置类（`cds-frontend/eslint.config.js` 12 条、`package.json` 11 条、`tsconfig.*`、`alembic.ini` 8 条）**未判**；w5（`scripts` / `deploy` / `k8s` / `helm` / `.github`，预检 71 发现 / 59 可评审）仍在 w4 后面排队，**这一路一条都没评**。");
-              {
+              if (!HAS_RAW) { out.push(DISC_RAW); } else {
     const raw = await Bun.file(dir + "/ocr-findings.json").json();
     const w4all = raw.filter(x => x.path.startsWith("cds-frontend"));
     const isLegacy = x => x.path.includes("app/templates") || x.path.includes("admin.js");
@@ -122,7 +132,7 @@ if (existsSync(dir + "/coverage.json")) {
   }  out.push("");
 }
 
-{
+if (!HAS_RAW) { out.push(DISC_RAW); } else {
   const allRaw = await Bun.file(dir + "/ocr-findings.json").json();
   const byWave = {};
   for (const x of allRaw) { const k = x.scanPaths || "?"; (byWave[k] ||= new Set()).add(x.path); }
@@ -249,7 +259,7 @@ else out.push("\n## 13. 修复状态\n\n台账尚无修复状态节（`## D. 修
 const text = out.join("\n");
 await Bun.write(dir + "/ocr-review-report.md", text);
 
-const raw = (await Bun.file(dir + "/ocr-findings.json").json()).length;
+const raw = HAS_RAW ? (await Bun.file(dir + "/ocr-findings.json").json()).length : "n/a（本机无 ocr-findings.json）";
 console.log("ledger findings: " + findings.length + " (raw ocr unique: " + raw + ")");
 console.log("counts: " + JSON.stringify(counts));
 const dupes = findings.map(f => f.id).filter((id, i, a) => a.indexOf(id) !== i);

@@ -32,6 +32,8 @@ interface ContractFormValues extends FlowConfigFormValues {
   dp_epsilon_budget?: number;
   max_output_rows?: number;
   allowed_output_formats?: string[];
+  purpose?: string;
+  purpose_scope?: string[];
   terms?: string;
   inspection_rule_set?: string;
 }
@@ -103,6 +105,10 @@ export default function ContractCreate() {
   const onFinish = (values: ContractFormValues) => {
     try {
       const joinOrUndefined = (items?: string[]) => items?.length ? items.join(',') : undefined;
+      // A314：目的限定字段——空串与空数组一律**不交这个键**（而不是交 '' / []）：
+      // 交空串会被后端当成“目的为空”，不交才是“没做目的限定”的原进口径。
+      const purpose = values.purpose?.trim() ?? '';
+      const purposeScope = (values.purpose_scope ?? []).map((tag) => tag.trim()).filter(Boolean);
       const methods = values.delivery_methods ?? [];
       const flowValues: FlowConfigFormValues = {
         delivery_methods: methods,
@@ -133,6 +139,8 @@ export default function ContractCreate() {
           contract_type: values.contract_type,
           product_ids: values.product_ids,
           buyer_id: values.buyer_id,
+          ...(purpose ? { purpose } : {}),
+          ...(purposeScope.length ? { purpose_scope: purposeScope } : {}),
           allowed_sandbox_levels: joinOrUndefined(values.allowed_sandbox_levels),
           allowed_sandbox_modes: values.allowed_sandbox_modes,
           allowed_operations: joinOrUndefined(values.allowed_operations),
@@ -210,6 +218,20 @@ export default function ContractCreate() {
               }))}
             />
           </Form.Item>
+          <Form.Item name="purpose" label="数据用途"
+            tooltip="Gap A4 目的限定：填了之后，后端才会对本合约下的会话启用目的门（代码/查询与约定用途不符时可拒执行）；目的与白名单一同进 SM2 签署原文。留空 = 不做目的限定。"
+            rules={[{ max: 500, message: '数据用途不超过 500 字' }]}>
+            <Input placeholder="如：零售客单价建模" />
+          </Form.Item>
+          <Form.Item name="purpose_scope" label="用途白名单"
+            tooltip="可选：限定只允许这些用途词（回车或逗号成词）。后端把它写进目的门的白名单，不在表内的用途不得取数。">
+            <Select
+              mode="tags"
+              allowClear
+              tokenSeparators={[',', '，']}
+              placeholder="输入标签后回车或逗号分隔"
+            />
+          </Form.Item>
           <Form.Item name="allowed_sandbox_levels" label="允许沙箱级别"
             tooltip="SS-13 起执行面只有 MicroVM 单一路径：合约固定授权 l2c。历史级别（L0/L1/L2/L3/k8s）已从合约面收敛掉，仅在存量会话里只读展示。">
             <Select
@@ -225,7 +247,12 @@ export default function ContractCreate() {
               { label: '应用调用', value: 'application' },
             ]} />
           </Form.Item>
-          <Form.Item name="allowed_operations" label="允许操作">
+          <Form.Item
+            name="allowed_operations"
+            label="允许操作"
+            tooltip="这里是正向授权：没选的操作就是不允许。不让清空：后端把空 allowed_operations 当「不限制」（sandbox_sessions.py _operation_allowed_by_contract），清空等于把 read/analyze/train/infer 全放开了。"
+            rules={[{ required: true, type: 'array', message: '请至少选择一项允许操作：留空会被后端视为不限制，等于扩大授权' }]}
+          >
             <Select mode="multiple" allowClear options={[
               { label: '读取', value: 'read' },
               { label: '分析', value: 'analyze' },

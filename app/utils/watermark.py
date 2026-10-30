@@ -113,10 +113,13 @@ def extract_text_watermark(text: str) -> str | None:
 
 
 def verify_text_watermark(text: str, user_id: str, session_id: str) -> bool:
-    """Verify that the text contains the expected watermark."""
+    """Verify that the text carries exactly this subject's watermark.
+
+    A80/A172: equality, not substring — a document smuggling the 16-hex id inside a
+    longer embedded payload must not be attributed to this user/session.
+    """
     expected = generate_watermark(user_id, session_id)
-    extracted = extract_text_watermark(text)
-    return extracted is not None and expected in extracted
+    return extract_text_watermark(text) == expected
 
 
 # ── LSB Image Watermarking ─────────────────────────────────────────
@@ -127,6 +130,20 @@ def _load_image_bytes(image_bytes: bytes):
     img = Image.open(BytesIO(image_bytes))
     fmt = img.format or "PNG"
     return img, fmt
+
+
+def _validate_bits_per_channel(bits_per_channel: int) -> int:
+    """Guard the LSB width shared by embed/extract/verify.
+
+    The value is a raw shift width: 0 silently writes nothing (the caller would still
+    report "水印已植入") and >=8 clears every significant bit of the pixel. Only 1-4 is
+    both capacity-positive and picture-preserving, so anything else is rejected.
+    """
+    if isinstance(bits_per_channel, bool) or not isinstance(bits_per_channel, int):
+        raise ValueError(f"bits_per_channel must be an int in [1, 4], got {bits_per_channel!r}")
+    if not 1 <= bits_per_channel <= 4:
+        raise ValueError(f"bits_per_channel must be in [1, 4], got {bits_per_channel!r}")
+    return bits_per_channel
 
 
 def embed_image_watermark(image_bytes: str | bytes, watermark: str, bits_per_channel: int = 1) -> bytes:
@@ -141,6 +158,8 @@ def embed_image_watermark(image_bytes: str | bytes, watermark: str, bits_per_cha
         Watermarked image bytes (PNG).
     """
     from PIL import Image
+
+    bits_per_channel = _validate_bits_per_channel(bits_per_channel)
 
     if isinstance(image_bytes, str):
         image_bytes = image_bytes.encode()
@@ -201,6 +220,8 @@ def extract_image_watermark(image_bytes: str | bytes, bits_per_channel: int = 1)
     """
     from PIL import Image
 
+    bits_per_channel = _validate_bits_per_channel(bits_per_channel)
+
     if isinstance(image_bytes, str):
         image_bytes = image_bytes.encode()
 
@@ -223,6 +244,10 @@ def extract_image_watermark(image_bytes: str | bytes, bits_per_channel: int = 1)
                 if bit_idx >= needed:
                     break
                 for b_idx in range(bits_per_channel - 1, -1, -1):
+                    # Cap per bit: with bpc that does not divide 32 (e.g. 3) a whole
+                    # channel would overshoot the header and struct.unpack(">I") raises.
+                    if bit_idx >= needed:
+                        break
                     length_bits.append((ch >> b_idx) & 1)
                     bit_idx += 1
         if bit_idx >= needed:
@@ -249,6 +274,8 @@ def extract_image_watermark(image_bytes: str | bytes, bits_per_channel: int = 1)
                 if bit_idx >= total_bits:
                     break
                 for b_idx in range(bits_per_channel - 1, -1, -1):
+                    if bit_idx >= total_bits:
+                        break
                     if bit_idx >= 32:
                         all_bits.append((ch >> b_idx) & 1)
                     bit_idx += 1
@@ -262,8 +289,18 @@ def extract_image_watermark(image_bytes: str | bytes, bits_per_channel: int = 1)
         return None
 
 
-def verify_image_watermark(image_bytes: str | bytes, user_id: str, session_id: str) -> bool:
-    """Verify that an image contains the expected watermark."""
+def verify_image_watermark(
+    image_bytes: str | bytes,
+    user_id: str,
+    session_id: str,
+    bits_per_channel: int = 1,
+) -> bool:
+    """Verify that an image carries exactly this subject's watermark.
+
+    A80/A172: the embedder's bits_per_channel is a decode parameter — without it the
+    verifier could only ever read 1-bit images, so every bpc>1 watermark was a silent
+    false negative in the attribution path. Equality, not substring, as for text.
+    """
     expected = generate_watermark(user_id, session_id)
-    extracted = extract_image_watermark(image_bytes)
-    return extracted is not None and expected in extracted
+    extracted = extract_image_watermark(image_bytes, bits_per_channel=bits_per_channel)
+    return extracted == expected

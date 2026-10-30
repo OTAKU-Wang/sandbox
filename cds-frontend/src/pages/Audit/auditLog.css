@@ -144,20 +144,33 @@
   width: 120px;
 }
 
+/* 日期区间：原型 180px 是按**空值占位态**量的（两个 4 字占位符），选完值之后装不下
+   `YYYY-MM-DD`（14px 下 ~78px/个）。A229 ⇒ 改按内容下限：min-width 220 = 88×2 + 分隔盒 15
+   + picker 左右内距 22。台账建议的「180px 只当 ≥1400 的参考宽」没采纳：180 < 213，
+   在宽屏反而会回到裁切态。 */
 .cds-audit-screen .cds-audit-filter .f-range .ant-picker {
-  width: 180px;
+  width: auto;
+  min-width: 220px;
 }
 
 /* 区间分隔符：原型是扁平 `-`（墨 x1079..1083，行垂直中心，5×2 px；`~` 会在上方带波形），
-   且不在几何中心：真值 dash 中心 1081 = 盒左 1008 + 内距 11 + 前字段 55 + 分隔半宽 7。
-   ⇒ 前字段定宽 55、后字段吃剩下（真值 88），分隔符左右内距 5（真值分隔盒 1074..1088）。 */
+   分隔盒真值 1074..1088 ⇒ 左右内距 5。dash 中心原由「前字段定宽 55」推出，
+   那条定宽被 A229 换成 min-width 88 后整段右移，dash 仍居中于两字段之间。 */
 .cds-audit-screen .cds-audit-filter .f-range .ant-picker-range-separator {
   padding-inline: 5px;
 }
 
+/* 两个字段的 flex 基准钳在 88px：不钉基准的话，picker 改成 width:auto 后会拿
+   input 的固有宽（size=20 ≈ 170px）来做 max-content，整个控件反而胖到卡体外。 */
+.cds-audit-screen .cds-audit-filter .f-range .ant-picker-input {
+  flex: 1 1 88px;
+  min-width: 88px;
+}
+
 .cds-audit-screen .cds-audit-filter .f-range .ant-picker-input:first-child {
-  width: 55px;
-  flex: none;
+  flex: 1 1 88px;
+  min-width: 88px;
+  width: auto;
 }
 
 /* 重置/查询贴右：原型 x1225..1295 / x1307..1397 */

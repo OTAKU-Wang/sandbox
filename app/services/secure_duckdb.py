@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# A95 wiring: 查询期字段 ACL 用的顶层投影解析。
+_SELECT_CLAUSE_RE = re.compile(r"select\s+(.*?)\s+from", re.IGNORECASE | re.DOTALL)
+_IDENT_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
 try:
     import duckdb
     _HAS_DUCKDB = True
@@ -142,6 +146,9 @@ class SecureDuckDBEngine:
         self.mode = mode
         self._mask_rules: dict[str, list[MaskRule]] = {}  # table -> rules
         self._tables: dict[str, TableInfo] = {}
+        # A58: 表级 DEK 与表元数据同寿命，所以在 __init__ 就建好（旧的惰性
+        # hasattr 初始化让 close() 在「没注册过加密表」的引擎上无从下手）。
+        self._table_deks: dict[str, tuple[bytes, str]] = {}
         self._max_rows = 10000  # Result set limit
         self._db_path: str | None = None
         self._dek = dek  # SM4-GCM key for disk-level encryption
@@ -149,6 +156,9 @@ class SecureDuckDBEngine:
         self._policy = None  # PolicyBundle for query-time policy enforcement (P1-3)
         self._policy_state = POLICY_UNSET  # A48 fail-closed 执行门，见模块常量
         self._policy_note = ""
+        # A95 wiring: 查询期字段级规则（引擎侧）与本次查询的掩码列集合。
+        self._field_rules_src: dict | None = None
+        self._query_field_masks: frozenset[str] = frozenset()
         self._sandbox_level = "L3"  # Overridden by session context
         # A56: 会话归属随引擎生命周期走（旧的 _engine_owners 平行字典没人清扫）。
         self.owner_user_id: str | None = None
@@ -240,23 +250,45 @@ class SecureDuckDBEngine:
         直接放行，整个合约限制链路等于不存在。现在会话被登记为「受合约治理」而
         策略缺席 ⇒ 拒绝执行。
         """
+        self._query_field_masks = frozenset()
         if self._policy is None:
             if self._policy_state == POLICY_REQUIRED:
                 return False, POLICY_MISSING_REASON
-            return True, "No policy set"
-
-        from app.services.policy_compiler import policy_evaluator
-        base = {
-            "sandbox_level": self._sandbox_level,
-            "row_count": row_count,
-            "field": self._extract_select_fields(sql),
-        }
-        result = {"allowed": False, "reason": "policy evaluation returned no decision"}
-        for operation in CONTRACT_READ_OPERATIONS:
-            result = policy_evaluator.evaluate(self._policy, {**base, "operation": operation})
-            if result["allowed"]:
-                return True, result["reason"]
-        return False, result["reason"]
+            allowed, reason = True, "No policy set"
+        else:
+            from app.services.policy_compiler import policy_evaluator
+            base = {
+                "sandbox_level": self._sandbox_level,
+                "row_count": row_count,
+                "field": self._extract_select_fields(sql),
+            }
+            result = {"allowed": False, "reason": "policy evaluation returned no decision"}
+            allowed, reason = False, result["reason"]
+            for operation in CONTRACT_READ_OPERATIONS:
+                result = policy_evaluator.evaluate(self._policy, {**base, "operation": operation})
+                if result["allowed"]:
+                    allowed, reason = True, str(result["reason"])
+                    break
+        if not allowed:
+            return False, str(reason)
+        # A95 wiring：上面那套 5 项 PDP 从不读字段，字段级控制原本只在出沙箱
+        # 网关生效，被分级的列在查询期可以原文读出。查询期同样过字段 ACL。
+        mask_fields, deny_fields = self._effective_field_rules()
+        if deny_fields or mask_fields:
+            wildcard, fields = self._extract_select_projection(sql)
+            hits = sorted(f for f in fields if f in deny_fields)
+            if hits:
+                return False, (
+                    f"contract denies field-level access to ({','.join(hits)}) — "
+                    "use a masked view or drop these columns"
+                )
+            if wildcard:
+                return False, (
+                    "SELECT * covers contract-denied fields "
+                    f"({','.join(sorted(deny_fields))}); select columns explicitly"
+                )
+            self._query_field_masks = frozenset(mask_fields)
+        return True, reason
 
     @staticmethod
     def _extract_select_fields(sql: str) -> str:
@@ -270,6 +302,95 @@ class SecureDuckDBEngine:
             first_field = fields_str.split(",")[0].strip().split(".")[-1].strip().strip('"').strip("'")
             return first_field
         return "*"
+
+    def set_field_classifications(self, field_classifications: dict | None) -> None:
+        """A95 wiring: 挂查询期字段 ACL（与 output_gateway 消费的同一形态）。
+
+        接受三种形态：raw field→level 映射（DataResource.field_classifications 同形，
+        编译复用 policy_compiler.field_rules_from_classifications 单一事实源）、
+        预编译 {"mask_fields", "deny_out_fields"}、或全量 PDP 的
+        field_acl 形态 {field: {"read": bool, "mask_pattern": str}}。
+        """
+        self._field_rules_src = field_classifications
+
+    @staticmethod
+    def _compile_field_rule_shape(raw: dict | None) -> tuple[set[str], set[str]]:
+        """Compile one field-rule shape into lowercased (mask, deny) name sets."""
+        from app.services.policy_compiler import policy_compiler
+        if not isinstance(raw, dict) or not raw:
+            return set(), set()
+        if "mask_fields" in raw or "deny_out_fields" in raw:
+            return (
+                {str(f).lower() for f in raw.get("mask_fields") or []},
+                {str(f).lower() for f in raw.get("deny_out_fields") or []},
+            )
+        if any(isinstance(v, dict) for v in raw.values()):
+            mask: set[str] = set()
+            deny: set[str] = set()
+            for field, acl in raw.items():
+                if not isinstance(acl, dict):
+                    continue
+                if acl.get("read") is False:
+                    deny.add(str(field).lower())
+                elif acl.get("mask_pattern"):
+                    mask.add(str(field).lower())
+            return mask, deny
+        compiled = policy_compiler.field_rules_from_classifications(raw)
+        return (
+            {str(f).lower() for f in compiled.get("mask_fields") or []},
+            {str(f).lower() for f in compiled.get("deny_out_fields") or []},
+        )
+
+    def _effective_field_rules(self) -> tuple[set[str], set[str]]:
+        """引擎侧与策略包侧字段规则的并集（都是执法面，deny 覆盖 mask）。
+
+        引擎侧的 `_field_rules_src` 本身就是一份字段规则形态（三种输入都在这
+        里收敛）；策略包侧只认 rules 里的嵌套键，不把整个 rules 当映射解析。
+        """
+        mask, deny = self._compile_field_rule_shape(self._field_rules_src)
+        rules = getattr(self._policy, "rules", None)
+        if isinstance(rules, dict):
+            for key in ("field_classifications", "field_acl"):
+                m, d = self._compile_field_rule_shape(rules.get(key))
+                mask |= m
+                deny |= d
+            mask |= {str(f).lower() for f in rules.get("mask_fields") or []}
+            deny |= {str(f).lower() for f in rules.get("deny_out_fields") or []}
+        return mask - deny, deny
+
+    @classmethod
+    def _extract_select_projection(cls, sql: str) -> tuple[bool, list[str]]:
+        """顶层投影的 (wildcard, 小写标识符集合)。
+
+        deny 匹配连表达式内部的标识符一起看（substr(salary,…) 仍是对 salary
+        的读取）；wildcard 只数函数括号外的裸 ``*``，count(*) 不是投影星号。
+        DuckDB 列名大小写不敏感，标识符一律小写归一。
+        """
+        match = _SELECT_CLAUSE_RE.search(sql)
+        if not match:
+            return False, []
+        items: list[str] = [""]
+        depth = 0
+        for ch in match.group(1):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            if ch == "," and depth <= 0:
+                items.append("")
+            else:
+                items[-1] += ch
+        wildcard = False
+        idents: list[str] = []
+        for item in items:
+            bare = re.sub(r"\([^()]*\)", " ", item)
+            if "*" in bare:
+                wildcard = True
+            for tok in _IDENT_TOKEN_RE.findall(item):
+                low = tok.lower()
+                if low not in idents:
+                    idents.append(low)
+        return wildcard, idents
 
     def register_table(self, table_name: str, data: list[dict], source: str = "upload") -> TableInfo:
         """Register a list of dicts as a DuckDB table.
@@ -435,6 +556,15 @@ class SecureDuckDBEngine:
 
             truncated = len(result) > max_rows
             rows = [list(row) for row in result[:max_rows]]
+            # A95 wiring: mask 级列在查询期就出掩码值，原文不从查询结果里走
+            # （出沙箱网关的那层掩码仍在原位，两道都算数）。
+            if self._query_field_masks:
+                masked_idx = [i for i, c in enumerate(columns)
+                              if str(c).lower() in self._query_field_masks]
+                if masked_idx:
+                    for row in rows:
+                        for i in masked_idx:
+                            row[i] = "***"
 
             # Audit log: data access event
             self._audit_query(sql, len(rows), duration, success=True)
@@ -518,6 +648,17 @@ class SecureDuckDBEngine:
                         secure_wipe_file(sidecar)
             else:
                 _secure_wipe_db(self._db_path)
+
+        # A58: 磁盘侧擦完之后再擦内存侧。memory 模式根本没有落盘文件，
+        # 表元数据（含列名/行数）与列加密的表级 DEK 原本一直挂在引擎对象上，
+        # 只要还有任何一处引用（A48 的 fire-and-forget 策略闭包、清理队列里
+        # 尚未 pop 的条目）让它可达，明文钥匙就比会话寿命活得更久。
+        self._tables.clear()
+        self._mask_rules.clear()
+        self._table_deks.clear()
+        self._dek = None
+        self._policy = None
+        self._field_rules_src = None
 
     @staticmethod
     def _sanitize_identifier(name: str) -> str:
@@ -613,8 +754,6 @@ class SecureDuckDBEngine:
         self._tables[safe_name] = info
 
         # Store DEK for query-time decryption
-        if not hasattr(self, '_table_deks'):
-            self._table_deks: dict[str, tuple[bytes, str]] = {}
         self._table_deks[safe_name] = (dek, key_id)
 
         self._audit_table_event("table_create", safe_name, row_count=len(data),

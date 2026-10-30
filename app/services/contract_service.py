@@ -12,7 +12,7 @@ from app.models.user import User
 from app.services.policy_compiler import policy_compiler
 from app.services.crypto_service import crypto_service
 from app.services.dp_budget import dp_budget_ledger
-from app.services.blockchain_service import blockchain_service
+from app.services.blockchain_adapter import blockchain_adapter, chain_anchoring_state
 from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
@@ -171,19 +171,38 @@ class ContractService:
                 await dp_budget_ledger.allocate(db, str(contract.id), float(contract.dp_epsilon_budget))
                 logger.info(f"DP budget allocated: ε={contract.dp_epsilon_budget} for contract {contract.contract_no}")
 
-            # Anchor contract hash to blockchain (P1-7)
+            # Anchor the contract hash through the persisted chain-anchoring
+            # backend (P1-7). A93: blockchain_service could only ever produce an
+            # in-process anchor (its `_client` is never set, so the chain branch
+            # is unreachable), and the tx_hash written from its process-local
+            # dict could not be verified by any later process. blockchain_adapter
+            # persists each anchor and discloses the backend it actually used.
             contract_hash = crypto_service.sm3_hash(
                 f"{contract.id}:{contract.contract_no}:{contract.provider_id}:{contract.buyer_id}".encode()
             )
-            attestation = blockchain_service.anchor_to_blockchain(
-                contract_hash,
-                metadata={"contract_id": str(contract.id), "contract_no": contract.contract_no},
+            anchor_result = await blockchain_adapter.anchor(
+                contract_hash.encode(),
+                metadata={
+                    "contract_id": str(contract.id),
+                    "contract_no": contract.contract_no,
+                    "kind": "contract",
+                },
             )
-            if attestation.success:
-                contract.blockchain_tx_hash = attestation.tx_hash
-                logger.info(f"Contract {contract.contract_no} anchored to blockchain: {attestation.tx_hash}")
+            anchor_tx = anchor_result.anchor.tx_hash if anchor_result.anchor else None
+            if anchor_result.success and anchor_tx:
+                contract.blockchain_tx_hash = anchor_tx
+                logger.info(
+                    "Contract %s anchored: tx_hash=%s chain_state=%s",
+                    contract.contract_no,
+                    anchor_tx,
+                    chain_anchoring_state(anchor_result.anchor.backend),
+                )
             else:
-                logger.warning(f"Blockchain anchoring failed for contract {contract.contract_no}: {attestation.error}")
+                logger.warning(
+                    "Contract %s NOT anchored — no tx credential written: %s",
+                    contract.contract_no,
+                    anchor_result.error or "anchor returned no tx_hash",
+                )
         else:
             contract.status = ContractStatus.NEGOTIATING.value
 
@@ -216,7 +235,7 @@ class ContractService:
             logger.error(f"[Contract] Session cascade failed for {contract_id}: {e}")
 
         # Cascade 2: revoke policy bundles (DB + OPA)
-        revoked_bundles = await self._revoke_policy_bundles(db, contract)
+        revoked_bundles, opa_unconfirmed = await self._revoke_policy_bundles(db, contract)
 
         await audit_service.log(
             db, action="contract.terminate_cascade", resource_type="contract",
@@ -224,6 +243,8 @@ class ContractService:
             detail={
                 "sessions_terminated": terminated_sessions,
                 "policy_bundles_revoked": revoked_bundles,
+                # A160c：OPA 未确认删除的策略包必须进审计，不能只进日志文件
+                "policy_bundles_opa_unconfirmed": opa_unconfirmed,
             },
         )
 
@@ -231,22 +252,51 @@ class ContractService:
         await db.refresh(contract)
         return contract
 
-    async def _revoke_policy_bundles(self, db: AsyncSession, contract: Contract) -> int:
-        """Revoke compiled policy bundles for a contract (DB + OPA)."""
+    async def _revoke_policy_bundles(
+        self, db: AsyncSession, contract: Contract
+    ) -> tuple[int, list[str]]:
+        """Revoke compiled policy bundles for a contract (DB + OPA).
+
+        返回 `(已在 OPA 确认删除的个数, OPA 未确认删除的 policy_id 列表)`。
+
+        A160c：`opa_client.delete_policy()` **只返回 bool**（内部把异常吞成 False；
+        A160b 后“客户端已关闭”也是 False 而不是抛异常）。原来这里直接把返回值丢掉，
+        于是会出现静默半开：合约已 TERMINATED、DB 里 bundle 已 `revoked_at`，但 OPA
+        里的策略包**可能仍在放行**，而且没有任何调用方/审计看得到这个缺口。
+
+        取向（写在返回契约里而不是抛异常）：DB 侧照常撤销——合约终止是产品真相，
+        留一个“未撤销”的 bundle 反而与 TERMINATED 状态自相矛盾；但引擎侧未确认的
+        必须**如实披露**（ERROR 日志 + 审计 detail），供重试/人工核对。
+        “静默降级”在本仓是铁律禁止的（T12 honest degradation）。
+        """
         from app.models.policy_bundle import PolicyBundle
         from app.services.opa_client import opa_client
 
         result = await db.execute(select(PolicyBundle).where(PolicyBundle.contract_id == contract.id))
         bundles = result.scalars().all()
         revoked = 0
+        opa_unconfirmed: list[str] = []
         for bundle in bundles:
             bundle.revoked_at = datetime.now(timezone.utc)
             try:
-                await opa_client.delete_policy(bundle.policy_id)
-            except Exception as e:
-                logger.warning(f"[Contract] OPA policy deletion failed for {bundle.policy_id}: {e}")
-            revoked += 1
-        return revoked
+                confirmed = await opa_client.delete_policy(bundle.policy_id)
+            except Exception as e:  # delete_policy 按契约不抛，这里只兜底将来的回归
+                logger.error(
+                    f"[Contract] OPA policy deletion raised for {bundle.policy_id}: {e}",
+                    exc_info=True,
+                )
+                confirmed = False
+            if confirmed:
+                revoked += 1
+            else:
+                opa_unconfirmed.append(bundle.policy_id)
+        if opa_unconfirmed:
+            logger.error(
+                "[Contract] %d/%d policy bundles NOT confirmed deleted in OPA for contract %s: %s "
+                "— DB 已标撤销但引擎侧可能仍在执行该策略，需重试或人工核对（A160c）",
+                len(opa_unconfirmed), len(bundles), contract.id, ", ".join(opa_unconfirmed),
+            )
+        return revoked, opa_unconfirmed
 
     async def terminate_expired_contracts(self, db: AsyncSession) -> int:
         """Auto-terminate ACTIVE contracts past their valid_until (gap A1).

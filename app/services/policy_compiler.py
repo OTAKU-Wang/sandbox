@@ -319,7 +319,12 @@ class PolicyCompiler:
         ops_str = json.dumps(operations)
         dp_check = f"\n    input.dp_epsilon <= {dp_epsilon}" if dp_epsilon else ""
 
-        return f"""package cds.policy.{contract_id.replace("-", "_")}
+        # A103: py3.11 rejects a nested same-quote pair inside an f-string
+        # replacement field (PEP 701 is 3.12+), and `ci.yml` runs `compileall`
+        # on 3.11 — keep the replace() out of the triple-quoted f-string.
+        pkg = contract_id.replace("-", "_")
+
+        return f"""package cds.policy.{pkg}
 
 default allow = false
 
@@ -337,7 +342,9 @@ allow {{
         dp_epsilon = contract.get("dp_epsilon_budget")
         dp_check = f"\n    input.dp_epsilon_remaining >= {dp_epsilon}" if dp_epsilon else ""
 
-        return f"""package cds.policy.{contract_id.replace("-", "_")}.query
+        pkg = contract_id.replace("-", "_")  # A103: see _generate_rego
+
+        return f"""package cds.policy.{pkg}.query
 
 default allow = false
 
@@ -363,7 +370,9 @@ field_allowed(field) {{
         max_epochs = contract.get("max_epochs", 100)
         allowed_formats = json.dumps(contract.get("allowed_output_formats", ["safetensors", "onnx"]))
 
-        return f"""package cds.policy.{contract_id.replace("-", "_")}.training
+        pkg = contract_id.replace("-", "_")  # A103: see _generate_rego
+
+        return f"""package cds.policy.{pkg}.training
 
 default allow = false
 
@@ -386,7 +395,9 @@ allow {{
         levels = json.dumps(contract.get("allowed_sandbox_levels", ["L3"]))
         allowed_formats = json.dumps(contract.get("allowed_output_formats", ["zip", "tar.gz"]))
 
-        return f"""package cds.policy.{contract_id.replace("-", "_")}.product_dev
+        pkg = contract_id.replace("-", "_")  # A103: see _generate_rego
+
+        return f"""package cds.policy.{pkg}.product_dev
 
 default allow = false
 
@@ -403,7 +414,9 @@ allow {{
         max_rps = contract.get("max_requests_per_second", 100)
         max_response_mb = contract.get("max_response_mb", 10)
 
-        return f"""package cds.policy.{contract_id.replace("-", "_")}.app
+        pkg = contract_id.replace("-", "_")  # A103: see _generate_rego
+
+        return f"""package cds.policy.{pkg}.app
 
 default allow = false
 

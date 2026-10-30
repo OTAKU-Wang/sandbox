@@ -3,12 +3,19 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from collections.abc import Callable
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
-from app.core.scopes import key_unmapped_deny, require_group, require_human
+from app.core.scopes import (
+    is_key_credential,
+    key_credential_from_authorization,
+    key_unmapped_deny,
+    require_group,
+    require_human,
+)
 
 logger = logging.getLogger(__name__)
 from app.core.database import engine, Base
@@ -42,6 +49,165 @@ from app.models import notebook, workload, workload_test_run, compute_run  # SS-
 from app.models import api_endpoint, webhook, webhook_delivery, delivery_bundle  # SS-15: delivery channels
 
 
+def _create_all_allowed(cfg, env: dict | None = None) -> bool:
+    """只有 dev/test（或 sqlite 开发库）才允许 create_all；生产必须走 Alembic（A75）。
+
+    门从内联表达式提出来是为了可测：「生产不建表」不能只能靠读代码相信。
+    """
+    environ = os.environ if env is None else env
+    return bool(cfg.DEBUG or environ.get("TESTING") == "1" or "sqlite" in cfg.DATABASE_URL)
+
+
+def durable_queue_wiring() -> dict:
+    """W16 持久队列的接线事实（A75）：表由本进程建，但没有任何生产消费者在跑它。"""
+    return {
+        "table": "task_queue",
+        "schema_created_at_boot": True,
+        "production_consumer": False,
+        "terminal_write_guard": "none",
+        "stale_requeue_guard": "none",
+    }
+
+
+def _announce_boot_wiring() -> None:
+    """T12：启动时把半成品接线说出来 —— 「表建好了」不等于「功能可用了」（A75）。"""
+    wiring = durable_queue_wiring()
+    logger.warning(
+        "[MAIN] durable task queue wiring: %s —— 接线生产消费者之前需先补 claimed_by 归属守卫与 requeue 退避（A75）",
+        " ".join(f"{key}={value}" for key, value in wiring.items()),
+    )
+
+
+def jwt_key_source() -> tuple[str, str]:
+    """A89（部署/启动披露腿）：归类本进程实际使用的 JWT 签名密钥来源。
+
+    分支顺序镜像 ``app.services.auth_service._effective_jwt_secret_key``：
+    显式密钥 > TESTING/PYTEST 测试密钥 > CDS_ALLOW_LOCAL_DEFAULT_JWT_KEY 公开
+    密钥 opt-in > DEBUG 进程内随机 > validate_jwt_security() 后接受的非生产公开
+    默认。只回类别与运维建议，绝不返回或回显密钥本身及其任何前缀。
+    """
+    from app.core.config import _JWT_DEFAULT_KEY
+    from app.services import auth_service as _auth
+
+    if settings.JWT_SECRET_KEY != _JWT_DEFAULT_KEY:
+        return "explicit", "CDS_JWT_SECRET_KEY 已配置；令牌跨重启有效、多副本互验一致"
+    if os.environ.get("TESTING") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
+        return "test-local", "TESTING/PYTEST 环境变量生效；使用源码内置测试密钥（仅限测试套件）"
+    if _auth._env_flag(_auth._LOCAL_DEFAULT_JWT_KEY_ENV):
+        return "published-opt-in", (
+            f"{_auth._LOCAL_DEFAULT_JWT_KEY_ENV}=true；使用源码公开的默认密钥——持有源码者可伪造令牌，"
+            "应改用 CDS_JWT_SECRET_KEY"
+        )
+    if settings.DEBUG:
+        return "ephemeral-random", (
+            "DEBUG 回退；使用进程内随机密钥——重启后全部令牌失效、多副本无法互验，"
+            "稳定部署请设 CDS_JWT_SECRET_KEY"
+        )
+    return "published-default", "使用源码公开的默认密钥签名；请配置 CDS_JWT_SECRET_KEY"
+
+
+def _dp_budget_sync_client():
+    """A192d：跨进程 ε 预算账本要的是**同步** redis 客户端（`*_sync` 路径跑在同步上下文里）。"""
+    import redis as redis_lib
+
+    client = redis_lib.Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
+    client.ping()
+    return client
+
+
+def dp_budget_backend_wiring(
+    client_factory: Callable[[], object] | None = None,
+) -> dict[str, object]:
+    """A192d：装配期把跨进程 ε 预算后端接到账本上，并如实披露接没接上。
+
+    接不上时账本仍可读写，但那份 ε 预算只是本进程的：多副本各花各的、重启即清零。
+    所以失败路径只报 `budget_backend_health()` 的真实读数（backend/authoritative），
+    不得静默把进程内的旧数当权威继续对外说「预算还有/已耗尽」。
+    客户端自带 ping 门：`attach_redis` 只在 ping 通过后才调，避免接上一个
+    ping 都失败却仍被 health 报成 authoritative=True 的后端。
+    """
+    from app.services.dp_budget import dp_budget_ledger
+
+    factory = client_factory or _dp_budget_sync_client
+    try:
+        client = factory()
+    except Exception as exc:
+        health = dp_budget_ledger.budget_backend_health()
+        logger.warning(
+            "[MAIN] DP ε-budget backend NOT attached (%s: %s) — ε 预算自此只是本进程的："
+            "不跨副本共享、重启即清零；backend=%s authoritative=%s（可查："
+            "dp_budget_ledger.budget_backend_health()，A192d）",
+            exc.__class__.__name__, redact_url(str(exc)),
+            health["backend"], health["authoritative"],
+        )
+        return health
+
+    dp_budget_ledger.attach_redis(client)
+    health = dp_budget_ledger.budget_backend_health()
+    log = logger.info if health["authoritative"] else logger.warning
+    log(
+        "[MAIN] DP ε-budget backend=%s authoritative=%s redis_errors=%s"
+        "（A192d：多副本预算可见性由它决定）",
+        health["backend"], health["authoritative"], health["redis_errors"],
+    )
+    return health
+
+
+def hsm_backend_disclosure() -> dict[str, object]:
+    """T12/A94：开机就说清当前 HSM 后端到底是不是硬件（诚实降级铁律）。
+
+    backend-25b 已把 `is_simulation`/`backend` 落在适配器上，但只有调用方读了
+    它们才成得了「可辨别」——软件 KEK 与 Vault/HSM KEK 在开机日志里必须一字之差。
+    取不到后端时也得如实报 `unknown`，不能静默跳过这条披露。
+    """
+    try:
+        from app.services.hsm_adapter import describe_hsm_backend
+
+        desc = describe_hsm_backend()
+    except Exception as exc:
+        logger.error(
+            "[MAIN] HSM backend=unknown is_simulation=unknown — 无法确定密钥后端 "
+            "(%s: %s)，不得当作硬件 HSM 使用（A94/T12）",
+            exc.__class__.__name__, exc,
+        )
+        return {"backend": "unknown", "is_simulation": True, "error": str(exc)}
+
+    log = logger.warning if desc["is_simulation"] else logger.info
+    log(
+        "[MAIN] HSM backend=%s is_simulation=%s — %s",
+        desc["backend"], desc["is_simulation"],
+        "KEK 活在本进程、不是硬件 HSM（dev/test only；生产请接 Vault 并置 "
+        "CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false）" if desc["is_simulation"]
+        else "KEK 由外部 HSM/Vault 托管，本进程不持明文 KEK",
+    )
+    return desc
+
+
+DUCKDB_ENGINE_SWEEP_SECONDS = 300
+
+
+async def _duckdb_engine_sweeper_loop() -> None:
+    """按 TTL 回收 sandbox-db 的 DuckDB 引擎（A56：明文表与列 DEK 不该等下一个请求）。"""
+    import asyncio as _asyncio
+
+    while True:
+        await _asyncio.sleep(DUCKDB_ENGINE_SWEEP_SECONDS)
+        swept = sandbox_db.sweep_expired_duckdb_engines()
+        if swept:
+            logger.info("[MAIN] Reaped %d expired sandbox-db DuckDB engines (A56 TTL)", swept)
+
+
+def _start_duckdb_engine_sweeper():
+    import asyncio as _asyncio
+
+    return _asyncio.create_task(_duckdb_engine_sweeper_loop())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: validate security configuration (T12 — surfaces every enabled
@@ -49,6 +215,16 @@ async def lifespan(app: FastAPI):
     issues = settings.validate_security_config()
     for issue in issues:
         logger.warning(f"[SECURITY] {issue}")
+
+    _announce_boot_wiring()
+
+    # A94/T12：模拟 HSM 后端必须在启动日志里自报（不得静默），同时留一份可查健态。
+    _hsm_desc = hsm_backend_disclosure()
+    app.state.hsm_backend = _hsm_desc
+
+    # A192d：ε 预算的跨进程后端必须在装配期接上并如实披露——静默退回进程内账本
+    # 再照旧报预算，就是 owner-output-chain 已经修掉的那个错口径（A192/M-03）。
+    app.state.dp_budget_backend = dp_budget_backend_wiring()
 
     # Startup: initialize Redis connection and wire into services
     try:
@@ -78,16 +254,35 @@ async def lifespan(app: FastAPI):
         logger.error(f"[MAIN] Tenant quota restore failed: {e}")
 
     # Startup: create tables only in dev/test. Production must use Alembic.
-    allow_create_all = (
-        settings.DEBUG
-        or os.environ.get("TESTING") == "1"
-        or "sqlite" in settings.DATABASE_URL
-    )
-    if allow_create_all:
+    if _create_all_allowed(settings):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     else:
         logger.info("[MAIN] Skipping Base.metadata.create_all; use Alembic migrations")
+
+    # A89：在任何令牌签发之前披露本次启动的 JWT 密钥来源类别（运维从开机日志
+    # 就能判断令牌是否活过重启），绝不打印密钥本身。
+    _jwt_source, _jwt_advice = jwt_key_source()
+    _jwt_log = logger.info if _jwt_source == "explicit" else logger.warning
+    _jwt_log(
+        "[MAIN] JWT signing-key source=%s — %s", _jwt_source, _jwt_advice
+    )
+
+    # A82：重启遗留的 `running` 操作行没有任何执行者在跑，启动时先判 failed，
+    # 否则回滚互斥门会把该 session 永久锁死。必须在第一个请求进来之前执行。
+    try:
+        from app.core.database import async_session as _ops_session
+        from app.services.session_operations import reclaim_stale_operations
+
+        async with _ops_session() as _ops_db:
+            _reclaimed = await reclaim_stale_operations(_ops_db)
+            await _ops_db.commit()
+        if _reclaimed:
+            logger.warning(
+                "[MAIN] Reclaimed %d stale running session operations at boot (A82 lease)", _reclaimed,
+            )
+    except Exception as e:
+        logger.error(f"[MAIN] Stale operation reclaim failed: {e}")
 
     # Startup: start task pipeline (P1-2 unified scheduler)
     try:
@@ -107,7 +302,17 @@ async def lifespan(app: FastAPI):
     import asyncio as _asyncio
     from app.services.kms_service import _ttl_cleanup_loop
     _ttl_task = _asyncio.create_task(_ttl_cleanup_loop())
-    logger.info("[MAIN] KMS TTL cleanup started")
+    # A138: the sweep now has a real writer (distribute_key mints ledger rows);
+    # disclose the honest delay boundary — hand-offs persist within one sweep.
+    logger.info(
+        "[MAIN] KMS TTL cleanup started — key_distributions 台账由 distribute_key 交接点写入，"
+        "落库延迟 ≤ 300s（循环周期），到期对 session_key_enc 做 crypto-erase（A138）"
+    )
+
+    _duckdb_sweeper_task = _start_duckdb_engine_sweeper()
+    logger.info(
+        "[MAIN] sandbox-db DuckDB engine sweeper started (interval=%ss)", DUCKDB_ENGINE_SWEEP_SECONDS
+    )
 
     # Startup: restore persisted wrapped keys (gap B3 — restart recovery)
     try:
@@ -131,6 +336,28 @@ async def lifespan(app: FastAPI):
             session_cleanup_loop(settings.SESSION_CLEANUP_INTERVAL_SECONDS)
         )
         logger.info("[MAIN] Session lifecycle cleanup started")
+
+    # A147: 会话行与真实容器状态的周期对账（启动期一次性收敛只能覆盖重启，
+    # 运行期容器异外退出/回收失败会长期留下「行活容器没」与「容器活行终」两类孤儿）。
+    _container_reconcile_task = None
+    if os.environ.get("TESTING") != "1":
+        async def _container_state_reconcile_loop() -> None:
+            from app.core.database import async_session
+            from app.services.sandbox_runtime import sandbox_runtime
+            while True:
+                await _asyncio.sleep(settings.SESSION_RECONCILE_INTERVAL_SECONDS)
+                try:
+                    async with async_session() as _db:
+                        await sandbox_runtime.reconcile_container_state(_db, limit=200)
+                        await _db.commit()
+                except Exception as e:  # 对账失败不得带倒服务，但必须响亮披露
+                    logger.error("[MAIN] Container state reconcile failed: %s", e)
+
+        _container_reconcile_task = _asyncio.create_task(_container_state_reconcile_loop())
+        logger.info(
+            "[MAIN] Container state reconcile started (interval=%ss)",
+            settings.SESSION_RECONCILE_INTERVAL_SECONDS,
+        )
 
     _compute_scheduler_task = None
     if os.environ.get("TESTING") != "1" and settings.COMPUTE_SCHEDULER_ENABLED:
@@ -180,7 +407,7 @@ async def lifespan(app: FastAPI):
             await _session_cleanup_task
         except _asyncio.CancelledError:
             pass
-    for _bg_task in (_compute_scheduler_task, _webhook_dispatcher_task):
+    for _bg_task in (_compute_scheduler_task, _webhook_dispatcher_task, _container_reconcile_task):
         if _bg_task is not None:
             _bg_task.cancel()
             try:
@@ -197,6 +424,12 @@ async def lifespan(app: FastAPI):
     _ttl_task.cancel()
     try:
         await _ttl_task
+    except _asyncio.CancelledError:
+        pass
+    # Shutdown: sandbox-db DuckDB engine sweeper (A56)
+    _duckdb_sweeper_task.cancel()
+    try:
+        await _duckdb_sweeper_task
     except _asyncio.CancelledError:
         pass
     # Shutdown: egress audit flush (W13)
@@ -250,15 +483,21 @@ class Ss12KeyDefaultDenyMiddleware:
         path = scope.get("path", "")
         auth = ""
         header_key = ""
+        # A65: 同名头必须按 starlette `Headers.get` 的「取第一个」口径解析；取最后一个
+        # 会让 `[Bearer cds_ak_…, Bearer <别的>]` 这类重复头在守卫眼里不是 key，
+        # 而路由仍然按第一个头把它认证成 key 主体。
         for k, v in scope.get("headers") or []:
             if k == b"authorization":
-                auth = v.decode("latin-1")
+                if not auth:
+                    auth = v.decode("latin-1")
             elif k == b"x-cds-api-key":
-                header_key = v.decode("latin-1")
+                if not header_key:
+                    header_key = v.decode("latin-1")
         # 文档化的数据面凭据（X-CDS-API-Key）同样是 key subject：默认拒绝必须
         # 看得见它，否则换一个头就绕过了未映射前缀的 fail-closed 判定。
-        if not auth.startswith("Bearer cds_ak_") and header_key.startswith("cds_ak_"):
-            auth = "Bearer " + header_key
+        if (not is_key_credential(key_credential_from_authorization(auth))
+                and is_key_credential(header_key)):
+            auth = "Bearer " + header_key.strip()
         if not key_unmapped_deny(path, auth):
             await self.app(scope, receive, send)
             return
@@ -398,10 +637,17 @@ if _static_dir.exists():
 
         async def __call__(self, scope, receive, send):
             if scope.get("type") == "http":
+                auth = ""
+                header_key = ""
                 for k, v in scope.get("headers", []):
-                    if (k == b"authorization" and v.startswith(b"Bearer cds_ak_")) or (
-                        k == b"x-cds-api-key" and v.startswith(b"cds_ak_")
-                    ):
+                    if k == b"authorization" and not auth:
+                        auth = v.decode("latin-1")
+                    elif k == b"x-cds-api-key" and not header_key:
+                        header_key = v.decode("latin-1")
+                # A65: 与路由同口径 —— `HTTPBearer` 对 scheme 大小写不敏感、`deps` 会
+                # strip 凭据，字节比较 `b"Bearer cds_ak_"` 差一个字节就看不见 key。
+                if (is_key_credential(key_credential_from_authorization(auth))
+                        or is_key_credential(header_key)):
                         body = ('{"code": "API_KEY_SCOPE_DENIED", '
                                 '"message": "API key subjects cannot access human-only endpoints", '
                                 '"detail": {"reason": "human_only"}, "request_id": ""}')

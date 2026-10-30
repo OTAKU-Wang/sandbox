@@ -7,6 +7,9 @@ metadata:
     app: zookeeper
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: zookeeper
@@ -23,9 +26,21 @@ spec:
           env:
             - name: ZOOKEEPER_CLIENT_PORT
               value: "2181"
+            # cp-zookeeper 的启动脚本读 KAFKA_HEAP_OPTS，默认 -Xmx1G 高于下面的
+            # 512Mi limit，容器会 OOMKill 循环；堆必须压在 limit 之下。
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms128m -Xmx256m"
           volumeMounts:
             - name: zkdata
               mountPath: /var/lib/zookeeper/data
+          # 没有任何探针时 Service 会把流量给尚未监听 2181 的实例。这里用 TCP 探针：
+          # 镜像里不保证有 nc，ruok/srvr 又需要 4LW 白名单，而每 10s 起一个
+          # zookeeper-shell JVM 的探针代价太高。
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 10
+            periodSeconds: 10
           resources:
             requests:
               memory: "256Mi"
@@ -73,6 +88,9 @@ metadata:
     app: kafka
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kafka
@@ -88,6 +106,10 @@ spec:
           ports:
             - containerPort: 9092
           env:
+            # cp-kafka 默认 KAFKA_HEAP_OPTS 是 -Xmx1G，与下面的 1Gi limit 同高：
+            # 堆 + metaspace + 直接内存必然超限 → OOMKill 循环。堆压到 limit 之下。
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms256m -Xmx512m"
             - name: KAFKA_BROKER_ID
               value: "1"
             - name: KAFKA_ZOOKEEPER_CONNECT
@@ -109,6 +131,14 @@ spec:
           volumeMounts:
             - name: kafkadata
               mountPath: /var/lib/kafka/data
+          # 9092 只有在 broker 完成日志加载/元数据注册后才监听，所以 TCP 探针
+          # 就是“能接受 produce/consume”信号；kafka-broker-api-versions.sh 那种
+          # 探针每次多开一个 JVM，不适合 10s 周期。
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 10
           resources:
             requests:
               memory: "512Mi"
@@ -133,8 +163,9 @@ spec:
     - name: kafka
       port: 9092
       targetPort: 9092
-      nodePort: 30092
-  type: NodePort
+  # 集群内 ClusterIP：broker 只宣告 PLAINTEXT://kafka:9092（集群 DNS），节点端口
+  # 既连不通（客户端拿到的元数据指向集群内地址），又等于把无认证 broker 暴露到节点网。
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

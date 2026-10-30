@@ -62,7 +62,8 @@ describe('buildDevTaskRows', () => {
   it('按开发阶段给笔记本定级', () => {
     const rows = buildDevTaskRows({
       notebooks: [notebook(), notebook({ id: 'nb-2', session_id: 's-1' }), notebook({ id: 'nb-3' })],
-      workloads: [workload({ status: 'published', source_notebook_id: 'nb-3' })],
+      // A250：标签「已发布生产」与执行入口同口径后，只有 env=production 的 published 负载能撑它。
+      workloads: [workload({ status: 'published', source_notebook_id: 'nb-3', env: 'production' })],
       runs: [],
     });
     const byKey = new Map(rows.map((row) => [row.key, row.stage.label]));

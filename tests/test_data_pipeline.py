@@ -1,5 +1,6 @@
 """Unstructured data pipeline tests."""
 import json
+import uuid
 import pytest
 from pathlib import Path
 from httpx import AsyncClient
@@ -166,11 +167,16 @@ async def test_api_list_tasks(client: AsyncClient, operator_headers: dict):
 @pytest.mark.asyncio
 async def test_api_process_path_document(client: AsyncClient, operator_headers: dict):
     """API test: process a local document file."""
-    dummy = Path("/tmp/test-api-doc.txt")
+    # A3：``process-path`` 只接受上传根内的路径（根外绝对路径一律 400），
+    # 所以这里按**合法形态**摆输入：上传根内的相对路径。断言一字未改。
+    from app.api.data_pipeline import UPLOAD_ROOT
+    rel = f"test-api-doc-{uuid.uuid4().hex[:8]}/in.txt"
+    dummy = UPLOAD_ROOT / rel
+    dummy.parent.mkdir(parents=True, exist_ok=True)
     dummy.write_text("Test content for API pipeline")
     try:
         resp = await client.post(
-            f"/api/v1/data-pipeline/process-path?task_type=document&input_path={dummy}",
+            f"/api/v1/data-pipeline/process-path?task_type=document&input_path={rel}",
             headers=operator_headers,
         )
         assert resp.status_code == 200
@@ -180,17 +186,22 @@ async def test_api_process_path_document(client: AsyncClient, operator_headers: 
         assert data["duration_ms"] >= 0
     finally:
         dummy.unlink()
+        dummy.parent.rmdir()
 
 
 @pytest.mark.asyncio
 async def test_api_get_task(client: AsyncClient, operator_headers: dict):
     """API test: get task by ID after processing."""
-    dummy = Path("/tmp/test-api-get.txt")
+    # 同上：A3 后合法输入必须在上传根内（断言一字未改）。
+    from app.api.data_pipeline import UPLOAD_ROOT
+    rel = f"test-api-get-{uuid.uuid4().hex[:8]}/in.txt"
+    dummy = UPLOAD_ROOT / rel
+    dummy.parent.mkdir(parents=True, exist_ok=True)
     dummy.write_text("content")
     try:
         # Process first
         resp = await client.post(
-            f"/api/v1/data-pipeline/process-path?task_type=document&input_path={dummy}",
+            f"/api/v1/data-pipeline/process-path?task_type=document&input_path={rel}",
             headers=operator_headers,
         )
         task_id = resp.json()["task_id"]
@@ -201,6 +212,7 @@ async def test_api_get_task(client: AsyncClient, operator_headers: dict):
         assert resp2.json()["task_id"] == task_id
     finally:
         dummy.unlink()
+        dummy.parent.rmdir()
 
 
 @pytest.mark.asyncio

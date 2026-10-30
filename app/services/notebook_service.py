@@ -27,6 +27,8 @@ ENVELOPE_MARKER = "CDS_ENV_B64::"
 # 降级口径（前端 display.ts 按 backend + stateful + degraded_reason 渲染，不得新增 backend 取值）
 KERNEL_UNAVAILABLE_REASON = "沙箱内 kernel 守护进程不可用，本单元格按无状态方式独立执行（不保留变量）"
 KERNEL_NOT_RESIDENT_REASON = "kernel 由单元格自行拉起，平台未能确认其跨单元格常驻（不保证保留变量）"
+# A112：驱动已经跑过单元格、只是信封解不出来——重跑会把非幂等副作用做两遍，只能如实降级。
+OUTPUT_UNPARSEABLE_REASON = "沙箱内驱动已执行本单元格，但输出信封无法解析（超时截断或输出被改写）：为避免重复副作用，平台不重跑该单元格，本条结果按失败披露"
 
 _CELL_DRIVER = '''
 import base64, contextlib, io, json, os, socket, sys, time
@@ -537,6 +539,20 @@ async def run_cell(
             return stateless
         if raw.get("error"):
             return {"ok": False, "backend": "cds_stateless", "stdout": "", "stderr": str(raw.get("error")), "exit_code": -1, "stateful": False, "kernel_error": "transport error"}
+        if output.strip():
+            return {
+                "ok": False,
+                "backend": "cds_stateless",
+                "stateful": False,
+                "stdout": "",
+                "stderr": OUTPUT_UNPARSEABLE_REASON,
+                "repr": "",
+                "exit_code": -3,
+                "output_unparseable": True,
+                "output_blocked": False,
+                "degraded_reason": OUTPUT_UNPARSEABLE_REASON,
+                "security_report": raw.get("security_report"),
+            }
     return await run_stateless(executor, code)
 
 

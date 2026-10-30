@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sdk"))
 from cds_sdk import CDSClient, CDSError  # noqa: E402
 
 
-def _client(handler) -> CDSClient:
+def _client(handler, **kw) -> CDSClient:
     return CDSClient(
-        "http://test", token="tok", transport=httpx.MockTransport(handler)
+        "http://test", token="tok", transport=httpx.MockTransport(handler), **kw
     )
 
 
@@ -238,7 +238,9 @@ def test_create_rag_task_passes_query_param():
         seen["params"] = dict(request.url.params)
         return httpx.Response(201, json={"task_id": "task-1", "task_type": "rag_query"})
 
-    with _client(handler) as c:
+    with _client(handler, task_payload_in_body=False) as c:
+        # OCR A87 把默认线形翻成 JSON body；本例显式传 False，继续钉住旧 query-string 线形
+        # （向后兼容面，服务端 legacy 用例同向）。新默认线形由 tests/test_ocr_a87_*.py 钉。
         c.create_task("s-1", "rag_query", rag_query="最近有什么产品")
     assert seen["path"] == "/api/v1/sandbox-tasks"
     assert seen["params"]["session_id"] == "s-1"

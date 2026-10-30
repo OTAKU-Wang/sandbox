@@ -7,22 +7,38 @@
  * inside an inline `onclick="fn('...')"` JS string literal.
  */
 const API = {
+    async _body(res) {
+        // A242: a 204/empty success body must resolve — `res.json()` on it threw
+        // SyntaxError, which every page reported as "operation failed".
+        const text = await res.text();
+        if (!text) return null;
+        try { return JSON.parse(text); } catch (e) { return text; }
+    },
+    async _throw(res) {
+        throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
+    },
     async get(url) {
         const res = await fetch(url, { headers: this._headers() });
-        if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
-        return res.json();
+        if (!res.ok) await this._throw(res);
+        return this._body(res);
     },
     async post(url, body) {
         const res = await fetch(url, {
             method: 'POST', headers: this._headers(), body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
-        return res.json();
+        if (!res.ok) await this._throw(res);
+        return this._body(res);
     },
-    async del(url) {
-        const res = await fetch(url, { method: 'DELETE', headers: this._headers() });
-        if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
-        return res.json();
+    async del(url, body) {
+        // A242: the high-risk deletes (certificates, KMS keys) require a
+        // HighRiskOperationRequest body with an operator reason — with no body the
+        // request could only 422. Ask the operator instead of inventing a reason.
+        const payload = body || { reason: prompt('删除原因（必填，至少 8 字）：') || '' };
+        const res = await fetch(url, {
+            method: 'DELETE', headers: this._headers(), body: JSON.stringify(payload),
+        });
+        if (!res.ok) await this._throw(res);
+        return this._body(res);
     },
     _headers() {
         const h = { 'Content-Type': 'application/json' };

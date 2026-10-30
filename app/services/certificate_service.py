@@ -107,6 +107,111 @@ def _encode_null() -> bytes:
     return bytes([0x05, 0x00])
 
 
+def _encode_boolean(value: bool) -> bytes:
+    """BOOLEAN with the DER value octets (0xFF true / 0x00 false).
+
+    A104: BasicConstraints used to carry ``INTEGER 1`` where ``BOOLEAN`` is required, so a
+    strict parser read ``ca=FALSE`` (or refused the extension outright) on a real CA cert.
+    """
+    return _encode_tlv(0x01, b'\xff' if value else b'\x00')
+
+
+# RFC 5280 §4.2.1.3 KeyUsage bit assignments, numbered from the MOST significant bit of the
+# first content octet — the numbering a DER BIT STRING actually uses.
+_KEY_USAGE_BITS: tuple[str, ...] = (
+    'digitalSignature', 'nonRepudiation', 'keyEncipherment', 'dataEncipherment',
+    'keyAgreement', 'keyCertSign', 'cRLSign', 'encipherOnly', 'decipherOnly',
+)
+
+
+def _encode_key_usage(*names: str) -> bytes:
+    """Encode a KeyUsage BIT STRING (A104).
+
+    The previous encoding wrote the bit names as LOW-order bits with ``unused bits = 1``,
+    which is both invalid DER (the trailing unused bit was set) and semantically wrong: an
+    end-entity certificate asked for digitalSignature+keyEncipherment came out declaring
+    keyCertSign+encipherOnly, i.e. it could sign other certificates.
+    """
+    unknown = [name for name in names if name not in _KEY_USAGE_BITS]
+    if unknown:
+        raise ValueError(f"unknown KeyUsage names: {unknown}")
+    if not names:
+        return _encode_tlv(0x03, b'\x07')
+    last_bit = max(_KEY_USAGE_BITS.index(name) for name in names)
+    octets = bytearray((last_bit // 8) + 1)
+    for name in names:
+        bit = _KEY_USAGE_BITS.index(name)
+        octets[bit // 8] |= 0x80 >> (bit % 8)
+    unused = (7 - last_bit) % 8
+    return _encode_tlv(0x03, bytes([unused]) + bytes(octets))
+
+
+def _decode_key_usage(value: bytes) -> list[str]:
+    """Read back a KeyUsage BIT STRING (``value`` is the extension octet string)."""
+    if value and value[0] == 0x03:  # the extension value is a BIT STRING TLV
+        header = 2
+        if value[1] & 0x80:
+            header = 2 + (value[1] & 0x7F)
+        value = value[header:]
+    if len(value) < 2 or value[0] > 7:
+        return []
+    content = value[1:]
+    used_bits = len(content) * 8 - value[0]
+    names: list[str] = []
+    for bit in range(min(used_bits, len(_KEY_USAGE_BITS))):
+        if content[bit // 8] & (0x80 >> (bit % 8)):
+            names.append(_KEY_USAGE_BITS[bit])
+    return names
+
+
+def _encode_ecdsa_sig_value(r_s: bytes) -> bytes:
+    """Wrap a raw ``r||s`` SM2 signature into DER ``ECDSA-Sig-Value`` (A104).
+
+    GM/T 0006 / RFC 5758 put the signature value in
+    ``SEQUENCE { r INTEGER, s INTEGER }``; emitting the bare 64 bytes made every strict X.509
+    parser (and OpenSSL/BabaSSL on the real TLCP handshake) reject the certificate, while the
+    hand-rolled parser next door happily accepted it — so the platform kept issuing PEMs it
+    believed were fine.
+    """
+    if len(r_s) != 64:
+        raise ValueError(f"expected a 64-byte raw SM2 signature, got {len(r_s)} bytes")
+    r = int.from_bytes(r_s[:32], 'big')
+    s = int.from_bytes(r_s[32:], 'big')
+    return _encode_sequence(_encode_integer(r), _encode_integer(s))
+
+
+def _decode_ecdsa_sig_value(sig_bits: bytes) -> bytes:
+    """Inverse of :func:`_encode_ecdsa_sig_value`: DER SEQUENCE{r,s} → raw ``r||s``.
+
+    Already-bare input is passed through unchanged so certificates issued before this fix
+    still verify.
+    """
+    if not sig_bits or sig_bits[0] != 0x30:
+        return sig_bits
+
+    def read(buf: bytes, at: int) -> tuple[int, bytes, int]:
+        tag = buf[at]
+        length = buf[at + 1]
+        if length & 0x80:
+            extra = length & 0x7F
+            length = int.from_bytes(buf[at + 2:at + 2 + extra], 'big')
+            start = at + 2 + extra
+        else:
+            start = at + 2
+        return tag, buf[start:start + length], start + length
+
+    _, body, _ = read(sig_bits, 0)
+    items: list[tuple[int, bytes]] = []
+    at = 0
+    while at < len(body):
+        tag, value, at = read(body, at)
+        items.append((tag, value))
+    if len(items) != 2 or any(tag != 0x02 for tag, _ in items):
+        return sig_bits
+    r, s = (int.from_bytes(value, 'big') for _, value in items)
+    return r.to_bytes(32, 'big') + s.to_bytes(32, 'big')
+
+
 def _build_name(dn: str) -> bytes:
     """Build X.500 Name from DN string like 'CN=foo,O=bar,C=CN'."""
     rdns = []
@@ -627,12 +732,14 @@ class CertificateService:
             "is_ca": False,
         }
 
-        offset = 0
         idx = 0
         tbs_buf = items[0][1]
 
-        # version [0] EXPLICIT INTEGER
-        if tbs_buf[0] & 0xa0 == 0xa0:
+        # version [0] EXPLICIT INTEGER.
+        # A104: this used to read `tbs_buf[0] & 0xa0 == 0xa0`, which Python parses as
+        # `tbs_buf[0] & (0xa0 == 0xa0)` = `tbs_buf[0] & 1` — always 0 for the 0xa0 tag, so the
+        # block never ran and every following field was read one element early.
+        if tbs_buf and tbs_buf[idx] == 0xA0:
             _, ver_val, end = read_tlv(tbs_buf, 0)
             _, ver_int, _ = read_tlv(ver_val, 0)
             result["version"] = int.from_bytes(ver_int, 'big') + 1
@@ -676,23 +783,44 @@ class CertificateService:
                 pk_bytes = pk_bytes[1:]  # skip unused bits byte
             result["public_key"] = pk_bytes.hex()
 
-        # extensions [3] EXPLICIT
-        if idx < len(tbs_buf) and tbs_buf[idx] & 0xa0 == 0xa3:
+        # extensions [3] EXPLICIT (A104: the same precedence bug made this whole block dead
+        # code, and is_ca was "extension present" instead of the basicConstraints value)
+        result["key_usage"] = []
+        if idx < len(tbs_buf) and tbs_buf[idx] == 0xA3:
             _, ext_body, idx = read_tlv(tbs_buf, idx)
-            ext_items = parse_sequence_items(ext_body)
-            for ext_seq in ext_items:
-                if ext_seq[0] == 0x30:
-                    ext_parts = parse_sequence_items(ext_seq[1])
-                    if ext_parts:
-                        oid = self._decode_oid(ext_parts[0][1])
-                        if oid == "2.5.29.19":  # basicConstraints
-                            result["is_ca"] = True  # Simplified: presence = CA
+            for seq_tag, ext_list in parse_sequence_items(ext_body):
+                if seq_tag != 0x30:
+                    continue
+                for ext_tag, ext_seq in parse_sequence_items(ext_list):
+                    if ext_tag != 0x30:
+                        continue
+                    ext_parts = parse_sequence_items(ext_seq)
+                    if not ext_parts or ext_parts[0][0] != 0x06:
+                        continue
+                    oid = self._decode_oid(ext_parts[0][1])
+                    value = next(
+                        (part[1] for part in ext_parts[1:] if part[0] == 0x04), b''
+                    )
+                    if oid == "2.5.29.19":  # basicConstraints
+                        bc_body = next(
+                            (body for tag, body in parse_sequence_items(value)
+                             if tag == 0x30),
+                            b'',
+                        )
+                        bc_items = parse_sequence_items(bc_body)
+                        result["is_ca"] = bool(
+                            bc_items and bc_items[0][0] == 0x01
+                            and bc_items[0][1] != b'\x00'
+                        )
+                    elif oid == "2.5.29.15":  # keyUsage
+                        result["key_usage"] = _decode_key_usage(value)
 
         # Signature value (from outer Certificate)
         sig_raw = items[2][1]
         if sig_raw and sig_raw[0] == 0:
             sig_raw = sig_raw[1:]  # skip unused bits byte
-        result["signature"] = sig_raw.hex()
+        # crypto_service.verify() wants the bare r||s, so unwrap the DER signature value.
+        result["signature"] = _decode_ecdsa_sig_value(sig_raw).hex()
 
         return result
 
@@ -873,7 +1001,7 @@ class CertificateService:
         try:
             signature = crypto_service.sign(tbs_cert, signing_key, signing_pub)
             sig_bytes = bytes.fromhex(signature.signature)
-            sig_value = _encode_bitstring(sig_bytes)
+            sig_value = _encode_bitstring(_encode_ecdsa_sig_value(sig_bytes))
         except (TypeError, AttributeError, ValueError, RuntimeError) as e:
             raise RuntimeError(f"Certificate signing failed: {e}") from e
 
@@ -891,26 +1019,27 @@ class CertificateService:
         return f"-----BEGIN CERTIFICATE-----\n{pem_body}\n-----END CERTIFICATE-----"
 
     def _build_extensions(self, is_ca: bool) -> bytes:
-        """Build X.509v3 extensions (BasicConstraints, KeyUsage)."""
-        # BasicConstraints: CA=TRUE/FALSE, pathLen=0 for CA
+        """Build X.509v3 extensions (BasicConstraints, KeyUsage) in strict DER.
+
+        Both are marked critical (A104): RFC 5280 §4.2.1.9 requires basicConstraints to be
+        critical in a CA certificate, §4.2.1.3 recommends the same for keyUsage, and a
+        non-critical flag would let a peer that ignores extensions mint cert-signing rights.
+        """
         if is_ca:
-            bc_value = _encode_sequence(_encode_integer(1))  # CA=TRUE
+            bc_value = _encode_sequence(_encode_boolean(True))
+            ku_value = _encode_key_usage('keyCertSign', 'cRLSign')
         else:
-            bc_value = _encode_sequence()  # CA=FALSE (default)
+            # ca BOOLEAN has DEFAULT FALSE, so an empty SEQUENCE is the DER for CA=FALSE.
+            bc_value = _encode_sequence()
+            ku_value = _encode_key_usage('digitalSignature', 'keyEncipherment')
         bc_ext = _encode_sequence(
             _encode_oid("2.5.29.19"),  # basicConstraints
+            _encode_boolean(True),     # critical
             _encode_octetstring(bc_value),
         )
-
-        # KeyUsage
-        if is_ca:
-            # keyCertSign + cRLSign = bits 5+6 = 0x06
-            ku_value = _encode_tlv(0x03, b'\x01\x06')
-        else:
-            # digitalSignature + keyEncipherment = bits 0+2 = 0x05
-            ku_value = _encode_tlv(0x03, b'\x01\x05')
         ku_ext = _encode_sequence(
             _encode_oid("2.5.29.15"),  # keyUsage
+            _encode_boolean(True),     # critical
             _encode_octetstring(ku_value),
         )
 

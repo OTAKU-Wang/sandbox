@@ -307,9 +307,15 @@ class TestA61EventLoopSafety:
         assert store.added and store.added[-1].entry_id == "audit-1"
 
     def test_async_call_sites_do_not_call_the_blocking_entry_point(self):
-        for rel in ("app/api/federation.py", "app/services/catalog_sync.py"):
+        # sandbox_runtime 是第三个异步调用方（A61 台账原文只点了两个）：
+        # 不把它放进而检清单，它在事件循环上拨号就是隐形的。
+        for rel in (
+            "app/api/federation.py",
+            "app/services/catalog_sync.py",
+            "app/services/sandbox_runtime.py",
+        ):
             src = (REPO / rel).read_text(encoding="utf-8")
-            assert "send_request_async(" in src, f"{rel} still blocks the event loop"
+            assert re.search(r"send_request_async[\"'(]", src), f"{rel} still blocks the event loop"
             assert not re.search(r"(?<!_)send_request\(", src.replace("send_request_async(", "")), rel
 
 

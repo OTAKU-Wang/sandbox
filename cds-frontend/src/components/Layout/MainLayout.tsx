@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { Layout } from 'antd';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
@@ -58,7 +58,10 @@ export default function MainLayout() {
           <div className={detailScope ? 'cds-content-inner cds-detail' : 'cds-content-inner'}>
             <PageCrumb />
           <DataplaneBanner />
-            <Outlet />
+            {/* A307：懒加载路由冷启动时只挂内容区，不能让整页 shell（顶栏+左栏）被 Suspense 换掉。 */}
+            <Suspense fallback={null}>
+              <Outlet />
+            </Suspense>
           </div>
         </Content>
       </Layout>

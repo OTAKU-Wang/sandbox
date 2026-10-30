@@ -26,13 +26,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _cluster_view() -> tuple[object | None, str]:
+async def _cluster_view() -> tuple[object | None, str]:
     """Return (k8s_sandbox_adapter|None, namespace). Adapter is None when the
-    python client or kubectl is unavailable — callers degrade honestly."""
+    python client or kubectl is unavailable — callers degrade honestly.
+
+    A15: `get_k8s_adapter()` 是 `async def`——当年没 `await` 拿到的是协程对象（truthy），
+    于是 `_k8s` 属性取不到、整个实时分支永远进不去，运维视图在有集群时也永远报降级。
+    """
     try:
         from app.services.k8s_sandbox import get_k8s_adapter
         from app.core.config import get_settings
-        adapter = get_k8s_adapter()
+        adapter = await get_k8s_adapter()
         namespace = getattr(adapter, "namespace", None) or get_settings().SANDBOX_K8S_NAMESPACE
         return adapter, namespace
     except Exception as e:
@@ -51,7 +55,7 @@ async def list_deployments(
     Reads from the live cluster when the python client is available; returns
     an empty list with ``cluster_available: false`` otherwise.
     """
-    adapter, namespace = _cluster_view()
+    adapter, namespace = await _cluster_view()
     if adapter is None or getattr(adapter, "_k8s", None) is None:
         return {"cluster_available": False, "namespace": namespace, "items": [], "count": 0}
     try:
@@ -92,7 +96,7 @@ async def list_ops_network_policies(
         select(NetworkPolicy).order_by(NetworkPolicy.id).offset(skip).limit(limit)
     )).scalars().all()
 
-    adapter, _namespace = _cluster_view()
+    adapter, _namespace = await _cluster_view()
     live_names = set()
     cluster_available = adapter is not None and getattr(adapter, "_k8s", None) is not None
     if cluster_available:
@@ -150,7 +154,7 @@ async def list_ops_pvcs(
             "read_only": bool(att.read_only),
         })
 
-    adapter, _namespace = _cluster_view()
+    adapter, _namespace = await _cluster_view()
     cluster_available = adapter is not None and getattr(adapter, "_k8s", None) is not None
     live_claims: dict[str, dict] = {}
     if cluster_available:
@@ -219,7 +223,7 @@ async def get_ops_logs(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    adapter, _namespace = _cluster_view()
+    adapter, _namespace = await _cluster_view()
     if (
         getattr(session, "sandbox_level", None) == "k8s"
         and adapter is not None

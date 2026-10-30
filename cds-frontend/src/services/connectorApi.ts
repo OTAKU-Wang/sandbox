@@ -24,11 +24,11 @@ export interface HeartbeatResponse {
   status: 'healthy' | 'unhealthy' | 'unknown';
   last_seen: string | null;
   /**
-   * 后端当前恒返回 0（app/api/connectors.py get_connector_heartbeat_status 写死
-   * `"latency_ms": 0`），**不是实测值** ⇒ UI 不得把它当测量值展示（禁伪造铁律，A318）。
-   * 将来后端真量了延迟，再连同字段一起恢复展示。
+   * A318：心跳只观测 is_healthy / last_heartbeat，本服务不测 RTT ⇒ 后端固定返回 null
+   * （app/api/connectors.py get_connector_heartbeat_status），null = 未测量。
+   * 将来真量了延迟再改成 number 并恢复展示；不得把常量当实测值上 UI（禁伪造铁律）。
    */
-  latency_ms?: number;
+  latency_ms?: number | null;
 }
 
 export interface RegisterConnectorPayload {

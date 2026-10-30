@@ -77,7 +77,11 @@ async function generateKey() {
     const productId = $('#key-product-id').value.trim();
     if (!productId) { alert('请输入 Product ID'); return; }
     try {
-        const result = await API.post('/api/v1/kms/keys', { product_id: productId });
+        // A287: create_dek 的 product_id 是非 Body 标量参数，FastAPI 按 query 解析；
+        // 放进 JSON body 只会缺 query 直接 422。
+        const result = await API.post(
+            '/api/v1/kms/keys?product_id=' + encodeURIComponent(productId), {});
+
         $('#key-result').innerHTML = `<div class="card" style="background:var(--bg);">
             <p><strong>Key ID:</strong> <code>${esc(result.key_id)}</code></p>
             <p><strong>Key (hex):</strong> <code style="word-break:break-all;">${esc(result.key_bytes || '(stored in KMS)')}</code></p>
@@ -88,8 +92,14 @@ async function generateKey() {
 
 async function destroyKey(keyId) {
     if (!confirm(`确认销毁密钥 ${keyId}？此操作不可逆。`)) return;
+    // A242: DELETE /api/v1/kms/keys/{key_id} 要求 HighRiskOperationRequest 体
+    // （reason 必填 ≥8 字，ticket_id 进审计）——对话框自己收集并显式传入。
+    const reason = (prompt('销毁原因（必填，至少 8 字，将写入审计）：') || '').trim();
+    if (reason.length < 8) { alert('销毁原因至少 8 字，已取消'); return; }
+    const ticketId = (prompt('关联工单号 ticket_id（可选，≤128 字）：') || '').trim();
+    const body = ticketId ? { reason, ticket_id: ticketId } : { reason };
     try {
-        await API.del(`/api/v1/kms/keys/${keyId}`);
+        await API.del(`/api/v1/kms/keys/${keyId}`, body);
         loadKeys();
     } catch (e) { alert('销毁失败: ' + e.message); }
 }

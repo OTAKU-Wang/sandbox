@@ -58,6 +58,15 @@ class InferenceService:
     ) -> TrainedModel:
         if fmt not in MODEL_FORMATS:
             raise ValueError(f"Unsupported model format '{fmt}' (allowed: {sorted(MODEL_FORMATS)})")
+        # A10 second gate (service layer, every caller): the v1 runner is a
+        # fixed ort.InferenceSession, so formats outside _EXECUTABLE_FORMATS —
+        # the single source of truth — are refused at registration, never
+        # persisted as runnable-looking artifacts (fail-closed, no copied list).
+        if fmt not in _EXECUTABLE_FORMATS:
+            raise ValueError(
+                f"Model format '{fmt}' is not executable by the v1 sandbox runner "
+                f"(executable formats: {sorted(_EXECUTABLE_FORMATS)}) — registration refused"
+            )
         if not artifact_bytes:
             raise ValueError("Model artifact cannot be empty")
         if len(artifact_bytes) > _MAX_MODEL_BYTES:

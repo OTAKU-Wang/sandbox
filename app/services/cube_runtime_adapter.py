@@ -44,7 +44,7 @@ _VOLUME_PLUGIN_DRIVER = "cds-encrypted"
 # 与 specs/data-sandbox-developer-portal-prd.md + prototype-v3 IDE 屏一致:
 #   GUEST_DATA_DIR    合约授权数据的 VM 内副本（注入口径, 见 _inject_session_data_sync:
 #                     上游冷启动沙箱不把声明卷挂进 guest, 所以“只读”是产品口径 +
-#                     采集面不取它, 真正的出域约束始终由 T5 出口网关把行）
+#                     采集面不取它, 真正的出域约束始终由 T5 出口网关把关）
 #   GUEST_OUTPUT_DIR  唯一被成果交付采集的产物目录（原型口径）
 #   GUEST_WORK_DIR    工作区（内核 cwd / 会话文件）; 兼容期内仍参与采集,
 #                     以免存量会话产物在升级后静默丢交付（采集时逐文件标源目录）
@@ -979,7 +979,7 @@ class CubeRuntimeAdapter(RuntimeAdapter):
             return ["python3", "-c", code]
         return ["sh", "-c", code]
 
-    def terminate(self, container_id: str) -> bool:
+    def terminate(self, container_id: str, session_id: str | None = None) -> bool:
         node_id, sandbox_id = self._parse_container_id(container_id)
         try:
             node = self._resolve_node_sync(node_id)
@@ -992,8 +992,21 @@ class CubeRuntimeAdapter(RuntimeAdapter):
             client.destroy(request)
             self._node_cache.pop(node_id, None)
             # SS-14 RT-07 (2026-10-14): 沙箱销毁成功后回收会话卷（幂等 best-effort）。
+            # A90: 卷命名空间是 session_id（prepare_session_volume/provision 建的是
+            # cds-data-<session_id>），不是 cubelet sandbox_id。按 sandbox_id 删的是一个
+            # 从未存在过的名字，真卷 + 其 KMS DEK 记录会永久孤儿，所以解析不到 session_id
+            # 时宁可披露孤儿也不能谎报清理成功。
             if self._settings.CUBE_MASTER_ADDR:
-                self._master_delete_volume(f"cds-data-{sandbox_id}")
+                owner_id = session_id or self._session_id_for_container(container_id)
+                if owner_id:
+                    self._master_delete_volume(f"cds-data-{owner_id}")
+                else:
+                    self._fire_critical_alert(
+                        "cube_session_volume_orphaned",
+                        f"Destroyed sandbox {sandbox_id} on node {node_id} (container {container_id}) "
+                        "but its owning session id could not be resolved; the session volume "
+                        "cds-data-<session_id> is unreclaimed and needs manual reconciliation.",
+                    )
             return True
         except CDSError as exc:
             if exc.code == "SANDBOX_NOT_FOUND":
@@ -1006,6 +1019,32 @@ class CubeRuntimeAdapter(RuntimeAdapter):
                 return False
             logger.error("[CubeRuntime] Destroy %s failed: %s", sandbox_id, exc)
             return False
+
+    def _session_id_for_container(self, container_id: str) -> str | None:
+        """Owning session id of a container id — the namespace session volumes live in."""
+        import asyncio
+
+        async def _lookup() -> str | None:
+            from sqlalchemy import select
+
+            from app.core.database import sync_bridge_session
+            from app.models.sandbox_session import SandboxSession
+
+            async with sync_bridge_session() as db:
+                row = (
+                    await db.execute(
+                        select(SandboxSession.id).where(SandboxSession.container_id == container_id)
+                    )
+                ).scalars().first()
+                return str(row) if row is not None else None
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return _run_sync(_lookup())
+        from app.core.database import sync_db_bridge
+
+        return sync_db_bridge.run(_lookup())
 
     def _fire_critical_alert(self, alert_type: str, message: str) -> None:
         """Raise a durable critical AlertRecord (existing alerting path) — never silent."""

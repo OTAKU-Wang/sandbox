@@ -73,7 +73,12 @@ class FieldVisibilityConfig(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("data_products.id"), nullable=False, unique=True)
+    # A214/E2-11: uniqueness has exactly ONE schema source — the named unique
+    # index ``ix_field_visibility_product`` (owned by __table_args__ and created
+    # by migration 0000). The column's own ``unique=True`` used to add a second,
+    # anonymous UNIQUE constraint on top of it (revision 0030 drops that
+    # constraint on PostgreSQL); do not reintroduce it.
+    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("data_products.id"), nullable=False)
 
     # Field visibility rules: {field_name: {sensitivity, mask_pattern, auto_approve, description}}
     field_rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

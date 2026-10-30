@@ -14,6 +14,7 @@ Trust scores are computed from multiple signals:
 """
 import logging
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -128,8 +129,17 @@ class TrustEvaluator:
             "security": security,
         }
 
-        total = sum(scores[k] * self.WEIGHTS[k] for k in self.WEIGHTS)
-        total = int(min(100, max(0, total)))
+        # A166: 定点四舍五入，不再向零截断。旧写法 `int(min(100, max(0, total)))`
+        # 把 49.8 变成 49 ⇒ 等级从 SILVER 掉到 NEW，而 federation_connector 直接拿
+        # 这个整数与 `min_trust_by_op` 比较（`trust_result.score < min_score` → 403），
+        # 所以取整方式是准入判据的一部分。Decimal 还消掉了浮点漂移（0.3 之类不可精确
+        # 表示的二进制小数）；权重 0.30/0.30/0.20/0.20 ⇒ 精确分只有 0.1 分辨率，
+        # 不会落在 .5，ROUND_HALF_UP 与 ROUND_HALF_EVEN 在此等价。
+        weighted = Decimal(0)
+        for key, weight in self.WEIGHTS.items():
+            weighted += Decimal(str(scores[key])) * Decimal(str(weight))
+        weighted = min(Decimal(100), max(Decimal(0), weighted))
+        total = int(weighted.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
         # Determine level
         level = TrustLevel.NEW
@@ -186,6 +196,15 @@ class TrustEvaluator:
             certifications=certifications,
         )
 
+    # Level ordering, lowest → highest (A151: hoisted out of can_access()
+    # so the fail-closed comparison has a single ordered table to consult).
+    LEVEL_ORDER: dict[TrustLevel, int] = {
+        TrustLevel.NEW: 0,
+        TrustLevel.SILVER: 1,
+        TrustLevel.GOLD: 2,
+        TrustLevel.PLATINUM: 3,
+    }
+
     def can_access(
         self,
         trust_level: TrustLevel,
@@ -194,19 +213,30 @@ class TrustEvaluator:
         """Check if a trust level meets the required level.
 
         Args:
-            trust_level: Current trust level.
+            trust_level: Current trust level (TrustLevel or its wire value).
             required_level: Required trust level for access.
 
         Returns:
-            True if access is allowed.
+            True if access is allowed. An input that is not a registered
+            trust level is DENIED (A151 fail-closed): the old
+            ``level_order.get(x, 0)`` lookup treated "unrecognised" as level 0,
+            so a missing or misspelled ``required_level`` meant "no trust
+            required at all" — the opposite of evaluate()'s conservative default.
+
+        Raises:
+            Nothing: malformed input returns False instead of propagating.
         """
-        level_order = {
-            TrustLevel.NEW: 0,
-            TrustLevel.SILVER: 1,
-            TrustLevel.GOLD: 2,
-            TrustLevel.PLATINUM: 3,
-        }
-        return level_order.get(trust_level, 0) >= level_order.get(required_level, 0)
+        try:
+            subject = TrustLevel(trust_level)
+            required = TrustLevel(required_level)
+        except ValueError:
+            logger.warning(
+                "Trust access denied: unrecognised trust level (subject=%r required=%r)",
+                trust_level,
+                required_level,
+            )
+            return False
+        return self.LEVEL_ORDER[subject] >= self.LEVEL_ORDER[required]
 
 
 # Singleton

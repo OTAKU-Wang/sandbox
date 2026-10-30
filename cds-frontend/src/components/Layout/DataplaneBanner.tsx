@@ -1,17 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert } from 'antd';
-import { metaApi, type CapabilityMatrix } from '../../services/metaApi';
-
-interface DataplaneStatus {
-  enabled: boolean;
-  mode: 'full' | 'control_plane_only' | string;
-  reason: string | null;
-  note: string;
-}
-
-/** 矩阵载荷上挂在档位声明（capability_matrix.get_capability_matrix 的第三个键）。
- * metaApi 的 CapabilityMatrix 只声明了 matrix/levels，档位是这里唯一的消费方，故就地扩展而不放宽共享类型。 */
-type CapabilityMatrixWithDataplane = CapabilityMatrix & { dataplane?: DataplaneStatus };
+import { metaApi, type DataplaneStatus } from '../../services/metaApi';
 
 /**
  * SS-13 交付档全局横幅。
@@ -28,7 +17,7 @@ export default function DataplaneBanner() {
     metaApi
       .getCapabilityMatrix()
       .then((matrix) => {
-        if (alive) setDp(((matrix ?? {}) as CapabilityMatrixWithDataplane).dataplane ?? null);
+        if (alive) setDp(matrix?.dataplane ?? null);
       })
       .catch((err) => {
         // 探针失败刻意**不**再叠一条错误 Alert：执行入口自己会如实报 400 RUNTIME_UNAVAILABLE，

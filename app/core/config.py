@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 _JWT_DEFAULT_KEY = "change-me-in-production"
 _JWT_MIN_KEY_LENGTH = 32  # bytes — RFC 7518 Section 3.2 recommends ≥ 256 bits for HS256
+# A121 (half): cross-language DEK width. `cds-volume-plugin/cipher.go` fixes
+# `dekLen = 16` at compile time; CDS_CUBE_DEK_LENGTH is runtime-configurable, so
+# validate_security_config compares the two. Pinned by
+# tests/test_ocr_a121_cube_dek_length_gate.py (drift there reddens that test).
+_CUBE_PLUGIN_DEK_LEN = 16
 
 
 class Settings(BaseSettings):
@@ -100,6 +105,8 @@ class Settings(BaseSettings):
     # Session lifecycle (gap A2/D1): background sweep interval for expired
     # sessions, dev sessions and contracts.
     SESSION_CLEANUP_INTERVAL_SECONDS: int = 300
+    # A147: 周期对账会话行与真实容器状态（行活/容器没 → TERMINATED，行终/容器活 → 回收）
+    SESSION_RECONCILE_INTERVAL_SECONDS: int = 900
 
     COMPUTE_SCHEDULER_ENABLED: bool = True
     COMPUTE_SCHEDULER_INTERVAL_SECONDS: int = 60
@@ -509,6 +516,16 @@ class Settings(BaseSettings):
         # DB); the ">=1 eligible node" requirement is a runtime check enforced
         # at the l2c create gate as 400 RUNTIME_UNAVAILABLE.
         if self.CUBE_DATAPLANE_ENABLED:
+            # A40: the TLS switch itself is the only thing that can turn node mTLS
+            # off, so it must fail closed on its own — otherwise the CA check below
+            # is short-circuited and prod boots with a plaintext control plane.
+            if not self.CUBE_NODE_GRPC_TLS:
+                raise ValueError(
+                    "CDS_CUBE_NODE_GRPC_TLS=false is not permitted in production with "
+                    "CDS_CUBE_DATAPLANE_ENABLED=true: it silently disables the node TLS "
+                    "front-proxy, so the L2' control plane (provision/exec/DEK references) "
+                    "runs plaintext to cubelet. The plaintext gRPC leg is dev-only."
+                )
             if self.CUBE_NODE_GRPC_TLS and not self.CUBE_NODE_TLS_CA:
                 raise ValueError(
                     "CDS_CUBE_DATAPLANE_ENABLED=true in production requires node "
@@ -529,6 +546,17 @@ class Settings(BaseSettings):
                     "CDS_CUBE_TEMPLATE_SIGNING_KEY (CB-05 artifact token "
                     "signing for the node distribution path)"
                 )
+            # A121 (half): the runtime-configurable DEK width must equal the node
+            # volume plugin's compiled width, or the sandbox CDS_DEK is issued at
+            # one length and consumed at another by the encrypted-volume SM4-GCM leg.
+            if self.CUBE_DEK_LENGTH != _CUBE_PLUGIN_DEK_LEN:
+                raise ValueError(
+                    f"CDS_CUBE_DEK_LENGTH={self.CUBE_DEK_LENGTH} disagrees with the node "
+                    f"volume plugin's compiled DEK width (cds-volume-plugin/cipher.go "
+                    f"dekLen={_CUBE_PLUGIN_DEK_LEN}): the encrypted-volume path would get "
+                    "a key of a different width than its SM4-GCM leg accepts. Keep both "
+                    "sides at the same width."
+                )
 
         # SS-13 single-path cutover: legacy sandbox levels are retired from
         # production. A production deployment must not silently keep the
@@ -546,12 +574,21 @@ class Settings(BaseSettings):
         # PZ-05 (MR-B1): with TEE attestation required, the measurement
         # whitelist must be explicit — an empty allow-all policy is not a
         # production posture.
-        if self.KMS_REQUIRE_ATTESTATION and not self.ATTESTATION_ALLOWED_MEASUREMENTS.strip():
+        # A141: the gate must check the value the way its consumer parses it
+        # (remote_attestation._load_operator_measurements drops empty csv fields,
+        # and an empty set there means accept-any-TEE). A plain `.strip()` check
+        # let " , ,, " boot while arming nothing.
+        _allowed_measurements = {
+            m.strip()
+            for m in self.ATTESTATION_ALLOWED_MEASUREMENTS.split(",")
+            if m.strip()
+        }
+        if self.KMS_REQUIRE_ATTESTATION and not _allowed_measurements:
             raise ValueError(
                 "ATTESTATION_ALLOWED_MEASUREMENTS is required in production when "
-                "KMS_REQUIRE_ATTESTATION=true: an empty measurement whitelist "
-                "accepts any TEE. Set CDS_ATTESTATION_ALLOWED_MEASUREMENTS to a "
-                "csv of approved SM3 measurements."
+                "KMS_REQUIRE_ATTESTATION=true and must contain at least one non-empty "
+                "measurement: an empty measurement whitelist accepts any TEE. Set "
+                "CDS_ATTESTATION_ALLOWED_MEASUREMENTS to a csv of approved SM3 measurements."
             )
 
         # W4: unauthenticated legacy admin pages must never serve in production.

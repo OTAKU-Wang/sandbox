@@ -26,7 +26,7 @@
 | `SANDBOX_NOT_FOUND` | 404 | 底层沙箱已不存在（节点侧，SS-10 新码） | 底层沙箱已不存在（节点侧） | 终止会话重建；报告 request_id |
 | `RUNTIME_UNAVAILABLE` | 400 | L2' 数据面未启用 / 节点未就绪（SS-10 新码，dataplane 关闭时 l2c 请求） | L2' 数据面未启用/节点未就绪 | 联系管理员检查 cube 节点（FG-017） |
 | `TEE_NODE_UNAVAILABLE` | 400 | `tee_policy=tee_required` 时没有 TEE 能力（capabilities.tee ∈ {tdx, sev_snp}）的 cube 节点（SS-13 新码，抛出点 `sandbox_sessions.py` l2c create 门） | 无可用 TEE 节点（诚实降级：不伪装 TEE） | 联系管理员确认 TEE 节点（RT-06），或改用 `tee_if_available` |
-| `LEGACY_LEVEL_RETIRED` | 400 | 请求了已退役的传统沙箱级别（L0/L1/L2/L3/k8s），且 `CDS_SANDBOX_LEGACY_ENABLED` 未开启（SS-13 单路径切换，抛出点 `sandbox_sessions.py` create） | 该沙箱级别已退役，仅支持 l2c | 使用默认级别 `l2c`；dev/test 可设 `CDS_SANDBOX_LEGACY_ENABLED=true` |
+| `LEGACY_LEVEL_RETIRED` | 400 | 请求了已退役的传统沙箱级别（L0/L1/L2/L3/k8s）且 `CDS_SANDBOX_LEGACY_ENABLED` 未开启（SS-13 单路径切换），或受治理合约会话请求的档位低于供数下限 `SUPPLY_DATA_LEVELS`（A55b，`detail.reason ∈ {below_supply_data_floor, level_deprecated}`；抛出点 `sandbox_sessions.py` create） | 该沙箱级别已退役，仅支持 l2c | 使用默认级别 `l2c`；dev/test 可设 `CDS_SANDBOX_LEGACY_ENABLED=true` |
 | `API_KEY_INVALID` | 401 | 平台 API 密钥不存在或已过期（SS-12 新码，`core/deps.py` key 认证路径：`cds_ak_` 凭据 SM3 哈希未命中 / 惰性过期判定） | 密钥格式不符 / 不存在 / 已过期 | 检查密钥是否完整、是否已过期；联系平台管理员 |
 | `API_KEY_INACTIVE` | 401 | 密钥已禁用 / 已吊销 / 连续认证失败进入冷却（SS-12 新码，`detail.reason` ∈ disabled / revoked / cooldown；冷却为进程内计数器，多实例下近似） | 密钥被禁用 / 吊销 / 失败冷却中 | 密钥被管理员禁用或吊销，或连续失败进入冷却；联系管理员或稍后重试 |
 | `API_KEY_SCOPE_DENIED` | 403 | 该密钥无目标功能域的权限（SS-12 新码，`core/scopes.py` scope 门 / human-only 门 / 未注册前缀 default-deny） | 该密钥无此功能域的权限（含 human-only 路由） | 该 API 密钥权限不足；请管理员调整 scope 或改用其他密钥 |
@@ -55,6 +55,7 @@
 | `BUNDLE_TOO_LARGE` | 413 | 成果包超过 512MB 上限（`deliveries.py`） | 交付包过大 | 分批交付，或改走数据产品通道 |
 | `WEBHOOK_EVENT_UNSUPPORTED` | 400 | 订阅了平台不支持的推送事件类型（`deliveries.py` 订阅创建/更新） | 不支持的推送事件类型 | 按 `detail` 的支持清单选择事件 |
 | `ENDPOINT_SLUG_TAKEN` | 409 | OpenAPI 端点 slug 与既有端点冲突（`deliveries.py`，slug 全局唯一） | 该 slug 已被占用 | 换一个 slug |
+| `NETWORK_POLICY_EXISTS` | 409 | 会话已有网络策略：先查扑空后 INSERT 撞 `network_policies.session_id` 唯一约束（`network_policy.py` `POST /network-policies`，A20） | 这个会话已经有网络策略了 | 改走 PATCH /network-policies/{id} 更新既有策略 |
 | `INVALID_REQUEST_BODY` | 400 | `/open/v1/{slug}` 请求体不是 JSON 对象（`app/api/open_api.py`） | 请求体必须是 JSON 对象 | 修正请求体；该码可安全重试同一修正后的请求 |
 | `COMPUTE_RUN_ACTIVE` | 409 | 同一合约已有未终结的计算运行又手动触发（`app/api/compute.py` claim 门） | 该合约已有计算在跑 | 等当前运行结束或取消后再触发 |
 | `COMPUTE_RUN_RUNNING` | 409 | 取消仍在执行的计算运行（会牵连沙箱内真实执行）（`compute.py` cancel） | 运行中不能静默中止 | 终止其沙箱会话以停止执行 |

@@ -77,10 +77,39 @@ class TaskPipeline:
         """
         self._handlers[stage] = handler
 
+    def _binding_is_stale(self) -> bool:
+        """poll task 是否绑在别的（很可能是已关闭的）事件循环上。"""
+        if self._poll_task is None:
+            return False
+        try:
+            return self._poll_task.get_loop() is not asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - 无运行中循环，无从比较
+            return False
+
+    def _drop_stale_binding(self) -> None:
+        """丢弃旧循环留下的任务绑定，使本次 start 能在当前循环重新装配。"""
+        stale = self._poll_task
+        self._poll_task = None
+        for task in [stale, *self._running.values()]:
+            if task is not None and not task.done():
+                try:
+                    task.cancel()
+                except RuntimeError:  # pragma: no cover - 宿主循环已关闭
+                    pass
+        self._running.clear()
+        self._running_flag = False
+
     async def start(self):
         """Start the pipeline polling loop."""
         if self._running_flag:
-            return
+            # A192x: 单例可能被上一个事件循环启动过（测试套件内多次 lifespan、
+            # 进程内重载、同进程多个 ASGI app）。那种 poll task 之后再没有
+            # 任何路径会取消它，它会继续在已关闭的循环上读写 DB，
+            # 把后面的用例/服务打成 "no active connection" / "Event loop is closed"。
+            if not self._binding_is_stale():
+                return
+            logger.warning("[Pipeline] 检测到跨事件循环的陈旧绑定，按当前循环重新装配")
+            self._drop_stale_binding()
         await self._queue.connect()
         self._running_flag = True
         self._poll_task = asyncio.create_task(self._poll_loop())
@@ -89,7 +118,10 @@ class TaskPipeline:
     async def stop(self):
         """Stop the pipeline and cancel running tasks."""
         self._running_flag = False
-        if self._poll_task:
+        if self._binding_is_stale():
+            # 不能跨循环 await 别人的 task：只解除绑定，取消由宿主循环负责。
+            self._drop_stale_binding()
+        elif self._poll_task:
             self._poll_task.cancel()
             try:
                 await self._poll_task

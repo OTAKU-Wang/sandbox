@@ -18,7 +18,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD:-cds_dev_redis} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # A286: noeviction. 这套 Redis 里放的是会话、限流计数与登录短态，不是可丢的缓存；
+    # allkeys-lru 在 maxmemory 打满时正好把它们当缓存踢掉（表现为"随机掉登录 / 限流突然放开"）。
+    # 保留 --maxmemory：写满后 Redis 拒绝写入（app/core/security.py 按 OOM 与连接失败分开
+    # 披露），而不是无限增长后被 docker OOM-kill。六份 deploy 拷贝必须同改。
+    command: redis-server --requirepass ${REDIS_PASSWORD:-cds_dev_redis} --maxmemory 256mb --maxmemory-policy noeviction
     ports:
       - "6379:6379"
     volumes:
@@ -62,14 +66,19 @@ services:
   opa:
     image: openpolicyagent/opa:0.68.0
     ports:
-      - "8181:8181"
+      # A284: OPA 数据面 API 不带任何认证——能碰到 8181 的人 `PUT /v1/policies/...`
+      # 写一份 `default allow = true` 就能把授权引擎清空（policy_evaluator 认 OPA 的
+      # truthy 结果为 ALLOW）。所以宿主只发布到回环；cds-api 走 bridge 网络上的
+      # http://opa:8181，本来就不依赖宿主端口。与 docker-compose.prod.yml 同一口径。
+      - "127.0.0.1:8181:8181"
     command:
       - "run"
       - "--server"
       - "--addr=0.0.0.0:8181"
       - "--log-level=info"
     volumes:
-      - ./policies:/policies
+      # 只读：策略由 app 在运行时通过 API 推送，容器没有理由回写仓里的 rego。
+      - ./policies:/policies:ro
     healthcheck:
       # opa:0.68.0 是 distroless 镜像，里面没有 wget/shell——原来的 wget 健康检查永远过不了，
       # 于是 cds-api（depends_on opa: service_healthy）在任何机器上都起不来。
@@ -123,7 +132,12 @@ services:
       CDS_MINIO_ENDPOINT: minio:9000
       CDS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cds_minio_admin}
       CDS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-cds_dev_minio_password}
-      CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY:-dev_jwt_secret_change_in_prod_32bytes}
+      # A89: 这里不能给默认值。`:-xxx` 的兜底串是写在源码里的公开密钥，而它与
+      # app.core.config._JWT_DEFAULT_KEY 不相等，auth_service 会直接拿它签名 ⇒
+      # 任何拿得到源码的人都能自签 role=admin 的令牌。改成必填插值：缺 key 时
+      # `docker compose up` 在起任何容器之前就失败（与 docker-compose.prod.yml 同口径），
+      # 而不是默默跑起一套可伪造的栈。生成：openssl rand -hex 32（见 .env.example）。
+      CDS_JWT_SECRET_KEY: ${CDS_JWT_SECRET_KEY:?CDS_JWT_SECRET_KEY is required - JWT signing secret, generate with openssl rand -hex 32}
       # PZ-04/PZ-05 (specs/ss-11-cds-productization.md §7.1) — honesty & federation
       # gates, dev values (relaxed); prod template sets the fail-closed posture.
       CDS_MIA_SHADOW_MODEL: "false"

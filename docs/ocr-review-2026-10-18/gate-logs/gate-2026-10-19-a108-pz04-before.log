@@ -1,0 +1,435 @@
+# 改前读数（远程 py3.12 车道容器，同一命令同树）：A108/A109 与 PZ-04 合跑 5 failed / 34 passed / 4 errors，Bad file descriptor 24 次
+.............F.....................FEFEFEFE                              [100%]
+==================================== ERRORS ====================================
+_________ ERROR at teardown of test_firecracker_seccomp_retry_allowed __________
+E   OSError: [Errno 9] Bad file descriptor
+__ ERROR at teardown of test_firecracker_seccomp_retry_denied_fails_honestly ___
+  + Exception Group Traceback (most recent call last):
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 862, in item_capture
+  |     yield
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 905, in pytest_runtest_teardown
+  |     return (yield)
+  |             ^^^^^
+  |   File "/usr/local/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 199, in pytest_runtest_teardown
+  |     item.session._setupstate.teardown_exact(nextitem)
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 579, in teardown_exact
+  |     raise exceptions[0]
+  | ExceptionGroup: errors while tearing down <Function test_firecracker_seccomp_retry_denied_fails_honestly> (3 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1014, in _teardown_yield_fixture
+    |     next(it)
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 1052, in _scoped_runner
+    |     runner.__exit__(None, None, None)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 62, in __exit__
+    |     self.close()
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 70, in close
+    |     _cancel_all_tasks(loop)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 206, in _cancel_all_tasks
+    |     loop.run_until_complete(tasks.gather(*to_cancel, return_exceptions=True))
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    |     return self._loop.run_until_complete(task)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +---------------- 3 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    |     return self._loop.run_until_complete(task)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 865, in item_capture
+    self.suspend_global_capture(in_=False)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 790, in suspend_global_capture
+    self._global_capturing.suspend_capturing(in_=in_)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 673, in suspend_capturing
+    self.err.suspend()
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 547, in suspend
+    os.dup2(self.targetfd_save, self.targetfd)
+OSError: [Errno 9] Bad file descriptor
+
+During handling of the above exception, another exception occurred:
+E   OSError: [Errno 9] Bad file descriptor
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:675 [firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for vm-6b8b51c6
+____ ERROR at teardown of test_firecracker_qemu_serial_seccomp_retry_denied ____
+  + Exception Group Traceback (most recent call last):
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 862, in item_capture
+  |     yield
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 905, in pytest_runtest_teardown
+  |     return (yield)
+  |             ^^^^^
+  |   File "/usr/local/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 199, in pytest_runtest_teardown
+  |     item.session._setupstate.teardown_exact(nextitem)
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 579, in teardown_exact
+  |     raise exceptions[0]
+  | ExceptionGroup: errors while tearing down <Function test_firecracker_qemu_serial_seccomp_retry_denied> (3 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1014, in _teardown_yield_fixture
+    |     next(it)
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 1052, in _scoped_runner
+    |     runner.__exit__(None, None, None)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 62, in __exit__
+    |     self.close()
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 70, in close
+    |     _cancel_all_tasks(loop)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 206, in _cancel_all_tasks
+    |     loop.run_until_complete(tasks.gather(*to_cancel, return_exceptions=True))
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    |     return self._loop.run_until_complete(task)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +---------------- 3 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    |     return self._loop.run_until_complete(task)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 865, in item_capture
+    self.suspend_global_capture(in_=False)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 790, in suspend_global_capture
+    self._global_capturing.suspend_capturing(in_=in_)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 673, in suspend_capturing
+    self.err.suspend()
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 547, in suspend
+    os.dup2(self.targetfd_save, self.targetfd)
+OSError: [Errno 9] Bad file descriptor
+
+During handling of the above exception, another exception occurred:
+E   OSError: [Errno 9] Bad file descriptor
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-51ae1601
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:837 [firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for vm-51ae1601
+___ ERROR at teardown of test_firecracker_qemu_serial_seccomp_retry_allowed ____
+  + Exception Group Traceback (most recent call last):
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 862, in item_capture
+  |     yield
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 905, in pytest_runtest_teardown
+  |     return (yield)
+  |             ^^^^^
+  |   File "/usr/local/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 199, in pytest_runtest_teardown
+  |     item.session._setupstate.teardown_exact(nextitem)
+  |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 579, in teardown_exact
+  |     raise exceptions[0]
+  | ExceptionGroup: errors while tearing down <Function test_firecracker_qemu_serial_seccomp_retry_allowed> (3 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1014, in _teardown_yield_fixture
+    |     next(it)
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 1052, in _scoped_runner
+    |     runner.__exit__(None, None, None)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 62, in __exit__
+    |     self.close()
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 70, in close
+    |     _cancel_all_tasks(loop)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 206, in _cancel_all_tasks
+    |     loop.run_until_complete(tasks.gather(*to_cancel, return_exceptions=True))
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    |     return self._loop.run_until_complete(task)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +---------------- 3 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1166, in finish
+    |     raise exceptions[0]
+    |   File "/usr/local/lib/python3.12/site-packages/_pytest/fixtures.py", line 1156, in finish
+    |     fin()
+    |   File "/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |   File "/usr/local/lib/python3.12/asyncio/runners.py", line 118, in run
+    |     return self._loop.run_until_complete(task)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    |     self.run_forever()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    |     self._run_once()
+    |   File "/usr/local/lib/python3.12/asyncio/base_events.py", line 1961, in _run_once
+    |     event_list = self._selector.select(timeout)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/selectors.py", line 468, in select
+    |     fd_event_list = self._selector.poll(timeout, max_ev)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | OSError: [Errno 9] Bad file descriptor
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 865, in item_capture
+    self.suspend_global_capture(in_=False)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 790, in suspend_global_capture
+    self._global_capturing.suspend_capturing(in_=in_)
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 673, in suspend_capturing
+    self.err.suspend()
+  File "/usr/local/lib/python3.12/site-packages/_pytest/capture.py", line 547, in suspend
+    os.dup2(self.targetfd_save, self.targetfd)
+OSError: [Errno 9] Bad file descriptor
+
+During handling of the above exception, another exception occurred:
+E   OSError: [Errno 9] Bad file descriptor
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-566baebe
+=================================== FAILURES ===================================
+E   KeyError: 'used_cpu_cores'
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.sandbox_manager:sandbox_manager.py:254 Tenant quota delta flush failed for tenant-b: redis down — 增量保留，下次 flush 重试
+WARNING  app.services.sandbox_manager:sandbox_manager.py:254 Tenant quota delta flush failed for tenant-b: redis down — 增量保留，下次 flush 重试
+ERROR    app.core.redis:redis.py:59 Redis connection failed: Authentication required.
+WARNING  app.services.sandbox_manager:sandbox_manager.py:254 Tenant quota delta flush failed for tenant-b: Authentication required. — 增量保留，下次 flush 重试
+/work/tests/test_ocr_a108_a109_sandbox_manager.py:151: KeyError: 'used_cpu_cores'
+E   OSError: [Errno 9] Bad file descriptor
+/usr/local/lib/python3.12/site-packages/_pytest/capture.py:547: OSError: [Errno 9] Bad file descriptor
+E   OSError: [Errno 9] Bad file descriptor
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:675 [firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for vm-6b8b51c6
+/usr/local/lib/python3.12/site-packages/_pytest/capture.py:547: OSError: [Errno 9] Bad file descriptor
+E   OSError: [Errno 9] Bad file descriptor
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-51ae1601
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:837 [firecracker] seccomp retry denied (SECCOMP_FALLBACK_ALLOWED=false) for vm-51ae1601
+/usr/local/lib/python3.12/site-packages/_pytest/capture.py:547: OSError: [Errno 9] Bad file descriptor
+E   OSError: [Errno 9] Bad file descriptor
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.firecracker_runtime:firecracker_runtime.py:790 [qemu-tcg] Using simulation fallback for VM vm-566baebe
+/usr/local/lib/python3.12/site-packages/_pytest/capture.py:547: OSError: [Errno 9] Bad file descriptor
+=============================== warnings summary ===============================
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_returns_copy_not_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:47: PytestWarning: The test <Function test_returns_copy_not_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_returns_copy_not_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_mutating_returned_dict_cannot_poison_defaults
+  tests/test_ocr_a108_a109_sandbox_manager.py:52: PytestWarning: The test <Function test_mutating_returned_dict_cannot_poison_defaults> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_mutating_returned_dict_cannot_poison_defaults(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_validate_none_does_not_return_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:62: PytestWarning: The test <Function test_validate_none_does_not_return_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_validate_none_does_not_return_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[0]
+  tests/test_ocr_a108_a109_sandbox_manager.py:69: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[0]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[-1]
+  tests/test_ocr_a108_a109_sandbox_manager.py:69: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[-1]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[8]
+  tests/test_ocr_a108_a109_sandbox_manager.py:69: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[8]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[1.5]
+  tests/test_ocr_a108_a109_sandbox_manager.py:69: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[1.5]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[True]
+  tests/test_ocr_a108_a109_sandbox_manager.py:69: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[True]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[None]
+  tests/test_ocr_a108_a109_sandbox_manager.py:69: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[None]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_zero_on_any_key_rejected
+  tests/test_ocr_a108_a109_sandbox_manager.py:78: PytestWarning: The test <Function test_zero_on_any_key_rejected> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_zero_on_any_key_rejected(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_legit_narrowing_and_clamping_keep_working
+  tests/test_ocr_a108_a109_sandbox_manager.py:83: PytestWarning: The test <Function test_legit_narrowing_and_clamping_keep_working> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_legit_narrowing_and_clamping_keep_working(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_unknown_keys_do_not_bypass_validation
+  tests/test_ocr_a108_a109_sandbox_manager.py:93: PytestWarning: The test <Function test_unknown_keys_do_not_bypass_validation> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_unknown_keys_do_not_bypass_validation(self):
+
+tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_denied
+  /usr/local/lib/python3.12/traceback.py:369: RuntimeWarning: coroutine '_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.finalizer.<locals>.async_finalizer' was never awaited
+    return next(itertools.islice(positions_gen, instruction_index // 2, None))
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_ocr_a108_a109_sandbox_manager.py::TestDeltaBasedPersistence::test_failed_flush_keeps_delta_for_retry
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_allowed
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_denied_fails_honestly
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_denied
+FAILED tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_allowed
+ERROR tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_allowed
+ERROR tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_denied_fails_honestly
+ERROR tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_denied
+ERROR tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_allowed
+5 failed, 34 passed, 13 warnings, 4 errors in 10.54s

@@ -21,6 +21,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
@@ -40,6 +41,15 @@ EGRESS_SOURCE = "cube_egress"
 # for the access record (CubeEgress/lua/audit.lua build_record)
 KNOWN_EVENT_TYPES = ("access", "security_event", "tls_handshake")
 _EVENT_ALIASES = {"http_request": "access"}
+
+
+class MalformedEgressRecord(ValueError):
+    """One JSONL line whose shape cannot be mapped to an audit row (A81).
+
+    Raised only by the mapping's own shape guards — never by infrastructure — so
+    ``ingest_egress_batch`` can isolate a single unusable line while a genuine
+    failure (database, dedup constraint) keeps propagating to the tailer.
+    """
 
 
 def normalize_event_type(raw: object) -> str:
@@ -68,6 +78,57 @@ def _clean(mapping: dict) -> dict:
     return {k: v for k, v in mapping.items() if v is not None}
 
 
+def _section(record: dict, key: str) -> dict:
+    """One documented sub-object of the line: absent is fine, wrong type is not.
+
+    ``EgressEntry.record`` is an unconstrained ``dict``, so a sub-object that
+    arrived as a string/number means this line is not the schema this mapper
+    reads. Guessing past it would file a *plausible-looking* audit row for data
+    nobody verified — the funnel would rather drop the line and say so (A81).
+    """
+    value = record.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise MalformedEgressRecord(
+            f"{key} must be a JSON object, got {type(value).__name__}"
+        )
+    return value
+
+
+def _str_list(value: object, field: str) -> list[str]:
+    """A string list destined for ``",".join``; any other shape is rejected, not coerced."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise MalformedEgressRecord(
+            f"{field} must be a list of strings, got {type(value).__name__}"
+        )
+    bad = next((item for item in value if not isinstance(item, str)), None)
+    if bad is not None:
+        raise MalformedEgressRecord(
+            f"{field} must contain only strings, got a {type(bad).__name__} element"
+        )
+    return value
+
+
+def _str(value: object, field: str) -> str | None:
+    """A value destined for a typed ``audit_logs`` column (ip_address, user_agent)."""
+    if value is None or isinstance(value, str):
+        return value
+    raise MalformedEgressRecord(f"{field} must be a string, got {type(value).__name__}")
+
+
+def _shape_hint(payload: object) -> str:
+    """Field names of a rejected line — never its values.
+
+    Provenance (node/file/offset/line_no) plus these names is enough to find the
+    original bytes in the node's own JSONL; copying egress payloads into the
+    control-plane log would be a second, unredacted store of the same data.
+    """
+    return str(sorted(payload)) if isinstance(payload, dict) else type(payload).__name__
+
+
 def map_egress_record(
     record: dict,
     node_id: str,
@@ -84,17 +145,21 @@ def map_egress_record(
     encryption_key_id; cube-specific fields (sni, tls result, upstream
     failure, provenance, redacted bodies) live in the detail JSON.
     """
-    sandbox = record.get("sandbox") or {}
-    conn = record.get("conn") or {}
-    tls = record.get("tls") or {}
-    http = record.get("http") or {}
-    policy = record.get("policy") or {}
-    creds = record.get("credentials") or {}
-    security = record.get("security") or {}
+    if not isinstance(record, dict):
+        raise MalformedEgressRecord(
+            f"record must be a JSON object, got {type(record).__name__}"
+        )
+    sandbox = _section(record, "sandbox")
+    conn = _section(record, "conn")
+    tls = _section(record, "tls")
+    http = _section(record, "http")
+    policy = _section(record, "policy")
+    creds = _section(record, "credentials")
+    security = _section(record, "security")
 
     event_type = normalize_event_type(record.get("event"))
     rule_id = policy.get("matched_rule")
-    secret_ids = creds.get("secret_ids") or []
+    secret_ids = _str_list(creds.get("secret_ids"), "credentials.secret_ids")
     upstream_failed = bool(security.get("upstream_status") is not None)
 
     detail = _clean(
@@ -153,8 +218,8 @@ def map_egress_record(
         "action": f"{EGRESS_SOURCE}.{event_type}",
         "resource_type": "egress",
         "resource_id": str(rule_id) if rule_id not in (None, "") else None,
-        "ip_address": sandbox.get("src_ip"),
-        "user_agent": http.get("user_agent"),
+        "ip_address": _str(sandbox.get("src_ip"), "sandbox.src_ip"),
+        "user_agent": _str(http.get("user_agent"), "http.user_agent"),
         "detail": detail,
         "timestamp": _parse_ts(record.get("ts")),
     }
@@ -252,6 +317,51 @@ async def _anchor_batch(db: AsyncSession, entries: list[AuditLog], node_id: str)
         await db.commit()
 
 
+async def _claim_dedup_key(
+    db: AsyncSession,
+    node_id: str,
+    file_name: str,
+    offset: int,
+    line_no: int,
+) -> bool:
+    """Insert one idempotency key; False when a racing writer already holds it.
+
+    ``ingest_egress_batch``'s pre-check is a separate SELECT from this INSERT while
+    ``uq_cube_egress_dedup_key`` is UNIQUE, and the tailer delivers at-least-once, so two
+    replicas (or two batches) can pass the pre-check for the same line (A120). Without a
+    guard the loser's IntegrityError escapes through the batch-end commit and takes every
+    other line of the batch — plus its audit row — down with it. The INSERT gets its own
+    SAVEPOINT because ``db.rollback()`` would expire everything the request session still
+    holds, and only a *visible* winner row is treated as a duplicate: any other integrity
+    failure keeps propagating instead of silently dropping the line.
+    """
+    try:
+        async with db.begin_nested():
+            db.add(
+                CubeEgressDedup(
+                    node_id=node_id, file_name=file_name, offset=offset, line_no=line_no
+                )
+            )
+            await db.flush()
+    except IntegrityError:
+        winner = await db.execute(
+            select(CubeEgressDedup.id).where(
+                CubeEgressDedup.node_id == node_id,
+                CubeEgressDedup.file_name == file_name,
+                CubeEgressDedup.offset == offset,
+                CubeEgressDedup.line_no == line_no,
+            )
+        )
+        if winner.first() is None:
+            raise
+        logger.debug(
+            "[cube_egress] dedup race lost for %s/%s:%s:%s; counting as duplicate",
+            node_id, file_name, offset, line_no,
+        )
+        return False
+    return True
+
+
 async def ingest_egress_batch(
     db: AsyncSession,
     node_id: str,
@@ -261,17 +371,32 @@ async def ingest_egress_batch(
     """Dedup + store + anchor one tailer batch.
 
     entries: [{"offset": int, "line_no": int, "record": dict}, ...]
-    Returns {"received": n, "duplicates": m, "stored": k}.
+    Returns {"received": n, "duplicates": m, "stored": k}.  Lines that cannot be
+    mapped are dropped one by one and disclosed through the ``malformed`` counter
+    plus a WARNING carrying their provenance (A81); the response body keeps its
+    three keys because the tailer contract pins them.
     """
     from app.core.metrics import record_cube_egress_lines
 
     received = len(entries)
     duplicates = 0
+    malformed = 0
     stored: list[AuditLog] = []
     for entry in entries:
-        offset = int(entry["offset"])
-        line_no = int(entry["line_no"])
-        record = entry["record"] or {}
+        try:
+            offset = int(entry["offset"])
+            line_no = int(entry["line_no"])
+            record = entry["record"] or {}
+        except (KeyError, TypeError, ValueError) as exc:
+            # Envelope itself unusable — no provenance beyond the batch, so say that too.
+            malformed += 1
+            record_cube_egress_lines("malformed")
+            logger.warning(
+                "[cube_egress] dropped unusable entry envelope node=%s file=%s "
+                "reason=%s: %s; entry_keys=%s",
+                node_id, file_name, type(exc).__name__, exc, _shape_hint(entry),
+            )
+            continue
         existing = await db.execute(
             select(CubeEgressDedup.id).where(
                 CubeEgressDedup.node_id == node_id,
@@ -284,12 +409,36 @@ async def ingest_egress_batch(
             duplicates += 1
             record_cube_egress_lines("duplicate")
             continue
-        mapped = map_egress_record(record, node_id, file_name, offset, line_no)
-        db.add(
-            CubeEgressDedup(
-                node_id=node_id, file_name=file_name, offset=offset, line_no=line_no
+        if not await _claim_dedup_key(db, node_id, file_name, offset, line_no):
+            duplicates += 1
+            record_cube_egress_lines("duplicate")
+            continue
+        try:
+            mapped = map_egress_record(record, node_id, file_name, offset, line_no)
+        except (MalformedEgressRecord, AttributeError, TypeError, ValueError) as exc:
+            # A81: one unmappable line used to escape through the batch-end commit and
+            # 500 the whole POST, losing every other line of the batch — and because the
+            # node tailer only advances its watermark on 2xx
+            # (deploy/cube-node/audit_tailer.py), that one line blocked the file's whole
+            # audit stream. Dropping it is only acceptable if it stays *visible*: counted,
+            # warned, with the coordinates needed to recover the line from the node.
+            #
+            # Trade-off, chosen deliberately: _claim_dedup_key already consumed this
+            # line's idempotency key, so a redelivery counts it as a duplicate instead of
+            # re-mapping it. map_egress_record is a pure function of the line, so a retry
+            # can only fail identically; leaving the key unclaimed would turn one known-bad
+            # line into an unbounded warning loop with no chance of recovery. Recovery is
+            # an explicit operator action: fix the mapping (or the producer), delete that
+            # one cube_egress_dedup row, replay the file.
+            malformed += 1
+            record_cube_egress_lines("malformed")
+            logger.warning(
+                "[cube_egress] dropped unmappable egress line node=%s file=%s "
+                "offset=%s line_no=%s reason=%s: %s; record_keys=%s",
+                node_id, file_name, offset, line_no,
+                type(exc).__name__, exc, _shape_hint(record),
             )
-        )
+            continue
         audit_entry = await audit_service.log(
             db,
             action=mapped["action"],

@@ -1,0 +1,307 @@
+........................................................................ [  1%]
+........................................................................ [  3%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+..................F..................................................... [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+...........................s............................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+...................................................FFF.................. [ 44%]
+....................................FFFFFFF............................. [ 46%]
+..............................................................F..FFF..F. [ 48%]
+FF.......................FFF............................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+...........................................................Fs........... [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+.............................ss......................................... [ 96%]
+........................................................................ [ 98%]
+................................................................         [100%]/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/unraisableexception.py:33: RuntimeWarning: coroutine 'test_run_does_not_pretend_when_bridge_cannot_start.<locals>._work' was never awaited
+  gc.collect()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+
+=================================== FAILURES ===================================
+E   AssertionError: stdout:
+      pinned sha: 9b75d33907ed7336b1eef73a935ae2d1990d9b35 (source: manifest/_VERSION/fallback)
+      upstream source: /home/<user>/Documents/workspace/CubeSandbox (work-copy)
+      generating 7 protos: cubebox/v1/cubebox.proto errorcode/v1/errorcode.proto images/v1/images.proto snapshot/v1/snapshot.proto volumeplugin/v1/volumeplugin.proto types/v1/descriptor.proto types/v1/images.proto
+      
+      stderr:
+      ERROR: protoc 未产出: services/cubebox/v1/cubebox.proto_pb2.py services/cubebox/v1/cubebox.proto_pb2_grpc.py services/errorcode/v1/errorcode.proto_pb2.py services/errorcode/v1/errorcode.proto_pb2_grpc.py services/images/v1/images.proto_pb2.py services/images/v1/images.proto_pb2_grpc.py services/snapshot/v1/snapshot.proto_pb2.py services/snapshot/v1/snapshot.proto_pb2_grpc.py services/volumeplugin/v1/volumeplugin.proto_pb2.py services/volumeplugin/v1/volumeplugin.proto_pb2_grpc.py types/v1/descriptor.proto_pb2.py types/v1/descriptor.proto_pb2_grpc.py types/v1/images.proto_pb2.py types/v1/images.proto_pb2_grpc.py
+      
+    assert 3 == 0
+     +  where 3 = CompletedProcess(args=['bash', '/home/<user>/Documents/workspace/sandbox/scripts/gen-cube-stubs.sh'], returncode=3, st...r.proto_pb2.py types/v1/descriptor.proto_pb2_grpc.py types/v1/images.proto_pb2.py types/v1/images.proto_pb2_grpc.py\n').returncode
+/home/<user>/Documents/workspace/sandbox/tests/test_cube_upstream_check.py:243: AssertionError: stdout:
+E   AssertionError: api_key_prefix 'cds-conn-XUkRt3' is 15 chars, column width is 8 — PostgreSQL rejects this insert (A6)
+    assert 15 <= 8
+     +  where 15 = len('cds-conn-XUkRt3')
+     +    where 'cds-conn-XUkRt3' = <app.models.connector.Connector object at 0x76101a8da650>.api_key_prefix
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a06_connector_key_prefix.py:46: AssertionError: api_key_prefix 'cds-conn-XUkRt3' is 15 chars, column width is 8 — PostgreSQL rejects this insert (A6)
+E   AssertionError: rotated api_key_prefix 'cds-conn-31I-FJ' overflows varchar(8)
+    assert 15 <= 8
+     +  where 15 = len('cds-conn-31I-FJ')
+     +    where 'cds-conn-31I-FJ' = <app.models.connector.Connector object at 0x76101a7a5040>.api_key_prefix
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a06_connector_key_prefix.py:67: AssertionError: rotated api_key_prefix 'cds-conn-31I-FJ' overflows varchar(8)
+E   AssertionError: assert ('cds-conn-PGLk73' and 0 > 0)
+     +  where 0 = <built-in method find of str object at 0x76101a7c2cd0>('cds-conn-PGLk73')
+     +    where <built-in method find of str object at 0x76101a7c2cd0> = 'cds-conn-PGLk73yAsjI3zvadjVkCSFkKmZoC8Gpvy78LdLLBZEw'.find
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a06_connector_key_prefix.py:86: AssertionError: assert ('cds-conn-PGLk73' and 0 > 0)
+E   AssertionError: 验真页必须读后端真实字段 result.verified
+    assert 'result.verified' in "\nasync function loadAnchors() {\n    try {\n        const data = await API.get('/api/v1/audit/records');\n        co...le_root || '-')}</code></p>\n        </div>`;\n    } catch (e) { alert('验证失败: ' + e.message); }\n}\n\nloadAnchors();\n"
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:40: AssertionError: 验真页必须读后端真实字段 result.verified
+E   AssertionError: backend/backend_label（联盟链 vs 本地 PG）必须上屏
+    assert 'backend_label' in "\nasync function loadAnchors() {\n    try {\n        const data = await API.get('/api/v1/audit/records');\n        co...le_root || '-')}</code></p>\n        </div>`;\n    } catch (e) { alert('验证失败: ' + e.message); }\n}\n\nloadAnchors();\n"
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:45: AssertionError: backend/backend_label（联盟链 vs 本地 PG）必须上屏
+E   AssertionError: 后端只吃 record_id，不得引导用户输 tx_hash
+    assert 'tx_hash 进行验证' not in '<!DOCTYPE h...dy>\n</html>'
+      
+      'tx_hash 进行验证' is contained here:
+        older="输入 tx_hash 进行验证" style="flex:1;">
+      ?           ++++++++++++
+                <button class="btn btn-primary" onclick="verifyTx()">验证交易</button>
+            </div>
+            <div id="verify-result"></div>...
+      
+      ...Full output truncated (64 lines hidden), use '-vv' to show
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:50: AssertionError: 后端只吃 record_id，不得引导用户输 tx_hash
+E   AssertionError: 错误提示必须固定文案，不得把 API.get 拼出的后端响应原文透传到页面
+    assert ("'验证失败: ' + e.message" not in '\nasync fun...Anchors();\n'
+      
+      "'验证失败: ' + e.message" is contained here:
+        ) { alert('验证失败: ' + e.message); }
+        }
+        
+        loadAnchors();)
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:56: AssertionError: 错误提示必须固定文案，不得把 API.get 拼出的后端响应原文透传到页面
+E   AssertionError: <div class="card" style="background:var(--bg);margin-top:12px;">
+                  <p><strong>验证结果:</strong> <span class="badge badge-danger">失败</span></p>
+                  <p><strong>Record ID:</strong> <code>rec-1</code></p>
+                  <p><strong>Merkle Root:</strong> <code>root-1</code></p>
+              </div>
+    assert ('badge-success' in '<div class="card" style="background:var(--bg);margin-top:12px;">\n            <p><strong>验证结果:</strong> <span class="...</strong> <code>rec-1</code></p>\n            <p><strong>Merkle Root:</strong> <code>root-1</code></p>\n        </div>')
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:136: AssertionError: <div class="card" style="background:var(--bg);margin-top:12px;">
+E   assert '未找到与该 tx_hash 匹配的锚定记录' in '<div class="card" style="background:var(--bg);margin-top:12px;">\n            <p><strong>验证结果:</strong> <span class="...</strong> <code>rec-1</code></p>\n            <p><strong>Merkle Root:</strong> <code>root-2</code></p>\n        </div>'
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:151: assert '未找到与该 tx_hash 匹配的锚定记录' in '<div class="card" style="background:var(--bg);margin-top:12px;">\n            <p><strong>验证结果:</strong> <span class="...</strong> <code>rec-1</code></p>\n            <p><strong>Merkle Root:</strong> <code>root-2</code></p>\n        </div>'
+E   AssertionError: 后端错误响应原文被透传上屏: {"els": {"#tx-hash": {"innerHTML": "", "textContent": "", "style": {}, "value": "rec-1"}, "#anchors-table": {"innerHTML": "<tr><td colspan=\"5\" class=\"empty\">加载失败: 500: {&quot;detail&quot;:{&quot;code&quot;:&quot;HTTP_400&quot;,&quot;message&quot;:&quot;&lt;img src=x onerror=alert(1)&gt;&quot;}}</td></tr>", "textContent": "", "style": {}, "value": ""}}, "alerts": ["验证失败: 500: {\"detail\":{\"code\":\"HTTP_400\",\"message\":\"<img src=x onerror=alert(1)>\"}}"]}
+    assert 'onerror' not in '{"els": {"#...(1)>\\"}}"]}'
+      
+      'onerror' is contained here:
+        img src=x onerror=alert(1)&gt;&quot;}}</td></tr>", "textContent": "", "style": {}, "value": ""}}, "alerts": ["验证失败: 500: {\"detail\":{\"code\":\"HTTP_400\",\"message\":\"<img src=x onerror=alert(1)>\"}}"]}
+      ?           +++++++
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a134_verify_page_contract.py:160: AssertionError: 后端错误响应原文被透传上屏: {"els": {"#tx-hash": {"innerHTML": "", "textContent": "", "style": {}, "value": "rec-1"}, "#anchors-table": {"innerHTML": "<tr><td colspan=\"5\" class=\"empty\">加载失败: 500: {&quot;detail&quot;:{&quot;code&quot;:&quot;HTTP_400&quot;,&quot;message&quot;:&quot;&lt;img src=x onerror=alert(1)&gt;&quot;}}</td></tr>", "textContent": "", "style": {}, "value": ""}}, "alerts": ["验证失败: 500: {\"detail\":{\"code\":\"HTTP_400\",\"message\":\"<img src=x onerror=alert(1)>\"}}"]}
+E   AssertionError: activation must read the contract row FOR UPDATE: concurrent activations otherwise both observe `signed` and double-allocate the DP budget + double-fulfil (A19). Captured: SELECT contracts.id, contracts.contract_no, contracts.contract_type, contracts.status, contracts.provider_id, contracts.buyer_id, contracts.
+    assert False
+     +  where False = any(<generator object test_activation_reads_the_contract_row_with_a_lock.<locals>.<genexpr> at 0x76100e2aa500>)
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a19_contract_activate_lock.py:124: AssertionError: activation must read the contract row FOR UPDATE: concurrent activations otherwise both observe `signed` and double-allocate the DP budget + double-fulfil (A19). Captured: SELECT contracts.id, contracts.contract_no, contracts.contract_type, contracts.status, contracts.provider_id, contracts.buyer_id, contracts.
+E   AssertionError: an unbound release must be refused, not served with default caps: got 200 -> {'success': True, 'output_format': 'json', 'row_count': 5, 'truncated': False, 'output_data': '[{"x": 0}, {"x": 1}, {"x": 2}, {"x": 3}, {"x": 4}]', 'findings': [], 'security_report': {'passed': True, 'blocked': False, 'stage_results': {'scene_routing': True, 'format_validation': True, 'dlp_scan': True, 'data_reconstruction': True, 'k_anonymity': True, 'differential_privacy': True, 'watermark': True, 'signature': True, 'final_approval': True}, 'findings': [], 'findings_count': 0, 'severities': [], 'dp_applied': False, 'watermark': '95a9e47427410482', 'signature': 'd19626f5d048b79529f7d6e0cf4941ae91e117d98896dd11c0e4f3166e5daba14512130e438e3e7c0845267108d11d2a4678c69eaf7b1e783fd13fe1fd14c105', 'not_evaluated': ['data_reconstruction', 'k_anonymity'], 'degraded': []}, 'watermark': '95a9e47427410482', 'signature': 'd19626f5d048b79529f7d6e0cf4941ae91e117d98896dd11c0e4f3166e5daba14512130e438e3e7c0845267108d11d2a4678c69eaf7b1e783fd13fe1fd14c105', 'error': None, 'empty_output': False}
+    assert 200 == 403
+     +  where 200 = <Response [200 OK]>.status_code
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a21_output_release_gate.py:106: AssertionError: an unbound release must be refused, not served with default caps: got 200 -> {'success': True, 'output_format': 'json', 'row_count': 5, 'truncated': False, 'output_data': '[{"x": 0}, {"x": 1}, {"x": 2}, {"x": 3}, {"x": 4}]', 'findings': [], 'security_report': {'passed': True, 'blocked': False, 'stage_results': {'scene_routing': True, 'format_validation': True, 'dlp_scan': True, 'data_reconstruction': True, 'k_anonymity': True, 'differential_privacy': True, 'watermark': True, 'signature': True, 'final_approval': True}, 'findings': [], 'findings_count': 0, 'severities': [], 'dp_applied': False, 'watermark': '95a9e47427410482', 'signature': 'd19626f5d048b79529f7d6e0cf4941ae91e117d98896dd11c0e4f3166e5daba14512130e438e3e7c0845267108d11d2a4678c69eaf7b1e783fd13fe1fd14c105', 'not_evaluated': ['data_reconstruction', 'k_anonymity'], 'degraded': []}, 'watermark': '95a9e47427410482', 'signature': 'd19626f5d048b79529f7d6e0cf4941ae91e117d98896dd11c0e4f3166e5daba14512130e438e3e7c0845267108d11d2a4678c69eaf7b1e783fd13fe1fd14c105', 'error': None, 'empty_output': False}
+E   AssertionError: {"success":true,"output_format":"csv","row_count":1,"truncated":false,"output_data":"x\r\n1\r\n","findings":[],"security_report":{"passed":true,"blocked":false,"stage_results":{"scene_routing":true,"format_validation":true,"dlp_scan":true,"data_reconstruction":true,"k_anonymity":true,"differential_privacy":true,"watermark":true,"signature":true,"final_approval":true},"findings":[],"findings_count":0,"severities":[],"dp_applied":false,"watermark":"1e8ed0e75a7b80e6","signature":"71e5d484bdbc8b133ad9e00421ccff803a65f28ff7896d386d3d622e469fa24d69835084bc6a999a046854b67497fd4946c66c0097c69646895e318e1ad7b377","not_evaluated":["data_reconstruction","k_anonymity"],"degraded":[]},"watermark":"1e8ed0e75a7b80e6","signature":"71e5d484bdbc8b133ad9e00421ccff803a65f28ff7896d386d3d622e469fa24d69835084bc6a999a046854b67497fd4946c66c0097c69646895e318e1ad7b377","error":null,"empty_output":false}
+    assert 200 == 404
+     +  where 200 = <Response [200 OK]>.status_code
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a21_output_release_gate.py:131: AssertionError: {"success":true,"output_format":"csv","row_count":1,"truncated":false,"output_data":"x\r\n1\r\n","findings":[],"security_report":{"passed":true,"blocked":false,"stage_results":{"scene_routing":true,"format_validation":true,"dlp_scan":true,"data_reconstruction":true,"k_anonymity":true,"differential_privacy":true,"watermark":true,"signature":true,"final_approval":true},"findings":[],"findings_count":0,"severities":[],"dp_applied":false,"watermark":"1e8ed0e75a7b80e6","signature":"71e5d484bdbc8b133ad9e00421ccff803a65f28ff7896d386d3d622e469fa24d69835084bc6a999a046854b67497fd4946c66c0097c69646895e318e1ad7b377","not_evaluated":["data_reconstruction","k_anonymity"],"degraded":[]},"watermark":"1e8ed0e75a7b80e6","signature":"71e5d484bdbc8b133ad9e00421ccff803a65f28ff7896d386d3d622e469fa24d69835084bc6a999a046854b67497fd4946c66c0097c69646895e318e1ad7b377","error":null,"empty_output":false}
+E   assert 200 == 404
+     +  where 200 = <Response [200 OK]>.status_code
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a21_output_release_gate.py:149: assert 200 == 404
+E   assert 200 == 404
+     +  where 200 = <Response [200 OK]>.status_code
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a21_output_release_gate.py:204: assert 200 == 404
+E   AssertionError: claims must be kept bounded by a cap
+    assert (False)
+     +  where False = isinstance(None, int)
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a21_output_release_gate.py:235: AssertionError: claims must be kept bounded by a cap
+E   KeyError: 'epsilon_allocated'
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a21_output_release_gate.py:260: KeyError: 'epsilon_allocated'
+E   AssertionError: 校验失败但文案仍宣称通过: '本地防篡改日志校验通过（非联盟链上链，见 backend 标注）'
+    assert '校验通过' not in '本地防篡改日志校验通过... backend 标注）'
+      
+      '校验通过' is contained here:
+        本地防篡改日志校验通过（非联盟链上链，见 backend 标注）
+      ?        ++++
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.blockchain_adapter:blockchain_adapter.py:456 [Blockchain] Failed to persist anchor c915068a-a25a-4920-b607-38f6c5f5788f: (raised as a result of Query-invoked autoflush; consider using a session.no_autoflush block if this flush is occurring prematurely)
+(sqlite3.OperationalError) no such table: blockchain_anchors
+[SQL: INSERT INTO blockchain_anchors (id, data_hash, backend, tx_hash, block_number, confirmed, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING created_at]
+[parameters: ('c915068aa25a4920b60738f6c5f5788f', '4d4d1ab076a9fbd1e05ab9ae64de24c37ce0518c59adea51b7efcc5d15775d74', 'pg_append_only', '91550f198745787bca80968e075969e47e08499097af2353269c258f2c9a228c', None, 1, '{"record_count": 2, "anchored_by": "49344617-c20e-4df1-9657-a53da838ea78", "record_ids": ["755af769-8b35-4c12-ac88-ce27609feed8", "95623dec-d0ab-4755 ... (35 characters truncated) ...  "91550f198745787bca80968e075969e47e08499097af2353269c258f2c9a228c", "prev_hash": "bba904729c11a86f805cb9232ae786c0deeae575f562a8a46b307acd6d773ae2"}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a5_audit_anchor_integrity.py:73: AssertionError: 校验失败但文案仍宣称通过: '本地防篡改日志校验通过（非联盟链上链，见 backend 标注）'
+E   AssertionError: {"anchored":2,"merkle_root":"6ac1535785d556a71e0a803b77d10aeee15db63d19a88199eb8831ca2453ee0f","tx_hash":"fe942e8724345ab34b89a49a5cab6023377ce178405ee622af71bef061903599","anchor_id":"eba09dd4-8d03-49c6-9dcb-db6f267e1f53","confirmed":true,"block_number":null,"backend":{"backend":"pg_append_only","backend_label":"本地防篡改追加日志（非联盟链，非区块链上链）","is_consortium_chain":false,"chain_anchoring":"pg-log"}}
+    assert 200 == 409
+     +  where 200 = <Response [200 OK]>.status_code
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.blockchain_adapter:blockchain_adapter.py:456 [Blockchain] Failed to persist anchor f0d3cb03-c265-4f3b-9486-d477585d9ba5: (raised as a result of Query-invoked autoflush; consider using a session.no_autoflush block if this flush is occurring prematurely)
+(sqlite3.OperationalError) no such table: blockchain_anchors
+[SQL: INSERT INTO blockchain_anchors (id, data_hash, backend, tx_hash, block_number, confirmed, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING created_at]
+[parameters: ('f0d3cb03c2654f3b9486d477585d9ba5', 'ab8b2163f34e89a31c110855a4ea6936a946d8ed9c05fcb79f91074db0dd4439', 'pg_append_only', '2e18d93e288f14c5f062c1ce40ea8200a4ee2e106624798a9b6666e37226b157', None, 1, '{"record_count": 2, "anchored_by": "99e9370d-0983-4343-acbe-b833059743d4", "record_ids": ["65b10476-92f3-48e9-b0ef-7c7d81cab491", "8cb64b73-382b-4279 ... (35 characters truncated) ...  "2e18d93e288f14c5f062c1ce40ea8200a4ee2e106624798a9b6666e37226b157", "prev_hash": "91550f198745787bca80968e075969e47e08499097af2353269c258f2c9a228c"}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+ERROR    app.services.blockchain_adapter:blockchain_adapter.py:456 [Blockchain] Failed to persist anchor eba09dd4-8d03-49c6-9dcb-db6f267e1f53: (raised as a result of Query-invoked autoflush; consider using a session.no_autoflush block if this flush is occurring prematurely)
+(sqlite3.OperationalError) no such table: blockchain_anchors
+[SQL: INSERT INTO blockchain_anchors (id, data_hash, backend, tx_hash, block_number, confirmed, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING created_at]
+[parameters: ('eba09dd48d0349c69dcbdb6f267e1f53', 'ab8b2163f34e89a31c110855a4ea6936a946d8ed9c05fcb79f91074db0dd4439', 'pg_append_only', 'fe942e8724345ab34b89a49a5cab6023377ce178405ee622af71bef061903599', None, 1, '{"record_count": 2, "anchored_by": "99e9370d-0983-4343-acbe-b833059743d4", "record_ids": ["65b10476-92f3-48e9-b0ef-7c7d81cab491", "8cb64b73-382b-4279 ... (35 characters truncated) ...  "fe942e8724345ab34b89a49a5cab6023377ce178405ee622af71bef061903599", "prev_hash": "2e18d93e288f14c5f062c1ce40ea8200a4ee2e106624798a9b6666e37226b157"}')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a5_audit_anchor_integrity.py:96: AssertionError: {"anchored":2,"merkle_root":"6ac1535785d556a71e0a803b77d10aeee15db63d19a88199eb8831ca2453ee0f","tx_hash":"fe942e8724345ab34b89a49a5cab6023377ce178405ee622af71bef061903599","anchor_id":"eba09dd4-8d03-49c6-9dcb-db6f267e1f53","confirmed":true,"block_number":null,"backend":{"backend":"pg_append_only","backend_label":"本地防篡改追加日志（非联盟链，非区块链上链）","is_consortium_chain":false,"chain_anchoring":"pg-log"}}
+E   AssertionError: {"code":"HTTP_404","message":"No records found","request_id":"06177a611a8b4426","detail":"No records found"}
+    assert 404 == 422
+     +  where 404 = <Response [404 Not Found]>.status_code
+/home/<user>/Documents/workspace/sandbox/tests/test_ocr_a5_audit_anchor_integrity.py:134: AssertionError: {"code":"HTTP_404","message":"No records found","request_id":"06177a611a8b4426","detail":"No records found"}
+E   PermissionError: json_path must live inside a platform import root (allowed: /tmp/cds-uploads, /tmp/cds-sandbox, /tmp/cds-sandbox-l0, /tmp/cds-storage, /tmp/cds-pipeline, /tmp/cds-duckdb, /tmp/cds-test-sandbox-results)
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.secure_duckdb:secure_duckdb.py:653 [secure-duckdb] session=sm4-roundtrip-test refused json_path outside the import roots: /tmp/pytest-of-kratos/pytest-186/test_register_json_encrypted0/test_data.json
+/home/<user>/Documents/workspace/sandbox/app/services/secure_duckdb.py:657: PermissionError: json_path must live inside a platform import root (allowed: /tmp/cds-uploads, /tmp/cds-sandbox, /tmp/cds-sandbox-l0, /tmp/cds-storage, /tmp/cds-pipeline, /tmp/cds-duckdb, /tmp/cds-test-sandbox-results)
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743: PytestCollectionWarning: cannot collect 'test_session_factory' because it is not a function.
+    def __call__(self, **local_kw: Any) -> _AS:
+
+tests/test_exec_stream.py::test_ticket_single_use_and_protocol_frames
+tests/test_exec_stream.py::test_unknown_session_rejected
+tests/test_exec_stream.py::test_critical_pii_blocks_stream
+tests/test_exec_stream.py::test_ws_ticket_endpoint_requires_auth_and_mints
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_mounts_attached_shared_volumes
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_without_volume_sends_no_binds
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_discloses_and_refuses_when_volume_resolution_fails
+tests/test_exec_stream_shared_volumes.py::test_ticket_consume_is_atomic_under_concurrent_use
+tests/test_jupyter_gateway_isolation.py::TestUnavailablePaths::test_ticket_refused_without_redis
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_exec_stream.py::test_ticket_single_use_and_protocol_frames
+tests/test_exec_stream.py::test_ticket_single_use_and_protocol_frames
+tests/test_exec_stream.py::test_unknown_session_rejected
+tests/test_exec_stream.py::test_critical_pii_blocks_stream
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_mounts_attached_shared_volumes
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_without_volume_sends_no_binds
+tests/test_exec_stream_shared_volumes.py::test_ws_stream_discloses_and_refuses_when_volume_resolution_fails
+tests/test_exec_stream_shared_volumes.py::test_ticket_consume_is_atomic_under_concurrent_use
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/jwt/api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_frontend_api_contract.py::test_frontend_calls_resolve_to_real_routes
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/openapi/utils.py:252: UserWarning: Duplicate Operation ID proxy_api_jupyter__path__delete for function proxy at /home/<user>/Documents/workspace/sandbox/app/api/jupyter_proxy.py
+    warnings.warn(message, stacklevel=1)
+
+tests/test_gpu_tee_runtime.py::TestGPUCCInit::test_initialize_creates_unique_keys
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/sql/compiler.py:7402: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def visit_VARCHAR(self, type_: sqltypes.String, **kw: Any) -> str:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_returns_copy_not_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:43: PytestWarning: The test <Function test_returns_copy_not_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_returns_copy_not_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_mutating_returned_dict_cannot_poison_defaults
+  tests/test_ocr_a108_a109_sandbox_manager.py:48: PytestWarning: The test <Function test_mutating_returned_dict_cannot_poison_defaults> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_mutating_returned_dict_cannot_poison_defaults(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_validate_none_does_not_return_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:58: PytestWarning: The test <Function test_validate_none_does_not_return_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_validate_none_does_not_return_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[0]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[0]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[-1]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[-1]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[8]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[8]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[1.5]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[1.5]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[True]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[True]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[None]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[None]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_zero_on_any_key_rejected
+  tests/test_ocr_a108_a109_sandbox_manager.py:74: PytestWarning: The test <Function test_zero_on_any_key_rejected> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_zero_on_any_key_rejected(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_legit_narrowing_and_clamping_keep_working
+  tests/test_ocr_a108_a109_sandbox_manager.py:79: PytestWarning: The test <Function test_legit_narrowing_and_clamping_keep_working> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_legit_narrowing_and_clamping_keep_working(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_unknown_keys_do_not_bypass_validation
+  tests/test_ocr_a108_a109_sandbox_manager.py:89: PytestWarning: The test <Function test_unknown_keys_do_not_bypass_validation> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_unknown_keys_do_not_bypass_validation(self):
+
+tests/test_ocr_a3_a165_pipeline.py::TestDicomHardFail::test_dicom_strip_failure_exits_nonzero
+  tests/test_ocr_a3_a165_pipeline.py:179: PytestWarning: The test <Function test_dicom_strip_failure_exits_nonzero> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_dicom_strip_failure_exits_nonzero(self, tmp_path: Path):
+
+tests/test_scene_runtime.py::TestFederatedRuntime::test_execute_federation_request_uses_connector
+  /home/<user>/Documents/workspace/sandbox/app/services/sandbox_runtime.py:2900: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(async_dispatch):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_cube_upstream_check.py::test_regen_is_idempotent - Assertio...
+FAILED tests/test_ocr_a06_connector_key_prefix.py::test_registered_connector_prefix_fits_the_column
+FAILED tests/test_ocr_a06_connector_key_prefix.py::test_rotated_connector_prefix_fits_the_column
+FAILED tests/test_ocr_a06_connector_key_prefix.py::test_prefix_still_identifies_its_own_key
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageContractStatic::test_reads_verified_not_valid
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageContractStatic::test_disclosure_fields_rendered
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageContractStatic::test_input_is_record_id_and_urlencoded
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageContractStatic::test_error_path_is_fixed_copy
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageBehavior::test_verified_true_shows_pass_plus_disclosure
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageBehavior::test_verified_false_shows_fail
+FAILED tests/test_ocr_a134_verify_page_contract.py::TestVerifyPageBehavior::test_request_failure_uses_fixed_copy
+FAILED tests/test_ocr_a19_contract_activate_lock.py::test_activation_reads_the_contract_row_with_a_lock
+FAILED tests/test_ocr_a21_output_release_gate.py::test_gateway_without_session_id_is_refused_and_audited
+FAILED tests/test_ocr_a21_output_release_gate.py::test_gateway_rejects_an_ad_hoc_session_id
+FAILED tests/test_ocr_a21_output_release_gate.py::test_gateway_rejects_a_nonexistent_uuid_session
+FAILED tests/test_ocr_a21_output_release_gate.py::test_inspect_rejects_a_nonexistent_uuid_session
+FAILED tests/test_ocr_a21_output_release_gate.py::test_owner_claim_store_is_bounded
+FAILED tests/test_ocr_a21_output_release_gate.py::test_dp_budget_ad_hoc_flow_still_works
+FAILED tests/test_ocr_a5_audit_anchor_integrity.py::test_verification_note_follows_outcome
+FAILED tests/test_ocr_a5_audit_anchor_integrity.py::test_reanchor_does_not_steal_anchored_members
+FAILED tests/test_ocr_a5_audit_anchor_integrity.py::test_anchor_rejects_oversized_batch
+FAILED tests/test_sm4_duckdb_roundtrip.py::TestMultiSourceEncrypted::test_register_json_encrypted
+22 failed, 3710 passed, 5 skipped, 35 warnings in 946.10s (0:15:46)

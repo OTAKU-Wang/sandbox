@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, cast, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -53,12 +53,27 @@ def _contract_references_product(contract: Contract, product_id: uuid.UUID) -> b
     return str(product_id) in {str(pid) for pid in (contract.product_ids or [])}
 
 
+def _product_reference_predicate(product_id: uuid.UUID):
+    """把「合约是否引用该 product」的判断下推到 SQL。
+
+    product_ids 是通用 JSON 列（PG 上为 JSON，SQLite 上为 TEXT），仓内没有可复用的
+    JSON 容器谓词写法，所以统一 cast 成文本后做不区分大小写的 LIKE：JSON 文本里数组
+    元素总是带双引号，`%"<uuid>"%` 只能整元素命中，不会命中前缀（已实测）。
+
+    它只是**超集过滤器**：最终判据仍是 _contract_references_product 的精确比对，所以
+    两种方言的 JSON 文本渲染若有差异，只会多取行、绝不会漏取行——这条守卫漏一行就等于
+    放行删除/归档，不能赌方言行为。
+    """
+    return cast(Contract.product_ids, Text).ilike(f'%"{product_id}"%')
+
+
 async def _contracts_referencing_product(
     db: AsyncSession,
     product_id: uuid.UUID,
     statuses: set[str] | None = None,
 ) -> list[Contract]:
-    query = select(Contract)
+    # A11 同族：旧写法 `select(Contract)` 无界取回整表再在 Python 里过滤。
+    query = select(Contract).where(_product_reference_predicate(product_id))
     if statuses:
         query = query.where(Contract.status.in_(statuses))
     result = await db.execute(query)

@@ -44,7 +44,12 @@ class Certificate(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=CertStatus.ACTIVE.value)
 
     # Certificate data (PEM encoded)
-    serial_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # A214/E2-8: uniqueness has exactly ONE schema source — the named unique
+    # index ``ix_certificates_serial`` (owned by __table_args__ and created by
+    # migration 0000). The column's own ``unique=True`` used to add a second,
+    # anonymous UNIQUE constraint on top of it (revision 0030 drops that
+    # constraint on PostgreSQL); do not reintroduce it.
+    serial_number: Mapped[str] = mapped_column(String(64), nullable=False)
     subject: Mapped[str] = mapped_column(String(512), nullable=False)  # DN
     issuer: Mapped[str] = mapped_column(String(512), nullable=False)   # Issuer DN
     public_key: Mapped[str] = mapped_column(Text, nullable=False)      # SM2 public key (hex)

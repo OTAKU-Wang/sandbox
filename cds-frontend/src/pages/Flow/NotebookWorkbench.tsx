@@ -283,6 +283,7 @@ function NotebookWorkspace({
   const [tab, setTab] = useState<OutputTabKey>('output');
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [disclosureMissing, setDisclosureMissing] = useState(0);
   const [clearedAt, setClearedAt] = useState<string | null>(null);
   const [localLines, setLocalLines] = useState<WorkbenchLogLine[]>([]);
   const [localRun, setLocalRun] = useState<{
@@ -418,6 +419,7 @@ function NotebookWorkspace({
   const downloadSelected = async () => {
     if (!sessionId || !chosenFiles.length) return;
     setDownloading(true);
+    let missing = 0;
     for (const file of chosenFiles) {
       try {
         const { blob, review } = await sandboxApi.downloadFile(sessionId, file.name);
@@ -427,7 +429,22 @@ function NotebookWorkspace({
         link.download = file.name;
         link.click();
         URL.revokeObjectURL(url);
-        if (review?.status === 'redacted') messageApi.warning(`${file.name}：输出审查已脱敏后才放行`);
+        if (review?.status === 'redacted') {
+          messageApi.warning(`${file.name}：输出审查已脱敏后才放行`);
+        } else if (!review) {
+          // A294：X-CDS-Output-Review 没到页面（跨域未 expose_headers）= 审查结果未知；
+          // 页脚写的是「逐个过 T5 输出审查后取回」，这里不出声就是把未知渲染成通过。
+          messageApi.warning(`${file.name}：未读取到输出审查披露（X-CDS-Output-Review），不代表输出已通过审查`);
+          pushLocalLine({
+            at: new Date().toISOString(),
+            text: `${file.name}：未读取到输出审查披露（X-CDS-Output-Review 没到页面）——不代表输出通过了 T5 审查`,
+            tone: 'warn',
+            problem: false,
+          });
+          // 计数交给左栏页脚（FileDirectoryPanel 的 disclosureMissingCount）：
+          // 逐文件的一次性 toast 会消失，页脚口径必须同样不再断言「已过审」。
+          missing += 1;
+        }
       } catch (err) {
         const detail = (err as { detail?: { findings_count?: number } }).detail;
         messageApi.error(
@@ -437,6 +454,7 @@ function NotebookWorkspace({
         );
       }
     }
+    setDisclosureMissing(missing);
     setDownloading(false);
   };
 
@@ -815,6 +833,7 @@ function NotebookWorkspace({
           void downloadSelected();
         }}
         downloading={downloading}
+        disclosureMissingCount={disclosureMissing}
       />
 
       <div className="nbw-right">

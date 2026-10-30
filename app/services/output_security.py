@@ -59,8 +59,19 @@ def inspection_to_report(result: InspectionResult) -> dict[str, Any]:
         "findings_count": len(result.findings),
         "severities": severities,
         "dp_applied": result.dp_applied,
+        # A192e 报告腿：dp_applied 一个布尔表达不了「剩余 ε 未知」。少了这行，11 个调用点
+        # 只能从 findings 文本里猜预算到底是「核实过确实不够」还是「后端读不到」，
+        # 而把未知压成 dp_applied=False 就是「没有预算」的读数。语义与 dp_applied 无关：
+        # 未核实仍不计账、仍 fail-closed，只是终于能被报告出来。
+        "dp_budget_state": result.dp_budget_state,
         "watermark": result.watermark,
         "signature": result.signature,
+        # A191/A193 续：签名的可审计性是报告的一部分。少了这三个字段，11 个调用点只看
+        # 得到 signature 有没有值，分不清部署密钥与进程内临时密钥，也看不见签名失败时的
+        # 降级摘要（unsigned_digest 不是签名，绝不能顶替 signature）。
+        "signature_key_source": getattr(result, "signature_key_source", None),
+        "signature_public_key": getattr(result, "signature_public_key", None),
+        "unsigned_digest": getattr(result, "unsigned_digest", None),
         "not_evaluated": list(getattr(result, "not_evaluated", []) or []),
         "degraded": list(getattr(result, "degraded", []) or []),
     }

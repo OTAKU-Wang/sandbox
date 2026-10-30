@@ -123,7 +123,10 @@ async def test_health_additive_capability_section(client: AsyncClient):
     assert data["status"] == "ok"
     assert data["service"] == "cds"
     assert data["capability"]["levels"] == list(LEVELS)
-    assert data["capability"]["l2c_planned"] is False  # D-e2e-10: SS-13 M1+M2 shipped
+    # A9: 旧断言钉的是 health_capability_section() 里 all() 死逻辑的产物（永远 False）。
+    # SS-13 M1+M2 已交付不等于 l2c 行全 real —— tee_proof_gate(RT-06) 与
+    # network_policy_hotswap(CB-04) 仍 planned，诚实值是 True。
+    assert data["capability"]["l2c_planned"] is True  # A9 / D-e2e-10
 
 
 @pytest.mark.asyncio
@@ -137,5 +140,9 @@ async def test_capability_matrix_service_module_shape():
     assert tuple(payload["matrix"]) == cm.LEVEL_ORDER
     assert tuple(cm.CAPABILITIES) == CAPABILITIES
     health = cm.health_capability_section()
-    assert health["l2c_planned"] is False  # D-e2e-10: SS-13 M1+M2 shipped
+    assert health["l2c_planned"] is True  # A9: 仍有 planned 格 ⇒ 不得报 False
+    planned = [k for k, v in cm.get_capability_matrix()["matrix"]["l2c"].items()
+               if isinstance(v, dict) and v.get("state") == "planned"]
+    # 钉住「是哪两格还没做完」，而不是只钉一个布尔值：新增/移除 planned 格会在这里显形
+    assert set(planned) == {"tee_proof_gate", "network_policy_hotswap"}
     assert health["baseline"] == cm.MATRIX_BASELINE_DATE

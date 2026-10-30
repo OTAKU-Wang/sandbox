@@ -1,0 +1,162 @@
+........................................................................ [  1%]
+........................................................................ [  3%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+..................F..................................................... [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+.............................................................Fs......... [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+...............................ss....................................... [ 96%]
+........................................................................ [ 98%]
+..................................................................       [100%]/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/unraisableexception.py:33: RuntimeWarning: coroutine 'test_run_does_not_pretend_when_bridge_cannot_start.<locals>._work' was never awaited
+  gc.collect()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+
+=================================== FAILURES ===================================
+E   AssertionError: stdout:
+      pinned sha: 9b75d33907ed7336b1eef73a935ae2d1990d9b35 (source: manifest/_VERSION/fallback)
+      upstream source: /home/<user>/Documents/workspace/CubeSandbox (work-copy)
+      generating 7 protos: cubebox/v1/cubebox.proto errorcode/v1/errorcode.proto images/v1/images.proto snapshot/v1/snapshot.proto volumeplugin/v1/volumeplugin.proto types/v1/descriptor.proto types/v1/images.proto
+      
+      stderr:
+      ERROR: protoc 未产出: services/cubebox/v1/cubebox.proto_pb2.py services/cubebox/v1/cubebox.proto_pb2_grpc.py services/errorcode/v1/errorcode.proto_pb2.py services/errorcode/v1/errorcode.proto_pb2_grpc.py services/images/v1/images.proto_pb2.py services/images/v1/images.proto_pb2_grpc.py services/snapshot/v1/snapshot.proto_pb2.py services/snapshot/v1/snapshot.proto_pb2_grpc.py services/volumeplugin/v1/volumeplugin.proto_pb2.py services/volumeplugin/v1/volumeplugin.proto_pb2_grpc.py types/v1/descriptor.proto_pb2.py types/v1/descriptor.proto_pb2_grpc.py types/v1/images.proto_pb2.py types/v1/images.proto_pb2_grpc.py
+      
+    assert 3 == 0
+     +  where 3 = CompletedProcess(args=['bash', '/home/<user>/Documents/workspace/sandbox/scripts/gen-cube-stubs.sh'], returncode=3, st...r.proto_pb2.py types/v1/descriptor.proto_pb2_grpc.py types/v1/images.proto_pb2.py types/v1/images.proto_pb2_grpc.py\n').returncode
+/home/<user>/Documents/workspace/sandbox/tests/test_cube_upstream_check.py:243: AssertionError: stdout:
+E   PermissionError: json_path must live inside a platform import root (allowed: /tmp/cds-uploads, /tmp/cds-sandbox, /tmp/cds-sandbox-l0, /tmp/cds-storage, /tmp/cds-pipeline, /tmp/cds-duckdb, /tmp/cds-test-sandbox-results)
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.secure_duckdb:secure_duckdb.py:653 [secure-duckdb] session=sm4-roundtrip-test refused json_path outside the import roots: /tmp/pytest-of-kratos/pytest-218/test_register_json_encrypted0/test_data.json
+/home/<user>/Documents/workspace/sandbox/app/services/secure_duckdb.py:657: PermissionError: json_path must live inside a platform import root (allowed: /tmp/cds-uploads, /tmp/cds-sandbox, /tmp/cds-sandbox-l0, /tmp/cds-storage, /tmp/cds-pipeline, /tmp/cds-duckdb, /tmp/cds-test-sandbox-results)
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743: PytestCollectionWarning: cannot collect 'test_session_factory' because it is not a function.
+    def __call__(self, **local_kw: Any) -> _AS:
+
+tests/test_exec_stream.py: 6 warnings
+tests/test_exec_stream_shared_volumes.py: 4 warnings
+tests/test_jupyter_gateway_isolation.py: 1 warning
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_exec_stream.py: 6 warnings
+tests/test_exec_stream_shared_volumes.py: 4 warnings
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/jwt/api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_frontend_api_contract.py::test_frontend_calls_resolve_to_real_routes
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/openapi/utils.py:252: UserWarning: Duplicate Operation ID proxy_api_jupyter__path__post for function proxy at /home/<user>/Documents/workspace/sandbox/app/api/jupyter_proxy.py
+    warnings.warn(message, stacklevel=1)
+
+tests/test_frontend_api_contract.py::test_frontend_calls_resolve_to_real_routes
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/encoders.py:283: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    allowed_keys = set(obj.keys())
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_returns_copy_not_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:43: PytestWarning: The test <Function test_returns_copy_not_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_returns_copy_not_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_mutating_returned_dict_cannot_poison_defaults
+  tests/test_ocr_a108_a109_sandbox_manager.py:48: PytestWarning: The test <Function test_mutating_returned_dict_cannot_poison_defaults> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_mutating_returned_dict_cannot_poison_defaults(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_validate_none_does_not_return_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:58: PytestWarning: The test <Function test_validate_none_does_not_return_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_validate_none_does_not_return_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[0]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[0]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[-1]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[-1]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[8]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[8]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[1.5]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[1.5]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[True]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[True]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[None]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[None]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_zero_on_any_key_rejected
+  tests/test_ocr_a108_a109_sandbox_manager.py:74: PytestWarning: The test <Function test_zero_on_any_key_rejected> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_zero_on_any_key_rejected(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_legit_narrowing_and_clamping_keep_working
+  tests/test_ocr_a108_a109_sandbox_manager.py:79: PytestWarning: The test <Function test_legit_narrowing_and_clamping_keep_working> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_legit_narrowing_and_clamping_keep_working(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_unknown_keys_do_not_bypass_validation
+  tests/test_ocr_a108_a109_sandbox_manager.py:89: PytestWarning: The test <Function test_unknown_keys_do_not_bypass_validation> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_unknown_keys_do_not_bypass_validation(self):
+
+tests/test_ocr_a3_a165_pipeline.py::TestDicomHardFail::test_dicom_strip_failure_exits_nonzero
+  tests/test_ocr_a3_a165_pipeline.py:179: PytestWarning: The test <Function test_dicom_strip_failure_exits_nonzero> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_dicom_strip_failure_exits_nonzero(self, tmp_path: Path):
+
+tests/test_scene_runtime.py::TestFederatedRuntime::test_execute_federation_request_uses_connector
+  /home/<user>/Documents/workspace/sandbox/app/services/sandbox_runtime.py:2900: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(async_dispatch):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_cube_upstream_check.py::test_regen_is_idempotent - Assertio...
+FAILED tests/test_sm4_duckdb_roundtrip.py::TestMultiSourceEncrypted::test_register_json_encrypted
+2 failed, 3733 passed, 4 skipped, 39 warnings in 988.00s (0:16:28)

@@ -1,9 +1,37 @@
 """Tests for output gateway: format conversion, row limiting, policy enforcement."""
 import json
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
 from app.services.output_gateway import OutputGateway, OutputPolicy, OutputFormat, VALID_FORMATS
+
+
+async def _create_bound_session(
+    client: AsyncClient, auth_headers: dict, publish_product
+) -> str:
+    """A session the caller owns — required by /gateway since A21.
+
+    The release endpoint no longer accepts an unbound or ad-hoc session id
+    (that skipped both ownership and the contract allowance), so the API-level
+    cases below must bind to a real sandbox session.
+    """
+    product_resp = await client.post(
+        "/api/v1/data-products",
+        json={"name": f"Gateway Product {uuid.uuid4().hex[:8]}"},
+        headers=auth_headers,
+    )
+    assert product_resp.status_code == 201
+    product_id = product_resp.json()["id"]
+    await publish_product(product_id)
+    session_resp = await client.post(
+        "/api/v1/sandbox-sessions",
+        json={"data_product_id": product_id},
+        headers=auth_headers,
+    )
+    assert session_resp.status_code == 201
+    return session_resp.json()["id"]
 
 
 @pytest.fixture
@@ -147,13 +175,17 @@ def test_default_policy():
 
 
 @pytest.mark.asyncio
-async def test_gateway_api_endpoint(client: AsyncClient, auth_headers: dict):
+async def test_gateway_api_endpoint(
+    client: AsyncClient, auth_headers: dict, publish_product
+):
     """Gateway API endpoint processes output."""
+    session_id = await _create_bound_session(client, auth_headers, publish_product)
     resp = await client.post("/api/v1/output-control/gateway", json={
         "data": [{"x": 1}, {"x": 2}],
         "output_format": "json",
         "max_output_rows": 100,
         "allowed_output_formats": ["json", "csv"],
+        "session_id": session_id,
     }, headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
@@ -162,12 +194,16 @@ async def test_gateway_api_endpoint(client: AsyncClient, auth_headers: dict):
 
 
 @pytest.mark.asyncio
-async def test_gateway_api_format_not_allowed(client: AsyncClient, auth_headers: dict):
+async def test_gateway_api_format_not_allowed(
+    client: AsyncClient, auth_headers: dict, publish_product
+):
     """Gateway API rejects disallowed format."""
+    session_id = await _create_bound_session(client, auth_headers, publish_product)
     resp = await client.post("/api/v1/output-control/gateway", json={
         "data": [{"x": 1}],
         "output_format": "parquet",
         "allowed_output_formats": ["csv"],
+        "session_id": session_id,
     }, headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()

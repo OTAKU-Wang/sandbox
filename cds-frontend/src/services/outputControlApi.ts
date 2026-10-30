@@ -20,6 +20,21 @@ export interface DPNoiseResult {
   sensitivity: number;
 }
 
+/** A192e 三态口径（与后端 InspectionResult.dp_budget_state / GET /dp/budget 同一词汇表）。 */
+export type DPBudgetState = 'sufficient' | 'exhausted' | 'unverified' | 'unallocated';
+
+export interface DPBudgetResult {
+  session_id: string;
+  /**
+   * 后端读不到预算时是 null：剩余量未知。渲染成 0 就是把「无法核实」谎报成
+   * 「没有预算」（与后端 A192e 修的同一个病），所以这里不允许用 number。
+   */
+  epsilon_remaining: number | null;
+  budget_state: DPBudgetState;
+  budget_source: string;
+  budget_authoritative: boolean;
+}
+
 export interface OutputGatewayResult {
   success: boolean;
   output_format: string | null;
@@ -47,10 +62,12 @@ export const outputControlApi = {
     api.post('/output-control/dp/noise', data),
 
   initDPBudget: (sessionId: string, epsilon: number): Promise<{ session_id: string; epsilon_allocated: number }> =>
-    api.post(`/output-control/dp/budget/init?session_id=${sessionId}&epsilon=${epsilon}`),
+    api.post('/output-control/dp/budget/init', undefined, {
+      params: { session_id: sessionId, epsilon },
+    }),
 
-  getDPBudget: (sessionId: string): Promise<{ session_id: string; epsilon_remaining: number }> =>
-    api.get(`/output-control/dp/budget/${sessionId}`),
+  getDPBudget: (sessionId: string): Promise<DPBudgetResult> =>
+    api.get(`/output-control/dp/budget/${encodeURIComponent(sessionId)}`),
 
   processGateway: (data: {
     data: Record<string, unknown>[];

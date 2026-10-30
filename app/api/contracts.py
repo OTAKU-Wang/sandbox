@@ -186,7 +186,15 @@ async def activate_contract(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_business_user),
 ):
-    contract = await contract_service.get_by_id(db, contract_id)
+    # A19: 下面这段是对同一行的「读-改-写」。旧写法走 contract_service.get_by_id（普通
+    # SELECT），两个并发激活（双击 / 客户端重试 / 多副本）会同时读到 `signed`，于是 DP
+    # 隐私预算被分配两次、履约两次（两套沙箱会话）。加行锁后第二个事务阻塞到第一个
+    # 提交，再看到 `active` 并走下面的幂等早退。SQLite（本机/CI 引擎）会丢掉 FOR UPDATE，
+    # 生产 PG 上这个锁才是真挡住的。
+    result = await db.execute(
+        select(Contract).where(Contract.id == contract_id).with_for_update()
+    )
+    contract = result.scalar_one_or_none()
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
     if current_user.id not in (contract.provider_id, contract.buyer_id):

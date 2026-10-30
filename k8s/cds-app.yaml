@@ -6,7 +6,14 @@ metadata:
   labels:
     app: cds-api
 spec:
-  replicas: 2
+  # A302: 单副本。下面的工作区卷在本路径上是 local-path / RWO，2 副本时每个 pod
+  # 写自己那份可写层，读请求打到另一个 pod 就是空盘；要横向扩展必须先把
+  # workspace 换成 ReadWriteMany（helm 路径已如此）。
+  replicas: 1
+  # PVC 单例不能用默认 RollingUpdate：surge pod 因 Multi-Attach / node affinity
+  # 永远停在 ContainerCreating，升级直接卡死。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cds-api
@@ -68,6 +75,11 @@ spec:
                 secretKeyRef:
                   name: cds-secrets
                   key: CDS_JWT_SECRET_KEY
+          envFrom:
+            # A302: 生产启动姿态（validate_security_config 的四个 boot gate）集中在
+            # ConfigMap，保证 k8s 与 prod compose / helm values / remote_deploy.sh 不漂移。
+            - configMapRef:
+                name: cds-app-env
           readinessProbe:
             httpGet:
               path: /health
@@ -87,6 +99,42 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "2000m"
+          # A302/A285: 代码声明的运行时写入路径全部落卷。之前本 Deployment 一个 volume
+          # 都没有，所有写入只存在于容器可写层，pod 重建即丢：会话工作区、对象存储
+          # 本地原件（库里 ready 指向空盘）、出口审计（retention 0=永久，丢盘=审计断链）、
+          # 共享卷根、Cube 结果目录。路径与 prod compose 的六个卷一致。
+          volumeMounts:
+            - name: api-sandbox
+              mountPath: /tmp/cds-sandbox
+            - name: api-sandbox-l0
+              mountPath: /tmp/cds-sandbox-l0
+            - name: api-storage
+              mountPath: /tmp/cds-storage
+            - name: api-egress-audit
+              mountPath: /data/egress-audit
+            - name: api-shared-volumes
+              mountPath: /data/shared-volumes
+            - name: api-cube-results
+              mountPath: /var/lib/cds/sandbox-results
+      volumes:
+        - name: api-sandbox
+          persistentVolumeClaim:
+            claimName: cds-api-sandbox-pvc
+        - name: api-sandbox-l0
+          persistentVolumeClaim:
+            claimName: cds-api-sandbox-l0-pvc
+        - name: api-storage
+          persistentVolumeClaim:
+            claimName: cds-api-storage-pvc
+        - name: api-egress-audit
+          persistentVolumeClaim:
+            claimName: cds-api-egress-audit-pvc
+        - name: api-shared-volumes
+          persistentVolumeClaim:
+            claimName: cds-api-shared-volumes-pvc
+        - name: api-cube-results
+          persistentVolumeClaim:
+            claimName: cds-api-cube-results-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -158,3 +206,148 @@ spec:
       targetPort: 80
       nodePort: 30081
   type: NodePort
+---
+# A302: 生产启动姿态。本文件不设 CDS_DEBUG=true，Settings.DEBUG 默认 false，
+# validate_security_config() 就把本路径当生产：四个开关留在代码默认值时它直接
+# RAISE，cds-api 依旧在 k3s 上 CrashLoop。四个值与 docker-compose.prod.yml /
+# helm values / remote_deploy.sh 逐字节一致（姿态同步是测试门）。
+#
+# 遗留要求（同一个 boot gate 集，不属于本门但是真约束）：生产姿态还要求
+# cds-secrets 里提供 CDS_COLUMN_ENCRYPTION_KEY（16 字节，`openssl rand -hex 16`）
+# 与 CDS_MFA_SECRET_ENCRYPTION_KEY；两者为空时 validate_security_config 仍然拒绝
+# 启动 —— 密钥不能进 ConfigMap，所以只能记在这里。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cds-app-env
+  namespace: cds-system
+  labels:
+    app: cds-api
+data:
+  CDS_DEBUG: "false"
+  CDS_SECCOMP_FALLBACK_ALLOWED: "false"
+  CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
+  CDS_SM3_FALLBACK_ALLOWED: "false"
+  CDS_FEDERATION_JWT_KEY_REQUIRED: "true"
+---
+# Prod 姿态下 main.py 跳过 create_all，schema 只能由 Alembic 建；没有这一步
+# cds-api 会在空库上起来然后 500。与 deploy/e2e-remote/remote_deploy.sh 的
+# “migrate schema” 步骤一致：只给 CDS_DATABASE_URL，跑 `alembic upgrade head`。
+# `kubectl apply` 不重建已存在的 Job：重跑迁移请先 `kubectl delete job cds-migrate -n cds-system`。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cds-migrate
+  namespace: cds-system
+  labels:
+    app: cds-migrate
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: cds-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: cds-api:latest
+          imagePullPolicy: Never  # k3s 本地导入的镜像，同 cds-api Deployment
+          command: ["python", "-m", "alembic", "upgrade", "head"]
+          env:
+            - name: CDS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cds-secrets
+                  key: CDS_DATABASE_URL
+            - name: CDS_DEBUG
+              value: "false"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+# A302: api 的六个运行时写入路径对应的 PVC（单节点 local-path + RWO +
+# replicas:1 + strategy Recreate，三者互相成立）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-sandbox-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-sandbox-l0-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-storage-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+# 出口审计日志：retention 0=永久，与其他卷不同，这里的丢失是不可逆的。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-egress-audit-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-shared-volumes-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cds-api-cube-results-pvc
+  namespace: cds-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi

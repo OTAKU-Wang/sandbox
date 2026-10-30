@@ -23,7 +23,12 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - empty boots Redis open} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # A286: noeviction — sessions, rate-limit counters and login short-state live here,
+    # and allkeys-lru evicted exactly those under memory pressure (random logouts, rate
+    # limit silently opening). The cap stays on purpose: a full maxmemory now yields a
+    # DISCLOSED write refusal (security.py separates OOM from a Redis outage) instead of
+    # an unbounded Redis that docker OOM-kills. Must move with the other five copies.
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - empty boots Redis open} --maxmemory 256mb --maxmemory-policy noeviction
     ports:
       - "6379:6379"
     volumes:
@@ -65,17 +70,21 @@ services:
       retries: 5
 
   # ─── 策略引擎 ───
+  # A284: OPA 的数据 API 不带任何认证——碰得到 8181 就等于能 `PUT /v1/policies`
+  # 写一份 `default allow = true`，而 policy_evaluator 拿到真值就 ALLOW。
+  # 宿主侧只绑回环（运维本机 curl），PDP 客户端仍走 bridge（CDS_OPA_URL=http://opa:8181）；
+  # 策略源只读挂载，opa 容器里的进程改不动仓里的 rego。
   opa:
     image: openpolicyagent/opa:0.68.0
     ports:
-      - "8181:8181"
+      - "127.0.0.1:8181:8181"
     command:
       - "run"
       - "--server"
       - "--addr=0.0.0.0:8181"
       - "--log-level=info"
     volumes:
-      - ./policies:/policies
+      - ./policies:/policies:ro
     healthcheck:
       test: ["CMD", "/opa", "version"]
       interval: 10s

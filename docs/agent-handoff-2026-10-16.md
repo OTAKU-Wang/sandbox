@@ -13,6 +13,8 @@
 
 ## 1. 验证面（用户铁律：测试必须在远程跑，本地只当廉价探针）
 
+> **2026-10-19 口径已变更（以 `docs/agent-handoff-2026-10-19.md` §1 为准）**：用户「在不影响我本地网络的情况下 在我本地进行开发测试」⇒ 常规 pytest / vitest / tsc / build 的权威读数改在本机取，远程只留给硬件门（真 MicroVM/Cube 节点、真 Tongsuo）。本节与 §1.1 保留作历史口径与远程车道操作手册。
+
 ```bash
 # 一次性：口令/连接参数不进仓库，见 §6
 export CDS_LOCAL_ROOT=$PWD                       # sync_tree.sh 用

@@ -35,7 +35,10 @@ export default function FlowConfigFields({ currentSpec }: { currentSpec?: Sandbo
       <Form.Item
         name="delivery_methods"
         label="交付方式（可多选）"
-        rules={[{ required: true, message: '至少选择一种交付方式' }]}
+        // 不在表单层钉 required：创建合约页把本面板当可选项（一个都不勾 = 不提交流程配置，
+        // 后端按默认「仅数据集交付 + 手动计算」处理，见 ContractCreate 的 methods.length 分支）。
+        // 「要提交就必须选一种」这条规则的唯一权威是 services/flow.ts 的 validateFlowConfig
+        // （同样报「至少选择一种交付方式」），由 FlowConfigCard 的提交前门禁执行。
       >
         <Checkbox.Group>
           <Space direction="vertical" size={6}>

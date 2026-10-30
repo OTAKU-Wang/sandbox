@@ -5,6 +5,11 @@ The output gateway previously ran with caller-supplied limits (the
 pipeline's output inspection never consulted the governing contract at all.
 This module resolves the ACTUAL OutputPolicy from the contract bound to a
 session, with conservative defaults when no contract applies.
+
+A95c: a contract whose field classification state cannot be established
+(unparseable product id, dangling resource row, DB error) gets a QUARANTINED
+policy — 0 rows, no allowed format — instead of a policy that silently looks
+like "this data was never classified".
 """
 import logging
 import uuid
@@ -19,6 +24,43 @@ logger = logging.getLogger(__name__)
 _CONSERVATIVE_MAX_ROWS = 10000
 _CONSERVATIVE_FORMATS = ["csv", "json"]
 
+QUARANTINE_REASON_KEY = "field_classification_error"
+
+
+class ClassificationUnavailableError(RuntimeError):
+    """Field classification could not be established for a contract.
+
+    Distinct from "this data carries no classifications": only the latter may
+    compile to empty rules. Collapsing the two (the pre-A95c behaviour) made
+    mask/deny fields vanish whenever the lookup raised, i.e. fail-open.
+    """
+
+
+def _quarantine_policy(contract, reason: str) -> OutputPolicy:
+    """Policy for "classification state unknown": release nothing, say why.
+
+    max_output_rows=0 plus an empty format allowlist cannot be widened by
+    clamp_gateway_request, so both release paths (gateway and the text-output
+    clamp) refuse instead of releasing possibly classified output.
+    """
+    logger.error(
+        "[OutputPolicy] SECURITY: field classification lookup failed for contract %s (%s) — "
+        "output release QUARANTINED (0 rows, no allowed format) instead of releasing "
+        "output as if it were unclassified",
+        getattr(contract, "id", "?"), reason,
+    )
+    rules = dict(contract.inspection_rule_set or {})
+    rules.pop("field_classifications", None)
+    rules[QUARANTINE_REASON_KEY] = reason
+    return OutputPolicy(
+        max_output_rows=0,
+        allowed_output_formats=[],
+        dp_epsilon_budget=(
+            float(contract.dp_epsilon_budget) if contract.dp_epsilon_budget is not None else None
+        ),
+        inspection_rule_set=rules,
+    )
+
 
 async def build_output_policy(db: AsyncSession, contract_id: str | uuid.UUID | None) -> OutputPolicy:
     """Build the OutputPolicy enforced for a session's outputs.
@@ -29,7 +71,9 @@ async def build_output_policy(db: AsyncSession, contract_id: str | uuid.UUID | N
 
     Returns:
         OutputPolicy from the contract, or conservative defaults when there
-        is no contract. Failures resolve to defaults, never to an open policy.
+        is no contract. An unreadable contract still yields conservative
+        defaults; an unreadable FIELD CLASSIFICATION yields a quarantined
+        policy, because "no classification" would release masked/denied fields.
     """
     policy = OutputPolicy(
         max_output_rows=_CONSERVATIVE_MAX_ROWS,
@@ -57,7 +101,10 @@ async def build_output_policy(db: AsyncSession, contract_id: str | uuid.UUID | N
     # Gap A5/T7: enrich the inspection rules with the field-level
     # classification of the contracted data product's resource so masked /
     # denied fields are enforced on every output release.
-    field_rules = await _field_rules_for_contract(db, contract)
+    try:
+        field_rules = await _field_rules_for_contract(db, contract)
+    except ClassificationUnavailableError as e:
+        return _quarantine_policy(contract, str(e))
     if field_rules:
         inspection_rules["field_classifications"] = field_rules
 
@@ -70,33 +117,64 @@ async def build_output_policy(db: AsyncSession, contract_id: str | uuid.UUID | N
 
 
 async def _field_rules_for_contract(db: AsyncSession, contract) -> dict | None:
-    """Resolve the field classification rules of the first contracted product.
+    """Compile the contracted resources' field classifications into gate rules.
 
-    Returns None when the product/resource has no field_classifications.
+    Lookup path matches the query-time wiring
+    (app/api/sandbox_db._field_classifications_for_contract):
+    contract.product_ids → DataProduct.resource_id → DataResource, with the
+    HIGHER level winning when several products classify the same field.
+
+    Returns None only when the state is positively "nothing classified".
+    Raises ClassificationUnavailableError when it cannot be established.
     """
-    try:
-        from app.models.data_product import DataProduct
-        from app.models.data_resource import DataResource
-        from app.services.policy_compiler import policy_compiler
-        product_ids = contract.product_ids or []
-        if not product_ids:
-            return None
-        result = await db.execute(
-            select(DataProduct).where(DataProduct.id.in_([str(p) for p in product_ids])).limit(1)
-        )
-        product = result.scalars().first()
-        if not product or not product.resource_id:
-            return None
-        resource = await db.get(DataResource, product.resource_id)
-        if not resource or not resource.field_classifications:
-            return None
-        rules = policy_compiler.field_rules_from_classifications(resource.field_classifications)
-        if not rules.get("mask_fields") and not rules.get("deny_out_fields"):
-            return None
-        return rules
-    except Exception as e:
-        logger.warning("[OutputPolicy] Field classification resolution failed: %s", e)
+    from app.models.data_product import DataProduct
+    from app.models.data_resource import DataResource
+    from app.services.policy_compiler import policy_compiler
+
+    product_ids = contract.product_ids or []
+    if not product_ids:
         return None
+
+    # uuid.UUID, never str: the SQLite UUID bind processor reads value.hex, so a
+    # str raises AttributeError at bind time (the A95c red) while PostgreSQL only
+    # matched it by implicit-cast luck. One comparable type, both dialects.
+    wanted: list[uuid.UUID] = []
+    for pid in product_ids:
+        try:
+            wanted.append(pid if isinstance(pid, uuid.UUID) else uuid.UUID(str(pid)))
+        except (TypeError, ValueError) as e:
+            raise ClassificationUnavailableError(
+                f"contract product_ids contains a non-UUID entry: {pid!r}"
+            ) from e
+
+    merged: dict[str, int] = {}
+    try:
+        result = await db.execute(select(DataProduct).where(DataProduct.id.in_(wanted)))
+        for product in result.scalars().all():
+            if not product.resource_id:
+                continue
+            resource = await db.get(DataResource, product.resource_id)
+            if resource is None:
+                raise ClassificationUnavailableError(
+                    f"product {product.id} references missing resource {product.resource_id}"
+                )
+            for field, raw_level in (resource.field_classifications or {}).items():
+                try:
+                    level = int(raw_level)
+                except (TypeError, ValueError):
+                    continue
+                name = str(field)
+                if level > merged.get(name, -1):
+                    merged[name] = level
+    except ClassificationUnavailableError:
+        raise
+    except Exception as e:
+        raise ClassificationUnavailableError(f"{type(e).__name__}: {e}") from e
+
+    rules = policy_compiler.field_rules_from_classifications(merged)
+    if not rules.get("mask_fields") and not rules.get("deny_out_fields"):
+        return None
+    return rules
 
 
 def _parse_formats(raw) -> list[str]:
@@ -149,6 +227,10 @@ async def enforce_text_output_policy(
         "allowed_output_formats": policy.allowed_output_formats,
         "source": "contract" if contract_id else "default",
     }
+    quarantine_reason = (policy.inspection_rule_set or {}).get(QUARANTINE_REASON_KEY)
+    if quarantine_reason:
+        report["policy"][QUARANTINE_REASON_KEY] = quarantine_reason
+        report["policy"]["release_quarantined"] = True
     return redacted_output, report
 
 

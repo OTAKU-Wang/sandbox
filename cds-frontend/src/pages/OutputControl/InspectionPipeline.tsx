@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Typography, Card, Steps, Table, Tag, Descriptions, Space, Button, Input, InputNumber, Select, message, Row, Col, Statistic, Divider } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { outputControlApi, type InspectionResult, type DPNoiseResult } from '../../services/outputControlApi';
+import { outputControlApi, type DPBudgetState, type InspectionResult, type DPNoiseResult } from '../../services/outputControlApi';
 import { sandboxApi } from '../../services/sandboxApi';
 import { EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
 
@@ -22,6 +22,35 @@ const stages = [
 ];
 
 const stageLabels = Object.fromEntries(stages.map((stage) => [stage.key, stage.title]));
+
+export interface DPBudgetView {
+  /** 上屏的读数：可读时是两位小数，未知/未分配时是状态词，永远不是被造出来的 0。 */
+  display: string;
+  hint: string | null;
+}
+
+export function dpBudgetView(
+  state: DPBudgetState | undefined,
+  remaining: number | null,
+  authoritative = true,
+): DPBudgetView {
+  if (remaining === null || remaining === undefined || state === 'unverified') {
+    return {
+      display: '未核实',
+      hint: '预算后端读不到，剩余 ε 未知——未知不是 0。',
+    };
+  }
+  if (state === 'unallocated') {
+    return { display: '未分配', hint: '该会话没有 ε 预算记录，不代表已耗尽' };
+  }
+  if (state === 'exhausted') {
+    return { display: remaining.toFixed(2), hint: '预算已耗尽（核实过的读数）' };
+  }
+  return {
+    display: remaining.toFixed(2),
+    hint: authoritative ? null : '本机进程内预算，未跨副本共享',
+  };
+}
 
 const severityColors: Record<string, string> = {
   critical: 'red',
@@ -119,6 +148,10 @@ export default function InspectionPipeline() {
     label: `${session.id.slice(0, 8)}... / ${session.status} / ${session.sandbox_level}`,
     value: session.id,
   }));
+
+  const budgetView = budgetData
+    ? dpBudgetView(budgetData.budget_state, budgetData.epsilon_remaining, budgetData.budget_authoritative)
+    : null;
 
   return (
     <div>
@@ -379,13 +412,16 @@ export default function InspectionPipeline() {
               </>
             )}
 
-            {budgetData ? (
+            {budgetData && budgetView ? (
               <>
                 <Divider />
                 <Descriptions bordered column={1} size="small">
                   <Descriptions.Item label="会话ID">{budgetData.session_id}</Descriptions.Item>
                   <Descriptions.Item label="剩余预算 ε">
-                    <Statistic value={budgetData.epsilon_remaining} precision={2} valueStyle={{ fontSize: 20 }} />
+                    <Statistic value={budgetView.display} valueStyle={{ fontSize: 20 }} />
+                    {budgetView.hint && (
+                      <div><Text type="secondary">{budgetView.hint}</Text></div>
+                    )}
                   </Descriptions.Item>
                 </Descriptions>
               </>

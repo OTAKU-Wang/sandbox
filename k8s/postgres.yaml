@@ -7,6 +7,9 @@ metadata:
     app: postgres
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgres

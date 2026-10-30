@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Descriptions, Tag, Button, Typography, Space, message, Alert, Progress, Table, Card } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { contractApi } from '../../services/contractApi';
+import { contractApi, DP_LEDGER_ENTRY_LIMIT } from '../../services/contractApi';
 import { authApi } from '../../services/authApi';
 import { useAuthStore } from '../../stores/authStore';
 import { CenteredLoading, EmptyState, QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
@@ -11,9 +11,11 @@ import {
   contractSignPayload,
   loadSM2PrivateKey,
   saveSM2PrivateKey,
+  SM2_KEY_STORAGE_DISCLOSURE,
 } from '../../utils/crypto';
 import { confirmHighRiskOperation } from '../../utils/highRiskOperation';
 import FlowConfigCard from '../Flow/FlowConfigCard';
+import { describeFlowError } from '../../services/flow';
 import type { ContractWithFlow } from '../../services/flow';
 
 const { Title, Text } = Typography;
@@ -28,6 +30,15 @@ const typeLabels: Record<string, string> = {
   data_query: '数据查询', model_training: '模型训练', data_application: '数据应用',
   api_service: 'API服务', joint_compute: '联合计算', product_dev: '产品开发', data_modeling: '数据建模',
 };
+
+/**
+ * A317：DP 消费流水的截断披露口径。后端只回最近 20 条（app/api/contracts.py:302
+ * `for e in ledger[:20]`），响应体里既没 total 也没 has_more，所以满页就是被截断的
+ * 信号；上限本身钉在 contractApi 的 DP_LEDGER_ENTRY_LIMIT，页面不许自己拿魔数。禁把 20 行当全量台账。
+ */
+const DP_LEDGER_TRUNCATION_NOTE =
+  `消费流水只展示最近 ${DP_LEDGER_ENTRY_LIMIT} 条：后端 GET /contracts/{id}/dp-budget 本身就是 ledger[:${DP_LEDGER_ENTRY_LIMIT}]，`
+  + '响应里没有 total/has_more 字段，所以下表不是全量台账（完整消耗记录见「审计日志」）。';
 
 export default function ContractDetail() {
   const { id } = useParams<{ id: string }>();
@@ -59,7 +70,7 @@ export default function ContractDetail() {
         const keypair = await authApi.generateSM2Keys();
         saveSM2PrivateKey(user.id, keypair.private_key);
         privateKey = keypair.private_key;
-        message.info('SM2密钥对已生成并保存在本地，请妥善保管');
+        message.info('SM2密钥对已由服务端下发，并以明文存在本浏览器 localStorage（详见合约页签署说明）');
       }
 
       const partyRole = user.id === contract.provider_id ? 'provider' : 'buyer';
@@ -86,16 +97,19 @@ export default function ContractDetail() {
     },
   });
 
+  // A316：失败提示必须带出后端 W2 信封里的原因（detail 优先、次 message，末尾附错误码），
+  // 固定「激活失败」四个字让运维只能来逐个问人；口径与签署路径一致，走 flow.ts 的 describeFlowError。
   const activateMutation = useMutation({
     mutationFn: () => contractApi.activate(id!),
     onSuccess: () => { message.success('激活成功'); queryClient.invalidateQueries({ queryKey: ['contract', id] }); },
-    onError: () => message.error('激活失败'),
+    onError: (error: unknown) => message.error(`激活失败: ${describeFlowError(error, '后端未返回具体原因')}`),
   });
 
   const terminateMutation = useMutation({
     mutationFn: (payload: { reason: string; ticket_id?: string | null }) => contractApi.terminate(id!, payload),
     onSuccess: () => { message.success('已终止'); queryClient.invalidateQueries({ queryKey: ['contract', id] }); },
-    onError: () => message.error('终止失败'),
+    // A316：同上——终止被拒（状态机拒绝/无权）时把后端原因透出来，不只说「终止失败」。
+    onError: (error: unknown) => message.error(`终止失败: ${describeFlowError(error, '后端未返回具体原因')}`),
   });
 
   const handleTerminate = () => {
@@ -162,7 +176,7 @@ export default function ContractDetail() {
       {contract.status === 'draft' && isParty && !userHasSigned && (
         <Alert
           message="合约签署说明"
-          description={'点击"SM2签署"按钮将使用SM2国密算法对合约进行数字签名。首次签署会自动生成SM2密钥对，私钥安全存储在本地。双方签署后合约自动生效。'}
+          description={`点击"SM2签署"按钮将使用SM2国密算法对合约进行数字签名。首次签署若本地无密钥，会向服务端申请一对 SM2 密钥并保存在本浏览器。${SM2_KEY_STORAGE_DISCLOSURE}双方签署后合约自动生效。`}
           type="info" showIcon style={{ marginBottom: 16 }}
         />
       )}
@@ -218,18 +232,26 @@ export default function ContractDetail() {
             />
           )}
           {dpBudget.entries.length > 0 && (
-            <Table
-              dataSource={dpBudget.entries}
-              rowKey={(r) => `${r.session_id}-${r.timestamp}`}
-              size="small"
-              style={{ marginTop: 16 }}
-              pagination={false}
-              columns={[
-                { title: '操作', dataIndex: 'operation', key: 'operation' },
-                { title: '消耗(ε)', dataIndex: 'epsilon_consumed', key: 'epsilon_consumed', render: (v: number) => v.toFixed(4) },
-                { title: '时间', dataIndex: 'timestamp', key: 'timestamp', render: (v: string) => new Date(v).toLocaleString() },
-              ]}
-            />
+            <>
+              {/* A317：满页 = 被后端截断，必须显式说出来，不让 20 行当全量台账。 */}
+              {dpBudget.entries.length >= DP_LEDGER_ENTRY_LIMIT && (
+                <div data-testid="dp-budget-truncated" style={{ marginTop: 12 }}>
+                  <Text type="secondary">{DP_LEDGER_TRUNCATION_NOTE}</Text>
+                </div>
+              )}
+              <Table
+                dataSource={dpBudget.entries}
+                rowKey={(r) => `${r.session_id}-${r.timestamp}`}
+                size="small"
+                style={{ marginTop: 16 }}
+                pagination={false}
+                columns={[
+                  { title: '操作', dataIndex: 'operation', key: 'operation' },
+                  { title: '消耗(ε)', dataIndex: 'epsilon_consumed', key: 'epsilon_consumed', render: (v: number) => v.toFixed(4) },
+                  { title: '时间', dataIndex: 'timestamp', key: 'timestamp', render: (v: string) => new Date(v).toLocaleString() },
+                ]}
+              />
+            </>
           )}
         </Card>
       )}

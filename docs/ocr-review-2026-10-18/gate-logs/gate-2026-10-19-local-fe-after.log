@@ -1,0 +1,30 @@
+# 本机前端四步。前三步即 CI 前端作业的 npm test + npm run build；lint 在 ci.yml 里是信息性基线。
+### tsc -b
+
+
+### vitest run
+Test Files  66 passed (66)
+      Tests  649 passed (649)
+
+### npm run build
+eliveryCenter-BR_woRBI.js           52.85 kB │ gzip:  17.52 kB
+dist/assets/ContractDetail-00fwirr6.js           53.05 kB │ gzip:  20.22 kB
+dist/assets/select-BkGpPbM4.js                   73.85 kB │ gzip:  24.00 kB
+dist/assets/date-picker-D6Aj4Vuw.js             103.72 kB │ gzip:  32.61 kB
+dist/assets/table-CWI9LUqZ.js                   143.69 kB │ gzip:  45.77 kB
+dist/assets/jsx-runtime-CX7WzUxx.js             161.79 kB │ gzip:  55.74 kB
+dist/assets/typography-D0ErPNG_.js              207.03 kB │ gzip:  66.40 kB
+dist/assets/Dashboard-BLi4Pdx1.js               380.96 kB │ gzip: 112.97 kB
+dist/assets/SessionDetail-B1ghhS0z.js           398.30 kB │ gzip: 105.42 kB
+dist/assets/index-me9CcdjH.js                   452.21 kB │ gzip: 145.86 kB
+dist/assets/editor.api2-BmGoRSl4.js           3,626.86 kB │ gzip: 926.78 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 2.23s
+
+### eslint . (informational)
+✖ 23 problems (23 errors, 0 warnings)

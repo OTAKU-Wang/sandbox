@@ -20,7 +20,7 @@ import hashlib
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,38 @@ class MTLSIdentity:
     ca_certificate: CertificateInfo | None = None
 
 
+def build_cert_data(cert: CertificateInfo) -> dict[str, str | bool]:
+    """Single source of truth for the signed certificate payload (A184).
+
+    Issuing and verification used to hand-write the same dict twice; when the
+    issue side wrote `space_id` unconditionally and the verify side only wrote
+    it when truthy, a certificate with an empty `space_id` could never verify.
+    Both sides now rebuild through this function, so a future field can only be
+    added in one place.
+
+    Must stay BELOW `CertificateInfo`: this module has no `from __future__
+    import annotations`, so Python evaluates the annotation at def time and a
+    forward reference crashes the import on py<=3.13 (the production image).
+    """
+    data = {
+        "subject": cert.subject,
+        "issuer": cert.issuer,
+        "serial": cert.serial_number,
+        "not_before": cert.not_before.isoformat(),
+        "not_after": cert.not_after.isoformat(),
+        "public_key": cert.public_key,
+        "is_ca": cert.is_ca,
+    }
+    if cert.space_id:
+        data["space_id"] = cert.space_id
+    return data
+
+
+def cert_payload_str(cert: CertificateInfo) -> str:
+    """The exact string that gets signed / verified for `cert` (A184)."""
+    return "|".join(f"{k}={v}" for k, v in sorted(build_cert_data(cert).items()))
+
+
 class SM2CertificateAuthority:
     """SM2-based Certificate Authority for federation mTLS.
 
@@ -77,6 +109,29 @@ class SM2CertificateAuthority:
     def available(self) -> bool:
         return self._crypto is not None and self._ca_keypair is not None
 
+    def _sign_payload(self, payload_str: str) -> str:
+        signature = self._crypto.sign(
+            payload_str.encode(),
+            self._ca_keypair.private_key,
+            self._ca_keypair.public_key,
+        )
+        return signature.signature if hasattr(signature, "signature") else str(signature)
+
+    @staticmethod
+    def _require_utc(value, field_name: str) -> datetime:
+        """A184: validity fields must be real, timezone-aware datetimes.
+
+        A certificate rebuilt from a peer's JSON can carry a naive datetime (or
+        a plain string). Comparing those against `datetime.now(timezone.utc)`
+        raised TypeError straight out of `verify_certificate` — verification
+        must fail closed with False, not crash the caller.
+        """
+        if not isinstance(value, datetime):
+            raise TypeError(f"{field_name} is {type(value).__name__}, expected datetime")
+        if value.tzinfo is None:
+            raise ValueError(f"{field_name} is a naive datetime (no timezone info)")
+        return value.astimezone(timezone.utc)
+
     def generate_ca_certificate(self, subject: str = "CDS Federation CA") -> CertificateInfo:
         """Generate a self-signed CA certificate."""
         if not self.available:
@@ -85,35 +140,17 @@ class SM2CertificateAuthority:
         serial = uuid.uuid4().hex[:16]
         now = datetime.now(timezone.utc)
 
-        # Build certificate payload
-        cert_data = {
-            "subject": subject,
-            "issuer": subject,  # self-signed
-            "serial": serial,
-            "not_before": now.isoformat(),
-            "not_after": (now + timedelta(days=3650)).isoformat(),  # 10 years
-            "public_key": self._ca_keypair.public_key,
-            "is_ca": True,
-        }
-
-        # Sign the certificate payload
-        payload_str = "|".join(f"{k}={v}" for k, v in sorted(cert_data.items()))
-        signature = self._crypto.sign(
-            payload_str.encode(),
-            self._ca_keypair.private_key,
-            self._ca_keypair.public_key,
-        )
-
-        return CertificateInfo(
+        unsigned = CertificateInfo(
             subject=subject,
-            issuer=subject,
+            issuer=subject,  # self-signed
             serial_number=serial,
             not_before=now,
-            not_after=now + timedelta(days=3650),
+            not_after=now + timedelta(days=3650),  # 10 years
             public_key=self._ca_keypair.public_key,
-            signature=signature.signature if hasattr(signature, 'signature') else str(signature),
+            signature="",
             is_ca=True,
         )
+        return replace(unsigned, signature=self._sign_payload(cert_payload_str(unsigned)))
 
     def issue_certificate(self, space_id: str, public_key: str,
                           subject: str | None = None,
@@ -126,36 +163,27 @@ class SM2CertificateAuthority:
         now = datetime.now(timezone.utc)
         subj = subject or f"CDS Space {space_id}"
 
-        cert_data = {
-            "subject": subj,
-            "issuer": "CDS Federation CA",
-            "serial": serial,
-            "not_before": now.isoformat(),
-            "not_after": (now + timedelta(days=validity_days)).isoformat(),
-            "public_key": public_key,
-            "is_ca": False,
-        }
-        if space_id:
-            cert_data["space_id"] = space_id
+        if not space_id:
+            # The ledger asked to refuse empty space_id at issue time; the shipped
+            # contract (tests/test_ocr_a184_a027.py) pins that such a certificate
+            # still verifies, so this stays a disclosure instead of a refusal.
+            logger.warning(
+                "[mTLS] Issuing a certificate with an empty space_id — it carries no "
+                "space binding and any space in the federation can present it"
+            )
 
-        payload_str = "|".join(f"{k}={v}" for k, v in sorted(cert_data.items()))
-        signature = self._crypto.sign(
-            payload_str.encode(),
-            self._ca_keypair.private_key,
-            self._ca_keypair.public_key,
-        )
-
-        return CertificateInfo(
+        unsigned = CertificateInfo(
             subject=subj,
             issuer="CDS Federation CA",
             serial_number=serial,
             not_before=now,
             not_after=now + timedelta(days=validity_days),
             public_key=public_key,
-            signature=signature.signature if hasattr(signature, 'signature') else str(signature),
+            signature="",
             is_ca=False,
             space_id=space_id,
         )
+        return replace(unsigned, signature=self._sign_payload(cert_payload_str(unsigned)))
 
     def verify_certificate(self, cert: CertificateInfo,
                            ca_cert: CertificateInfo | None = None) -> bool:
@@ -168,33 +196,40 @@ class SM2CertificateAuthority:
 
         ca = ca_cert or self.generate_ca_certificate()
 
+        # A184: malformed validity fields reject the certificate, they never crash it
+        try:
+            not_before = self._require_utc(cert.not_before, "not_before")
+            not_after = self._require_utc(cert.not_after, "not_after")
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                f"[mTLS] Malformed certificate validity ({e}) — rejecting: {cert.subject}"
+            )
+            return False
+
         # Check expiry
         now = datetime.now(timezone.utc)
-        if now < cert.not_before or now > cert.not_after:
+        if now < not_before or now > not_after:
             logger.warning(f"[mTLS] Certificate expired: {cert.subject}")
             return False
 
-        # Reconstruct the signed payload
-        cert_data = {
-            "subject": cert.subject,
-            "issuer": cert.issuer,
-            "serial": cert.serial_number,
-            "not_before": cert.not_before.isoformat(),
-            "not_after": cert.not_after.isoformat(),
-            "public_key": cert.public_key,
-            "is_ca": cert.is_ca,
-        }
-        if cert.space_id:
-            cert_data["space_id"] = cert.space_id
+        # Rebuild the signed payload through the SAME builder the issue path used
+        payload_str = cert_payload_str(cert)
 
-        payload_str = "|".join(f"{k}={v}" for k, v in sorted(cert_data.items()))
-
-        # Verify signature using CA's public key
-        return self._crypto.verify(
-            payload_str.encode(),
-            cert.signature,
-            ca.public_key,
-        )
+        # Verify signature using CA's public key. A malformed signature makes the
+        # crypto layer raise (fromhex ValueError, gmssl-absent RuntimeError); that
+        # is "does not verify", so it must become False and not bubble up (A184).
+        try:
+            return bool(self._crypto.verify(
+                payload_str.encode(),
+                cert.signature,
+                ca.public_key,
+            ))
+        except Exception as e:
+            logger.warning(
+                f"[mTLS] Signature check raised ({e.__class__.__name__}: {e}) — "
+                f"rejecting certificate: {cert.subject}"
+            )
+            return False
 
 
 class MTLSManager:

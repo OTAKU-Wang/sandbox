@@ -169,17 +169,29 @@ class CPUTrainer:
             # Tokenize dataset if raw text
             encodings = self._prepare_dataset(dataset, tokenizer, cfg)
 
-            # Setup optimizer and scheduler
-            optimizer = self._create_optimizer(model, cfg)
-            scheduler = self._create_scheduler(optimizer, cfg, len(encodings))
-
-            # Apply LoRA if configured
+            # A101: LoRA 必须在优化器之前注入。get_peft_model 返回新的包装体、
+            # 新增 adapter 参数并把基座置 requires_grad=False；先建优化器拿到的
+            # 是注入前的参数快照，adapter 永不进优化器 ⇒ optimizer.step() 静默 no-op。
             if cfg.use_lora:
                 model = self._apply_lora(model, cfg)
+
+            trainable = [p for p in model.parameters() if p.requires_grad]
+            if not trainable:
+                raise RuntimeError(
+                    "no trainable parameters after adapter injection: refusing to "
+                    "report a training run that cannot update anything"
+                )
+
+            # Setup optimizer and scheduler (over post-injection trainable params)
+            optimizer = self._create_optimizer(model, cfg)
+            scheduler = self._create_scheduler(optimizer, cfg, len(encodings))
 
             # Training loop
             loss_history: list[float] = []
             total_steps = 0
+            # A102: 上报的梯幅与噪声注入标志必须来自实际跑过的那一步。
+            last_grad_norm = 0.0
+            last_dp_injected = False
 
             model.train()
 
@@ -191,9 +203,11 @@ class CPUTrainer:
                 batches = self._create_batches(encodings, cfg.batch_size)
 
                 for batch in batches:
-                    step_loss, grad_norm = self.train_step(
+                    step_loss, grad_norm, dp_injected = self.train_step(
                         batch, model, optimizer, cfg
                     )
+                    last_grad_norm = grad_norm
+                    last_dp_injected = dp_injected
 
                     # Update learning rate
                     if scheduler:
@@ -227,10 +241,10 @@ class CPUTrainer:
                 epochs_completed=cfg.num_epochs,
                 memorization_score=mem_result.score,
                 duration_ms=duration_ms,
-                gradient_norm=0.0,  # Last step norm not tracked in aggregate
+                gradient_norm=last_grad_norm,
                 learning_rate_final=cfg.learning_rate,
                 peak_memory_mb=peak_mb,
-                dp_noise_injected=cfg.dp_enabled,
+                dp_noise_injected=last_dp_injected,
             )
 
         except Exception as e:
@@ -266,7 +280,7 @@ class CPUTrainer:
         model: Any,
         optimizer: Any,
         config: TrainConfig | None = None,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, bool]:
         """Execute a single training step: forward, loss, backward, clip, step.
 
         Args:
@@ -276,7 +290,7 @@ class CPUTrainer:
             config: Training configuration.
 
         Returns:
-            Tuple of (loss_value, gradient_norm).
+            Tuple of (loss_value, gradient_norm, dp_noise_actually_injected).
         """
         torch = _torch
         cfg = config or TrainConfig()
@@ -295,8 +309,10 @@ class CPUTrainer:
 
         # DP-SGD: clip gradients and add noise
         grad_norm = 0.0
+        dp_injected = False
         if cfg.dp_enabled:
-            grad_norm = self._clip_and_noise(model, cfg)
+            batch_size = int(input_ids.shape[0]) if hasattr(input_ids, "shape") else 1
+            grad_norm, dp_injected = self._clip_and_noise(model, cfg, batch_size)
         else:
             # Standard gradient clipping
             grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -306,7 +322,7 @@ class CPUTrainer:
         # Optimizer step
         optimizer.step()
 
-        return loss.item(), grad_norm
+        return loss.item(), grad_norm, dp_injected
 
     def check_memorization(
         self,
@@ -481,10 +497,13 @@ class CPUTrainer:
         return batches
 
     def _create_optimizer(self, model: Any, config: TrainConfig) -> Any:
-        """Create AdamW optimizer with weight decay."""
-        torch = _torch
+        """Create AdamW optimizer with weight decay over updatable parameters only.
+
+        Frozen parameters (PEFT base weights) are excluded: handing them to AdamW
+        only creates dead optimizer state that never receives a gradient.
+        """
         return _optim.AdamW(
-            model.parameters(),
+            [p for p in model.parameters() if p.requires_grad],
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
             betas=(0.9, 0.999),
@@ -538,13 +557,17 @@ class CPUTrainer:
             )
             return model
 
-    def _clip_and_noise(self, model: Any, config: TrainConfig) -> float:
+    def _clip_and_noise(
+        self, model: Any, config: TrainConfig, batch_size: int = 1
+    ) -> tuple[float, bool]:
         """Clip gradients and add DP noise.
 
         Implements the DP-SGD clipping + noise mechanism from
         Abadi et al. (2016) "Deep Learning with Differential Privacy".
 
-        Returns the gradient norm before clipping.
+        Returns:
+            (gradient norm before clipping, whether noise was actually injected —
+            i.e. at least one parameter carried a gradient this step)
         """
         torch = _torch
 
@@ -563,10 +586,15 @@ class CPUTrainer:
                 if p.grad is not None:
                     p.grad.data.mul_(clip_coef)
 
-        # Add calibrated Gaussian noise
+        # Add calibrated Gaussian noise. DP-SGD averages the per-example clipped
+        # gradients over the batch, so the scale calibrated to (ε,δ) is σC/B; using
+        # σC over-noises by B× and voids the privacy budget the run claims.
         noise_scale = (
-            config.dp_noise_multiplier * config.dp_max_grad_norm
+            config.dp_noise_multiplier
+            * config.dp_max_grad_norm
+            / max(batch_size, 1)
         )
+        injected = False
         for p in model.parameters():
             if p.grad is not None:
                 noise = torch.normal(
@@ -576,8 +604,9 @@ class CPUTrainer:
                     device=p.grad.device,
                 )
                 p.grad.data.add_(noise)
+                injected = True
 
-        return total_norm
+        return total_norm, injected
 
     def _estimate_memory_mb(self, model: Any) -> float:
         """Estimate model memory usage in MB."""

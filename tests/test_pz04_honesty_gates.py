@@ -7,6 +7,7 @@ Covers:
 - firecracker seccomp-less retry gated by SECCOMP_FALLBACK_ALLOWED (MR-A13, S4 closed)
 """
 import base64
+import os
 import uuid
 from types import SimpleNamespace
 
@@ -218,12 +219,18 @@ def _mk_vm(tmp_path):
 
 
 def _patch_bwrap(monkeypatch, runtime):
+    # 契约（sandbox_security.get_seccomp_bpf_fd）：交出去的是**本次调用独占**的 fd，
+    # 调用方用完由 close_seccomp_fd 归还。这里以前写死 7 —— 那是 pytest 自己在用的
+    # fd，产品一归还就把输出捕获的 fd 关掉，本文件 4 个测试连带同一次 pytest 里
+    # 上百个文件的 teardown 全部 OSError: EBADF。给一个真正的 pipe fd。
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
     monkeypatch.setattr(
         runtime,
         "_build_sim_bwrap_args",
         lambda workspace, code_file, language, session_key=None, env_vars=None: (
-            ["bwrap", "--seccomp", "7", "chdir", "/workspace"],
-            7,
+            ["bwrap", "--seccomp", str(read_fd), "chdir", "/workspace"],
+            read_fd,
         ),
     )
 

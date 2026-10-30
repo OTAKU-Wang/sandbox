@@ -4,6 +4,7 @@ L2: Firecracker/QEMU adapter with hardened local fallback when guest execution i
 L3: bwrap (Bubblewrap) lightweight sandbox + Docker fallback
 """
 import asyncio
+import inspect
 import logging
 import uuid
 import subprocess
@@ -12,6 +13,7 @@ import os
 import shlex
 import shutil
 import threading
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -45,6 +47,116 @@ def _release_seccomp_fd(fd: int | None) -> None:
     close_seccomp_fd(fd)
 
 
+def _terminate_with_session_id(terminate: Callable[..., bool], container_id: str,
+                               session_id: str | uuid.UUID | None) -> bool:
+    """Terminate one container, handing the known session id down when the callee takes it.
+
+    A90b: `cube_runtime_adapter.terminate()` 的 `session_id` 形参（A90）是卷命名空间
+    `cds-data-<session_id>` 的唯一正确来源。不传则运行面只能走 `_session_id_for_container()`
+    的 DB 反查兜底，反查失败就只能落在“披露孤儿”分支。
+
+    签名探测而不是无条件透传：只声明 `terminate(container_id)` 的对象（旧运行面适配器、
+    打桩替换门面 `terminate` 的现有测试）被塞关键字参数会直接 TypeError；它们照旧
+    单参调用，留在已有行为上。传的是已绑定方法（适配器或 `SandboxRuntime` 自己的）。
+    """
+    if session_id is None:
+        return terminate(container_id)
+    try:
+        accepts = "session_id" in inspect.signature(terminate).parameters
+    except (TypeError, ValueError):
+        accepts = False
+    if not accepts:
+        return terminate(container_id)
+    # 形参存在性已在上面运行时核过，静态侧看不到 `...` callable 的关键字名。
+    return terminate(container_id, session_id=str(session_id))  # type: ignore[call-arg]
+
+
+def _session_uuid_or_none(value: object) -> uuid.UUID | None:
+    """Parse a session id this caller already holds into the UUID the audit column wants.
+
+    A90b: 知道 id 的调用方自己解析，不把强转交给 `audit_service._coerce_session_id`
+    兜底（那条路会把列写成 NULL 并在 detail 里披漏）；解析不出来就递 None，不造假值。
+    """
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _guest_secret_channel():
+    """A96: 新建一条客侧密钥带外通道。
+
+    通道是一次性的（值只能投一次，投完就关），所以任何重试分支重建 argv 时
+    必须同时新建一条，否则客侧 bootstrap 收不到值而以 rc=97 拒跑。
+    """
+    from app.services.sandbox_security import GuestSecrets
+
+    return GuestSecrets()
+
+
+def _run_guest_argv(argv: list[str], secrets, *, pass_fds: tuple[int, ...] = (), **run_kwargs):
+    """A96 版的 ``subprocess.run``：argv 里没有密钥值，值经子进程 stdin 送达。
+
+    `sandbox_security.build_bwrap_args` 只把“有几个变量”写进 argv，值由本函数在 exec 后
+    经 stdin 交给客侧 bootstrap。没带通道时行为与原来逐字一致。
+    """
+    if secrets is None:
+        return subprocess.run(argv, pass_fds=pass_fds, **run_kwargs)
+    # Popen 不认 ``capture_output``（那是 run() 的糖）：在这里译成两个 PIPE，
+    # 保证调用方给 run() 的开关在这条路径上语义不变。
+    if run_kwargs.pop("capture_output", False):
+        run_kwargs.setdefault("stdout", subprocess.PIPE)
+        run_kwargs.setdefault("stderr", subprocess.PIPE)
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, pass_fds=pass_fds, **run_kwargs)
+    except BaseException:
+        secrets.close()
+        raise
+    try:
+        secrets.deliver(proc)
+    except Exception as exc:
+        # 不当投递成功：子进程可能已经退了（bwrap 自身失败等），让退出码与 stderr 说话；
+        # 客侧 bootstrap 拿不到值会自己以 rc=97 + 自报披露。
+        logger.warning("A96: 带外通道投递未完成（不降级、不泄漏）: %s", exc)
+    finally:
+        secrets.close()
+    stdout, stderr = proc.communicate()
+    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
+def _secret_pairs(session_key: str | None, env_vars: dict[str, str] | None) -> list[tuple[str, str]]:
+    """A96: 手搜 bwrap argv 的 L0/L1 有两处密钥来源 —— 显式 ``session_key``，以及
+    `_workspace_dek_env()` 混在 ``env_vars`` 里送过来的 DEK。返回待带外投递的 (名字, 值)。
+    """
+    from app.services.sandbox_security import SECRET_ENV_NAMES
+
+    pairs: list[tuple[str, str]] = []
+    if session_key:
+        pairs.append(("CDS_SESSION_KEY", session_key))
+    for name in SECRET_ENV_NAMES:
+        if name == "CDS_SESSION_KEY":
+            continue
+        value = (env_vars or {}).get(name)
+        if value:
+            pairs.append((name, value))
+    return pairs
+
+
+def _bootstrap_tail(secrets, guest_cmd: list[str]) -> list[str]:
+    """A96: 有待投递的密钥时，把真正的客侧命令包进 stdin bootstrap。
+
+    argv 里只出现变量个数与 bootstrap 脚本；值由父进程 exec 后经 stdin 送入，
+    客侧仍然看到 ``CDS_SESSION_KEY`` / ``CDS_DEK_HEX`` 环境变量，对客契约不变。
+    """
+    from app.services.sandbox_security import GUEST_SECRET_ARGV0, GUEST_SECRET_BOOTSTRAP
+
+    if secrets is None or not len(secrets):
+        return list(guest_cmd)
+    return ["sh", "-c", GUEST_SECRET_BOOTSTRAP, GUEST_SECRET_ARGV0, str(len(secrets)), *guest_cmd]
+
+
 class RuntimeAdapter(ABC):
     """Abstract interface for sandbox runtime adapters."""
 
@@ -65,6 +177,31 @@ class RuntimeAdapter(ABC):
         ...
 
 
+def _assert_egress_enforceable(isolate_network: bool, dns_proxy_port: int | None) -> None:
+    """Refuse a shared-network execution: nothing here enforces an egress allowlist.
+
+    A156 (with A155): `network_policy` builds netns/iptables chains and a DNS proxy, but
+    no runtime consumes them (`check_connection` / `get_bwrap_netns_args` /
+    `get_dns_env_vars` have zero callers) and the proxy binds 127.0.0.1 on an ephemeral,
+    non-53 port. `isolate_network=False` therefore means "fully open", never "allowlisted"
+    — fail closed rather than run a workload whose recorded policy says otherwise.
+    """
+    if isolate_network:
+        return
+    if dns_proxy_port is not None:
+        raise RuntimeError(
+            "SECURITY ERROR: allowlist mode (dns_proxy_port=…) is not enforced by this runtime — "
+            "the DNS proxy binds 127.0.0.1 on a non-53 port and no netns/iptables rule is applied, "
+            "so the sandbox would get unrestricted egress while the policy record claims otherwise "
+            "(A156). Refusing."
+        )
+    raise RuntimeError(
+        "SECURITY ERROR: isolate_network=False requires egress enforcement that this runtime does "
+        "not have — the network_policy execution hooks are unwired (A155/A156), so this would run "
+        "with a completely unfiltered network. Keep isolate_network=True (--unshare-net)."
+    )
+
+
 def _build_l0_bwrap_args(
     workspace: Path,
     code_file: str,
@@ -74,21 +211,27 @@ def _build_l0_bwrap_args(
     isolate_network: bool = True,
     dns_proxy_port: int | None = None,
     extra_binds: list[tuple[Path, str, bool]] | None = None,
+    secrets=None,
 ) -> tuple[list[str], int | None]:
     """Build hardened bwrap arguments for L0 sandbox.
 
     Lighter than L3 but still provides:
     - PID namespace (process isolation)
     - Mount namespace (filesystem isolation)
-    - Network namespace (no network by default, or controlled access via policy)
+    - Network namespace (no network by default; the runtime has no egress-allowlist
+      enforcement, see the isolate_network note below)
     - IPC namespace (no shared memory)
     - Seccomp syscall filter
     - Minimal /dev, restricted /proc, no /sys
 
     Args:
-        isolate_network: If True, isolate network (--unshare-net). If False, allow
-            network access (for allowlist mode with iptables filtering).
-        dns_proxy_port: If set, configure /etc/resolv.conf to point to DNS proxy.
+        isolate_network: If True, isolate network (--unshare-net). If False, the sandbox
+            gets the host network with NO filtering at all — the runtime does not apply
+            any egress allowlist (A155/A156), so callers must not present False as
+            "allowlist mode". Execution paths guard this via
+            :func:`_assert_egress_enforceable`.
+        dns_proxy_port: Ignored unless isolate_network is False, and resolv.conf cannot
+            express a non-53 resolver port — see the A156 note above.
 
     Returns (args_list, seccomp_fd). The fd is single-use (bwrap consumes it) — release
     it with ``close_seccomp_fd`` after the spawn.
@@ -171,13 +314,30 @@ def _build_l0_bwrap_args(
     if bpf_fd is not None:
         args += ["--seccomp", str(bpf_fd)]
 
-    # Inject session key via environment variable (never written to disk)
-    if session_key:
+    # A96: 会话密钥 / DEK 不得进 argv（bwrap 的参数在 exec 前就落在 /proc/<pid>/cmdline，
+    # 同机任意进程可读）。带通道 ⇒ 值改绊 stdin bootstrap；不带通道 ⇒ 保持
+    # tests/test_sandbox_security_hardening.py 钉住的旧 ``--setenv`` 形态，但把汄露说出来。
+    pending = _secret_pairs(session_key, env_vars)
+    secret_names = {name for name, _ in pending}
+    if pending:
+        if secrets is None:
+            logger.warning(
+                "A96: L0 未传 GuestSecrets 带外通道，%d 个会话密钥/DEK 仍以 --setenv 明文进 argv"
+                "（/proc/<pid>/cmdline 同机可读）；调用方应接线 GuestSecrets",
+                len(pending),
+            )
+        else:
+            secrets.extend(pending)
+
+    if secrets is None and session_key:
+        # Inject session key via environment variable (never written to disk)
         args += ["--setenv", "CDS_SESSION_KEY", session_key]
 
     # Inject additional env vars
     if env_vars:
         for k, v in env_vars.items():
+            if secrets is not None and k in secret_names:
+                continue
             args += ["--setenv", k, v]
 
     # Set PATH
@@ -185,12 +345,13 @@ def _build_l0_bwrap_args(
 
     # Command to execute
     if language == "python":
-        args += ["python3", code_file]
+        guest_cmd = ["python3", code_file]
     elif language == "sql":
         from app.services.sandbox_security import _build_sql_runner
-        args += ["python3", "-c", _build_sql_runner(code_file)]
+        guest_cmd = ["python3", "-c", _build_sql_runner(code_file)]
     else:
-        args += ["bash", code_file]
+        guest_cmd = ["bash", code_file]
+    args += _bootstrap_tail(secrets, guest_cmd)
 
     return args, bpf_fd
 
@@ -249,13 +410,16 @@ class ProcessAdapter(RuntimeAdapter):
     def _prepare_exec_command(self, workspace: Path, container_id: str, code: str, language: str,
                               session_key: str | None, env_vars: dict[str, str] | None,
                               isolate_network: bool, dns_proxy_port: int | None,
-                              extra_binds: list[tuple[Path, str, bool]] | None = None):
+                              extra_binds: list[tuple[Path, str, bool]] | None = None,
+                              secrets=None):
         """Build the isolation command for one execution (shared by execute()
         and execute_streaming() so both paths use identical hardening).
 
         Returns (cmd, env, seccomp_fd). Raises RuntimeError when no isolation
         is available and the unsandboxed fallback is disabled.
         """
+        _assert_egress_enforceable(isolate_network, dns_proxy_port)
+
         ext_map = {"python": "py", "sql": "sql", "shell": "sh", "bash": "sh"}
         ext = ext_map.get(language, "py")
         code_file = workspace / "tmp" / f"exec.{ext}"
@@ -272,6 +436,7 @@ class ProcessAdapter(RuntimeAdapter):
                 isolate_network=isolate_network,
                 dns_proxy_port=dns_proxy_port,
                 extra_binds=extra_binds,
+                secrets=secrets,
             )
             return bwrap_args, os.environ.copy(), seccomp_fd
 
@@ -317,12 +482,14 @@ class ProcessAdapter(RuntimeAdapter):
 
         effective_timeout = timeout or 120
 
+        secrets = _guest_secret_channel()
         try:
             cmd, env, seccomp_fd = self._prepare_exec_command(
                 workspace, container_id, code, language, session_key, env_vars,
-                isolate_network, dns_proxy_port, extra_binds=extra_binds,
+                isolate_network, dns_proxy_port, extra_binds=extra_binds, secrets=secrets,
             )
         except RuntimeError as e:
+            secrets.close()
             return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
 
         output_limiter = OutputLimiter(max_bytes=10 * 1024 * 1024)
@@ -330,7 +497,8 @@ class ProcessAdapter(RuntimeAdapter):
         extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
         try:
             result = await asyncio.wait_for(
-                asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, env=env, pass_fds=extra_fds),
+                asyncio.to_thread(_run_guest_argv, cmd, secrets, capture_output=True, text=True,
+                                  env=env, pass_fds=extra_fds),
                 timeout=effective_timeout,
             )
             # Retry without seccomp if kernel doesn't support it (EINVAL) —
@@ -341,9 +509,17 @@ class ProcessAdapter(RuntimeAdapter):
                 and seccomp_fd is not None
                 and _seccomp_fallback_allowed()
             ):
-                cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
+                # A96: 通道一次性 ⇒ 重试前重建通道与 argv（旧那份值已经投完，不会重发）。
+                secrets.close()
+                secrets = _guest_secret_channel()
+                cmd_retry, env, retry_fd = self._prepare_exec_command(
+                    workspace, container_id, code, language, session_key, env_vars,
+                    isolate_network, dns_proxy_port, extra_binds=extra_binds, secrets=secrets,
+                )
+                cmd_no_seccomp = [c for c in cmd_retry if c != "--seccomp" and c != str(retry_fd)]
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(subprocess.run, cmd_no_seccomp, capture_output=True, text=True, env=env),
+                    asyncio.to_thread(_run_guest_argv, cmd_no_seccomp, secrets,
+                                      capture_output=True, text=True, env=env),
                     timeout=effective_timeout,
                 )
             duration = int((datetime.now() - start).total_seconds() * 1000)
@@ -390,12 +566,15 @@ class ProcessAdapter(RuntimeAdapter):
             return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
 
         effective_timeout = timeout or 120
+        secrets = _guest_secret_channel()
         try:
             cmd, env, seccomp_fd = self._prepare_exec_command(
                 workspace, container_id, code, language, session_key, env_vars,
                 isolate_network=True, dns_proxy_port=None, extra_binds=extra_binds,
+                secrets=secrets,
             )
         except RuntimeError as e:
+            secrets.close()
             await on_line("stderr", str(e))
             return {"exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
 
@@ -404,15 +583,25 @@ class ProcessAdapter(RuntimeAdapter):
         saw_einval = False
         proc_holder: dict[str, asyncio.subprocess.Process] = {}
 
-        async def _run_once(command: list[str]) -> int:
+        async def _run_once(command: list[str], channel) -> int:
             nonlocal saw_einval
-            proc = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                pass_fds=extra_fds,
-            )
+            # A96: asyncio 的 proc.stdin 是 StreamWriter，`deliver()` 写不了它的 fd ⇒
+            # 先把载荷推满并关掉写端，再把读端直接交给子进程当 stdin。
+            stdin_fd = None
+            if len(channel):
+                channel.push()
+                stdin_fd = channel.stdin_fd
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *command,
+                    **({"stdin": stdin_fd} if stdin_fd is not None else {}),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    pass_fds=extra_fds,
+                )
+            finally:
+                channel.close()
             proc_holder["proc"] = proc
 
             async def _pump(stream: asyncio.StreamReader, name: str) -> None:
@@ -452,18 +641,26 @@ class ProcessAdapter(RuntimeAdapter):
             return -1 if timed_out else exit_code
 
         try:
-            exit_code = await _run_once(cmd)
+            exit_code = await _run_once(cmd, secrets)
             # Mirror execute(): retry without seccomp on kernel EINVAL
             # (SECCOMP_FALLBACK_ALLOWED gated, fail-closed default).
             if exit_code != 0 and saw_einval and seccomp_fd is not None and _seccomp_fallback_allowed():
-                cmd_no_seccomp = [c for c in cmd if c != "--seccomp" and c != str(seccomp_fd)]
-                exit_code = await _run_once(cmd_no_seccomp)
+                # A96: 通道一次性 ⇒ 重试前重建通道与 argv，否则客侧 bootstrap 拿不到密钥。
+                secrets = _guest_secret_channel()
+                cmd_retry, env, retry_fd = self._prepare_exec_command(
+                    workspace, container_id, code, language, session_key, env_vars,
+                    isolate_network=True, dns_proxy_port=None, extra_binds=extra_binds,
+                    secrets=secrets,
+                )
+                cmd_no_seccomp = [c for c in cmd_retry if c != "--seccomp" and c != str(retry_fd)]
+                exit_code = await _run_once(cmd_no_seccomp, secrets)
         except BaseException:
             proc = proc_holder.get("proc")
             if proc is not None and proc.returncode is None:
                 proc.kill()
             raise
         finally:
+            secrets.close()
             _release_seccomp_fd(seccomp_fd)
         duration = int((datetime.now() - started).total_seconds() * 1000)
         return {"exit_code": exit_code, "duration_ms": duration, "sandbox_level": "L0", "blocked": False}
@@ -737,8 +934,12 @@ class BwrapAdapter(RuntimeAdapter):
     def _guest_argv(self, *, workspace: Path, config, cfg: dict, command: list[str] | None,
                     env_vars: dict[str, str] | None, session_key: str | None,
                     language: str = "python", code_file: str | None = None,
-                    session_id: str = ""):
-        """Single place that turns a session workspace into a hardened bwrap argv."""
+                    session_id: str = "", secrets=None):
+        """Single place that turns a session workspace into a hardened bwrap argv.
+
+        A96: ``secrets`` 是客侧密钥的带外通道；不传则 argv 依旧零密钥，但客侧 bootstrap
+        收不到值会以 rc=97 拒跑（宁可执行失败，不可把明文写进 argv）。
+        """
         from app.services.sandbox_security import build_bwrap_args
 
         return build_bwrap_args(
@@ -752,6 +953,7 @@ class BwrapAdapter(RuntimeAdapter):
             user_id=cfg.get("user_id", ""),
             sandbox_level="L3",
             command=command,
+            secrets=secrets,
         )
 
     async def ensure_kernel(self, container_id: str, env_vars: dict[str, str] | None = None,
@@ -819,13 +1021,21 @@ class BwrapAdapter(RuntimeAdapter):
 
         config, cfg = self._load_session_config(workspace)
         kernel_env = {**(env_vars or {}), "CDS_SESSION_ID": cfg.get("session_id", container_id.replace("bwrap-", ""))}
-        args, seccomp_fd = self._guest_argv(
-            workspace=workspace, config=config, cfg=cfg,
-            command=["python3", self.KERNEL_DAEMON_GUEST, self.KERNEL_SOCK_GUEST, "--resident",
-                     "--session", kernel_env["CDS_SESSION_ID"]],
-            env_vars=kernel_env, session_key=None,
-            session_id=kernel_env["CDS_SESSION_ID"],
-        )
+        kernel_command = ["python3", self.KERNEL_DAEMON_GUEST, self.KERNEL_SOCK_GUEST, "--resident",
+                          "--session", kernel_env["CDS_SESSION_ID"]]
+
+        def _kernel_argv(secrets):
+            return self._guest_argv(
+                workspace=workspace, config=config, cfg=cfg,
+                command=kernel_command,
+                env_vars=kernel_env, session_key=None,
+                session_id=kernel_env["CDS_SESSION_ID"],
+                secrets=secrets,
+            )
+
+        # A96: 会话密钥/DEK 只经这条带外通道走 stdin，不进 argv。
+        secrets = _guest_secret_channel()
+        args, seccomp_fd = _kernel_argv(secrets)
         log_path = kdir / "kernel.log"
         budget = float(timeout) if timeout and 0 < float(timeout) < 15.0 else 15.0
 
@@ -850,8 +1060,12 @@ class BwrapAdapter(RuntimeAdapter):
                     container_id,
                 )
                 self._kernel_kill(container_id)
-                args = [c for c in args if c != "--seccomp" and c != str(seccomp_fd)]
-                spawn = await asyncio.to_thread(self._spawn_kernel, args, None, log_path)
+                # A96: 通道一次性 ⇒ 重试必须重建通道与 argv（旧 argv 里那份值已经投递完了）。
+                # 去掉 syscall 白名单直接落在建 argv 前的 config 上，不再从已建好的 argv 里摘 token。
+                config.use_seccomp = False
+                secrets = _guest_secret_channel()
+                args, seccomp_fd = _kernel_argv(secrets)
+                spawn = await asyncio.to_thread(self._spawn_kernel, args, seccomp_fd, log_path, secrets)
                 if not spawn["ok"]:
                     return {"ok": False, "state": "spawn_failed", "error": spawn["error"], "level": "L3"}
                 seccomp_applied = False
@@ -867,14 +1081,19 @@ class BwrapAdapter(RuntimeAdapter):
         return {"ok": True, "state": "started", "kernel": info, "seccomp": seccomp_applied, "level": "L3"}
 
     @staticmethod
-    def _spawn_kernel(args: list[str], seccomp_fd: int | None, log_path: Path) -> dict:
-        """Start the kernel bwrap as a child of the control-plane process (survives the exec call)."""
+    def _spawn_kernel(args: list[str], seccomp_fd: int | None, log_path: Path, secrets=None) -> dict:
+        """Start the kernel bwrap as a child of the control-plane process (survives the exec call).
+
+        A96: 子进程以 ``stdin=PIPE`` 起，exec 后立即把客侧密钥经 stdin 交给 bootstrap
+        （没通道时仍旧 DEVNULL，不会留一条永不 EOF 的 stdin）。
+        """
         try:
             size = log_path.stat().st_size if log_path.exists() else 0
             log = open(log_path, "ab")
             try:
                 proc = subprocess.Popen(
-                    args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                    args, stdout=log, stderr=log,
+                    stdin=subprocess.PIPE if secrets is not None else subprocess.DEVNULL,
                     start_new_session=True,
                     pass_fds=(seccomp_fd,) if seccomp_fd is not None else (),
                 )
@@ -882,6 +1101,13 @@ class BwrapAdapter(RuntimeAdapter):
                 log.close()
             # 子进程已在 exec 前拿到自己的副本，母进程立即归还借出的 fd（不归还就会逐次漏 fd）
             _release_seccomp_fd(seccomp_fd)
+            if secrets is not None:
+                try:
+                    secrets.deliver(proc)
+                except Exception as exc:
+                    logger.warning("A96: 常驻 kernel 带外通道投递未完成（客侧以 rc=97 拒跑）: %s", exc)
+                finally:
+                    secrets.close()
             return {"ok": True, "proc": proc, "size": size}
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)[:400], "size": 0}
@@ -998,10 +1224,13 @@ class BwrapAdapter(RuntimeAdapter):
 
         # Build hardened bwrap arguments
         session_id = cfg.get("session_id", container_id.replace("bwrap-", ""))
+        # A96: 会话密钥与 workspace DEK 只经 stdin 带外通道递给客侧，不进 argv。
+        secrets = _guest_secret_channel()
         bwrap_args, seccomp_fd = self._guest_argv(
             workspace=workspace, config=config, cfg=cfg, command=None,
             env_vars=env_vars, session_key=session_key, language=language,
             code_file=f"/workspace/tmp/exec.{ext}", session_id=session_id,
+            secrets=secrets,
         )
 
         # Output limiter to prevent data exfiltration via large outputs
@@ -1011,7 +1240,8 @@ class BwrapAdapter(RuntimeAdapter):
             start = datetime.now()
             extra_fds = (seccomp_fd,) if seccomp_fd is not None else ()
             result = await asyncio.wait_for(
-                asyncio.to_thread(subprocess.run, bwrap_args, capture_output=True, text=True, pass_fds=extra_fds),
+                asyncio.to_thread(_run_guest_argv, bwrap_args, secrets,
+                                  capture_output=True, text=True, pass_fds=extra_fds),
                 timeout=effective_timeout,
             )
             # Retry without seccomp if kernel/bwrap rejects PR_SET_SECCOMP —
@@ -1021,9 +1251,22 @@ class BwrapAdapter(RuntimeAdapter):
                 and self._seccomp_retry_needed(result.stderr, seccomp_fd)
                 and _seccomp_fallback_allowed()
             ):
-                cmd_no_seccomp = [c for c in bwrap_args if c != "--seccomp" and c != str(seccomp_fd)]
+                # A96: 通道是一次性的，投过的值不会随重试重发 ⇒ 必须新建通道并重建 argv，
+                # 否则重试路径依旧 rc=97。seccomp 开关落回 config，在新 argv 里就不存在。
+                # 上一个 BPF fd 已被第一次 exec 拿过副本，在这里归还（重建会把变量接成 None，
+                # 不归还就会逐次漏 fd）。
+                _release_seccomp_fd(seccomp_fd)
+                config.use_seccomp = False
+                secrets = _guest_secret_channel()
+                cmd_no_seccomp, seccomp_fd = self._guest_argv(
+                    workspace=workspace, config=config, cfg=cfg, command=None,
+                    env_vars=env_vars, session_key=session_key, language=language,
+                    code_file=f"/workspace/tmp/exec.{ext}", session_id=session_id,
+                    secrets=secrets,
+                )
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(subprocess.run, cmd_no_seccomp, capture_output=True, text=True),
+                    asyncio.to_thread(_run_guest_argv, cmd_no_seccomp, secrets,
+                                      capture_output=True, text=True),
                     timeout=effective_timeout,
                 )
             duration = int((datetime.now() - start).total_seconds() * 1000)
@@ -1050,11 +1293,15 @@ class BwrapAdapter(RuntimeAdapter):
             # Log execution event to main audit trail
             try:
                 from app.services.audit_service import audit_service
-                await audit_service.log(
-                    db=None,
+                await audit_service.log_standalone(
                     action="sandbox.execute",
                     resource_type="sandbox_session",
-                    user_id=cfg.get("user_id", ""),
+                    # A319: user_id 列同样是 UUID(as_uuid=True) —— 递 str 会在 flush 期抛
+                    # StatementError，行依旧丢；解析不出来就递 None，不造假值。
+                    user_id=_session_uuid_or_none(cfg.get("user_id")),
+                    # A90b: 这条路径知道 session id（审计文件就是用它命名的），
+                    # 就显式传 UUID，而不是只留 resource_id 文本给人工关联。
+                    session_id=_session_uuid_or_none(session_id),
                     resource_id=session_id,
                     detail={
                         "language": language,
@@ -1065,7 +1312,8 @@ class BwrapAdapter(RuntimeAdapter):
                     },
                 )
             except Exception:
-                pass  # Non-fatal
+                # A319: 原先是 `pass  # Non-fatal` —— 审计写失败必须响亮披露，不能再静默丢事件。
+                logger.exception("A319: sandbox.execute 审计写入失败 — 该执行事实未进审计漏斗")
 
             return {
                 "output": stdout + stderr,
@@ -1605,6 +1853,8 @@ class TEEAdapter(RuntimeAdapter):
         effective_timeout = timeout or 120
 
         # Build bwrap execution command (reuses the enclave's isolation)
+        # A96: 会话密钥 / DEK 经下面这条带外通道走 stdin，不进 bwrap 的 argv。
+        secrets = _guest_secret_channel()
         if shutil.which("bwrap"):
             cmd = [
                 "bwrap",
@@ -1627,21 +1877,25 @@ class TEEAdapter(RuntimeAdapter):
                   else []),
                 "--tmpfs", "/sys:size=1m",
             ]
-            if session_key:
-                cmd += ["--setenv", "CDS_SESSION_KEY", session_key]
-            if env_vars:
-                for k, v in env_vars.items():
+            pending = _secret_pairs(session_key, env_vars)
+            secret_names = {name for name, _ in pending}
+            if pending:
+                secrets.extend(pending)
+            for k, v in (env_vars or {}).items():
+                if k not in secret_names:
                     cmd += ["--setenv", k, v]
             cmd += ["--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin"]
 
             if language == "python":
-                cmd += ["python3", f"/workspace/tmp/exec.{ext}"]
+                guest_cmd = ["python3", f"/workspace/tmp/exec.{ext}"]
             elif language == "sql":
                 from app.services.sandbox_security import _build_sql_runner
-                cmd += ["python3", "-c", _build_sql_runner(f"/workspace/tmp/exec.{ext}")]
+                guest_cmd = ["python3", "-c", _build_sql_runner(f"/workspace/tmp/exec.{ext}")]
             else:
-                cmd += ["bash", f"/workspace/tmp/exec.{ext}"]
+                guest_cmd = ["bash", f"/workspace/tmp/exec.{ext}"]
+            cmd += _bootstrap_tail(secrets, guest_cmd)
         else:
+            secrets.close()
             return {
                 "output": "SECURITY ERROR: bwrap not installed and L1 software_confidential fallback cannot execute safely.",
                 "exit_code": -1,
@@ -1660,7 +1914,7 @@ class TEEAdapter(RuntimeAdapter):
         try:
             start = datetime.now()
             result = await asyncio.wait_for(
-                asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, env=env),
+                asyncio.to_thread(_run_guest_argv, cmd, secrets, capture_output=True, text=True, env=env),
                 timeout=effective_timeout,
             )
             duration = int((datetime.now() - start).total_seconds() * 1000)
@@ -2378,23 +2632,34 @@ class SandboxRuntime:
             "error": f"streaming exec not supported for container {container_id[:5]}…",
         }
 
-    def terminate(self, container_id: str) -> bool:
+    def terminate(self, container_id: str,
+                  session_id: str | uuid.UUID | None = None) -> bool:
+        """Route termination to the correct adapter.
+
+        A90b: `session_id` 可选只为兼容既有调用点；握着会话行的调用方必须显式传——
+        会话卷的名字是 `cds-data-<session_id>`（A90），运行面拿不到 id 就只能回库反查。
+        """
         if container_id.startswith("l0-"):
-            return self._adapters[SandboxLevel.L0.value].terminate(container_id)
+            return _terminate_with_session_id(
+                self._adapters[SandboxLevel.L0.value].terminate, container_id, session_id)
         if container_id.startswith("tee-"):
-            return self._adapters[SandboxLevel.L1.value].terminate(container_id)
+            return _terminate_with_session_id(
+                self._adapters[SandboxLevel.L1.value].terminate, container_id, session_id)
         if container_id.startswith("fc-"):
-            return self._adapters[SandboxLevel.L2.value].terminate(container_id)
+            return _terminate_with_session_id(
+                self._adapters[SandboxLevel.L2.value].terminate, container_id, session_id)
         if container_id.startswith("bwrap-"):
-            return self._adapters[SandboxLevel.L3.value].terminate(container_id)
+            return _terminate_with_session_id(
+                self._adapters[SandboxLevel.L3.value].terminate, container_id, session_id)
         if container_id.startswith("k8s-"):
-            return self._adapters["k8s"].terminate(container_id)
+            return _terminate_with_session_id(
+                self._adapters["k8s"].terminate, container_id, session_id)
         if container_id.startswith("l2c-"):
             adapter = self._adapters.get(SandboxLevel.L2C.value)
             if adapter is None:
                 logger.warning("[SandboxRuntime] l2c terminate but data plane not enabled: %s", container_id)
                 return False
-            return adapter.terminate(container_id)
+            return _terminate_with_session_id(adapter.terminate, container_id, session_id)
         logger.warning("[SandboxRuntime] Refusing to terminate unsupported container id: %s", container_id)
         return False
 
@@ -2449,7 +2714,9 @@ class SandboxRuntime:
         # Step 1: Destroy container
         if session.container_id:
             try:
-                self.terminate(session.container_id)
+                # A90b: 本调用方握着 session_id，显式传下去（经签名探测，替了 terminate
+                # 桩的单参调用方照旧工作），不让运行面回库反查。
+                _terminate_with_session_id(self.terminate, session.container_id, session_id)
                 container_destroyed = True
             except Exception as e:
                 errors.append(f"Container destruction failed: {e}")
@@ -2503,6 +2770,9 @@ class SandboxRuntime:
                 db,
                 action="sandbox.secure_destroy",
                 resource_type="sandbox_session",
+                # A90b: 知道会话就按 UUID 回链到列上，而不是只留 resource_id 文本、
+                # 事后靠 `_coerce_session_id` 兜底强转。
+                session_id=session_id,
                 resource_id=str(session_id),
                 user_id=session.user_id,
                 detail={
@@ -2524,10 +2794,16 @@ class SandboxRuntime:
         )
 
     async def terminate_sessions_by_key(self, key_id: str, db, reason: str = "key_revoked") -> int:
-        """Terminate all active sandbox sessions using a specific key.
+        """Close every active sandbox session that still uses this key.
 
-        Called when a DEK is revoked to ensure no sandbox continues
-        operating with a revoked key. Returns count of terminated sessions.
+        Called when a DEK is revoked (or stops being usable) so no sandbox keeps
+        operating with a dead key. Returns the number of sessions closed.
+
+        A123b: the final status follows the caller's intent. A revocation writes
+        `REVOKED` — the state machine opened that edge from exactly the six live
+        states selected below (A123) and the enum advertises the copy "Session
+        revoked (key revoked)"; the frontend already renders 已撤销 for it. A
+        non-revocation close (key TTL expiry) stays `TERMINATED`.
         """
         from sqlalchemy import select
         from app.models.sandbox_session import SandboxSession
@@ -2549,25 +2825,33 @@ class SandboxRuntime:
             )
         )
         sessions = result.scalars().all()
+        # A123b: `reason` carries the caller's intent — the revocation callers are
+        # api/kms.py (`key_revoked`) and certificate_service (`certificate_revoked:
+        # <serial>`), while key TTL expiry passes `key_ttl_expired`. Only a
+        # revocation is a REVOKED; everything else stays a plain termination.
+        is_revocation = "revoke" in (reason or "").lower()
+        target = SessionStatus.REVOKED if is_revocation else SessionStatus.TERMINATED
+        verb = "revoked" if is_revocation else "terminated"
         terminated = 0
 
         for session in sessions:
             try:
                 # Validate state transition via state machine
                 current = SessionStatus(session.status)
-                result = session_state_machine.validate_transition(current, SessionStatus.TERMINATED)
-                if not result.success:
-                    logger.warning(f"[KMS] Cannot terminate session {session.id}: {result.error}")
+                transition = session_state_machine.validate_transition(current, target)
+                if not transition.success:
+                    logger.warning(f"[KMS] Cannot {verb} session {session.id}: {transition.error}")
                     continue
                 if session.container_id:
-                    self.terminate(session.container_id)
-                session.status = SessionStatus.TERMINATED.value
+                    # A90b: 会话行就在手上，id 显式交给运行面。
+                    _terminate_with_session_id(self.terminate, session.container_id, session.id)
+                session.status = target.value
                 session.ended_at = datetime.now(timezone.utc)
-                session.error_message = f"Session terminated: {reason}"
+                session.error_message = f"Session {verb}: {reason}"
                 terminated += 1
-                logger.info(f"[KMS] Terminated session {session.id} due to key revocation ({key_id})")
+                logger.info(f"[KMS] {verb} session {session.id} due to key {key_id}")
             except Exception as e:
-                logger.error(f"[KMS] Failed to terminate session {session.id}: {e}")
+                logger.error(f"[KMS] Failed to {verb} session {session.id}: {e}")
 
         # Destroy the key in KMS
         kms_service.destroy_key(key_id)
@@ -2589,8 +2873,115 @@ class SandboxRuntime:
             )
 
         await db.flush()
-        logger.info(f"[KMS] Key {key_id} revoked: {terminated} sessions terminated")
+        logger.info(f"[KMS] Key {key_id}: {terminated} sessions {verb}")
         return terminated
+
+    async def reconcile_container_state(self, db, *, limit: int = 200) -> dict:
+        """A147b: 收敛「会话行状态 ↔ 容器死活」的双向漂移 —— 可外部触发、幂等、留审计痕迹。
+
+        - 行在活跃态而运行面确认容器已不在（节点重启 / 进程被杀 / 外部 rm）⇒ 走状态机
+          写成 TERMINATED，`error_message` 点名 reconciler 与容器 id。
+        - 行已是终态而容器还在跑 ⇒ 回收容器（A147 那类泄漏：容器还占着
+          `cds-data-<session_id>` 卷）。
+
+        `unknown`（前缀不认识 / 适配器未注册）只进披露、不动作：把它当成“容器没了”
+        会让一次缺注册变成对整批活会话的批量终止。收敛后行离开活跃态、回收后运行面不再
+        报 running ⇒ 重复触发不叠加写入（幂等）。`container_id` 刻意保留：它是这行的
+        对账凭据（A147 同源决定）。
+
+        周期化不在本文件里做（这里不养 sleep / 常驻协程）：由调用方（lifespan 定时任务或
+        运维端点 ⇒ 见 app/main.py 的 NEEDS-OWNER）按需触发。`limit` 限单轮探针数量：
+        `get_status` 对 k8s / l2c 是会打到节点面的同步调用。
+        """
+        from sqlalchemy import select
+        from app.models.sandbox_session import SandboxSession
+        from app.services.session_lifecycle import ACTIVE_SESSION_STATUSES
+        from app.services.session_state_machine import session_state_machine
+
+        terminal_only = [s.value for s in SessionStatus if s.value not in ACTIVE_SESSION_STATUSES]
+
+        async def _scan(statuses: list[str]) -> list:
+            result = await db.execute(
+                select(SandboxSession)
+                .where(
+                    SandboxSession.status.in_(statuses),
+                    SandboxSession.container_id.is_not(None),
+                    SandboxSession.container_id != "",
+                )
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+        live_rows = await _scan(ACTIVE_SESSION_STATUSES)
+        closed_rows = await _scan(terminal_only)
+        live_probe = await asyncio.gather(
+            *(asyncio.to_thread(self.get_status, row.container_id) for row in live_rows)
+        )
+        closed_probe = await asyncio.gather(
+            *(asyncio.to_thread(self.get_status, row.container_id) for row in closed_rows)
+        )
+
+        closed_ids: list[str] = []
+        unknown_ids: list[str] = []
+        reclaimed_ids: list[str] = []
+
+        for row, state in zip(live_rows, live_probe):
+            if state == "unknown":
+                unknown_ids.append(str(row.id))
+                continue
+            if state != "terminated":
+                continue
+            try:
+                current = SessionStatus(row.status)
+            except ValueError:
+                logger.error("[reconcile] session %s has unmapped status %r; leaving it alone",
+                             row.id, row.status)
+                continue
+            transition = session_state_machine.validate_transition(current, SessionStatus.TERMINATED)
+            if not transition.success:
+                logger.warning("[reconcile] cannot close session %s: %s", row.id, transition.error)
+                continue
+            row.status = SessionStatus.TERMINATED.value
+            row.ended_at = datetime.now(timezone.utc)
+            row.error_message = f"reconciled: container {row.container_id} absent in runtime"
+            closed_ids.append(str(row.id))
+
+        for row, state in zip(closed_rows, closed_probe):
+            if state != "running":
+                continue
+            if not _terminate_with_session_id(self.terminate, row.container_id, row.id):
+                logger.error(
+                    "[reconcile] container %s of terminated session %s refused to terminate; "
+                    "leaving it as a named leak", row.container_id, row.id,
+                )
+                continue
+            reclaimed_ids.append(str(row.id))
+
+        report = {
+            "scanned": len(live_rows) + len(closed_rows),
+            "closed": len(closed_ids),
+            "containers_reclaimed": len(reclaimed_ids),
+            "skipped_unknown": len(unknown_ids),
+            "closed_session_ids": closed_ids,
+            "reclaimed_session_ids": reclaimed_ids,
+            "skipped_unknown_session_ids": unknown_ids,
+        }
+        if closed_ids or reclaimed_ids:
+            from app.services.audit_service import audit_service
+            await audit_service.log(
+                db, action="session.container_state_reconciled",
+                resource_type="sandbox_session",
+                detail=report,
+            )
+            await db.flush()
+        if unknown_ids:
+            logger.warning(
+                "[reconcile] %d sessions left untouched because the runtime could not answer "
+                "whether their container is alive: %s", len(unknown_ids), unknown_ids,
+            )
+        if closed_ids or reclaimed_ids:
+            logger.info("[reconcile] closed=%s reclaimed=%s", closed_ids, reclaimed_ids)
+        return report
 
 
 # Singleton
@@ -2893,13 +3284,27 @@ class FederatedRuntime(SceneRuntime):
                 "federated": True,
             }
 
-        response = connector.send_request(
-            trust=trust,
-            operation=operation,
-            resource=resource,
-            payload=request.get("payload") or context.get("payload"),
-            user_id=request.get("user_id") or context.get("user_id"),
-        )
+        # A61: 这里是 `async def`，而网关拨号是同步 httpx（连接 5s / 读 30s）+ 磁盘中
+        # mTLS 密钥 —— 直调会在事件循环上占住整个 worker 最多 35s。优先用连接器自己的
+        # offload 入口；注入的只测同步入口的 stub 走 to_thread，同样不占循环。
+        async_dispatch = getattr(connector, "send_request_async", None)
+        if asyncio.iscoroutinefunction(async_dispatch):
+            response = await async_dispatch(
+                trust=trust,
+                operation=operation,
+                resource=resource,
+                payload=request.get("payload") or context.get("payload"),
+                user_id=request.get("user_id") or context.get("user_id"),
+            )
+        else:
+            response = await asyncio.to_thread(
+                connector.send_request,
+                trust=trust,
+                operation=operation,
+                resource=resource,
+                payload=request.get("payload") or context.get("payload"),
+                user_id=request.get("user_id") or context.get("user_id"),
+            )
         if hasattr(response, "__await__"):
             response = await response
 

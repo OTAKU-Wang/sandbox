@@ -1,0 +1,11 @@
+........................................................................ [ 31%]
+........................................................................ [ 63%]
+........................................................................ [ 95%]
+...........                                                              [100%]
+=============================== warnings summary ===============================
+tests/test_ocr_a3_a165_pipeline.py::TestDicomHardFail::test_dicom_strip_failure_exits_nonzero
+  tests/test_ocr_a3_a165_pipeline.py:179: PytestWarning: The test <Function test_dicom_strip_failure_exits_nonzero> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_dicom_strip_failure_exits_nonzero(self, tmp_path: Path):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+227 passed, 1 warning in 69.90s (0:01:09)

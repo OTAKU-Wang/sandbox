@@ -46,7 +46,10 @@ def _import_websocket():
 
 def _default_ws_open(url: str, timeout: float):
     ws = _import_websocket().WebSocket()
-    ws.connect(url)
+    # A86: connect(timeout=...) is what bounds the TCP + handshake phase
+    # (websocket-client copies it into sock_opt.timeout); settimeout() alone
+    # only covers recv(), so an unreachable host could block forever here.
+    ws.connect(url, timeout=timeout)
     ws.settimeout(timeout)
     return ws
 
@@ -106,9 +109,12 @@ def stream_exec(
 
     Yields one parsed frame (dict) per server message. Iteration stops
     after a terminal frame (``exit`` / ``blocked`` / ``error``) or when the
-    server closes the connection. A ``blocked`` frame means the T5 DLP
-    inspection killed the stream (fail-closed) — treat the output as
-    untrusted and check :meth:`CDSClient.get_session_audit`.
+    server closes the connection. Silence longer than ``recv_timeout`` is
+    reported as a degradation, not as a clean end: the generator raises
+    :class:`CDSError` (504) saying the output was truncated (a sandboxed
+    compile or data pull can be silent for minutes). A ``blocked`` frame means
+    the T5 DLP inspection killed the stream (fail-closed) — treat the output
+    as untrusted and check :meth:`CDSClient.get_session_audit`.
     """
     ticket_resp = client.request_ws_ticket()
     ticket = ticket_resp.get("ticket") if isinstance(ticket_resp, dict) else None
@@ -134,11 +140,26 @@ def stream_exec(
         frame: dict[str, Any] = {"type": "start", "command": command}
         if timeout_seconds is not None:
             frame["timeout"] = int(timeout_seconds)
-        ws.send(json.dumps(frame))
+        try:
+            ws.send(json.dumps(frame))
+        except Exception as exc:
+            # A86: the SDK contract is "only CDSError escapes" (A76 family) —
+            # a raw websocket-client send error must not reach the caller.
+            raise CDSError(502, f"websocket send failed: {exc}") from exc
         while True:
             try:
                 raw = ws.recv()
-            except Exception as exc:  # server closed / timeout
+            except Exception as exc:  # closed / stalled / transport error
+                # A74: no frame within recv_timeout is a degradation, not a
+                # clean end — it must be disclosed, never reported as "done".
+                if _is_timeout_error(exc):
+                    raise CDSError(
+                        504,
+                        f"websocket recv timed out after {recv_timeout}s without "
+                        f"receiving a frame: output is TRUNCATED (truncated=true) "
+                        f"and the command may still be running in the sandbox — "
+                        f"raise recv_timeout or fall back to execute()/logs()",
+                    ) from exc
                 if _is_closed_error(exc):
                     return
                 raise CDSError(502, f"websocket recv failed: {exc}") from exc
@@ -161,8 +182,16 @@ def stream_exec(
             pass
 
 
-def _is_closed_error(exc: Exception) -> bool:
-    name = type(exc).__name__
-    if name in ("WebSocketConnectionClosedException", "WebSocketTimeoutException"):
+def _is_timeout_error(exc: Exception) -> bool:
+    """A stalled stream (silence past recv_timeout) is not a closed one (A74)."""
+    if isinstance(exc, TimeoutError):
         return True
-    return isinstance(exc, (ConnectionError, TimeoutError))
+    return type(exc).__name__ == "WebSocketTimeoutException"
+
+
+def _is_closed_error(exc: Exception) -> bool:
+    """Only a genuinely closed connection ends the iteration cleanly (A74)."""
+    name = type(exc).__name__
+    if name == "WebSocketConnectionClosedException":
+        return True
+    return isinstance(exc, ConnectionError)

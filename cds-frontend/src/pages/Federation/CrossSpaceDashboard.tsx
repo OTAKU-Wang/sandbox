@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Card, Table, Tag, Typography, Space, Button, Modal, Form, Select, Input, message, Checkbox, Popconfirm } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { federationApi } from '../../services/federationApi';
+import { federationApi, formatTrustTimestamp } from '../../services/federationApi';
 import type { TrustRelationship, SyncStatus } from '../../services/federationApi';
 import type { ColumnsType } from 'antd/es/table';
 import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
@@ -74,7 +74,7 @@ export default function CrossSpaceDashboard() {
     { title: '信任等级', dataIndex: 'trust_level', key: 'trust_level', render: (v) => <Tag color={trustLevelColors[v]}>{v.toUpperCase()}</Tag> },
     { title: '状态', dataIndex: 'status', key: 'status', render: (v) => <Tag color={trustStatusColors[v]}>{v}</Tag> },
     { title: '允许操作', dataIndex: 'allowed_operations', key: 'ops', render: (ops: string[]) => ops?.map(o => <Tag key={o}>{o}</Tag>) },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v) => new Date(v).toLocaleString() },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v: string | null) => formatTrustTimestamp(v) },
     {
       title: '操作', key: 'action', width: 160,
       render: (_, record) => (

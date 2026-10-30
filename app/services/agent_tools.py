@@ -2,12 +2,16 @@
 
 Tools are platform-registered implementations — a user may select tools for an
 agent run but never supply tool code (that would widen the code_scanner import
-whitelist). Network-capable tools carry ``network_targets`` and are gated at
-runner build time by the session's network policy allowlist.
+whitelist). Network gating is enforced per URL at exec time by
+``validate_network_target`` (session network policy) plus the runner-side
+``_net_allowed`` gate (A157) — there is no static per-tool target list (A158:
+the never-consumed ``network_targets`` field was removed rather than left as
+decoration). ``validate_run`` is the single entry point that also enforces
+per-tool ``roles`` and the ``budget_cost`` sum when the caller supplies them.
 """
 import ipaddress
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +21,6 @@ class AgentTool:
     id: str
     description: str
     params_schema: dict
-    network_targets: list[str] = field(default_factory=list)
     budget_cost: int = 1
     roles: tuple[str, ...] = ()
 
@@ -110,17 +113,41 @@ class ToolRegistry:
     def list_tools(self) -> list[AgentTool]:
         return sorted(self._tools.values(), key=lambda t: t.id)
 
-    def validate_run(self, tool_ids: list[str]) -> str | None:
-        """Validate a tool selection for an agent run. Returns error or None."""
+    def validate_run(
+        self,
+        tool_ids: list[str],
+        *,
+        role: str | None = None,
+        budget: int | None = None,
+    ) -> str | None:
+        """Validate a tool selection for an agent run. Returns error or None.
+
+        A158 single enforcement entry point: when ``role`` is given, every tool
+        declaring ``roles`` must admit it (fail-closed); when ``budget`` is
+        given, the selection's ``budget_cost`` sum must fit. Callers holding a
+        subject or a run budget should pass them — this is the fallback behind
+        per-caller checks such as ``_enforce_tool_roles``.
+        """
         if not tool_ids:
             return "at least one tool is required"
         seen: set[str] = set()
+        tools: list[AgentTool] = []
         for tool_id in tool_ids:
             if tool_id in seen:
                 return f"duplicate tool {tool_id!r}"
             seen.add(tool_id)
-            if self.get(tool_id) is None:
+            tool = self.get(tool_id)
+            if tool is None:
                 return f"unknown tool {tool_id!r}"
+            tools.append(tool)
+        if role is not None:
+            for tool in tools:
+                if tool.roles and role not in tool.roles:
+                    return f"tool {tool.id!r} is not allowed for role {role!r}"
+        if budget is not None:
+            total = sum(tool.budget_cost for tool in tools)
+            if total > budget:
+                return f"tool selection costs {total}, exceeds run budget {budget}"
         return None
 
 
@@ -192,7 +219,6 @@ BUILTIN_TOOLS = {
                 "timeout": {"type": "integer", "description": "超时秒数（默认 10）"},
             },
         ),
-        network_targets=[],
         budget_cost=1,
         roles=("admin", "operator", "data_provider"),
     ),

@@ -9,8 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text, or_
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.core import database as core_database
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.user import User, UserRole
@@ -153,8 +154,15 @@ async def _find_anchor_by_tx_hash(tx_hash: str) -> tuple[str | None, AnchorRecor
     return None, None
 
 
+# A5: 单次锚定的记录数上限。巨型 IN + 事件循环内同步建树必须被闸门挡住；
+# 超限在请求校验阶段（422 VALIDATION_ERROR）就被拒，绝不进入 DB 查询或建树。
+MAX_ANCHOR_BATCH_SIZE = 1000
+
+
 class AnchorRequest(BaseModel):
-    record_ids: list[str]
+    # 长度闸门：>MAX_ANCHOR_BATCH_SIZE 由 pydantic 直接拒绝（422 VALIDATION_ERROR），
+    # 不再把巨型 IN + 同步建树丢进事件循环。
+    record_ids: list[str] = Field(max_length=MAX_ANCHOR_BATCH_SIZE)
 
 
 @router.get("/records")
@@ -352,10 +360,23 @@ async def anchor_audit_records(
     if not records:
         raise HTTPException(status_code=404, detail="No records found")
 
+    # A5: 绝不重新锚定已属于其它锚点的记录。旧锚点成员由 /verify 按 tx_hash 反查
+    # 兄弟记录重算——把已锚定行拉进新锚点并改写其 tx_hash，会让旧锚点成员集合与
+    # 当初叶子不一致，产生「未篡改却验不过」的假阳性。只有尚未锚定的行才能加入
+    # 新锚点；请求全为已锚定行时拒绝，而非静默造一个抢走成员的新根。
+    already_anchored = [r for r in records if r.blockchain_tx_hash]
+    to_anchor = [r for r in records if not r.blockchain_tx_hash]
+    if not to_anchor:
+        raise HTTPException(
+            status_code=409,
+            detail="All requested records are already anchored",
+        )
+
     # Compute hashes and build Merkle tree (leaf bytes: merkle_service helper,
-    # the one place this frozen format lives).
+    # the one place this frozen format lives). Only rows joining THIS root are
+    # hashed — already-anchored members are excluded (see A5 above).
     record_hashes = []
-    for r in records:
+    for r in to_anchor:
         record_hashes.append(crypto_service.sm3_hash(merkle_leaf_preimage(r)))
 
     # Build Merkle tree and get root
@@ -363,20 +384,24 @@ async def anchor_audit_records(
 
     # Anchor to blockchain (PG append-only or configured backend)
     anchor_result = await blockchain_adapter.anchor(merkle_root.encode(), {
-        "record_count": len(records),
+        "record_count": len(to_anchor),
         "anchored_by": str(current_user.id),
-        "record_ids": [str(r.id) for r in records],
+        "record_ids": [str(r.id) for r in to_anchor],
     })
 
     if anchor_result.success and anchor_result.anchor:
         tx_hash = anchor_result.anchor.tx_hash
         if tx_hash:
-            for r in records:
+            # Stamp only the newly anchored rows; already-anchored members keep
+            # their original tx_hash so their prior root stays verifiable
+            # (A5 — never steal anchored members).
+            for r in to_anchor:
                 r.blockchain_tx_hash = tx_hash
             await db.flush()
 
     return {
-        "anchored": len(records),
+        "anchored": len(to_anchor),
+        "skipped_already_anchored": len(already_anchored),
         "merkle_root": merkle_root,
         "tx_hash": anchor_result.anchor.tx_hash if anchor_result.anchor else None,
         "anchor_id": anchor_result.anchor.anchor_id if anchor_result.anchor else None,
@@ -429,12 +454,17 @@ async def verify_audit_record(
         verified = await blockchain_adapter.verify(anchor_id, merkle_root.encode())
         anchor_backend = _backend_disclosure(anchor_record.backend)
 
-    if anchor_backend and not anchor_backend["is_consortium_chain"]:
-        note = "本地防篡改日志校验通过（非联盟链上链，见 backend 标注）"
-    elif anchor_backend:
-        note = "联盟链存证校验通过"
-    else:
+    # A5: 结论与文案同源——note 必须由 verified 派生，绝不只看后端类型。
+    # 校验失败（重算根≠锚定值）时面向监管的文案不得宣称「校验通过」；后端诚实
+    # 披露保留——PG 追加日志的成功文案仍标明「非联盟链」。
+    if anchor_record is None:
         note = "未找到与该 tx_hash 匹配的锚定记录"
+    elif not verified:
+        note = "校验失败：重算的 Merkle 根与锚定值不一致（记录可能被篡改，或锚点成员已变更）"
+    elif anchor_backend is not None and not anchor_backend["is_consortium_chain"]:
+        note = "本地防篡改日志校验通过（非联盟链上链，见 backend 标注）"
+    else:
+        note = "联盟链存证校验通过"
 
     return {
         "verified": verified,
@@ -567,6 +597,66 @@ async def get_audit_statistics(
     }
 
 
+EXPORT_CSV_HEADER = [
+    "id", "user_id", "session_id", "action", "resource_type", "resource_id",
+    "blockchain_tx_hash", "created_at",
+]
+# 一批 = 一次 DB 取行上限 = 一个响应体消息。行边界切分保证分块拼接与单缓冲
+# 一次性拼装逐字节相等（csv 每行自带行终止符）。
+EXPORT_CSV_BATCH_ROWS = 500
+
+
+def _audit_export_row(record: AuditLog) -> list[str]:
+    """一行的列序、空值与 isoformat 写法——CSV 字节的唯一来源，改动即改字节。"""
+    return [
+        str(record.id),
+        str(record.user_id) if record.user_id else "",
+        str(record.session_id) if record.session_id else "",
+        record.action,
+        record.resource_type,
+        record.resource_id or "",
+        record.blockchain_tx_hash or "",
+        record.created_at.isoformat() if record.created_at else "",
+    ]
+
+
+def _drain_csv(buffer: io.StringIO) -> str:
+    chunk = buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+    return chunk
+
+
+async def _stream_audit_csv(since: datetime):
+    """按批流式产出审计 CSV：响应开始后才逐批向 DB 取行，绝不先整段入内存。
+
+    自带会话而不是复用请求会话：响应体可能在 `Depends(get_db)` 拆除之后才被迭代
+    （FastAPI 的这个先后是实现细节，0.106 曾经反转），复用请求会话会在流到一半时
+    撞上已关闭的会话——审计导出丢行是不可接受的。
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(EXPORT_CSV_HEADER)
+    yield _drain_csv(buffer)
+
+    rows_in_chunk = 0
+    async with core_database.async_session() as session:
+        result = await session.stream_scalars(
+            select(AuditLog)
+            .where(AuditLog.created_at >= since)
+            .order_by(AuditLog.created_at)
+            .execution_options(yield_per=EXPORT_CSV_BATCH_ROWS)
+        )
+        async for record in result:
+            writer.writerow(_audit_export_row(record))
+            rows_in_chunk += 1
+            if rows_in_chunk >= EXPORT_CSV_BATCH_ROWS:
+                yield _drain_csv(buffer)
+                rows_in_chunk = 0
+    if rows_in_chunk:
+        yield _drain_csv(buffer)
+
+
 @router.get("/export")
 async def export_audit_records(
     days: int = Query(30, ge=1, le=365),
@@ -577,33 +667,11 @@ async def export_audit_records(
     """Export audit records for regulatory review."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    result = await db.execute(
-        select(AuditLog).where(AuditLog.created_at >= since).order_by(AuditLog.created_at)
-    )
-    records = result.scalars().all()
-
-    if format == "csv":
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["id", "user_id", "session_id", "action", "resource_type", "resource_id", "blockchain_tx_hash", "created_at"])
-        for r in records:
-            writer.writerow([
-                str(r.id),
-                str(r.user_id) if r.user_id else "",
-                str(r.session_id) if r.session_id else "",
-                r.action,
-                r.resource_type,
-                r.resource_id or "",
-                r.blockchain_tx_hash or "",
-                r.created_at.isoformat() if r.created_at else "",
-            ])
-        output.seek(0)
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=audit_export_{days}d.csv"},
+    if format != "csv":
+        result = await db.execute(
+            select(AuditLog).where(AuditLog.created_at >= since).order_by(AuditLog.created_at)
         )
-    else:
+        records = result.scalars().all()
         items = [
             {
                 "id": str(r.id),
@@ -617,6 +685,12 @@ async def export_audit_records(
             for r in records
         ]
         return {"records": items, "total": len(items), "period_days": days}
+
+    return StreamingResponse(
+        _stream_audit_csv(since),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=audit_export_{days}d.csv"},
+    )
 
 
 @router.get("/compliance-report")

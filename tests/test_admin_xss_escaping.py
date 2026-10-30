@@ -235,6 +235,15 @@ class TestInjectionRendersInert:
     @pytest.mark.parametrize("mode", ["ok", "fail"])
     def test_payload_renders_as_literal_text(self, tmp_path, page, mode):
         joined = self._run(tmp_path, page, fail=(mode == "fail"))
+        if mode == "fail" and page == "blockchain.html":
+            # A134（2026-10-19）把验真失败路径改成只显示固定文案：后端响应原文
+            # （注入串的唯一载体）一律不上屏。此时「必须转义后显示」这条判据
+            # 编码的是实现细节而非安全属性，改为更强的形态无关判据：注入串无论
+            # 转义与否都不得出现在 DOM 里。其他页面的 fail 判据不变。
+            assert "<img" not in joined, f"{page}/{mode}: 残留原始 <img 标签\n{joined}"
+            assert "img src=x" not in joined, \
+                f"{page}/{mode}: 失败路径把后端响应原文（转义与否都算）送上了屏\n{joined}"
+            return
         # 注入串必须成为字面文本，且任何位置不得残留可执行标签
         assert "&lt;img src=x onerror=" in joined, \
             f"{page}/{mode}: 注入串没有以字面文本渲染\n{joined}"

@@ -8,8 +8,10 @@ metered on completion. The code_scanner import whitelist is NEVER widened —
 agent runners are validated byte-exactly against the trusted template.
 """
 import ast
+import ipaddress
 import json
 import logging
+import re
 import textwrap
 
 from app.services.agent_tools import tool_registry
@@ -35,6 +37,12 @@ _AGENT_STEP_BUDGET = 15
 _AGENT_TOKEN_BUDGET = 20000
 _AGENT_MAX_TOOLS = 4
 _AGENT_HTTP_ALLOW = {"domains": [], "ips": []}
+# A157: the http tool's egress caps are part of the TRUSTED TEMPLATE, not
+# per-task literals — a settings-derived cap would make byte-exact template
+# validation depend on the host config the sandbox must not be able to move.
+_AGENT_HTTP_MAX_TIMEOUT = 60
+_AGENT_HTTP_DEFAULT_TIMEOUT = 10
+_AGENT_HTTP_METHODS = ("GET", "POST")
 _RAG_INDEX_FILE = None
 _RAG_GENERATIVE_MODEL_ID = None
 _INFERENCE_MODEL_ID = None
@@ -96,25 +104,52 @@ def _sha256(s):
 
 
 def _net_allowed(url):
+    """A157: default-deny egress match for the http tool.
+
+    The old matcher only compared hostnames, so a whitelisted host on an
+    arbitrary port (``https://allowed-host:6379/``) silently turned a domain
+    allowlist into a TCP tunnel, and non-http schemes were only rejected by
+    accident. Here: http(s) only, scheme-default port only, and the FQDN
+    trailing dot is normalised on BOTH sides so a pattern and a URL written in
+    different styles cannot disagree. Anything unreadable is denied.
+    """
     from urllib.parse import urlparse
-    host = urlparse(url).hostname
+    default_ports = {"http": 80, "https": 443}
+    try:
+        parsed = urlparse(url or "")
+        explicit_port = parsed.port
+    except ValueError:
+        return False
+    port = default_ports.get(parsed.scheme)
+    if port is None:
+        return False
+    if (explicit_port if explicit_port is not None else port) != port:
+        return False
+    host = parsed.hostname
     if not host:
         return False
-    domains = _AGENT_HTTP_ALLOW.get("domains", [])
-    for pattern in domains:
-        pattern = pattern.strip().lower()
-        if pattern.startswith("*.") and host.endswith(pattern[1:]) and host != pattern[1:].lstrip("."):
-            return True
-        if host == pattern:
+    host = host.strip().lower().rstrip(".")
+    if not host:
+        return False
+    allow = _AGENT_HTTP_ALLOW or {}
+    for pattern in allow.get("domains") or []:
+        pattern = str(pattern).strip().lower().rstrip(".")
+        if not pattern or pattern == "*":
+            continue
+        if pattern.startswith("*."):
+            suffix = pattern[1:]
+            if host.endswith(suffix) and len(host) > len(suffix):
+                return True
+        elif host == pattern:
             return True
     import ipaddress
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
-    for cidr in _AGENT_HTTP_ALLOW.get("ips", []):
+    for cidr in allow.get("ips") or []:
         try:
-            if ip in ipaddress.ip_network(cidr, strict=False):
+            if ip in ipaddress.ip_network(str(cidr).strip(), strict=False):
                 return True
         except ValueError:
             continue
@@ -188,14 +223,44 @@ def _tool_db_query(args):
         eng.dispose()
 
 
+def _clamp_http_timeout(raw):
+    """A157: the caller never chooses its own ceiling.
+
+    A non-numeric/missing timeout falls back to the template default, and every
+    value is clamped into ``[1, _AGENT_HTTP_MAX_TIMEOUT]`` (``timeout: 10**9``
+    used to be honoured verbatim).
+    """
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError, OverflowError):
+        value = _AGENT_HTTP_DEFAULT_TIMEOUT
+    return max(1, min(value, _AGENT_HTTP_MAX_TIMEOUT))
+
+
 def _tool_http(args):
-    url = args["url"]
-    if not _net_allowed(url):
-        raise RuntimeError("url host is not in the session network allowlist")
+    """A157: method whitelist + allowlist + timeout cap, all BEFORE any socket.
+
+    The order is the product: the description said GET/POST while ``method`` was
+    forwarded verbatim (DELETE went out on the wire) and the socket was opened
+    without a method gate. Nothing below runs for a refused call, so no
+    connection is ever made to a host the session was not granted.
+    """
     import urllib.request
+    url = args.get("url")
     method = str(args.get("method", "GET")).upper()
-    timeout = int(args.get("timeout", 10) or 10)
-    req = urllib.request.Request(url, method=method)
+    if method not in _AGENT_HTTP_METHODS:
+        raise ValueError(
+            "http tool method not allowed: " + method[:32]
+            + " (only " + "/".join(_AGENT_HTTP_METHODS) + ")"
+        )
+    if not _net_allowed(url):
+        raise ValueError("http tool url is not in the session network allowlist")
+    body = args.get("body")
+    data = None
+    if body is not None:
+        data = body.encode("utf-8") if isinstance(body, str) else bytes(body)
+    timeout = _clamp_http_timeout(args.get("timeout"))
+    req = urllib.request.Request(url, data=data, method=method)
     for k, v in (args.get("headers") or {}).items():
         req.add_header(k, v)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -333,16 +398,85 @@ def main():
 '''
 
 
-def _validate_tool_ids(tool_ids: list[str]) -> None:
-    err = tool_registry.validate_run(tool_ids)
+def _validate_tool_ids(
+    tool_ids: list[str], *, role: str | None = None, budget: int | None = None
+) -> None:
+    # A158: forward the run context to validate_run — the single fail-closed
+    # entry point (never re-implement roles/budget checks here).
+    err = tool_registry.validate_run(tool_ids, role=role, budget=budget)
     if err:
         raise ValueError(err)
+
+
+# A157: bare hostname / wildcard-hostname pattern (optional single leading
+# ``*.``, optional single trailing dot). Deliberately strict: a scheme, a port,
+# a path or whitespace never matches, so those typos are rejected here instead
+# of quietly never matching again inside the sandbox.
+_HOST_PATTERN_RE = re.compile(
+    r"^(?:\*\.)?(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$"
+)
+_HTTP_ALLOW_KEYS = ("domains", "ips")
+
+
+def _validate_http_allow(http_allow: dict | None) -> dict:
+    """A157: validate + normalise the session http allowlist at GENERATION time.
+
+    Every malformed entry used to be dropped by the in-sandbox matcher
+    (``except ValueError: continue`` / a never-matching FQDN-with-dot), so a
+    typo meant "no egress" with no error anywhere — an operator believes the
+    allowlist is live while it is inert. Rejection here is fail-closed: the
+    task is refused with 422 rather than shipped with a silently-dead gate.
+
+    Returns the canonical ``{"domains": [...], "ips": [...]}`` dict embedded in
+    the runner; normalisation is idempotent, so ``validate_agent_runner`` can
+    re-feed the extracted literal and still hit a byte-exact template match.
+    """
+    if http_allow is None:
+        return {"domains": [], "ips": []}
+    if not isinstance(http_allow, dict):
+        raise ValueError("http_allow must be a dict of 'domains'/'ips' lists")
+    unknown = sorted(set(http_allow) - set(_HTTP_ALLOW_KEYS))
+    if unknown:
+        raise ValueError(f"http_allow has unsupported keys {unknown} (allowed: {list(_HTTP_ALLOW_KEYS)})")
+
+    domains_in = http_allow.get("domains") or []
+    ips_in = http_allow.get("ips") or []
+    if isinstance(domains_in, (str, bytes)) or not isinstance(domains_in, (list, tuple)):
+        raise ValueError("http_allow['domains'] must be a list of hostnames")
+    if isinstance(ips_in, (str, bytes)) or not isinstance(ips_in, (list, tuple)):
+        raise ValueError("http_allow['ips'] must be a list of IPs or CIDRs")
+
+    domains: list[str] = []
+    for raw in domains_in:
+        if not isinstance(raw, str):
+            raise ValueError(f"http_allow['domains'] entry {raw!r} is not a string")
+        entry = raw.strip().lower().rstrip(".")
+        if not entry or entry == "*" or not _HOST_PATTERN_RE.match(entry):
+            raise ValueError(
+                f"http_allow['domains'] entry {raw!r} is not a bare hostname "
+                "(no scheme, port, path or wildcard-only form)"
+            )
+        domains.append(entry)
+
+    ips: list[str] = []
+    for raw in ips_in:
+        if not isinstance(raw, str):
+            raise ValueError(f"http_allow['ips'] entry {raw!r} is not a string")
+        try:
+            net = ipaddress.ip_network(raw.strip(), strict=False)
+        except ValueError as exc:
+            raise ValueError(f"http_allow['ips'] entry {raw!r} is not a valid IP or CIDR") from exc
+        ips.append(str(net))
+
+    return {"domains": domains, "ips": ips}
 
 
 def build_agent_runner(
     prompt: str,
     tool_ids: list[str],
     *,
+    role: str | None = None,
     step_budget: int | None = None,
     token_budget: int | None = None,
     rag_index_file: str | None = "input/rag_index.json",
@@ -356,12 +490,13 @@ def build_agent_runner(
     literals (the code is stored encrypted as ``code_content``), so they never
     land in a plaintext column. The runner is validated byte-exactly against
     this template before execution — the code_scanner whitelist is never
-    widened.
+    widened. ``role`` is validation context only (A158 second gate) and never
+    affects the generated bytes, so the byte-exact template check is unchanged.
     """
     from app.core.config import get_settings
     settings = get_settings()
 
-    _validate_tool_ids(tool_ids)
+    _validate_tool_ids(tool_ids, role=role)
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("agent prompt cannot be empty")
@@ -375,6 +510,15 @@ def build_agent_runner(
     if effective_tokens < 1:
         raise ValueError("token_budget must be >= 1")
 
+    # A158 budget gate: the tool selection's budget_cost sum must fit the
+    # run's effective step budget (validate_run stays the single gate; this
+    # is the service-layer fallback for every builder, not just the API).
+    _validate_tool_ids(tool_ids, role=role, budget=effective_steps)
+
+    # A157: a malformed allowlist is refused here, at generation time — never
+    # smuggled into the runner where it would silently match nothing.
+    canonical_allow = _validate_http_allow(http_allow)
+
     body = textwrap.dedent(_AGENT_RUNNER_HEADER).rstrip()
     tail = (
         "\n\n# --- generated per-task params ---\n"
@@ -383,7 +527,7 @@ def build_agent_runner(
         f"_AGENT_STEP_BUDGET = {effective_steps}\n"
         f"_AGENT_TOKEN_BUDGET = {effective_tokens}\n"
         f"_AGENT_MAX_TOOLS = {len(tool_ids)}\n"
-        f"_AGENT_HTTP_ALLOW = {dict(http_allow or {"domains": [], "ips": []})!r}\n"
+        f"_AGENT_HTTP_ALLOW = {canonical_allow!r}\n"
         f"_RAG_INDEX_FILE = {rag_index_file!r}\n"
         f"_RAG_GENERATIVE_MODEL_ID = {generative_model_id!r}\n"
         f"_INFERENCE_MODEL_ID = {inference_model_id!r}\n"
@@ -433,16 +577,21 @@ def validate_agent_runner(code: str, tool_ids: list[str] | None = None) -> tuple
     if tool_registry.validate_run(extracted_tools) is not None:
         return False, "runner references unknown or duplicate tools"
 
-    expected = build_agent_runner(
-        literals["_AGENT_PROMPT"],
-        extracted_tools,
-        step_budget=literals.get("_AGENT_STEP_BUDGET"),
-        token_budget=literals.get("_AGENT_TOKEN_BUDGET"),
-        rag_index_file=literals.get("_RAG_INDEX_FILE"),
-        generative_model_id=literals.get("_RAG_GENERATIVE_MODEL_ID"),
-        inference_model_id=literals.get("_INFERENCE_MODEL_ID"),
-        http_allow=literals.get("_AGENT_HTTP_ALLOW"),
-    )
+    try:
+        expected = build_agent_runner(
+            literals["_AGENT_PROMPT"],
+            extracted_tools,
+            step_budget=literals.get("_AGENT_STEP_BUDGET"),
+            token_budget=literals.get("_AGENT_TOKEN_BUDGET"),
+            rag_index_file=literals.get("_RAG_INDEX_FILE"),
+            generative_model_id=literals.get("_RAG_GENERATIVE_MODEL_ID"),
+            inference_model_id=literals.get("_INFERENCE_MODEL_ID"),
+            http_allow=literals.get("_AGENT_HTTP_ALLOW"),
+        )
+    except ValueError as e:
+        # A tampered per-task literal can now be rejected by the A157 generator
+        # gates; keep the (passed, reason) contract instead of raising.
+        return False, f"runner params are invalid: {e}"
     if code != expected:
         return False, "runner differs from the system-generated template (tampered or stale)"
     return True, "runner matches the system-generated template"

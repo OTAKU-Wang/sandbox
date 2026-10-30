@@ -1,0 +1,636 @@
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+..................F..................................................... [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+...............FE....................................................... [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+................................Fs...................................... [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+..ss.................................................................... [ 97%]
+........................................................................ [ 99%]
+.....................................                                    [100%]/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/unraisableexception.py:33: RuntimeWarning: coroutine 'test_run_does_not_pretend_when_bridge_cannot_start.<locals>._work' was never awaited
+  gc.collect()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+
+==================================== ERRORS ====================================
+____ ERROR at teardown of test_lifespan_assembles_the_cross_process_backend ____
+  + Exception Group Traceback (most recent call last):
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/runner.py", line 353, in from_call
+  |     result: TResult | None = func()
+  |                              ~~~~^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/runner.py", line 245, in <lambda>
+  |     lambda: runtest_hook(item=item, **kwds),
+  |             ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pluggy/_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |            ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pluggy/_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |            ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pluggy/_callers.py", line 167, in _multicall
+  |     raise exception
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pluggy/_callers.py", line 139, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/logging.py", line 858, in pytest_runtest_teardown
+  |     yield
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pluggy/_callers.py", line 139, in _multicall
+  |     teardown.throw(exception)
+  |     ~~~~~~~~~~~~~~^^^^^^^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/capture.py", line 905, in pytest_runtest_teardown
+  |     return (yield)
+  |             ^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pluggy/_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/runner.py", line 194, in pytest_runtest_teardown
+  |     item.session._setupstate.teardown_exact(nextitem)
+  |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/runner.py", line 566, in teardown_exact
+  |     raise exceptions[0]
+  | ExceptionGroup: errors while tearing down <Coroutine test_lifespan_assembles_the_cross_process_backend> (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 308, in rollback
+    |     self.await_(self._connection.rollback())
+    |     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 197, in rollback
+    |     await self._execute(self._conn.rollback)
+    |                         ^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 137, in _conn
+    |     raise ValueError("no active connection")
+    | ValueError: no active connection
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1130, in _rollback_impl
+    |     self.engine.dialect.do_rollback(self.connection)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/default.py", line 712, in do_rollback
+    |     dbapi_connection.rollback()
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 310, in rollback
+    |     self._handle_exception(error)
+    |     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 339, in _handle_exception
+    |     raise self.dbapi.sqlite.OperationalError(
+    |         "no active connection"
+    |     ) from error
+    | sqlite3.OperationalError: no active connection
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/runner.py", line 555, in teardown_exact
+    |     fin()
+    |     ~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/fixtures.py", line 1053, in finish
+    |     raise exceptions[0]
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/fixtures.py", line 1042, in finish
+    |     fin()
+    |     ~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    |     return self._loop.run_until_complete(task)
+    |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+    |   File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    |     return future.result()
+    |            ~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py", line 416, in async_finalizer
+    |     await gen_obj.__anext__()
+    |   File "/home/<user>/Documents/workspace/sandbox/tests/conftest.py", line 204, in db_session
+    |     await session.rollback()
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py", line 989, in rollback
+    |     await greenlet_spawn(self.sync_session.rollback)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 201, in greenlet_spawn
+    |     result = context.throw(*sys.exc_info())
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/orm/session.py", line 1996, in rollback
+    |     self._transaction.rollback(_to_root=True)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+    |   File "<string>", line 2, in rollback
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    |     ret_value = fn(self, *arg, **kw)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/orm/session.py", line 1397, in rollback
+    |     raise rollback_err[1].with_traceback(rollback_err[2])
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/orm/session.py", line 1362, in rollback
+    |     t[1].rollback()
+    |     ~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2621, in rollback
+    |     self._do_rollback()
+    |     ~~~~~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2740, in _do_rollback
+    |     self._close_impl(try_deactivate=True)
+    |     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2723, in _close_impl
+    |     self._connection_rollback_impl()
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2715, in _connection_rollback_impl
+    |     self.connection._rollback_impl()
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1132, in _rollback_impl
+    |     self._handle_dbapi_exception(e, None, None, None, None)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2365, in _handle_dbapi_exception
+    |     raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1130, in _rollback_impl
+    |     self.engine.dialect.do_rollback(self.connection)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/default.py", line 712, in do_rollback
+    |     dbapi_connection.rollback()
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 310, in rollback
+    |     self._handle_exception(error)
+    |     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 339, in _handle_exception
+    |     raise self.dbapi.sqlite.OperationalError(
+    |         "no active connection"
+    |     ) from error
+    | sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no active connection
+    | (Background on this error at: https://sqlalche.me/e/20/e3q8)
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1969, in _exec_single_context
+    |     self.dialect.do_execute(
+    |     ~~~~~~~~~~~~~~~~~~~~~~~^
+    |         cursor, str_statement, effective_parameters, context
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    |     cursor.execute(statement, parameters)
+    |     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 183, in execute
+    |     self._adapt_connection._handle_exception(error)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 343, in _handle_exception
+    |     raise error
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 160, in execute
+    |     _cursor: AsyncIODBAPICursor = self.await_(self._connection.cursor())  # type: ignore[arg-type] # noqa: E501
+    |                                   ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 189, in cursor
+    |     return Cursor(self, await self._execute(self._conn.cursor))
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 160, in _execute
+    |     return await future
+    |            ^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 63, in _connection_worker_thread
+    |     result = function()
+    | sqlite3.ProgrammingError: Cannot operate on a closed database.
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/runner.py", line 555, in teardown_exact
+    |     fin()
+    |     ~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/fixtures.py", line 1053, in finish
+    |     raise exceptions[0]
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/_pytest/fixtures.py", line 1042, in finish
+    |     fin()
+    |     ~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py", line 424, in finalizer
+    |     runner.run(async_finalizer(), context=context)
+    |     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    |     return self._loop.run_until_complete(task)
+    |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+    |   File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    |     return future.result()
+    |            ~~~~~~~~~~~~~^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py", line 416, in async_finalizer
+    |     await gen_obj.__anext__()
+    |   File "/home/<user>/Documents/workspace/sandbox/tests/conftest.py", line 197, in setup_db
+    |     await conn.run_sync(Base.metadata.drop_all)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/engine.py", line 888, in run_sync
+    |     return await greenlet_spawn(
+    |            ^^^^^^^^^^^^^^^^^^^^^
+    |         fn, self._proxied, *arg, _require_await=False, **kw
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 203, in greenlet_spawn
+    |     result = context.switch(value)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/sql/schema.py", line 5958, in drop_all
+    |     bind._run_ddl_visitor(
+    |     ~~~~~~~~~~~~~~~~~~~~~^
+    |         ddl.SchemaDropper, self, checkfirst=checkfirst, tables=tables
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2469, in _run_ddl_visitor
+    |     ).traverse_single(element)
+    |       ~~~~~~~~~~~~~~~^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/sql/visitors.py", line 661, in traverse_single
+    |     return meth(obj, **kw)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/sql/ddl.py", line 1085, in visit_metadata
+    |     unsorted_tables = [t for t in tables if self._can_drop_table(t)]
+    |                                             ~~~~~~~~~~~~~~~~~~~~^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/sql/ddl.py", line 1161, in _can_drop_table
+    |     return not self.checkfirst or self.dialect.has_table(
+    |                                   ~~~~~~~~~~~~~~~~~~~~~~^
+    |         self.connection, table.name, schema=effective_schema
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "<string>", line 2, in has_table
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/reflection.py", line 90, in cache
+    |     return fn(self, con, *args, **kw)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/base.py", line 2332, in has_table
+    |     info = self._get_table_pragma(
+    |         connection, "table_info", table_name, schema=schema
+    |     )
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/base.py", line 3042, in _get_table_pragma
+    |     cursor = connection.exec_driver_sql(statement)
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1781, in exec_driver_sql
+    |     ret = self._execute_context(
+    |         dialect,
+    |     ...<5 lines>...
+    |         distilled_parameters,
+    |     )
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1848, in _execute_context
+    |     return self._exec_single_context(
+    |            ~~~~~~~~~~~~~~~~~~~~~~~~~^
+    |         dialect, context, statement, parameters
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1988, in _exec_single_context
+    |     self._handle_dbapi_exception(
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+    |         e, str_statement, effective_parameters, cursor, context
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 2365, in _handle_dbapi_exception
+    |     raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/base.py", line 1969, in _exec_single_context
+    |     self.dialect.do_execute(
+    |     ~~~~~~~~~~~~~~~~~~~~~~~^
+    |         cursor, str_statement, effective_parameters, context
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    |     cursor.execute(statement, parameters)
+    |     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 183, in execute
+    |     self._adapt_connection._handle_exception(error)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 343, in _handle_exception
+    |     raise error
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 160, in execute
+    |     _cursor: AsyncIODBAPICursor = self.await_(self._connection.cursor())  # type: ignore[arg-type] # noqa: E501
+    |                                   ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 189, in cursor
+    |     return Cursor(self, await self._execute(self._conn.cursor))
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 160, in _execute
+    |     return await future
+    |            ^^^^^^^^^^^^
+    |   File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 63, in _connection_worker_thread
+    |     result = function()
+    | sqlalchemy.exc.ProgrammingError: (sqlite3.ProgrammingError) Cannot operate on a closed database.
+    | [SQL: PRAGMA main.table_info("users")]
+    | (Background on this error at: https://sqlalche.me/e/20/f405)
+    +------------------------------------
+------------------------------ Captured log call -------------------------------
+WARNING  app.main:main.py:217 [SECURITY] WARN: JWT_SECRET_KEY uses default value (acceptable in DEBUG mode only)
+WARNING  app.main:main.py:75 [MAIN] durable task queue wiring: table=task_queue schema_created_at_boot=True production_consumer=False terminal_write_guard=none stale_requeue_guard=none —— 接线生产消费者之前需先补 claimed_by 归属守卫与 requeue 退避（A75）
+WARNING  app.main:main.py:181 [MAIN] HSM backend=software-fallback is_simulation=True — KEK 活在本进程、不是硬件 HSM（dev/test only；生产请接 Vault 并置 CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false）
+ERROR    app.main:main.py:237 Redis initialization failed: Redis unavailable (cooldown)
+ERROR    app.main:main.py:254 [MAIN] Tenant quota restore failed: Redis unavailable (cooldown)
+WARNING  app.main:main.py:267 [MAIN] JWT signing-key source=test-local — TESTING/PYTEST 环境变量生效；使用源码内置测试密钥（仅限测试套件）
+ERROR    sqlalchemy.pool.impl.StaticPool:base.py:1008 Exception during reset or similar
+Traceback (most recent call last):
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 986, in _finalize_fairy
+    fairy._reset(
+    ~~~~~~~~~~~~^
+        pool,
+        ^^^^^
+    ...<2 lines>...
+        asyncio_safe=can_manipulate_connection,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 1441, in _reset
+    pool._dialect.do_rollback(self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/default.py", line 712, in do_rollback
+    dbapi_connection.rollback()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 308, in rollback
+    self.await_(self._connection.rollback())
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 197, in rollback
+    await self._execute(self._conn.rollback)
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 160, in _execute
+    return await future
+           ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+---------------------------- Captured log teardown -----------------------------
+ERROR    sqlalchemy.pool.impl.StaticPool:base.py:377 Exception terminating connection <AdaptedConnection <aiosqlite.core.Connection object at 0x76c897d312b0>>
+Traceback (most recent call last):
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 373, in _close_connection
+    self._dialect.do_terminate(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 480, in do_terminate
+    dbapi_connection.terminate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/connectors/asyncio.py", line 402, in terminate
+    self.await_(asyncio.shield(self._terminate_graceful_close()))  # type: ignore[attr-defined] # noqa: E501
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+ERROR    sqlalchemy.pool.impl.StaticPool:base.py:377 Exception terminating connection <AdaptedConnection <aiosqlite.core.Connection object at 0x76c897d312b0>>
+Traceback (most recent call last):
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 373, in _close_connection
+    self._dialect.do_terminate(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 480, in do_terminate
+    dbapi_connection.terminate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/connectors/asyncio.py", line 402, in terminate
+    self.await_(asyncio.shield(self._terminate_graceful_close()))  # type: ignore[attr-defined] # noqa: E501
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+ERROR    sqlalchemy.pool.impl.StaticPool:base.py:377 Exception terminating connection <AdaptedConnection <aiosqlite.core.Connection object at 0x76c897d312b0>>
+Traceback (most recent call last):
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 373, in _close_connection
+    self._dialect.do_terminate(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 480, in do_terminate
+    dbapi_connection.terminate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/connectors/asyncio.py", line 402, in terminate
+    self.await_(asyncio.shield(self._terminate_graceful_close()))  # type: ignore[attr-defined] # noqa: E501
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+ERROR    app.services.task_pipeline:task_pipeline.py:279 [Pipeline] Stage running failed for task 5289557d-29e: (sqlite3.OperationalError) no active connection
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+ERROR    app.services.task_pipeline:task_pipeline.py:219 [Pipeline] Task 5289557d-29e failed: (sqlite3.OperationalError) no active connection
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+ERROR    app.services.task_pipeline:task_pipeline.py:279 [Pipeline] Stage running failed for task ef1e5c61-26b: (sqlite3.OperationalError) no active connection
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+ERROR    app.services.task_pipeline:task_pipeline.py:219 [Pipeline] Task ef1e5c61-26b failed: (sqlite3.OperationalError) no active connection
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+=================================== FAILURES ===================================
+E   AssertionError: stdout:
+      pinned sha: 9b75d33907ed7336b1eef73a935ae2d1990d9b35 (source: manifest/_VERSION/fallback)
+      upstream source: /home/<user>/Documents/workspace/CubeSandbox (work-copy)
+      generating 7 protos: cubebox/v1/cubebox.proto errorcode/v1/errorcode.proto images/v1/images.proto snapshot/v1/snapshot.proto volumeplugin/v1/volumeplugin.proto types/v1/descriptor.proto types/v1/images.proto
+      
+      stderr:
+      ERROR: protoc 未产出: services/cubebox/v1/cubebox.proto_pb2.py services/cubebox/v1/cubebox.proto_pb2_grpc.py services/errorcode/v1/errorcode.proto_pb2.py services/errorcode/v1/errorcode.proto_pb2_grpc.py services/images/v1/images.proto_pb2.py services/images/v1/images.proto_pb2_grpc.py services/snapshot/v1/snapshot.proto_pb2.py services/snapshot/v1/snapshot.proto_pb2_grpc.py services/volumeplugin/v1/volumeplugin.proto_pb2.py services/volumeplugin/v1/volumeplugin.proto_pb2_grpc.py types/v1/descriptor.proto_pb2.py types/v1/descriptor.proto_pb2_grpc.py types/v1/images.proto_pb2.py types/v1/images.proto_pb2_grpc.py
+      
+    assert 3 == 0
+     +  where 3 = CompletedProcess(args=['bash', '/home/<user>/Documents/workspace/sandbox/scripts/gen-cube-stubs.sh'], returncode=3, st...r.proto_pb2.py types/v1/descriptor.proto_pb2_grpc.py types/v1/images.proto_pb2.py types/v1/images.proto_pb2_grpc.py\n').returncode
+/home/<user>/Documents/workspace/sandbox/tests/test_cube_upstream_check.py:243: AssertionError: stdout:
+E   RuntimeError: Event loop is closed
+------------------------------ Captured log call -------------------------------
+WARNING  app.main:main.py:217 [SECURITY] WARN: JWT_SECRET_KEY uses default value (acceptable in DEBUG mode only)
+WARNING  app.main:main.py:75 [MAIN] durable task queue wiring: table=task_queue schema_created_at_boot=True production_consumer=False terminal_write_guard=none stale_requeue_guard=none —— 接线生产消费者之前需先补 claimed_by 归属守卫与 requeue 退避（A75）
+WARNING  app.main:main.py:181 [MAIN] HSM backend=software-fallback is_simulation=True — KEK 活在本进程、不是硬件 HSM（dev/test only；生产请接 Vault 并置 CDS_HSM_SOFTWARE_FALLBACK_ALLOWED=false）
+ERROR    app.main:main.py:237 Redis initialization failed: Redis unavailable (cooldown)
+ERROR    app.main:main.py:254 [MAIN] Tenant quota restore failed: Redis unavailable (cooldown)
+WARNING  app.main:main.py:267 [MAIN] JWT signing-key source=test-local — TESTING/PYTEST 环境变量生效；使用源码内置测试密钥（仅限测试套件）
+ERROR    sqlalchemy.pool.impl.StaticPool:base.py:1008 Exception during reset or similar
+Traceback (most recent call last):
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 986, in _finalize_fairy
+    fairy._reset(
+    ~~~~~~~~~~~~^
+        pool,
+        ^^^^^
+    ...<2 lines>...
+        asyncio_safe=can_manipulate_connection,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/pool/base.py", line 1441, in _reset
+    pool._dialect.do_rollback(self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/engine/default.py", line 712, in do_rollback
+    dbapi_connection.rollback()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/dialects/sqlite/aiosqlite.py", line 308, in rollback
+    self.await_(self._connection.rollback())
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 197, in rollback
+    await self._execute(self._conn.rollback)
+  File "/home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/aiosqlite/core.py", line 160, in _execute
+    return await future
+           ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+/usr/lib/python3.14/asyncio/base_events.py:550: RuntimeError: Event loop is closed
+E   PermissionError: json_path must live inside a platform import root (allowed: /tmp/cds-uploads, /tmp/cds-sandbox, /tmp/cds-sandbox-l0, /tmp/cds-storage, /tmp/cds-pipeline, /tmp/cds-duckdb, /tmp/cds-test-sandbox-results)
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.secure_duckdb:secure_duckdb.py:792 [secure-duckdb] session=sm4-roundtrip-test refused json_path outside the import roots: /tmp/pytest-of-kratos/pytest-565/test_register_json_encrypted0/test_data.json
+/home/<user>/Documents/workspace/sandbox/app/services/secure_duckdb.py:796: PermissionError: json_path must live inside a platform import root (allowed: /tmp/cds-uploads, /tmp/cds-sandbox, /tmp/cds-sandbox-l0, /tmp/cds-storage, /tmp/cds-pipeline, /tmp/cds-duckdb, /tmp/cds-test-sandbox-results)
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743
+.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743
+.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743
+.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/session.py:1743: PytestCollectionWarning: cannot collect 'test_session_factory' because it is not a function.
+    def __call__(self, **local_kw: Any) -> _AS:
+
+tests/test_error_contract.py::test_validation_error_with_missing_field_stays_422
+  /usr/lib/python3.14/copyreg.py:104: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return cls.__new__(cls, *args)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_exec_stream.py: 6 warnings
+tests/test_exec_stream_shared_volumes.py: 4 warnings
+tests/test_jupyter_gateway_isolation.py: 1 warning
+tests/test_ocr_a25_ws_ticket_atomic.py: 6 warnings
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_exec_stream.py: 6 warnings
+tests/test_exec_stream_shared_volumes.py: 4 warnings
+tests/test_ocr_a25_ws_ticket_atomic.py: 5 warnings
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/jwt/api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_frontend_api_contract.py::test_frontend_calls_resolve_to_real_routes
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/fastapi/openapi/utils.py:252: UserWarning: Duplicate Operation ID proxy_api_jupyter__path__delete for function proxy at /home/<user>/Documents/workspace/sandbox/app/api/jupyter_proxy.py
+    warnings.warn(message, stacklevel=1)
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_returns_copy_not_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:43: PytestWarning: The test <Function test_returns_copy_not_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_returns_copy_not_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_mutating_returned_dict_cannot_poison_defaults
+  tests/test_ocr_a108_a109_sandbox_manager.py:48: PytestWarning: The test <Function test_mutating_returned_dict_cannot_poison_defaults> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_mutating_returned_dict_cannot_poison_defaults(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_validate_none_does_not_return_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:58: PytestWarning: The test <Function test_validate_none_does_not_return_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_validate_none_does_not_return_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[0]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[0]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[-1]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[-1]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[8]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[8]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[1.5]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[1.5]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[True]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[True]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[None]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[None]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_zero_on_any_key_rejected
+  tests/test_ocr_a108_a109_sandbox_manager.py:74: PytestWarning: The test <Function test_zero_on_any_key_rejected> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_zero_on_any_key_rejected(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_legit_narrowing_and_clamping_keep_working
+  tests/test_ocr_a108_a109_sandbox_manager.py:79: PytestWarning: The test <Function test_legit_narrowing_and_clamping_keep_working> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_legit_narrowing_and_clamping_keep_working(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_unknown_keys_do_not_bypass_validation
+  tests/test_ocr_a108_a109_sandbox_manager.py:89: PytestWarning: The test <Function test_unknown_keys_do_not_bypass_validation> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_unknown_keys_do_not_bypass_validation(self):
+
+tests/test_ocr_a22_checkpoint_deserialization.py::TestA22CheckpointDeserialization::test_plain_pickle_leg_does_not_execute_payload
+tests/test_ocr_a22_checkpoint_deserialization.py::TestA22CheckpointDeserialization::test_torch_extension_fallback_does_not_execute_payload
+  /home/<user>/Documents/workspace/sandbox/.venv/lib/python3.14/site-packages/torch/_weights_only_unpickler.py:590: UserWarning: Detected pickle protocol 5 in the checkpoint, which was not the default pickle protocol used by `torch.load` (2). The weights_only Unpickler might not support all instructions implemented by this protocol, please file an issue for adding support if you encounter this.
+    return Unpickler(file, encoding=encoding).load()
+
+tests/test_ocr_a3_a165_pipeline.py::TestDicomHardFail::test_dicom_strip_failure_exits_nonzero
+  tests/test_ocr_a3_a165_pipeline.py:179: PytestWarning: The test <Function test_dicom_strip_failure_exits_nonzero> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_dicom_strip_failure_exits_nonzero(self, tmp_path: Path):
+
+tests/test_scene_runtime.py::TestFederatedRuntime::test_execute_federation_request_uses_connector
+  /home/<user>/Documents/workspace/sandbox/app/services/sandbox_runtime.py:3291: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(async_dispatch):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_cube_upstream_check.py::test_regen_is_idempotent - Assertio...
+FAILED tests/test_ocr_a192d_dp_backend_assembly.py::test_lifespan_assembles_the_cross_process_backend
+FAILED tests/test_sm4_duckdb_roundtrip.py::TestMultiSourceEncrypted::test_register_json_encrypted
+ERROR tests/test_ocr_a192d_dp_backend_assembly.py::test_lifespan_assembles_the_cross_process_backend
+3 failed, 4854 passed, 4 skipped, 55 warnings, 1 error in 1265.34s (0:21:05)

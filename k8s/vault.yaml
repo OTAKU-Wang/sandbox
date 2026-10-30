@@ -7,6 +7,9 @@ metadata:
     app: vault
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: vault
@@ -32,9 +35,16 @@ spec:
             - name: vault-config
               mountPath: /vault/config
               readOnly: true
+          # `vault status` exits 2 while the store is sealed, so a freshly scheduled
+          # pod (sealed until scripts/vault-init.sh runs) was permanently Not Ready —
+          # and the exec CLI also needs VAULT_ADDR inside the probe. /v1/sys/health is
+          # the documented unauthenticated health endpoint: 429 = sealed (not ready),
+          # 200 = active/standby and initialized, 501 = initialized=false (not ready).
           readinessProbe:
-            exec:
-              command: ["vault", "status", "-address=http://127.0.0.1:8200"]
+            # standbyok=true keeps an HA standby Ready; sealed/uninitialized stay not Ready.
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:

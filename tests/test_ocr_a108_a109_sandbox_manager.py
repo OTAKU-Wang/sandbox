@@ -28,14 +28,10 @@ from app.services.sandbox_manager import (
     get_resource_limits,
     get_tenant_quota,
     release_tenant_usage,
+    try_reserve_tenant_usage,
     update_tenant_usage,
     validate_resource_limits,
 )
-
-try:  # TEMP-RED: 修复后删除本块，恢复严格导入
-    from app.services.sandbox_manager import try_reserve_tenant_usage
-except ImportError:  # pragma: no cover
-    try_reserve_tenant_usage = None
 
 pytestmark = pytest.mark.asyncio
 
@@ -135,17 +131,24 @@ class TestDeltaBasedPersistence:
         """Redis 抖动不得把增量弄丢：失败保留 pending，恢复后补写。"""
         import app.core.redis as redis_module
 
-        async def broken(*a, **k):
-            raise ConnectionError("redis down")
+        real_get_redis = redis_module.get_redis
+        down = {"now": True}
 
-        monkeypatch.setattr(redis_module, "get_redis", broken)
+        async def flaky(*a, **k):
+            if down["now"]:
+                raise ConnectionError("redis down")
+            return await real_get_redis(*a, **k)
+
+        monkeypatch.setattr(redis_module, "get_redis", flaky)
         update_tenant_usage("tenant-b", cpu_cores=3)
         await flush_quota_persistence()  # 不得抛出
 
         stored = await _fake_redis_and_clean_state.hgetall(TENANT_QUOTA_KEY_PREFIX + "tenant-b")
         assert stored.get("used_cpu_cores") is None  # 当时确实没写进去
 
-        monkeypatch.undo()  # 恢复 fake redis
+        # 只撕掉本测试自己下的补丁：monkeypatch.undo() 会把 fixture 的
+        # fake redis 一并撤销，产品就被指回真 Redis（在隔间里无凭证⇒永远补不上）
+        down["now"] = False
         await flush_quota_persistence()
         stored = await _fake_redis_and_clean_state.hgetall(TENANT_QUOTA_KEY_PREFIX + "tenant-b")
         assert stored["used_cpu_cores"] == "3"

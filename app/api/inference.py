@@ -23,6 +23,7 @@ from app.models.user import User, UserRole
 from app.services.audit_service import audit_service
 from app.services.inference_service import (
     _estimate_input_tokens,
+    _EXECUTABLE_FORMATS,
     build_inference_runner,
     inference_service,
 )
@@ -53,6 +54,21 @@ async def register_model(
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DATA_PROVIDER)),
 ):
     """Register a model artifact (encrypted at rest)."""
+    # A10: the runner is a fixed ort.InferenceSession on model.onnx, so only
+    # _EXECUTABLE_FORMATS can ever run. The service module has promised this
+    # gate since spec N5 but never wired it — pickle/safetensors registered
+    # 201 + "registered", metered doomed invokes, and pickle at an upload
+    # endpoint is a latent deserialisation-RCE surface. Fail closed here.
+    if format not in _EXECUTABLE_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Model format '{format}' cannot be registered: the v1 sandbox "
+                f"runner executes only {sorted(_EXECUTABLE_FORMATS)} — refusing "
+                "to register an artifact that could never run (and pickle/safetensors "
+                "deserialisation is never accepted in a data-sandbox upload path)"
+            ),
+        )
     artifact = await file.read()
     try:
         model = await inference_service.register_model(

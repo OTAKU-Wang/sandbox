@@ -170,8 +170,13 @@ def test_remote_deploy_fails_fast_on_missing_column_key(tmp_path):
     (stub / "docker").write_text("#!/bin/sh\necho STUB-DOCKER-USED\n", encoding="utf-8")
     r = subprocess.run(
         [b, "-c",
+         # 参数接线修正：`remote_deploy.sh` 的公开契约是 **`$1 = ENV_FILE`**
+         # （`deploy/AGENTS.md`:37 与真实车道调用 `bash remote_deploy.sh /root/cds.env` 同形），
+         # 脚本不接受镜像 tar 参数。原判据把 `/nonexistent/img.tar.gz` 放在 `$1` ⇒ 脚本在
+         # 「env 文件不存在」那一步就 FATAL，永远走不到列加密 DEK 白名单。
+         # tar 挤到第二个位置参数（脚本不消费它），三条断言的原意一字不动。
          f'PATH="{posix(stub)}:$PATH" bash {posix(E2E / "remote_deploy.sh")} '
-         f'/nonexistent/img.tar.gz {posix(env)}'],
+         f'{posix(env)} /nonexistent/img.tar.gz'],
         capture_output=True, text=True, timeout=120)
     out = r.stdout + r.stderr
     assert r.returncode != 0, "deploy must FATAL on a missing column DEK"
@@ -299,8 +304,13 @@ def test_k8s_cds_app_boot_posture_and_migrations():
     for key, want in PROD_POSTURE.items():
         assert cm["data"].get(key) == want, f"cds-app-env {key} must be {want}"
     job = next((d for d in docs if d.get("kind") == "Job"), None)
-    assert job and any("alembic" in part for part in
-                       str(job["spec"]["template"]["spec"]["containers"][0].get("command", ""))), \
+    # 原判据写的是 `for part in str([...])`：对 **str** 迭代得到的是单个字符，
+    # `"alembic" in <1 个字符>` 永假 ⇒ 对任何清单形态都红（机器消费型断言写错，
+    # 不是清单缺口）。按意图遍历 command 列表元素 —— 判据变强，不是放宽。
+    _cmd = (job["spec"]["template"]["spec"]["containers"][0].get("command", [])
+            if job else [])
+    _parts = _cmd if isinstance(_cmd, list) else [_cmd]
+    assert job and any("alembic" in str(part) for part in _parts), \
         "prod posture needs an alembic migration Job (main.py skips create_all)"
     dep = next(d for d in docs if d.get("kind") == "Deployment"
                and d["metadata"]["name"] == "cds-api")

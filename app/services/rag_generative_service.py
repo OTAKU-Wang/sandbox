@@ -20,6 +20,13 @@ from app.models.rag_generative_model import RAGGenerativeModel
 logger = logging.getLogger(__name__)
 
 _MAX_BUNDLE_BYTES = 256 * 1024 * 1024
+"""Single source of truth for the generative bundle size cap.
+
+Read at request time by ``app.api.rag`` so the route can refuse an oversize
+upload WHILE streaming it (A26) instead of buffering it and letting
+:meth:`RAGGenerativeService.register` reject it afterwards; the check inside
+``register`` stays as the last line of defence for direct callers.
+"""
 _BUNDLE_FILENAME = "generative_model.bundle"
 
 
@@ -81,6 +88,25 @@ class RAGGenerativeService:
     async def get(self, db: AsyncSession, model_id: uuid.UUID) -> RAGGenerativeModel | None:
         result = await db.execute(select(RAGGenerativeModel).where(RAGGenerativeModel.model_id == model_id))
         return result.scalar_one_or_none()
+
+
+async def register_generative_model(
+    db: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    name: str,
+    artifact_bytes: bytes,
+) -> RAGGenerativeModel:
+    """Module-level entry point used by ``POST /api/v1/rag/generative-model``.
+
+    A26: the router validates the cap while streaming and hands over only a
+    bundle that already fits, so this is the one place the registry is reached
+    from the API — kept as a module attribute (not just a method) so the ingest
+    path is substitutable in tests.
+    """
+    return await rag_generative_service.register(
+        db, owner_id=owner_id, name=name, artifact_bytes=artifact_bytes
+    )
 
 
 async def prepare_rag_generative_model(db: AsyncSession, session, workspace, model_id: uuid.UUID) -> dict | None:

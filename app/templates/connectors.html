@@ -52,15 +52,18 @@ async function loadConnectors() {
         let active = 0;
         $('#connectors-table').innerHTML = list.map(c => {
             if (c.status === 'active') active++;
-            const actionLabel = c.status === 'suspended' ? '恢复' : '暂停';
+            let actionCell = '-';
+            if (c.status === 'active' || c.status === 'suspended') {
+                const label = c.status === 'suspended' ? '恢复' : '暂停';
+                const handler = c.status === 'suspended' ? 'reactivateConnector' : 'suspendConnector';
+                actionCell = `<button class="btn btn-sm btn-primary" onclick="${handler}('${escAttr(c.id)}')">${label}</button>`;
+            }
             return `<tr>
                 <td>${esc(c.space_name || c.name || '-')}</td>
                 <td>${esc(c.space_type || c.connector_type || '-')}</td>
                 <td>${statusBadge(c.status || 'active')}</td>
                 <td>${formatDate(c.updated_at || c.created_at)}</td>
-                <td>
-                    <button class="btn btn-sm btn-primary" onclick="suspendConnector('${escAttr(c.id)}')">${actionLabel}</button>
-                </td>
+                <td>${actionCell}</td>
             </tr>`;
         }).join('');
         $('#total-connectors').textContent = list.length;
@@ -85,6 +88,13 @@ async function registerConnector() {
 async function suspendConnector(id) {
     try {
         await API.post(`/api/v1/connectors/${id}/suspend`, {});
+        loadConnectors();
+    } catch (e) { alert('操作失败: ' + e.message); }
+}
+
+async function reactivateConnector(id) {
+    try {
+        await API.post(`/api/v1/connectors/${id}/reactivate`, {});
         loadConnectors();
     } catch (e) { alert('操作失败: ' + e.message); }
 }

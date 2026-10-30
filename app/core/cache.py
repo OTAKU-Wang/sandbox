@@ -37,10 +37,22 @@ async def cache_get(key: str) -> Any | None:
 async def cache_set(key: str, value: Any, ttl_seconds: int = 60) -> None:
     """Set value in cache with TTL.
 
-    Serialisation runs outside the best-effort guard: an unserialisable value is
-    a caller bug and must surface, while a Redis outage stays a silent miss.
-    Swallowing both together shows up as a cache that never hits (A27).
+    Serialisation and the TTL argument run outside the best-effort guard: an
+    unserialisable value or a non-positive/non-int ttl is a caller bug and must
+    surface, while a Redis outage stays a silent miss. Swallowing both together
+    shows up as a cache that never hits (A27) — and a rejected SETEX landed in
+    exactly that blind spot, since the caller got a clean return with nothing
+    written.
     """
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+        raise TypeError(
+            f"cache_set ttl_seconds must be a positive int, got "
+            f"{type(ttl_seconds).__name__} for key {key!r}"
+        )
+    if ttl_seconds <= 0:
+        raise ValueError(
+            f"cache_set ttl_seconds must be > 0, got {ttl_seconds} for key {key!r}"
+        )
     payload = json.dumps(value, ensure_ascii=False)
     try:
         redis = await _get_redis()

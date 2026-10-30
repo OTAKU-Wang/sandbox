@@ -275,16 +275,40 @@ async def review_exposure_request(
     if product.provider_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Only the product provider or platform admin can review exposure requests")
 
-    if body.rejection_reason and body.approved_fields:
-        raise HTTPException(status_code=400, detail="Cannot both approve fields and reject — choose one")
+    # A4: 决策取自字段是否出现（presence / is not None），绝不用真值。
+    # 旧写法 `if body.rejection_reason:` 让空白 rejection_reason（validator 已 strip 成 ""）
+    # 落进审批分支，把买方申请的全部字段（含 PII）静默授予并记为 approved。
+    # 所有校验都在改动 request 之前完成 — 被拒的请求不得留下任何部分写入。
+    is_rejection = body.rejection_reason is not None
+    if is_rejection:
+        if not body.rejection_reason:  # 空白拒绝理由：拒绝必须写明理由，绝不回落成批准
+            raise HTTPException(
+                status_code=400,
+                detail="A rejection requires a non-blank rejection_reason — "
+                       "a blank reason must not silently become an approval",
+            )
+        if body.approved_fields is not None:
+            raise HTTPException(status_code=400, detail="Cannot both approve fields and reject — choose one")
+    elif body.approved_fields is not None and not body.approved_fields:
+        # A4: [] 是“一个都不批”，不是“全批”；什么都不批请带理由走拒绝。
+        raise HTTPException(
+            status_code=400,
+            detail="approved_fields=[] approves nothing — reject the request with a rejection_reason instead",
+        )
 
-    if body.rejection_reason:
+    if is_rejection:
         request.status = ExposureRequestStatus.REJECTED.value
         request.rejection_reason = body.rejection_reason
         request.approved_fields = []
     else:
-        # Approve — either all requested or a subset
-        approved = body.approved_fields if body.approved_fields else request.requested_fields
+        # Approve — None/absent = all requested; a non-empty list = that subset.
+        # Copy rather than alias request.requested_fields: a plain JSON column must
+        # not hold the same list object as another column (mutate-and-reassign hazard).
+        approved = (
+            list(request.requested_fields)
+            if body.approved_fields is None
+            else list(body.approved_fields)
+        )
         # Validate that approved fields are a subset of requested
         invalid = [f for f in approved if f not in request.requested_fields]
         if invalid:

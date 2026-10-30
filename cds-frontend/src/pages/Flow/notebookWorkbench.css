@@ -13,6 +13,15 @@
   gap: 16px;
 }
 
+/* 统一焦点环（A223）：本文件的图标按钮 / 文字菜单 / 页签 / 目录折叠钮自己把 border 与
+   background 抹平了（.nbw-icon-btn 正常色 #7b8ba3、禁用色 #c4c9d1，本来差异就小），
+   键盘用户在这页看不到焦点落在哪。挂 `.nbw-root` 后代上＝一条覆盖页内全部可聚焦元素；
+   用 :focus-visible 而不是 :focus，鼠标点击不留环、键盘导航必留环。 */
+.nbw-root :focus-visible {
+  outline: 2px solid var(--nbw-blue);
+  outline-offset: 1px;
+}
+
 /* ---------- 标题卡（图 1 §2：标题 + 副标题 + 仅 1 个按钮，卡内无状态徽标） ---------- */
 .nbw-titlecard {
   display: flex;
@@ -40,13 +49,19 @@
   margin-top: 2px;
 }
 
-/* ---------- 两栏：左 250 固定 + 右栏吃满，左右等高 ---------- */
+/* ---------- 两栏：左 250 固定 + 右栏吃满，左右等高 ----------
+   自适应区间（A222）：下面这组定高/定宽只在「视口高 ≥ 950 且 视口宽 ≥ 1100」成立。
+   calc(100vh - 250px) 要到 950 高才凑得出 700，原先无条件 min-height: 700px 在矮屏
+   （1366×768、125% 缩放、iframe 嵌入）把实际高顶过可用高，再被 .nbw-left/.nbw-card 的
+   overflow:hidden 裁掉 ⇒ 700 的地板改挂 @media (min-height: 950px)，窄宽另有断点放开 250 定宽。 */
 .nbw-columns {
   display: flex;
   align-items: stretch;
   gap: 24px;
   height: calc(100vh - 250px);
-  min-height: 700px;
+  /* dvh 才等于当前可用视口高（vh 在 iframe / 地址栏伸缩场景下偏大）；不认 dvh 的走上一行 vh。 */
+  height: calc(100dvh - 250px);
+  min-height: 0;
 }
 .nbw-left {
   flex: 0 0 250px;
@@ -58,6 +73,36 @@
   border-radius: 8px;
   min-height: 0;
   overflow: hidden;
+}
+
+/* 视口高 ≥ 950（950 − 250 = 700 = 原型判据）才挂 700 的地板；更矮的屏按内容自然高走页面滚动。 */
+@media (min-height: 950px) {
+  .nbw-columns {
+    min-height: 700px;
+  }
+}
+
+/* 窄于 1100：左栏再吃定 250 就把工作台挤没了，改成上下堆叠（树在上、限高 320）。 */
+@media (max-width: 1100px) {
+  .nbw-columns {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 0;
+  }
+
+  .nbw-left {
+    flex: 1 1 100%;
+    width: auto;
+    max-height: 320px;
+  }
+
+  .nbw-card-fixed {
+    height: 260px;
+  }
+
+  .nbw-card-grow {
+    min-height: 360px;
+  }
 }
 .nbw-right {
   flex: 1 1 auto;
@@ -214,7 +259,15 @@
 .nbw-chip-ok { color: var(--nbw-green); background: #f0f9f2; }
 .nbw-chip-warn { color: #ad6800; background: #fff7e6; }
 .nbw-chip-off { color: #8c8c8c; background: #f5f5f5; }
-.nbw-chip-unknown { color: #8c8c8c; background: #f5f5f5; }
+/* 「未知 / 未接入」是降级态（tone=unknown：会话状态没查回来、接口没接），不是「已关闭」这个真值。
+   两条类此前逐字相同（A224）⇒ 按 honest-degradation 铁律改成可区分披露：挖黑字 + 斜纹底 + 虚线框。
+   字色 #8c5000 对两条斜纹底实测 6.04:1 / 5.69:1（WCAG 相对亮度），不再引入 A233 那一族对比度缺陷。 */
+.nbw-chip-unknown {
+  color: #8c5000;
+  background: repeating-linear-gradient(135deg, #fff7e6 0 6px, #ffefd6 6px 12px);
+  border: 1px dashed #d48806;
+  padding: 1px 8px;
+}
 
 /* ---------- 代码区 ---------- */
 .nbw-code-area {

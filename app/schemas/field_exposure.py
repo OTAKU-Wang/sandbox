@@ -77,8 +77,11 @@ class ExposureRequestCreate(BaseModel):
 
 class ExposureRequestReview(BaseModel):
     """Provider reviews an exposure request."""
-    approved_fields: list[str] | None = None  # None = approve all requested
-    rejection_reason: str | None = None  # If rejecting entirely
+    # A4: presence carries the decision — None/absent = approve all requested;
+    # [] = approve nothing (the endpoint refuses it with 400, never expands it to all).
+    approved_fields: list[str] | None = None
+    # A4: 是否拒绝看该字段是否出现（is not None），不看真值；空白理由会被 handler 拒为 400。
+    rejection_reason: str | None = None
 
     @field_validator("rejection_reason")
     @classmethod
@@ -87,6 +90,8 @@ class ExposureRequestReview(BaseModel):
             v = v.strip()
             if len(v) > 1000:
                 raise ValueError("Rejection reason too long (max 1000 chars)")
+            # 空白理由保留为 ""（而非洗成 None）：presence 就是“想拒绝”，
+            # 由 handler 统一回 400，绝不能静默变成批准。
         return v
 
 

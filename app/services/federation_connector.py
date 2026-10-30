@@ -226,6 +226,11 @@ class FederationStatus(str, Enum):
     REVOKED = "revoked"
 
 
+# Statuses `load_trusts_from_db()` reinstates, i.e. the rows that compete for one
+# remote space. Revoked/pending rows are history, not live authorization.
+_LIVE_TRUST_STATUSES = (FederationStatus.ACTIVE.value, FederationStatus.SUSPENDED.value)
+
+
 class ProtocolType(str, Enum):
     """Supported inter-space protocols."""
     REST = "rest"
@@ -465,9 +470,14 @@ class FederationConnector:
             from app.models.federation_trust import FederationTrustRecord
             async with self._db_session_factory() as session:
                 result = await session.execute(
-                    select(FederationTrustRecord).where(
-                        FederationTrustRecord.status.in_(["active", "suspended"])
-                    )
+                    select(FederationTrustRecord)
+                    .where(FederationTrustRecord.status.in_(_LIVE_TRUST_STATUSES))
+                    # A124: without an ORDER BY the row that wins the space index
+                    # below is whichever one the database happens to return first,
+                    # so the cross-space authorization surface changes on restart.
+                    # Newest creation wins — that is what the operator last did,
+                    # which is also what memory held before the restart.
+                    .order_by(FederationTrustRecord.created_at.desc(), FederationTrustRecord.id)
                 )
                 rows = result.scalars().all()
             for row in rows:
@@ -495,6 +505,15 @@ class FederationConnector:
                     last_sync=row.last_sync,
                 )
                 self._trusts[trust.trust_id] = trust
+                if remote.space_id in self._space_index:
+                    # Rows are newest-first: the first one for a space is the one
+                    # that decides trust_level/allowed_operations. A second live
+                    # row for the same pair is legacy duplicate state (A85).
+                    logger.warning(
+                        "[Federation] Duplicate live trust for space %s: keeping %s, ignoring %s",
+                        remote.space_id, self._space_index[remote.space_id].trust_id, trust.trust_id,
+                    )
+                    continue
                 self._space_index[remote.space_id] = trust
             logger.info("[Federation] Loaded %d trusts from DB", len(rows))
             return len(rows)
@@ -503,29 +522,60 @@ class FederationConnector:
             return 0
 
     async def _persist_trust(self, trust: FederationTrust) -> None:
-        """Persist a trust record to the database."""
+        """Upsert the trust record — at most one live row per space pair (A85).
+
+        A plain INSERT stacks a second live row on every re-establish, and since
+        `uq_federation_trusts_active_pair` (A124) now rejects a second *active*
+        row, the insert would just be swallowed by the `except` below: the
+        operator's newest action silently never lands, and revoking the newest
+        trust id hits a row that is not the live one.
+        """
         if not self._db_session_factory:
             return
         try:
             import json
+            from sqlalchemy import select
             from app.models.federation_trust import FederationTrustRecord
+
+            row_id = trust_row_id(trust.trust_id)
+            fields = dict(
+                local_space_id=trust.local_space.space_id,
+                local_space_name=trust.local_space.space_name,
+                local_endpoint=trust.local_space.endpoint,
+                remote_space_id=trust.remote_space.space_id,
+                remote_space_name=trust.remote_space.space_name,
+                remote_endpoint=trust.remote_space.endpoint,
+                trust_level=trust.trust_level.value,
+                status=trust.status.value,
+                allowed_operations_json=json.dumps(trust.allowed_operations),
+                policy_sync_enabled=trust.policy_sync_enabled,
+                expires_at=trust.expires_at,
+                last_sync=trust.last_sync,
+            )
             async with self._db_session_factory() as session:
-                record = FederationTrustRecord(
-                    id=trust_row_id(trust.trust_id),
-                    local_space_id=trust.local_space.space_id,
-                    local_space_name=trust.local_space.space_name,
-                    local_endpoint=trust.local_space.endpoint,
-                    remote_space_id=trust.remote_space.space_id,
-                    remote_space_name=trust.remote_space.space_name,
-                    remote_endpoint=trust.remote_space.endpoint,
-                    trust_level=trust.trust_level.value,
-                    status=trust.status.value,
-                    allowed_operations_json=json.dumps(trust.allowed_operations),
-                    policy_sync_enabled=trust.policy_sync_enabled,
-                    expires_at=trust.expires_at,
-                    last_sync=trust.last_sync,
-                )
-                session.add(record)
+                rows = list((await session.execute(
+                    select(FederationTrustRecord)
+                    .where(
+                        FederationTrustRecord.local_space_id == trust.local_space.space_id,
+                        FederationTrustRecord.remote_space_id == trust.remote_space.space_id,
+                    )
+                    .order_by(FederationTrustRecord.created_at.desc(), FederationTrustRecord.id)
+                )).scalars().all())
+                live = [row for row in rows if row.status in _LIVE_TRUST_STATUSES]
+                record = next((row for row in rows if row.id == row_id), None)
+                if record is None and live:
+                    record = live[0]
+                    # The re-issued opaque id must address the row that stays
+                    # behind, or revoke-after-restart targets a dead id (A63).
+                    record.id = row_id
+                if record is None:
+                    record = FederationTrustRecord(id=row_id)
+                    session.add(record)
+                for superseded in live:
+                    if superseded is not record:
+                        superseded.status = FederationStatus.REVOKED.value
+                for name, value in fields.items():
+                    setattr(record, name, value)
                 await session.commit()
         except Exception as e:
             logger.error("[Federation] Failed to persist trust %s: %s", trust.trust_id, e)

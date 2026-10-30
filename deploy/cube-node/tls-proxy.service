@@ -11,8 +11,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# stunnel 二进制路径按发行版可能为 /usr/bin/stunnel 或 /usr/sbin/stunnel
-ExecStart=/usr/bin/stunnel /etc/cds/tls-proxy/stunnel.conf
+# stunnel 二进制路径由 install.sh 渲染（CDS_CUBE_STUNNEL_BIN，默认 /usr/bin/stunnel；
+# 部分发行版为 /usr/sbin/stunnel）——模板不得硬编码路径
+ExecStart=__STUNNEL_BIN__ /etc/cds/tls-proxy/stunnel.conf
 Restart=always
 RestartSec=2
 # 轻量资源上限（sidecar 不承载沙箱负载）

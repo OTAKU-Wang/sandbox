@@ -11,9 +11,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import CDSError
 from app.models.contract import WorkloadEnv
 from app.models.workload import Workload, WorkloadStatus
 from app.models.workload_test_run import WorkloadTestRun, TestRunStatus
+from app.services import capability_matrix
 from app.services.notebook_service import extract_entrypoint
 from app.utils.crypto import sm3_hash
 
@@ -35,11 +37,19 @@ GATE_NOT_TEST_ENV = "WORKLOAD_NOT_TEST_ENV"
 GATE_STATE_CONFLICT = "WORKLOAD_STATE_CONFLICT"
 
 
-class WorkloadGateError(Exception):
+# 可以进入测试沙箱重测的状态（A163）：testing 表示已有一次在跑，published/retired 是发布链终态
+TEST_ENTRY_STATUSES: frozenset[str] = frozenset(
+    {WorkloadStatus.DRAFT.value, WorkloadStatus.TEST_FAILED.value, WorkloadStatus.TEST_PASSED.value}
+)
+
+
+class WorkloadGateError(CDSError):
+    """门禁异常：仍是本模块的 WorkloadGateError（调用方 `except wf.WorkloadGateError` 不变），
+    同时是 W2 CDSError 并带 412 —— 未被路由捕获的门禁（A163 的 `POST /workloads/{id}/test`）
+    因此按契约出 412 + code，而不是退化成 500。"""
+
     def __init__(self, code: str, message: str, detail: dict[str, Any] | None = None):
-        super().__init__(message)
-        self.code = code
-        self.message = message
+        super().__init__(message, code=code, http_status=412)
         self.detail = detail or {}
 
 
@@ -112,23 +122,65 @@ async def list_production_versions(db: AsyncSession, contract_id: uuid.UUID | No
 
 def pick_test_sandbox_level(contract) -> str:
     """按合约选测试/生产会话的隔离档：取合约 allowed_sandbox_levels 内可用的最高一档；
-    无合约约束时维持 l2c 旧行为。
+    无合约约束时回阶梯最强档（当前即 l2c）。
+
+    A55wf：候选阶梯不在本模块另抄一份 —— 唯一权威是
+    ``capability_matrix.SUPPLY_DATA_LEVELS``（由强到弱），与 dev-sandbox、生产会话两条入口
+    同源；权威增删一档，这里的选档跟着动。
 
     CR BLOCKER-1（SS-13）：阶梯**不下探到 L3 以下**。旧阶梯把 L2/L1/L0 也列为候选，
     等于允许一纸「只放行 L0」的合约把生产负载（真实供数 + OpenAPI 对外调用）降到
     进程隔离——隔离下限是平台不变量，不由合约数据决定。现在合约只放行 L0/L1/L2 时
-    仍回 l2c：选档不降隔离，运行面缺失就在建会话处诚实报 RUNTIME_UNAVAILABLE。
+    仍回阶梯最强档：选档不降隔离，运行面缺失就在建会话处诚实报 RUNTIME_UNAVAILABLE。
     L2 不进候选：它的适配器被 SANDBOX_LEGACY_ENABLED 门控，生产禁止开启（config 启动拒绝）。
     """
     allowed = {lv.strip() for lv in ((getattr(contract, "allowed_sandbox_levels", "") or "")).split(",") if lv.strip()}
-    for level in ("l2c", "L3"):
-        if not allowed or level in allowed:
+    ladder = capability_matrix.SUPPLY_DATA_LEVELS
+    strongest = ladder[0]
+    if not allowed:
+        return strongest
+    for level in ladder:
+        if level in allowed:
             return level
-    return "l2c"
+    return strongest
+
+
+def assert_test_entry(workload: Workload) -> None:
+    """测试沙箱入口的准入前置（A163）。
+
+    `run_test` 是**破坏性**的：它把 `status` 置为 testing 并重绑 `test_run_id`，而这两个字段
+    正是 `publish` / `get_production_head` / 合约校验所读的发布链引用。因此只有
+    「测试沙箱里、且处于可重测状态」的工件可以进入：
+    - `env != test`：生产工件（尤其 published head）进来一次就把生产 head 的 status 改掉、
+      并解绑它与已通过测试运行的绑定；
+    - `status` 不在 `TEST_ENTRY_STATUSES`：testing 说明已有一次测试在跑（再叠一条会留下两条
+      running 记录），published/retired 是发布链终态，不允许被测试入口拉回。
+    """
+    if workload.env != WorkloadEnv.TEST.value:
+        raise WorkloadGateError(
+            GATE_NOT_TEST_ENV,
+            "只有测试沙箱的工作负载可以执行测试",
+            {"env": workload.env, "status": workload.status},
+        )
+    if workload.status not in TEST_ENTRY_STATUSES:
+        raise WorkloadGateError(
+            GATE_STATE_CONFLICT,
+            f"工作负载状态 {workload.status} 不允许进入测试沙箱",
+            {
+                "from": workload.status,
+                "to": WorkloadStatus.TESTING.value,
+                "allowed": sorted(TEST_ENTRY_STATUSES),
+            },
+        )
 
 
 async def run_test(db: AsyncSession, workload: Workload, actor, *, keep_session: bool = False, timeout_seconds: int = 900) -> WorkloadTestRun:
-    """在测试沙箱里跑一遍 entrypoint，把结果落成不可绕过的测试记录。"""
+    """在测试沙箱里跑一遍 entrypoint，把结果落成不可绕过的测试记录。
+
+    动手前先过 `assert_test_entry`：门禁失败时不得留下任何 WorkloadTestRun、也不得改工件字段。
+    """
+    assert_test_entry(workload)
+
     from app.api.sandbox_sessions import create_sandbox_session, execute_in_sandbox
     from app.schemas.sandbox_session import SandboxSessionCreate, SandboxExecuteRequest
     from app.services.session_lifecycle import terminate_session

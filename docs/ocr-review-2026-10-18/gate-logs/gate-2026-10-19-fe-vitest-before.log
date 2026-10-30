@@ -1,0 +1,149 @@
+# 改前读数（远程 FE 车道 fe_vitest.log 摘录：失败块 + 汇总行；完整日志留在车道 /root/cds-test/srclogs/fe_vitest.log）
+>
+        <h4
+          class="ant-typography css-dev-only-do-not-override-mncuj7"
+        >
+          创建合约
+        </h4>
+        <div
+          class="ant-card ant-card-bordered css-dev-only-do-not-override-mncuj7"
+        >
+          <div
+            class="ant-card-body"
+          >
+            <form
+              class="ant-form ant-form-vertical css-dev-only-do-not-override-mncuj7"
+            >
+              <div
+                class="ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-has-success ant-form-item-vertical"
+              >
+                <div
+                  class="ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"
+                >
+                  <div
+                    class="ant-col ant-form-item-label css-dev-only-do-not-override-mncuj7"
+                  >
+                    <label
+                      class="ant-form-item-required"
+                      for="title"
+                      title="合约标题"
+                    >
+                      合约标题
+                    </label>
+                  </div>
+                  <div
+                    class="ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"
+                  >
+                    <div
+                      class="ant-form-item-control-input"
+                    >
+                      <div
+                        class="ant-form-item-control-input-content"
+                      >
+                        <input
+                          aria-required="true"
+                          class="ant-input css-dev-only-do-not-override-mncuj7 ant-input-outlined ant-input-status-success"
+                          id="title"
+                          placeholder="合约标题"
+                          type="text"
+                          value="零售合作合约"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div
+                class="ant-form-item css-dev-only-do-not-override-mncuj7 ant-form-item-vertical"
+              >
+                <div
+                  class="ant-row ant-form-item-row css-dev-only-do-not-override-mncuj7"
+                >
+                  <div
+                    class="ant-col ant-form-item-label css-dev-only-do-not-override-mncuj7"
+                  >
+                    <label
+                      class="ant-form-item-required"
+                      for="contract_type"
+                      title="合约类型"
+                    >
+                      合约类型
+                    </label>
+                  </div>
+                  <div
+                    class="ant-col ant-form-item-control css-dev-only-do-not-override-mncuj7"
+                  >
+                    <div
+                      class="ant-form-item-control-input"
+                    >
+                      <div
+                        class="ant-form-item-control-input-content"
+                      >
+                        <div
+                          aria-required="true"
+                          class="ant-select ant-select-outlined ant-select-in-form-item css-dev-only-do-not-override-mncuj7 ant-select-single ant-select-show-arrow"
+                        >
+                          <div
+                            class="ant-select-selector"
+                          >
+                            <span
+                              class="ant-select-selection-wrap"
+                            >
+                              <span
+                                class="ant-select-selection-search"
+                              >
+                                <input
+                                  aria-autocomplete="list"
+                                  aria-controls="contract_type_list"
+                                  aria-expanded="false"
+                                  aria-haspopup="listbox"
+                                  aria-owns="contract_type_list"
+                                  aria-required="true"
+                                  autocomplete="off"
+                                  class="ant-select-selection-search-input"
+                                  id="contract_type"
+                                  readonly=""
+                                  role="combobox"
+                                  style="opacity: 0;"
+                                  type="search"
+                                  unselectable="on"
+                                  value=""
+                                />
+                              </span>
+                              <span
+                                class="ant-select-selection-item"
+                                title="数据查询"
+                              >
+                                数据查询
+                              </span>
+                            </span>
+                          </div>
+                          <span
+                            aria-hidden="true"
+                            class="ant-select-arrow"
+                            style="user-select: none; -webkit-user-select: none;"
+                            unselectable="on"[...
+ ❯ src/pages/Contracts/__tests__/ContractCreate.test.tsx:155:38
+    153|
+    154|     fireEvent.click(findButton('创建合约'));
+    155|     await waitFor(() => expect(post).toHaveBeenCalledWith('/contracts'…
+       |                                      ^
+    156|     const body = submittedBody();
+    157|     expect(body.purpose).toBe('零售客单价建模');
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  3 failed | 63 passed (66)
+      Tests  5 failed | 644 passed (649)
+   Start at  01:53:57
+   Duration  92.71s (transform 3.75s, setup 6.01s, import 88.41s, tests 184.06s, environment 71.01s)
+
+
+=== 汇总行 ===
+ Test Files  3 failed | 63 passed (66)
+      Tests  5 failed | 644 passed (649)
+   Duration  92.71s (transform 3.75s, setup 6.01s, import 88.41s, tests 184.06s, environment 71.01s)

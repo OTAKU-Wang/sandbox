@@ -12,6 +12,39 @@ from app.services.merkle_service import escape_leaf_field
 logger = logging.getLogger(__name__)
 
 
+def _coerce_uuid_field(
+    value: uuid.UUID | str | None,
+    field: str,
+    action: str,
+    detail: dict | None,
+) -> tuple[uuid.UUID | None, dict | None]:
+    """AuditLog.user_id/session_id are UUID(as_uuid=True) while call sites pass str.
+
+    Every dialect loses on a raw str (SQLite: `.hex` AttributeError on any str; PostgreSQL:
+    on any non-UUID string) and a row that dies at flush is a lost audit event — the error
+    surfaces far from the write and is swallowed by the try/except that wraps most callers
+    (the A319 failure class, hit for session_id in A68 and for user_id in A320). So the
+    single funnel parses every UUID-typed field: parseable values become real UUIDs; when a
+    value cannot name its row, the column stays NULL and the raw string is disclosed in
+    `detail` plus an ERROR log naming the dropped field and the action — never a fabricated
+    value, never a truncation to fit, never a raise that drops the row.
+    """
+    if value is None or isinstance(value, uuid.UUID):
+        return value, detail
+    try:
+        return uuid.UUID(str(value)), detail
+    except (ValueError, AttributeError, TypeError):
+        logger.error(
+            "[audit] %s %r is not a %s UUID — stored as NULL for action=%s, raw kept in "
+            "detail._%s_unparsed (no fabricated value; an unparsed field must not drop the row)",
+            field, value, field, action, field,
+        )
+        if detail is None:
+            detail = {}
+        detail[f"_{field}_unparsed"] = str(value)[:120]
+        return None, detail
+
+
 class AuditService:
     """Audit trail service for compliance and provenance.
 
@@ -64,8 +97,8 @@ class AuditService:
         db: AsyncSession,
         action: str,
         resource_type: str,
-        user_id: uuid.UUID | None = None,
-        session_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | str | None = None,
+        session_id: uuid.UUID | str | None = None,
         resource_id: str | None = None,
         detail: dict | None = None,
         ip_address: str | None = None,
@@ -80,6 +113,19 @@ class AuditService:
         signature event string; both default to None so existing call sites
         and their stored detail payloads stay byte-identical.
         """
+        if db is None:
+            logger.error(
+                "[audit] log(db=None) for action=%s resource=%s — refusing to write silently: "
+                "None only fails at db.add(), and that AttributeError is routinely swallowed by "
+                "callers, so the audit event vanishes with zero rows and zero errors.",
+                action, resource_type,
+            )
+            raise TypeError(
+                "audit_service.log(db=None) would silently lose the audit row: pass the request "
+                "session, or use audit_service.log_standalone(...), which opens and commits its "
+                "own session (the division of labour recorded in app/api/AGENTS.md for "
+                "failure/denial paths)"
+            )
         # 审计叶子完整性 / Merkle leaf integrity — the frozen leaf preimage
         # (merkle_service.merkle_leaf_preimage) joins
         # id|action|resource_type|resource_id|created_at with "|" and neither
@@ -98,6 +144,8 @@ class AuditService:
         # is disclosed on the row and in the log, never silent (same rule as
         # detail["_sm2_sign_error"] below).
         escaped_fields: list[str] = []
+        session_id, detail = _coerce_uuid_field(session_id, "session_id", action, detail)
+        user_id, detail = _coerce_uuid_field(user_id, "user_id", action, detail)
         clean_action = escape_leaf_field(action)
         clean_resource_type = escape_leaf_field(resource_type)
         clean_resource_id = escape_leaf_field(resource_id)
@@ -190,8 +238,8 @@ class AuditService:
         *,
         action: str,
         resource_type: str,
-        user_id: uuid.UUID | None = None,
-        session_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | str | None = None,
+        session_id: uuid.UUID | str | None = None,
         resource_id: str | None = None,
         detail: dict | None = None,
         ip_address: str | None = None,

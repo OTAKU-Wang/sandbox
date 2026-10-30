@@ -270,7 +270,9 @@ class MIAProbe:
             ngram_size: Size of n-grams for overlap detection.
 
         Returns:
-            (memorization_ratio, matched_snippets) — ratio of matched n-grams.
+            (memorization_ratio, matched_snippets) — ratio of the generated text's
+            DISTINCT n-grams that appear in ANY reference, so 0.0 <= ratio <= 1.0;
+            a reference repeated R times counts once, distinct references accumulate.
         """
         def get_ngrams(text: str, n: int) -> set[tuple[str, ...]]:
             words = text.split()
@@ -280,20 +282,27 @@ class MIAProbe:
         if not gen_ngrams:
             return 0.0, []
 
-        matched_snippets = []
-        total_matched = 0
+        # A159b: an n-gram is matched once, however many references contain it.
+        # Counting per reference let R copies of the same reference report R x the
+        # overlap (ratio > 1.0 for a plain verbatim copy), and memorization_check
+        # turns that ratio straight into matched_ngrams.
+        matched: set[tuple[str, ...]] = set()
+        matched_snippets: list[str] = []
+        seen_snippets: set[str] = set()
 
         for ref in reference_texts:
             ref_ngrams = get_ngrams(ref, ngram_size)
-            overlap = gen_ngrams & ref_ngrams
-            if overlap:
-                total_matched += len(overlap)
-                # Extract the matched region
-                for ngram in list(overlap)[:3]:  # Top 3 matches
-                    snippet = " ".join(ngram)
+            new = (gen_ngrams & ref_ngrams) - matched
+            if not new:
+                continue
+            matched |= new
+            for ngram in sorted(new)[:3]:  # Top 3 new matches from this reference
+                snippet = " ".join(ngram)
+                if snippet not in seen_snippets:
+                    seen_snippets.add(snippet)
                     matched_snippets.append(snippet)
 
-        memorization_ratio = total_matched / len(gen_ngrams) if gen_ngrams else 0.0
+        memorization_ratio = min(1.0, len(matched) / len(gen_ngrams))
         return memorization_ratio, matched_snippets
 
 

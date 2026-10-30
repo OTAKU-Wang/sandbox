@@ -1,10 +1,13 @@
 """Sandbox Database API — DuckDB in-memory SQL execution with masked views + SM4 column encryption."""
 import logging
+import re
 import uuid
+from pathlib import Path
 from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,7 +17,16 @@ from app.models.contract import Contract
 from app.models.user import User, UserRole
 from app.models.sandbox_session import SandboxSession
 from app.services.audit_service import audit_service
-from app.services.secure_duckdb import SecureDuckDBEngine, MaskRule, QueryResult, cleanup_expired_engines
+# A95d: 复用发放门（output_policy/A95c）的同一个异常类型与语义 —— 查询期与发放期
+# 必须把「取不到分级」当成同一件事来处理，另造一个异常类就会再一次各说各话。
+from app.services.output_policy import ClassificationUnavailableError
+from app.services.secure_duckdb import (
+    MaskRule,
+    QueryResult,
+    SecureDuckDBEngine,
+    allowed_import_roots,
+    cleanup_expired_engines,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +36,17 @@ router = APIRouter()
 # （engine.owner_user_id）：A56 之前另开一个 _engine_owners 平行字典，TTL 清扫只动
 # _engines，归属登记永远留着（增长速率由请求量而非会话数决定）。
 _engines: dict[str, SecureDuckDBEngine] = {}
+
+ENGINE_TTL_SECONDS = 3600
+
+
+def sweep_expired_duckdb_engines(max_age_seconds: int = ENGINE_TTL_SECONDS) -> int:
+    """TTL 清扫的公开入口（A56）。
+
+    引擎里躺着明文表与列 DEK，回收不能只靠「下一个 sandbox-db 请求」—— 空闲进程
+    需要能被启动接线（app/main.py）按周期叫起来。
+    """
+    return cleanup_expired_engines(_engines, max_age_seconds)
 
 
 def _as_uuid(value: object) -> uuid.UUID | None:
@@ -36,6 +59,102 @@ def _as_uuid(value: object) -> uuid.UUID | None:
 
 def _can_manage_sandbox_db(user: User) -> bool:
     return user.role in (UserRole.ADMIN, UserRole.OPERATOR)
+
+
+_IMPORT_GLOB_CHARS = "*?["
+
+
+def _import_path_violation(raw_path: str) -> str | None:
+    """请求体里的导入路径是否越界；越界 ⇒ 原因字符串，合法 ⇒ None（A50）。
+
+    判定与引擎层同源（allowed_import_roots）：拒绝 glob（read_parquet 的 glob = 目录
+    枚举）、resolve() 后再比根（符号链接指向根外也算越界）。
+    """
+    raw = (raw_path or "").strip()
+    if not raw:
+        return "empty path"
+    if any(ch in raw for ch in _IMPORT_GLOB_CHARS):
+        return "glob wildcard"
+    try:
+        resolved = Path(raw).resolve()
+    except OSError as e:
+        return f"unresolvable path: {e}"
+    roots = allowed_import_roots()
+    if any(resolved == root or resolved.is_relative_to(root) for root in roots):
+        return None
+    return "outside import root"
+
+
+async def _confine_import_path(raw_path: str, *, kind: str, session_id: str, current_user: User) -> None:
+    """A50：导入路径在本 API 边界就要被关进平台导入根，不能只指望引擎层兜。
+
+    响应只回语义码与原因，不回显导入根清单 —— 那是平台内部目录拓扑。
+    """
+    reason = _import_path_violation(raw_path)
+    if reason is None:
+        return
+    logger.warning(
+        "[sandbox-db] session=%s user=%s refused %s (%s)", session_id, current_user.id, kind, reason
+    )
+    await audit_service.log_standalone(
+        action="sandbox_db.import_denied",
+        resource_type="sandbox_session",
+        user_id=current_user.id,
+        session_id=_as_uuid(session_id),
+        resource_id=session_id,
+        detail={"reason": reason, "kind": kind, "path": (raw_path or "")[:500]},
+    )
+    raise CDSError(
+        f"{kind} 必须位于平台导入根内",
+        code="FORBIDDEN",
+        http_status=403,
+        detail={"session_id": session_id, "kind": kind, "reason": reason},
+    )
+
+
+_RELATION_REF_RE = re.compile(r"\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_$.]*)", re.IGNORECASE)
+
+
+def _masked_base_tables(engine: SecureDuckDBEngine) -> set[str]:
+    return {name.lower() for name in getattr(engine, "_mask_rules", {})}
+
+
+async def _refuse_masked_view_bypass(
+    engine: SecureDuckDBEngine, sql: str, current_user: User, session_id: str
+) -> None:
+    """A57：基表一旦配了脱敏规则，对非脱敏管理员就不可见 —— 只能查它的 <table>_masked 视图。
+
+    /masked-view 是 ADMIN/OPERATOR 的管理动作，而 /query 只要会话归属；旧实现里同一个
+    会话的普通用户 `SELECT * FROM 基表` 就能绕过脱敏。判定按 FROM/JOIN 后的关系名粗筛，
+    宁可误拒（例如 CTE 与基表同名）也不放过基表。
+    """
+    if _can_manage_sandbox_db(current_user):
+        return
+    guarded = _masked_base_tables(engine)
+    if not guarded:
+        return
+    referenced = {name.lower().rsplit(".", 1)[-1] for name in _RELATION_REF_RE.findall(sql)}
+    blocked = sorted(referenced & guarded)
+    if not blocked:
+        return
+    logger.warning(
+        "[sandbox-db] session=%s user=%s tried to query masked base table(s) %s",
+        session_id, current_user.id, blocked,
+    )
+    await audit_service.log_standalone(
+        action="sandbox_db.masked_view_bypass_denied",
+        resource_type="sandbox_session",
+        user_id=current_user.id,
+        session_id=_as_uuid(session_id),
+        resource_id=session_id,
+        detail={"tables": blocked, "sql": sql[:500]},
+    )
+    raise CDSError(
+        "该表已配置脱敏规则，请查询其脱敏视图",
+        code="FORBIDDEN",
+        http_status=403,
+        detail={"session_id": session_id, "tables": blocked, "use_view": f"{blocked[0]}_masked"},
+    )
 
 
 async def _managed_sandbox_session(db: AsyncSession, session_id: str) -> SandboxSession | None:
@@ -87,7 +206,7 @@ async def _get_authorized_engine(
     这里同步完成 —— 本请求的第一条 SQL 之前策略就已到位，挂不上就直接 400 拒绝。
     A56：TTL 清扫也从只挂在 /query 上移到此处，只建表/只导入的会话同样会到期回收。
     """
-    cleanup_expired_engines(_engines)
+    sweep_expired_duckdb_engines()
 
     await _authorize_session_engine(db, session_id, current_user, create_if_missing=create)
     engine = _engines.get(session_id)
@@ -156,6 +275,7 @@ async def execute_query(
 ):
     """Execute a SQL query on a sandbox DuckDB instance."""
     engine = await _get_authorized_engine(db, body.session_id, current_user)
+    await _refuse_masked_view_bypass(engine, body.sql, current_user, body.session_id)
 
     result = engine.execute_query(body.sql, limit=body.limit)
     if not result.success:
@@ -331,6 +451,67 @@ async def _refuse_without_policy(
     )
 
 
+async def _field_classifications_for_contract(db: AsyncSession, contract) -> dict[str, int]:
+    """汇总合约所关联资源的字段分级 raw {field: level}（A95b/A95d）。
+
+    取数路径与出沙箱发放门（output_policy._field_rules_for_contract）一致：
+    contract.product_ids → DataProduct.resource_id → DataResource.field_classifications。
+    多产品同字段取**更高分级**（fail-closed）；编译留给引擎内的
+    policy_compiler.field_rules_from_classifications（单一事实源）。
+
+    A95d（最后一处 fail-open）：返回 {} 有两种完全不同的含义 —— 「这份数据确实没有
+    分级」（合法，原样放行）与「分级不可知」（不可放行）。旧实现把后者也返回 {}：
+    product_ids 里不可解析的条目被 `continue` 跳过、任何取数异常被宽 except 吞成
+    `{}` ⇒ 查询期字段门以为「该合约没有字段分级」，deny/mask 列原文返回。现在两种
+    含义分开：**只有**正面确认「没有分级」才返回 {}；不可解析 id / 悬空资源引用 /
+    取数异常一律抛 ClassificationUnavailableError，由调用方拒绝本次数据操作。
+    与发放门同一判定边界：产品行本身不存在（ghost id）仍是「没有可分级资源」，
+    不是「不可知」—— 这是 output_policy 已落地并被 tests/test_ocr_a95c_* 钉住的语义。
+    """
+    merged: dict[str, int] = {}
+    product_ids = contract.product_ids or []
+    if not product_ids:
+        return {}
+
+    # uuid.UUID，不是 str：SQLite 的 UUID 绑定读 value.hex，喂 str 会在绑定期抛
+    # AttributeError（A95c 的红），PostgreSQL 只是靠隐式转换侥幸匹配上。
+    wanted: list[uuid.UUID] = []
+    for pid in product_ids:
+        try:
+            wanted.append(pid if isinstance(pid, uuid.UUID) else uuid.UUID(str(pid)))
+        except (TypeError, ValueError) as e:
+            raise ClassificationUnavailableError(
+                f"contract product_ids contains a non-UUID entry: {pid!r}"
+            ) from e
+
+    try:
+        from app.models.data_product import DataProduct
+        from app.models.data_resource import DataResource
+
+        result = await db.execute(select(DataProduct).where(DataProduct.id.in_(wanted)))
+        for product in result.scalars().all():
+            if not product.resource_id:
+                continue
+            resource = await db.get(DataResource, product.resource_id)
+            if resource is None:
+                raise ClassificationUnavailableError(
+                    f"product {product.id} references missing resource {product.resource_id}"
+                )
+            for field, raw in (resource.field_classifications or {}).items():
+                try:
+                    level = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                name = str(field)
+                if level > merged.get(name, -1):
+                    merged[name] = level
+    except ClassificationUnavailableError:
+        raise
+    except Exception as e:
+        raise ClassificationUnavailableError(f"{type(e).__name__}: {e}") from e
+    return merged
+
+
 async def _resolve_contract_policy(
     db: AsyncSession,
     session_id: str,
@@ -401,6 +582,29 @@ async def _resolve_contract_policy(
         )
 
     engine.set_policy(bundle)
+
+    # A95b（A95 接线转交）：compile_for_mode 的 5 项 PDP 不读字段，字段级控制
+    # 原本只在出沙箱网关生效；这里把资源分级喂给引擎，查询期才能同样拒 deny_out
+    # 列 / 掩码 mask 列。不传 ⇒ 引擎修好了也没有分类可用，等于没修。
+    #
+    # A95d：分级**取不到**不能当成「没有分级」继续执行 —— 那等于 deny/mask 列在查询期
+    # 原文出密。与同族的其它拒绝分支一致：响亮 ERROR + 请求事务外的审计 + 400 拒绝，
+    # 绝不「捕获后打 warning 继续放行」。
+    try:
+        field_classifications = await _field_classifications_for_contract(db, contract)
+    except ClassificationUnavailableError as e:
+        logger.error(
+            "[sandbox-db] SECURITY: field classification lookup failed for contract %s (%s) — "
+            "query-time field ACL is UNKNOWN, so the data operation is REFUSED instead of "
+            "running as if this data carried no classifications",
+            contract_id, e,
+        )
+        await _refuse_without_policy(
+            current_user, session_id,
+            f"field classification unavailable: {e}", contract_id=contract_id,
+        )
+
+    engine.set_field_classifications(field_classifications)
 
 
 def _parse_dek(dek_hex: str | None) -> bytes | None:
@@ -474,6 +678,7 @@ async def import_json(
 ):
     """Import a JSON file into DuckDB with optional SM4 column encryption."""
     engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
+    await _confine_import_path(body.json_path, kind="json_path", session_id=body.session_id, current_user=current_user)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -483,8 +688,14 @@ async def import_json(
             dek=dek,
         )
     except PermissionError as e:
-        # A50：json_path 越出平台导入根
-        raise HTTPException(status_code=403, detail=str(e))
+        # A50：引擎层白名单兜住了 API 边界没见过的形状 —— 同样只回语义码，不回显导入根
+        logger.warning("[sandbox-db] session=%s engine refused json_path: %s", body.session_id, e)
+        raise CDSError(
+            "json_path 必须位于平台导入根内",
+            code="FORBIDDEN",
+            http_status=403,
+            detail={"session_id": body.session_id, "kind": "json_path", "reason": "engine_import_root_check"},
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -504,6 +715,7 @@ async def import_parquet(
 ):
     """Import a Parquet file into DuckDB with optional SM4 column encryption."""
     engine = await _get_authorized_engine(db, body.session_id, current_user, create=True)
+    await _confine_import_path(body.parquet_path, kind="parquet_path", session_id=body.session_id, current_user=current_user)
     dek = _parse_dek(body.dek_hex)
 
     try:
@@ -513,8 +725,14 @@ async def import_parquet(
             dek=dek,
         )
     except PermissionError as e:
-        # A50：parquet_path 越出平台导入根（或带 glob 枚举目录）
-        raise HTTPException(status_code=403, detail=str(e))
+        # A50：引擎层白名单兜住了 API 边界没见过的形状 —— 同样只回语义码，不回显导入根
+        logger.warning("[sandbox-db] session=%s engine refused parquet_path: %s", body.session_id, e)
+        raise CDSError(
+            "parquet_path 必须位于平台导入根内",
+            code="FORBIDDEN",
+            http_status=403,
+            detail={"session_id": body.session_id, "kind": "parquet_path", "reason": "engine_import_root_check"},
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -591,8 +809,33 @@ async def query_decrypted(
     """Execute a query with automatic decryption of SM4-encrypted columns.
 
     Transparently decrypts SM4-SIV and SM4-GCM encrypted columns in query results.
+
+    A51：这是列级加密的**明文出口**，与发放 DEK 同级别的敏感面 —— 旧实现只要
+    get_current_user + 会话归属，等于会话拥有者（角色不限，含 DATA_CONSUMER）可以经
+    HTTP 把整表明文拉走，列级加密对其失效。收到 ADMIN/OPERATOR（与 /encryption-config
+    同一角色门）并留审计；被拒的尝试写在本请求事务之外。
     """
     engine = await _get_authorized_engine(db, body.session_id, current_user)
+
+    if not _can_manage_sandbox_db(current_user):
+        logger.warning(
+            "[sandbox-db] session=%s user=%s (%s) denied decrypted query",
+            body.session_id, current_user.id, current_user.role,
+        )
+        await audit_service.log_standalone(
+            action="sandbox_db.decrypted_query_denied",
+            resource_type="sandbox_session",
+            user_id=current_user.id,
+            session_id=_as_uuid(body.session_id),
+            resource_id=body.session_id,
+            detail={"role": str(current_user.role), "sql": body.sql[:500]},
+        )
+        raise CDSError(
+            "解密查询仅限 ADMIN/OPERATOR",
+            code="FORBIDDEN",
+            http_status=403,
+            detail={"session_id": body.session_id, "reason": "plaintext_export_requires_admin"},
+        )
 
     result = engine.execute_query_decrypted(body.sql, limit=body.limit)
     if not result.success:

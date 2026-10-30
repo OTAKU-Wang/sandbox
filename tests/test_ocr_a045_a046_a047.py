@@ -75,7 +75,7 @@ def test_a046_local_fallback_bounds_key_space(rate_app):
     assert len(mw._local) <= RateLimitMiddleware._MAX_LOCAL_BUCKETS
 
 
-def test_a047_chunked_body_over_limit_is_not_delivered_intact():
+async def test_a047_chunked_body_over_limit_is_not_delivered_intact():
     """没有 content-length 的 chunked 请求也必须受 max_size_bytes 约束。"""
     app = FastAPI()
     app.add_middleware(RequestSizeLimitMiddleware, max_size_bytes=1024)
@@ -94,8 +94,53 @@ def test_a047_chunked_body_over_limit_is_not_delivered_intact():
         for _ in range(40):
             yield b"y" * 100
 
+    resp = None
     try:
         resp = client.post("/ingest", content=oversized())
     except Exception:
-        return
-    assert resp.status_code in (400, 413) or resp.json().get("received", 0) <= 1024, resp.text[:200]
+        resp = None  # 门直接掐掉连接（disconnect 也是合法的拦截形态）
+    if resp is not None:
+        assert resp.status_code in (400, 413) or resp.json().get("received", 0) <= 1024, resp.text[:200]
+
+    # TestClient 会把断连吞成异常，看不到字节数；在 ASGI 层直接断言字节上限：
+    # 超限 chunked 流交付给业务层的总量不得超过 max_size_bytes，且必须收到掐断信号。
+    delivered = 0
+    saw_disconnect = False
+
+    async def probe(_scope, receive, send):
+        nonlocal delivered, saw_disconnect
+        while True:
+            msg = await receive()
+            if msg["type"] == "http.disconnect":
+                saw_disconnect = True
+                break
+            delivered += len(msg.get("body", b""))
+            if not msg.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-length", b"1")]})
+        await send({"type": "http.response.body", "body": b"o"})
+
+    chunks = [b"y" * 100 for _ in range(40)]
+    idx = 0
+
+    async def receive():
+        nonlocal idx
+        if idx < len(chunks):
+            idx += 1
+            return {"type": "http.request", "body": chunks[idx - 1],
+                    "more_body": idx < len(chunks)}
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pass
+
+    mw = RequestSizeLimitMiddleware(probe, max_size_bytes=1024)
+    await mw({"type": "http", "http_version": "1.1", "method": "POST",
+              "path": "/ingest", "raw_path": b"/ingest", "query_string": b"",
+              "root_path": "", "scheme": "http", "server": ("test", 80),
+              "client": ("1.2.3.4", 5),
+              "headers": [(b"host", b"test"), (b"transfer-encoding", b"chunked")]},
+             receive, send)
+    assert delivered <= 1024, f"chunked body leaked {delivered} bytes past the 1024 cap"
+    assert saw_disconnect, "over-cap chunked stream must be cut with http.disconnect"

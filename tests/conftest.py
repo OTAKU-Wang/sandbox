@@ -195,6 +195,13 @@ async def setup_db():
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    # A192x 取证（未采纳的修改）：pytest-asyncio 1.x 不采纳下方遗留的 session 级
+    # event_loop，每个用例一个新循环，而 StaticPool 只有一条连接——它生在哪个
+    # 循环上就只能在那个循环上用，跨循环复用会在 teardown 里炸
+    # "no active connection" / "Event loop is closed"（现场：test_agent_api 之后的
+    # 启动披露类用例）。试过在本 teardown 里 `await test_engine.dispose()`
+    # 归还连接，定向配对从 1 error 变成 10 error（StaticPool 下其他存活会话
+    # 一起失去连接）⇒ 已回退，修法需重设装置层循环/池策略，见 ci/known-failures.md。
 
 
 @pytest_asyncio.fixture

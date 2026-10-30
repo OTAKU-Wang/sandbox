@@ -1,0 +1,103 @@
+# 改后读数（本机 Python 3.14.4，用户 2026-10-19 改口径后本机为权威；SQLite+fakeredis 全进程内）
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.3, pluggy-1.6.0 -- /home/kratos/Documents/workspace/sandbox/.venv/bin/python
+rootdir: /home/kratos/Documents/workspace/sandbox
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, timeout-2.4.0, cov-7.1.0, anyio-4.13.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 600.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 39 items
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_returns_copy_not_shared_dict PASSED [  2%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_mutating_returned_dict_cannot_poison_defaults PASSED [  5%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_validate_none_does_not_return_shared_dict PASSED [  7%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[0] PASSED [ 10%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[-1] PASSED [ 12%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[8] PASSED [ 15%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[1.5] PASSED [ 17%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[True] PASSED [ 20%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[None] PASSED [ 23%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_zero_on_any_key_rejected PASSED [ 25%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_legit_narrowing_and_clamping_keep_working PASSED [ 28%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_unknown_keys_do_not_bypass_validation PASSED [ 30%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestDeltaBasedPersistence::test_cross_replica_updates_compose_not_clobber PASSED [ 33%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestDeltaBasedPersistence::test_failed_flush_keeps_delta_for_retry PASSED [ 35%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestDeltaBasedPersistence::test_persist_of_missing_local_entry_never_deletes_redis_state PASSED [ 38%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestHonestRelease::test_over_release_is_clamped_and_logged PASSED [ 41%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestHonestRelease::test_normal_release_still_subtracts PASSED [ 43%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestTryReserve::test_reserve_allows_within_quota_and_applies_everywhere PASSED [ 46%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestTryReserve::test_reserve_atomic_across_replicas_rejects_second PASSED [ 48%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestTryReserve::test_reserve_rejected_locally_never_touches_redis PASSED [ 51%]
+tests/test_ocr_a108_a109_sandbox_manager.py::TestTryReserve::test_reserve_falls_back_to_in_process_when_redis_down PASSED [ 53%]
+tests/test_pz04_honesty_gates.py::test_sm3_hash_uses_real_sm3_when_gmssl_present PASSED [ 56%]
+tests/test_pz04_honesty_gates.py::test_sm3_hash_fallback_warns_once_when_gmssl_missing PASSED [ 58%]
+tests/test_pz04_honesty_gates.py::test_sm3_hash_refuses_fallback_when_disallowed PASSED [ 61%]
+tests/test_pz04_honesty_gates.py::test_merkle_hash_refuses_fallback_when_disallowed PASSED [ 64%]
+tests/test_pz04_honesty_gates.py::test_crypto_service_sm3_refuses_fallback_when_disallowed PASSED [ 66%]
+tests/test_pz04_honesty_gates.py::test_merkle_hash_fallback_warns_when_gmssl_missing PASSED [ 69%]
+tests/test_pz04_honesty_gates.py::test_column_dek_from_settings_hex PASSED [ 71%]
+tests/test_pz04_honesty_gates.py::test_column_dek_from_settings_base64 PASSED [ 74%]
+tests/test_pz04_honesty_gates.py::test_column_dek_invalid_raises PASSED  [ 76%]
+tests/test_pz04_honesty_gates.py::test_column_dek_empty_in_prod_raises PASSED [ 79%]
+tests/test_pz04_honesty_gates.py::test_column_dek_empty_in_dev_keeps_default PASSED [ 82%]
+tests/test_pz04_honesty_gates.py::test_column_roundtrip_with_configured_key PASSED [ 84%]
+tests/test_pz04_honesty_gates.py::test_gpu_stub_attestation_discloses_simulation PASSED [ 87%]
+tests/test_pz04_honesty_gates.py::test_attestation_report_defaults_are_not_simulation PASSED [ 89%]
+tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_allowed PASSED [ 92%]
+tests/test_pz04_honesty_gates.py::test_firecracker_seccomp_retry_denied_fails_honestly PASSED [ 94%]
+tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_denied PASSED [ 97%]
+tests/test_pz04_honesty_gates.py::test_firecracker_qemu_serial_seccomp_retry_allowed PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_returns_copy_not_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:43: PytestWarning: The test <Function test_returns_copy_not_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_returns_copy_not_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_mutating_returned_dict_cannot_poison_defaults
+  tests/test_ocr_a108_a109_sandbox_manager.py:48: PytestWarning: The test <Function test_mutating_returned_dict_cannot_poison_defaults> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_mutating_returned_dict_cannot_poison_defaults(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestGetResourceLimitsCopy::test_validate_none_does_not_return_shared_dict
+  tests/test_ocr_a108_a109_sandbox_manager.py:58: PytestWarning: The test <Function test_validate_none_does_not_return_shared_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_validate_none_does_not_return_shared_dict(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[0]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[0]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[-1]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[-1]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[8]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[8]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[1.5]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[1.5]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[True]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[True]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_non_positive_or_non_int_rejected_422[None]
+  tests/test_ocr_a108_a109_sandbox_manager.py:65: PytestWarning: The test <Function test_non_positive_or_non_int_rejected_422[None]> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    @pytest.mark.parametrize("bad", [0, -1, "8", 1.5, True, None])
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_zero_on_any_key_rejected
+  tests/test_ocr_a108_a109_sandbox_manager.py:74: PytestWarning: The test <Function test_zero_on_any_key_rejected> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_zero_on_any_key_rejected(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_legit_narrowing_and_clamping_keep_working
+  tests/test_ocr_a108_a109_sandbox_manager.py:79: PytestWarning: The test <Function test_legit_narrowing_and_clamping_keep_working> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_legit_narrowing_and_clamping_keep_working(self):
+
+tests/test_ocr_a108_a109_sandbox_manager.py::TestValidateResourceLimitsPositiveInt::test_unknown_keys_do_not_bypass_validation
+  tests/test_ocr_a108_a109_sandbox_manager.py:89: PytestWarning: The test <Function test_unknown_keys_do_not_bypass_validation> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_unknown_keys_do_not_bypass_validation(self):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 39 passed, 12 warnings in 4.57s ========================

@@ -86,7 +86,10 @@ export function auditActionLabel(record: Pick<AuditRecord, 'action' | 'event_typ
 export function auditActionColor(record: Pick<AuditRecord, 'action' | 'event_type'>): string {
   const tab = auditTabOf(record);
   if (tab) return tab.color;
-  if (record.action.endsWith('_failed') || record.action.endsWith('.blocked') || record.action.endsWith('_rejected')) return 'red';
+  // A249：详情接口/历史数据可能整行缺 action，上一行对 tab 有保护而这里没有——
+  // 缺字段是「不认识」，渲染成中性 default，绝不抛 TypeError（全站零 ErrorBoundary，一个空字段即白屏）。
+  const action = typeof record.action === 'string' ? record.action : '';
+  if (action.endsWith('_failed') || action.endsWith('.blocked') || action.endsWith('_rejected')) return 'red';
   return 'default';
 }
 

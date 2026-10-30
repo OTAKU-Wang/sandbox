@@ -17,7 +17,10 @@
 }
 
 .cds-dev-task-create .cds-trio > * {
-  flex: 0 0 373px;
+  /* A209：原先 `flex: 0 0 373px` 不涨不缩，而 1281–1439 既无断点也不能收缩 ⇒ 列簇只能溢出卡体。
+     改 `0 1 min(373px, 100%)`：宽屏仍钉 373（1440 档 x268/x666/x1064 像素真值不变），窄下去先缩。
+     flex-grow 故意留 0：第三列 basis 是 auto，前两列一旦也 grow，1440 档会被等分成 ≈330。 */
+  flex: 0 1 min(373px, 100%);
   min-width: 0;
 }
 
@@ -40,6 +43,12 @@
   }
 
   .cds-dev-task-create .cds-trio > * {
+    flex: 1 1 300px;
+  }
+
+  /* 媒体查询不加特异性：上面那条仍是 (0,2,0)，压不过 base 的 `> *:nth-child(3)` (0,3,0)，
+     换行后第三列会退回 `flex: 1 1 auto` 按内容忽宽忽窄（A209）⇒ 断点内补同特异性的覆盖。 */
+  .cds-dev-task-create .cds-trio > *:nth-child(3) {
     flex: 1 1 300px;
   }
 }
@@ -168,6 +177,19 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
   box-shadow: 0 0 0 2px rgba(27, 110, 243, 0.1);
 }
 
+/* A208：此前全文件只有一个状态规则（上面的 :focus-within）——antd 的错误态只染控件自己的
+   边框，而本页把控件画在自己的 div 上，必填校验失败时输入盒依旧白底灰边（只剩一行红字）。
+   错误类由 antd 加在 .ant-form-item 根上：两条命中路径都给——错误类是本盒的祖先（现 JSX：
+   Form.Item 直接包 MemStepper），以及由外层列 div 经 `:has(.ant-form-item-has-error …)`
+   持有（防以后 Form.Item 再包一层）。特异度 (0,3,0) 赢过 :focus-within 的 (0,2,0)，
+   聚焦时红环不会被蓝环盖掉。配套去掉 .cds-mem-input 上的 `box-shadow: none !important`：
+   它把 antd 的 focus/error/disabled 态整片压掉，还迫使后续状态覆盖再叠一层 !important。 */
+.cds-dev-task-create .ant-form-item-has-error .cds-mem-stepper,
+.cds-dev-task-create .cds-trio > div:has(.ant-form-item-has-error) .cds-mem-stepper {
+  border-color: #ff4d4f;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.1);
+}
+
 .cds-mem-step {
   flex: none;
   width: 36px;
@@ -193,7 +215,6 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
   flex: 1;
   min-width: 0;
   border: 0;
-  box-shadow: none !important;
   background: transparent;
 }
 
@@ -227,9 +248,13 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
   padding-inline: 21px;
 }
 
-/* 分页带：图样只在表区右对齐（「页」右缘 x1079 ≈ 表右缘 1096−17），当前页实心蓝。 */
+/* 分页带：图样只在表区右对齐（「页」右缘 x1079 ≈ 表右缘 1096−17），当前页实心蓝。
+   A235：`.cds-task-pager` 直接落在 ul.ant-pagination 上，antd 给它的是 display:flex，
+   flex 子项不受 text-align 支配 ⇒ 右靠其实没生效；补 justify-content: flex-end
+   （text-align 留着：速达器里「前往 __ 页」这类行内内容仍靠它）。 */
 .cds-dev-task-create .cds-task-pager.ant-pagination {
   text-align: right;
+  justify-content: flex-end;
 }
 
 .cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item-active {
@@ -243,6 +268,18 @@ body .cds-dev-task-create .cds-unit-item .ant-form-item-control-input-content::a
 }
 
 .cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-item {
+  min-width: 30px;
+  height: 28px;
+  line-height: 26px;
+}
+
+/* A235 同族：分页开了 size="small"，上面只钉了页码块 30×28，前后钮与 jump-prev/next
+   还是 mini 默认尺寸（全文原本 `grep item-link` 0 命中）⇒ 页码与箭头高矮不齐，
+   尺寸一并对齐到 30×28 / 26 行高。 */
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-next .ant-pagination-item-link,
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link,
+.cds-dev-task-create .cds-task-pager.ant-pagination .ant-pagination-jump-next .ant-pagination-item-link {
   min-width: 30px;
   height: 28px;
   line-height: 26px;

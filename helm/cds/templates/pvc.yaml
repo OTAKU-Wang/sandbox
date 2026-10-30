@@ -5,11 +5,16 @@ metadata:
   labels:
     {{- include "cds.labels" . | nindent 4 }}
 spec:
+  # Access mode comes from values: the workspace is shared by every replica, so
+  # the default is ReadWriteMany (a hardcoded ReadWriteOnce here contradicted
+  # replicaCount>1 + the HPA + topology spread).
   accessModes:
-    - ReadWriteOnce
+    {{- toYaml .Values.sandbox.accessModes | nindent 4 }}
   resources:
     requests:
       storage: {{ .Values.sandbox.workspaceSize }}
+  # Only render the class when one is chosen: an empty storageClassName renders
+  # as "" which Kubernetes reads as "no StorageClass" (disables provisioning).
   {{- if .Values.sandbox.storageClass }}
-  storageClassName: {{ .Values.sandbox.storageClass }}
+  storageClassName: {{ .Values.sandbox.storageClass | quote }}
   {{- end }}

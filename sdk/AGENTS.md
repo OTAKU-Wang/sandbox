@@ -30,7 +30,7 @@ sdk/
 ## ANTI-PATTERNS
 - `SESSION_TERMINATED` (410) is deliberately EXCLUDED from the retry set — terminal by W2 contract; never add it back.
 - Never fake streaming: missing `websocket-client` raises `CDSError` with an install hint; a `blocked` WS frame means T5 DLP killed the stream — treat output as untrusted.
-- Known drift: `cds_sdk/__init__.py` says `__version__ = "0.2.0"` while pyproject.toml is `0.3.0` — sync on next release, don't trust either as the shipped version.
+- Version single source (A78, 2026-10-20): `sdk/pyproject.toml` `[project].version` is the only truth; `cds_sdk/__init__.py` resolves it at import (tree pyproject → `importlib.metadata` → `0.0.0+unknown`) and a test forbids a literal `__version__ = "` from coming back. The old 0.2.0-vs-0.3.0 drift is closed.
 
 ## COMMANDS
 ```bash

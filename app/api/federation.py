@@ -1,15 +1,18 @@
 """Federation API — Cross-space trust and request proxying."""
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.data_product import DataProduct
+from app.models.federation_trust import FederationAuditRecord
 from app.models.user import User, UserRole
+from app.services.audit_service import audit_service
 from app.services.catalog_sync import SyncMode, catalog_sync
 from app.services.federation_connector import (
     federation_connector,
@@ -68,6 +71,7 @@ def _trust_payload(trust) -> dict:
 @router.post("/trust")
 async def establish_trust(
     body: EstablishTrustRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Establish a trust relationship with a remote space."""
@@ -82,10 +86,30 @@ async def establish_trust(
     )
 
     trust_level = TrustLevel(body.trust_level)
-    trust = federation_connector.establish_trust(
-        remote, trust_level,
-        allowed_operations=body.allowed_operations,
-        policy_sync=body.policy_sync,
+    try:
+        trust = federation_connector.establish_trust(
+            remote, trust_level,
+            allowed_operations=body.allowed_operations,
+            policy_sync=body.policy_sync,
+        )
+    except ValueError as exc:
+        # A60: 端点校验在连接器里 fail-closed，但操作员面对的是 HTTP 面 ——
+        # 不接住 ValueError 就走兵底 handler 的裸 500（无可行动信息）。在操作员边界
+        # 转成 400，不放宽校验。
+        raise HTTPException(status_code=400, detail=f"Federation endpoint refused: {exc}") from exc
+
+    # A64: trust establishment is a cross-space governance decision — it must
+    # enter the audit funnel like every other mutating endpoint.
+    await audit_service.log(
+        db, action="federation.trust.established", resource_type="federation_trust",
+        user_id=current_user.id, resource_id=trust.trust_id,
+        detail={
+            "remote_space": trust.remote_space.space_id,
+            "remote_endpoint": trust.remote_space.endpoint,
+            "trust_level": trust.trust_level.value,
+            "allowed_operations": list(trust.allowed_operations),
+            "policy_sync": trust.policy_sync_enabled,
+        },
     )
 
     return _trust_payload(trust)
@@ -187,24 +211,38 @@ async def get_trust(
 @router.post("/trusts/{trust_id}/revoke")
 async def revoke_trust(
     trust_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Revoke a trust relationship."""
     if not federation_connector.revoke_trust(trust_id):
         raise HTTPException(status_code=404, detail="Trust not found")
     trust = federation_connector.get_trust(trust_id)
+    # A64: revocation cuts off a whole remote space — audited.
+    await audit_service.log(
+        db, action="federation.trust.revoked", resource_type="federation_trust",
+        user_id=current_user.id, resource_id=trust_id,
+        detail={"remote_space": trust.remote_space.space_id if trust else None},
+    )
     return _trust_payload(trust)
 
 
 @router.post("/trusts/{trust_id}/suspend")
 async def suspend_trust(
     trust_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Suspend a trust relationship."""
     if not federation_connector.suspend_trust(trust_id):
         raise HTTPException(status_code=404, detail="Trust not found")
     trust = federation_connector.get_trust(trust_id)
+    # A64: suspension is a governance action — audited like revoke.
+    await audit_service.log(
+        db, action="federation.trust.suspended", resource_type="federation_trust",
+        user_id=current_user.id, resource_id=trust_id,
+        detail={"remote_space": trust.remote_space.space_id if trust else None},
+    )
     return _trust_payload(trust)
 
 
@@ -245,6 +283,18 @@ async def trigger_catalog_sync(
     """Trigger catalog synchronization from a trusted remote space."""
     _ensure_local_space()
     result = await catalog_sync.sync_space(db, space_id, SyncMode(mode))
+    # A64: a catalog sync mutates the local mirror with remote-supplied
+    # metadata — the operator action and its deltas are audited.
+    await audit_service.log(
+        db, action="federation.catalog.synced", resource_type="federation_space",
+        user_id=current_user.id, resource_id=space_id,
+        detail={
+            "sync_id": result.sync_id, "mode": result.mode.value, "status": result.status.value,
+            "synced": result.entries_synced, "added": result.entries_added,
+            "updated": result.entries_updated, "removed": result.entries_removed,
+            "errors": len(result.errors),
+        },
+    )
     return {
         "sync_id": result.sync_id,
         "space_id": result.space_id,
@@ -287,6 +337,7 @@ async def list_synced_catalog_entries(
 @router.post("/request")
 async def send_federation_request(
     body: SendRequestInput,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     """Send a proxied request to a remote space."""
@@ -299,6 +350,21 @@ async def send_federation_request(
         payload=body.payload, user_id=str(current_user.id),
     )
 
+    # A64: every cross-space egress goes through the audit funnel — the
+    # connector's in-process log is neither durable nor cross-worker.
+    await audit_service.log(
+        db, action="federation.request.sent", resource_type="federation_trust",
+        user_id=current_user.id, resource_id=body.trust_id,
+        detail={
+            "request_id": response.request_id,
+            "operation": body.operation,
+            "resource": body.resource,
+            "status_code": response.status_code,
+            "error": response.error,
+            "remote_space": trust.remote_space.space_id,
+        },
+    )
+
     return {
         "request_id": response.request_id,
         "status_code": response.status_code,
@@ -309,29 +375,75 @@ async def send_federation_request(
     }
 
 
+def _entry_view(entry_id: str, request_id: str, source_space: str, target_space: str,
+                operation: str, resource: str, status: str, user_id: str | None,
+                timestamp: datetime) -> dict:
+    return {
+        "entry_id": entry_id,
+        "request_id": request_id,
+        "source_space": source_space,
+        "target_space": target_space,
+        "operation": operation,
+        "resource": resource,
+        "status": status,
+        "user_id": user_id,
+        "timestamp": timestamp.isoformat(),
+    }
+
+
+def _sort_key(entry: dict) -> str:
+    return entry["timestamp"]
+
+
 @router.get("/audit")
 async def get_federation_audit(
     space_id: str | None = None,
     operation: str | None = None,
     limit: int = 100,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.REGULATOR)),
 ):
-    """Get federation audit log."""
-    entries = federation_connector.get_audit_log(space_id=space_id, operation=operation, limit=limit)
-    return [
-        {
-            "entry_id": e.entry_id,
-            "request_id": e.request_id,
-            "source_space": e.source_space,
-            "target_space": e.target_space,
-            "operation": e.operation,
-            "resource": e.resource,
-            "status": e.status,
-            "user_id": e.user_id,
-            "timestamp": e.timestamp.isoformat(),
-        }
-        for e in entries
+    """Get the federation audit log — the persisted record, not process memory.
+
+    A64: `_persist_audit_entry` wrote `FederationAuditRecord` rows that no
+    endpoint read, while this endpoint served only the connector's in-process
+    list (empty after restart, invisible across workers). The durable table is
+    now the primary source; in-process entries not yet flushed by the
+    fire-and-forget writer are merged in and deduplicated by entry_id.
+    """
+    query = select(FederationAuditRecord)
+    if space_id:
+        query = query.where(or_(
+            FederationAuditRecord.source_space == space_id,
+            FederationAuditRecord.target_space == space_id,
+        ))
+    if operation:
+        query = query.where(FederationAuditRecord.operation == operation)
+    query = query.order_by(FederationAuditRecord.timestamp.desc()).limit(limit)
+    rows = (await db.execute(query)).scalars().all()
+    entries = [
+        _entry_view(r.entry_id, r.request_id, r.source_space, r.target_space,
+                    r.operation, r.resource, r.status, r.user_id, r.timestamp)
+        for r in rows
     ]
+    seen = {e["entry_id"] for e in entries}
+
+    def _aware(dt: datetime) -> str:
+        # sqlite server_default yields naive datetimes; isoformat strings only
+        # sort correctly across naive/aware sources when normalised.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
+    for e in federation_connector.get_audit_log(space_id=space_id, operation=operation, limit=limit):
+        if e.entry_id in seen:
+            continue
+        view = _entry_view(e.entry_id, e.request_id, e.source_space, e.target_space,
+                           e.operation, e.resource, e.status, e.user_id, e.timestamp)
+        view["timestamp"] = _aware(e.timestamp)
+        entries.append(view)
+    entries.sort(key=_sort_key, reverse=True)
+    return entries[:limit]
 
 
 @router.get("/stats")

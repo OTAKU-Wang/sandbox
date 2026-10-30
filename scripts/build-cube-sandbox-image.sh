@@ -20,7 +20,21 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="${PYTHON:-$ROOT/.venv/bin/python}"
+# 显式 PYTHON 失效必须硬报错，不得静默回退到另一个解释器（探针结果必须出自指定解释器）
+if [ -n "${PYTHON:-}" ] && [ ! -x "$PY" ]; then
+  echo "ERROR: PYTHON=${PYTHON} not executable" >&2
+  exit 3
+fi
 [ -x "$PY" ] || PY="$(command -v python3 || true)"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker not found on PATH — cannot build" >&2
+  exit 3
+fi
+if [ ! -f "$ROOT/Dockerfile.cube-sandbox" ]; then
+  echo "ERROR: Dockerfile 缺失: $ROOT/Dockerfile.cube-sandbox" >&2
+  exit 3
+fi
 
 CA="${CDS_CUBE_EGRESS_CA:-${1:-}}"
 TAG="${2:-cds/cube-sandbox:latest}"
@@ -35,6 +49,13 @@ if [ ! -f "$CA" ] || [ ! -s "$CA" ]; then
   echo "ERROR: CubeEgress root CA not found or empty at ${CA} — refusing to" >&2
   echo "build a scenario image without the CA (honest failure; a CA-less" >&2
   echo "image would fail every HTTPS egress at the CubeEgress MITM)." >&2
+  exit 3
+fi
+# 私钥形状拒绝：拿错文件（私钥而非公开根 CA）绝不进可分发镜像的每一层 ——
+# 镜像会被广泛拷贝，烘焙私钥等于泄露私钥。宁可构建失败也不产出带私钥的镜像。
+if grep -q "PRIVATE KEY" "$CA"; then
+  echo "ERROR: $CA looks like a PRIVATE KEY, not a public root CA — refusing" >&2
+  echo "to bake private key material into a redistributable image." >&2
   exit 3
 fi
 
@@ -57,7 +78,12 @@ CTX="$(mktemp -d)"
 trap 'rm -rf "$CTX"' EXIT
 cp "$ROOT/Dockerfile.cube-sandbox" "$CTX/Dockerfile"
 cp "$CA" "$CTX/cube-egress-ca.crt"
+# 溯源 label：CA 指纹随镜像层留存（CB-05 审计链可用 docker inspect 回查烘焙的是哪份 CA）
+CA_SHA="$(sha256sum "$CTX/cube-egress-ca.crt" | awk '{print $1}')"
 
-echo "building ${TAG} (context: $CTX)"
-docker build -t "$TAG" "$CTX"
+echo "building ${TAG} (context: $CTX, CA sha256=${CA_SHA})"
+docker build -t "$TAG" \
+  --label "cds.cube-egress-ca.sha256=${CA_SHA}" \
+  --build-arg CUBE_EGRESS_CA=cube-egress-ca.crt \
+  "$CTX"
 echo "done: ${TAG}"

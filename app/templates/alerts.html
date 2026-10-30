@@ -33,21 +33,51 @@
 
 {% block scripts %}
 <script>
+// A115: “今日”必须按展示时区的当日区间算，不能拿 `toISOString().slice(0,10)`（UTC 日）
+// 去比一个用 `toLocaleString('zh-CN')`（本地时区）展示的列：东八区 00:00–08:00 的告警会被归到
+// “昨天”，而 `created_at` 为空格分隔无时区串或 epoch 秒时字符串前缀直接失配。
+function toMillis(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const s = String(v).trim();
+    if (/^-?\d+(\.\d+)?$/.test(s)) {
+        const n = Number(s);
+        return Math.abs(n) < 1e11 ? n * 1000 : n;
+    }
+    const parsed = Date.parse(s.replace(' ', 'T'));
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function fmtTime(v) {
+    const ms = toMillis(v);
+    return ms === null ? '-' : new Date(ms).toLocaleString('zh-CN');
+}
+
+function localDayRange(now) {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return [start.getTime(), new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()];
+}
+
+function isLocalToday(v, range) {
+    const ms = toMillis(v);
+    return ms !== null && ms >= range[0] && ms < range[1];
+}
+
 async function loadAlerts() {
     try {
         const data = await API.get('/api/v1/monitoring/alerts');
         const list = data.items || data.alerts || data || [];
         if (!list.length) { $('#alerts-empty').style.display = 'block'; return; }
+        const dayRange = localDayRange(new Date());
         let active = 0, critical = 0, today = 0;
-        const todayStr = new Date().toISOString().slice(0, 10);
         $('#alerts-table').innerHTML = list.map(a => {
             const status = a.status || 'active';
             if (status === 'active' || status === 'firing') active++;
             if (a.severity === 'critical') critical++;
-            if ((a.created_at || a.timestamp || '').startsWith(todayStr)) today++;
+            const stamp = a.created_at || a.timestamp;
+            if (isLocalToday(stamp, dayRange)) today++;
             const severityClass = a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warning' : 'info';
             return `<tr>
-                <td>${formatDate(a.created_at || a.timestamp)}</td>
+                <td>${fmtTime(stamp)}</td>
                 <td>${badge(a.severity || 'info', severityClass)}</td>
                 <td>${esc(a.alert_type || a.type || '-')}</td>
                 <td>${esc(truncate(a.message || a.description, 60))}</td>

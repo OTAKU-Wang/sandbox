@@ -14,6 +14,41 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# ─── OCR A152: honest-degradation gate for the pixel-less "redaction" steps ───
+# FaceDetectAndBlurStep / LicensePlateStep / DICOMTagStripStep below do NOT touch
+# image bytes — they only stamp metadata. Until a real detector + blur/mosaic
+# backend is wired, they are simulations and must disclose themselves (项目铁律 禁伪造):
+#   * ALLOW_SIMULATION=false → apply() refuses instead of writing the
+#     compliance-visible `is_redacted` flag onto unprocessed data;
+#   * ALLOW_SIMULATION=true  → sample, PreprocessingResult and the redaction
+#     summary all carry the simulation disclosure, so `redaction_rate` can never be
+#     read as verified redaction.
+SIMULATED_REDACTION_KEY = "redaction_simulated"
+REDACTION_BACKEND_KEY = "redaction_backend"
+SIMULATED_REDACTION_BACKEND = "metadata-only-simulation"
+
+
+def _redaction_simulation_allowed() -> bool:
+    from app.core.config import get_settings
+
+    return bool(get_settings().ALLOW_SIMULATION)
+
+
+def _refuse_fake_redaction(step_name: str) -> None:
+    if not _redaction_simulation_allowed():
+        raise NotImplementedError(
+            f"{step_name}: no real detection/redaction backend is wired — this step "
+            "does not modify image bytes, so it refuses to mark data as redacted "
+            "while ALLOW_SIMULATION=false"
+        )
+
+
+def _disclose_simulated_redaction(sample: ImageSample) -> None:
+    """Mark a sample whose "redaction" was metadata-only (OCR A152 disclosure)."""
+    sample.metadata[SIMULATED_REDACTION_KEY] = True
+    sample.metadata[REDACTION_BACKEND_KEY] = SIMULATED_REDACTION_BACKEND
+
+
 # ─── Enums ────────────────────────────────────────────────────────────
 
 class RedactionType(str, Enum):
@@ -68,6 +103,7 @@ class PreprocessingResult:
     processed_size: tuple[int, int] = (0, 0)
     redactions_applied: list[str] = field(default_factory=list)
     augmentation_applied: list[str] = field(default_factory=list)
+    simulated: bool = False
     success: bool = True
     error: str | None = None
 
@@ -174,9 +210,11 @@ class FaceDetectAndBlurStep(PipelineStep):
         return "face_blur"
 
     def apply(self, sample: ImageSample) -> ImageSample:
-        # In real impl: retinaface detection + gaussian blur
+        _refuse_fake_redaction(self.name())
+        # No real detector here: pixels are untouched — disclose it (OCR A152).
         sample.metadata["faces_blurred"] = True
         sample.metadata["blur_method"] = self.blur_method
+        _disclose_simulated_redaction(sample)
         sample.is_redacted = True
         return sample
 
@@ -192,7 +230,9 @@ class LicensePlateStep(PipelineStep):
         return "license_plate_mosaic"
 
     def apply(self, sample: ImageSample) -> ImageSample:
+        _refuse_fake_redaction(self.name())
         sample.metadata["plates_mosaiced"] = True
+        _disclose_simulated_redaction(sample)
         sample.is_redacted = True
         return sample
 
@@ -213,12 +253,14 @@ class DICOMTagStripStep(PipelineStep):
         return "dicom_tag_strip"
 
     def apply(self, sample: ImageSample) -> ImageSample:
+        _refuse_fake_redaction(self.name())
         stripped = []
         for tag in self.tags:
             if tag in sample.metadata:
                 del sample.metadata[tag]
                 stripped.append(tag)
         sample.metadata["dicom_tags_stripped"] = stripped
+        _disclose_simulated_redaction(sample)
         sample.is_redacted = True
         return sample
 
@@ -292,6 +334,8 @@ class PreprocessingPipeline:
                 sample = step.apply(sample)
                 if sample.is_redacted and not before_redacted:
                     result.redactions_applied.append(step.name())
+                    if sample.metadata.get(SIMULATED_REDACTION_KEY):
+                        result.simulated = True
                 elif step.name().startswith("random") or step.name() == "normalize":
                     result.augmentation_applied.append(step.name())
 
@@ -369,6 +413,13 @@ class SecureImageDataLoader:
 
     def get_redacted_count(self) -> int:
         return sum(1 for s in self._processed if s.is_redacted)
+
+    def get_simulated_redaction_count(self) -> int:
+        """How many "redacted" samples were only metadata-stamped (OCR A152)."""
+        return sum(
+            1 for s in self._processed
+            if s.is_redacted and s.metadata.get(SIMULATED_REDACTION_KEY)
+        )
 
 
 class SecureMultimodalDataLoader:
@@ -561,14 +612,23 @@ class VisionTrainingRuntime:
             )
 
     def get_redaction_summary(self) -> dict:
-        """Get summary of redactions applied."""
+        """Get summary of redactions applied.
+
+        `simulated`/`is_simulation` disclose how much of `redacted` is metadata-only
+        (OCR A152): a compliance reader must not see redaction_rate=1.0 for data that
+        was never actually processed.
+        """
         if not self.dataloader:
-            return {"total": 0, "redacted": 0}
+            return {"total": 0, "redacted": 0, "simulated": 0, "is_simulation": False}
+        simulated = self.dataloader.get_simulated_redaction_count()
+        redacted = self.dataloader.get_redacted_count()
         return {
             "total": self.dataloader.total_samples,
-            "redacted": self.dataloader.get_redacted_count(),
+            "redacted": redacted,
+            "simulated": simulated,
+            "is_simulation": simulated > 0,
             "redaction_rate": round(
-                self.dataloader.get_redacted_count() / max(1, self.dataloader.total_samples), 4
+                redacted / max(1, self.dataloader.total_samples), 4
             ),
         }
 

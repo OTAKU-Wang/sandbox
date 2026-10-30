@@ -1,0 +1,166 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.8 [39m[90m/work[39m
+
+ [32m✓[39m src/services/__tests__/k8sOpsApi.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m src/utils/__tests__/csvPreview.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m src/services/__tests__/api.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/stores/__tests__/authStore.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m src/utils/__tests__/workspace.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m src/services/__tests__/flow.test.ts [2m([22m[2m54 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m src/pages/Flow/__tests__/devTasksModel.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m src/pages/Flow/__tests__/display.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m src/utils/__tests__/crypto.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 265[2mms[22m[39m
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mrenders base menu items for unauthenticated user
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mshows audit menu for operator role
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/components/Feedback/__tests__/ErrorCard.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 915[2mms[22m[39m
+     [33m[2m✓[22m[39m 未登录不渲染能力矩阵入口 [33m 778[2mms[22m[39m
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mhides audit menu for buyer role
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mshows audit menu for regulator role
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mshows K8s 运营 group for operator role
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mhides K8s 运营 group for buyer role
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mshows API 密钥 menu for admin role
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2mSidebar[2m > [22m[2mhides API 密钥 menu for non-admin roles
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2m双模式工作台菜单过滤[2m > [22m[2m运营方默认落在管理员工台，管理态分组可见
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2m双模式工作台菜单过滤[2m > [22m[2m运营方切到开发者工作台后只保留开发闭环分组
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/Layout/__tests__/Sidebar.test.tsx[2m > [22m[2m双模式工作台菜单过滤[2m > [22m[2m业务角色残留管理员工台偏好时被强制回到开发者视图
+[22m[39mAn update to ForwardRef inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/components/Layout/__tests__/Sidebar.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 1771[2mms[22m[39m
+     [33m[2m✓[22m[39m renders base menu items for unauthenticated user [33m 573[2mms[22m[39m
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+ [32m✓[39m src/pages/__tests__/ApiKeys.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 4699[2mms[22m[39m
+     [33m[2m✓[22m[39m renders list row with monospace prefix, preset tag and status badge [33m 1331[2mms[22m[39m
+     [33m[2m✓[22m[39m renders status badges for all lifecycle states (active/disabled/revoked/expired) [33m 370[2mms[22m[39m
+     [33m[2m✓[22m[39m shows empty state with API-key explanation and create action [33m 384[2mms[22m[39m
+     [33m[2m✓[22m[39m opens create dialog, expands custom scope matrix, and warns on full preset [33m 2288[2mms[22m[39m
+     [33m[2m✓[22m[39m shows never-used hint when last_used_at is null [33m 321[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
+[2m      Tests [22m [1m[32m141 passed[39m[22m[90m (141)[39m
+[2m   Start at [22m 09:57:47
+[2m   Duration [22m 8.72s[2m (transform 2.72s, setup 1.34s, import 10.47s, tests 7.81s, environment 13.71s)[22m
+

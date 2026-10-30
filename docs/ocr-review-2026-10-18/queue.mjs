@@ -1,6 +1,10 @@
 import { existsSync } from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dir = process.env.TMP_OUT || "C:/Users/清彧/AppData/Local/Temp/ocr-cds";
+// 换机修正：原先写死 `C:/Users/清彧/AppData/Local/Temp/ocr-cds`，离开那台 Windows 机直接 ENOENT。
+// 本脚本与台账同目录，默认取脚本自身所在目录（台账真源）；跨目录试跑用 TMP_OUT 覆盖。
+const dir = process.env.TMP_OUT || path.dirname(fileURLToPath(import.meta.url));
 const ledger = await Bun.file(dir + "/ocr-verified-findings.md").text();
 const lines = ledger.split("\n");
 
@@ -33,9 +37,24 @@ for (let i = 0; i < lines.length; i++) {
   }
 }
 
+// §D 里写「已修：#### A134 …」这类修复记录会被上面的标题正则当成一条新 finding，
+// 同一个编号就会双计 ⇒ 总条目膚胀。按编号去重，保留首次出现（带真实标题/级别的那条）。
+const seenFindingId = new Set();
+for (let k = 0; k < findings.length; k++) {
+  if (seenFindingId.has(findings[k].id)) { findings[k] = null; continue; }
+  seenFindingId.add(findings[k].id);
+}
+for (let k = findings.length - 1; k >= 0; k--) if (findings[k] === null) findings.splice(k, 1);
+
 const secD = ledger.slice(ledger.indexOf("## D. 修复状态"));
 const fixed = new Set();
-for (const mm of secD.matchAll(/\bA\d{1,3}\b/g)) fixed.add(mm[0]);
+// §D 里也会写「这条还没修、下一轮修」——把这种行里的编号当成已修就是假绿。
+// 已修 = 该行没有被显式标为「仍开着 / 不登记为已修 / 未判定完」。
+const secDFixed = secD
+  .split("\n")
+  .filter((l) => !/仍开着|不登记为已修|未判定完|待下一轮/.test(l))
+  .join("\n");
+for (const mm of secDFixed.matchAll(/\bA\d{1,3}\b/g)) fixed.add(mm[0]);
 
 const PATH = /(?:`|^|\s)((?:app|sdk|alembic|tests|scripts|policies|contracts|cds-frontend|cds-volume-plugin|deploy|k8s|helm|ci|docs|specs)\/[\w./-]*|[\w.-]+\.(?:py|tsx|ts|sql|go|yaml|yml|sh|json|toml|rego|sol))/;
 const domainOf = (p) => {

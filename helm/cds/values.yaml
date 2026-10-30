@@ -34,7 +34,6 @@ api:
       memory: 2Gi
   env:
     CDS_DEBUG: "false"
-    LOG_LEVEL: info
     CDS_LOG_JSON: "false"
     CDS_SESSION_CLEANUP_INTERVAL_SECONDS: "300"
     CDS_KMS_REQUIRE_ATTESTATION: "true"
@@ -84,6 +83,16 @@ api:
     # validate_security_config) or disable the feature they cannot back.
     CDS_MIA_SHADOW_MODEL: "false"
     CDS_SM3_FALLBACK_ALLOWED: "false"
+    # A302: the two pure-degradation boot gates must read false here as well.
+    # With CDS_DEBUG above set to "false", validate_security_config() treats the
+    # release as production and RAISES on their True defaults — so a default
+    # `helm install` CrashLooped the API on every pod. Values are byte-identical
+    # to docker-compose.prod.yml (posture parity is a test gate).
+    CDS_SECCOMP_FALLBACK_ALLOWED: "false"
+    CDS_HSM_SOFTWARE_FALLBACK_ALLOWED: "false"
+    # A static federation JWT signing key is a hard security failure in prod;
+    # validate_security_config raises when this reads false.
+    CDS_FEDERATION_JWT_KEY_REQUIRED: "true"
     CDS_COLUMN_ENCRYPTION_KEY: ""  # 16-byte column DEK (hex or base64) — required in prod
     CDS_ATTESTATION_ALLOWED_MEASUREMENTS: ""  # csv SM3 whitelist — required with KMS_REQUIRE_ATTESTATION=true
     CDS_FEDERATION_ENABLED: "false"  # flip true only with real mTLS material below (FG-008)
@@ -180,6 +189,13 @@ clickhouse:
 # `secrets.existingSecret`); the compose/k8s-manifest paths still bundle OPA.
 opa:
   enabled: true
+  # A302: the chart ships no OPA template (see externalComponents), so the API
+  # cannot guess an in-cluster name — pointing at `<release>-opa` produced
+  # NXDOMAIN on every policy evaluation. This URL is the single source of the
+  # CDS_OPA_URL the API container gets. The default is the Service name the k8s
+  # manifest path creates (`opa`, port 8181) in the release namespace; override
+  # it with the address of the out-of-band OPA deployment.
+  url: "http://opa:8181"
   image:
     repository: openpolicyagent/opa
     tag: "0.68.0"
@@ -224,6 +240,10 @@ ingress:
 # ─── Secrets (reference K8s secrets) ───
 secrets:
   existingSecret: cds-secrets
+  # The Secret lives outside the chart, so its content cannot be hashed into the
+  # pod template. Bump this (e.g. to the Secret's resourceVersion or the date of
+  # rotation) after rotating any key so the Deployment rolls the pods.
+  checksum: ""
   # Keys expected in the secret:
   # CDS_DATABASE_URL, CDS_REDIS_URL, CDS_CLICKHOUSE_URL, CDS_JWT_SECRET_KEY,
   # CDS_VAULT_ADDR, CDS_VAULT_TOKEN, CDS_MINIO_ENDPOINT,
@@ -234,3 +254,10 @@ secrets:
 sandbox:
   workspaceSize: 20Gi
   storageClass: ""
+  # A302: the workspace is the shared session workspace the API reads back from
+  # every replica, and the Deployment spreads across zones with an HPA. RWO would
+  # strand the second replica in Multi-Attach, so the shared workspace needs a
+  # ReadWriteMany storage class (nfs/cephfs/csi-shared). Keep RWO only together
+  # with `replicaCount: 1` + autoscaling.enabled=false on a single-node cluster.
+  accessModes:
+    - ReadWriteMany

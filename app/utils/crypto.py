@@ -21,14 +21,20 @@ def _sm3_fallback_allowed() -> bool:
 
     Fail-closed when CDS_SM3_FALLBACK_ALLOWED=false: GM/T paths must run real
     SM3 instead of silently hashing with SHA-256.
+
+    A71: an unreadable config must not flip this honesty gate open — the
+    fallback is opt-in (PZ-04/MR-A14), so any failure here returns False and
+    the caller refuses to hash. Mirrors the Merkle-side twin fixed in A148
+    (app/services/merkle_service.py).
     """
     try:
         from app.core.config import get_settings
         return bool(get_settings().SM3_FALLBACK_ALLOWED)
     except Exception:
-        # Settings unavailable (e.g. imported before config is loadable):
-        # keep the historical dev behavior of falling back.
-        return True
+        logger.warning(
+            "SM3_FALLBACK_ALLOWED unreadable; refusing SHA-256 fallback (fail closed)"
+        )
+        return False
 
 
 def sm3_hash(data: bytes) -> str:

@@ -15,6 +15,41 @@ class ProcessingResult:
     metadata: dict | None = None
 
 
+# OCR-A135: XML 输入的保护上限与 DTD 拒绝。`_process_xml` 的 path 来自待处理文件
+# （上传/沙箱产出），expat 默认不取外部实体（所以没有 XXE 外带面），但内部实体声明
+# 就足够 billion-laughs / quadratic blowup：几 KB 的文件可以展开成 GB。
+MAX_XML_INPUT_BYTES = 8 * 1024 * 1024
+
+
+class XmlInputRejected(ValueError):
+    """XML 声明了 DTD/实体 —— 在解析前拒绝，而不是展开之后再失败。"""
+
+
+def _guard_xml_input(data: bytes) -> None:
+    """拒绝任何 DTD/实体声明（billion-laughs 与二次膨胀的唯一入口）。
+
+    用 expat 的声明钩子而不是正则扫串：钩子在 prolog 阶段触发，因此声明永远先于任何
+    实体展开被看到。良构性错误这里故意放过，交给 `ET.fromstring` 报统一的 parse error。
+    """
+    import xml.parsers.expat as expat
+
+    def _reject(kind: str):
+        def _handler(*_args):
+            raise XmlInputRejected(
+                f"{kind} declaration is refused (entity-expansion DoS guard, OCR-A135)"
+            )
+        return _handler
+
+    parser = expat.ParserCreate()
+    parser.StartDoctypeDeclHandler = _reject("<!DOCTYPE")
+    parser.EntityDeclHandler = _reject("<!ENTITY")
+    parser.ExternalEntityRefHandler = lambda *_args: False
+    try:
+        parser.Parse(data, True)
+    except expat.ExpatError:
+        return
+
+
 class UnstructuredDataProcessor:
     """Processes unstructured data: images, documents, audio/video."""
 
@@ -205,14 +240,37 @@ class SemiStructuredDataProcessor:
             return ProcessingResult(success=False, records_processed=0, error=f"Invalid JSON: {e}")
 
     def _process_xml(self, path: Path, output_dir: str, opts: dict) -> ProcessingResult:
-        """Process XML: parse, extract structure."""
+        """Process XML: parse, extract structure.
+
+        Input is attacker-influenced, so it is size-capped and DTD-free by policy
+        before anything touches the tree builder (OCR-A135).
+        """
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
 
         try:
+            size = path.stat().st_size
+        except OSError as e:
+            return ProcessingResult(success=False, records_processed=0, error=f"XML read error: {e}")
+        if size > MAX_XML_INPUT_BYTES:
+            return ProcessingResult(
+                success=False, records_processed=0,
+                error=f"XML input too large: {size} bytes exceeds {MAX_XML_INPUT_BYTES}",
+            )
+
+        try:
             import xml.etree.ElementTree as ET
-            tree = ET.parse(path)
-            root = tree.getroot()
+            data = path.read_bytes()
+            if len(data) > MAX_XML_INPUT_BYTES:
+                return ProcessingResult(
+                    success=False, records_processed=0,
+                    error=f"XML input too large: {len(data)} bytes exceeds {MAX_XML_INPUT_BYTES}",
+                )
+            try:
+                _guard_xml_input(data)
+            except XmlInputRejected as e:
+                return ProcessingResult(success=False, records_processed=0, error=f"XML rejected: {e}")
+            root = ET.fromstring(data)
             count = len(list(root))
 
             metadata = {

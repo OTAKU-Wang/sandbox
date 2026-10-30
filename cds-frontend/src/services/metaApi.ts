@@ -19,9 +19,22 @@ export interface LevelMetadata {
   deprecated: boolean;
 }
 
+/** SS-13 交付档声明：后端 `capability_matrix.dataplane_status()`（矩阵载荷的第三个键）的映射。
+ * 键名/可空性取自后端源：`enabled` 是 `bool(...)`、`mode` 只有 `full`/`control_plane_only` 两个取值、
+ * `reason` 仅控制面档时为 `"dataplane_disabled"`（完整档为 null）、`note` 恒有文案。 */
+export interface DataplaneStatus {
+  enabled: boolean;
+  mode: 'full' | 'control_plane_only';
+  reason: string | null;
+  note: string;
+}
+
 export interface CapabilityMatrix {
   matrix: Record<string, Record<string, CapabilityCell>>;
   levels: Record<string, LevelMetadata>;
+  /** 本部署的档位声明（唯一消费方：全局交付档横幅）。后端恒定返回该键，
+   * 声明为可选只是「载荷可能不完整」的边界容错，不代表存在两种接口。 */
+  dataplane?: DataplaneStatus;
 }
 
 /** 能力行标签（API 只返回能力 key）；未知 key 回退为原始 key，保证前向兼容。 */

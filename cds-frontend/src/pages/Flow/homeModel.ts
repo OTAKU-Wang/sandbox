@@ -61,12 +61,15 @@ export function taskStatePill(status: string | null | undefined): StatePill {
   return { label: status ?? UNKNOWN_TEXT, tone: 'default' };
 }
 
-/** 任务筛选标签（原型：全部 12 / 进行中 5 / 已结束 7），计数一律取后端下发值。 */
-export function taskFilterTabs(overview: HomeOverview): { key: string; label: string; count: number }[] {
+/** 任务筛选标签（原型：全部 12 / 进行中 5 / 已结束 7），计数一律取后端下发值。
+ * A266：前端把 task_filters 声明成必填，但后端缺键/改名时三连解引用直接抛 ⇒ 首页白屏；
+ * 缺的计数走未记录而不是折算 0（本文件头注不变式 1）。 */
+export function taskFilterTabs(overview: HomeOverview): { key: string; label: string; count: number | string }[] {
+  const filters = overview?.task_filters;
   return [
-    { key: 'all', label: '全部', count: overview.task_filters.all },
-    { key: 'active', label: '进行中', count: overview.task_filters.active },
-    { key: 'ended', label: '已结束', count: overview.task_filters.ended },
+    { key: 'all', label: '全部', count: filters?.all ?? UNKNOWN_TEXT },
+    { key: 'active', label: '进行中', count: filters?.active ?? UNKNOWN_TEXT },
+    { key: 'ended', label: '已结束', count: filters?.ended ?? UNKNOWN_TEXT },
   ];
 }
 
@@ -96,7 +99,8 @@ export function lastCallText(iso: string | null | undefined): string {
  * 这一格统计的只是当前账号自己的行 —— 那句话收进卡名的 Tooltip，不再挤在 12px 副行里，一字不丢。
  */
 export function opsLogSubtext(ops: HomeOverviewOpsLog): string {
-  return `失败 ${ops.failures}`;
+  // A266：后端不返 failures 时不能渲染字面量「失败 undefined」，缺数走未记录口径。
+  return `失败 ${ops?.failures ?? UNKNOWN_TEXT}`;
 }
 
 /** 操作日志的可见性口径（Tooltip 文案）：platform 才是平台数，其余一律只是本账号的。 */

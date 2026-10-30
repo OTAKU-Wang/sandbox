@@ -19,6 +19,37 @@ from app.services.mia_probe import mia_probe, MIARiskLevel
 logger = logging.getLogger(__name__)
 
 
+def _distinct_ngrams(text: str, n: int) -> set[tuple[str, ...]]:
+    """The n-gram口径 shared with `mia_probe.check_text_memorization` (A159).
+
+    The probe's denominator is the size of the DEDUPLICATED n-gram set, so any
+    count reported next to its ratio must use exactly this function — counting
+    word positions instead made `matched_ngrams` a different quantity than the
+    one the ratio was computed from.
+    """
+    words = text.split()
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _risk_level(ratio: float, threshold: float) -> str:
+    """Risk bands anchored on the CONFIGURED threshold (A159).
+
+    Hardcoded 0.1/0.3/0.5/0.8 bands contradicted `is_memorized`: at threshold
+    0.8 a ratio of 0.45 was labelled medium while `is_memorized` said False,
+    and at threshold 0.05 a memorized hit was still labelled safe. Callers read
+    both fields, so the bands move with the threshold: below the decision line
+    only `safe`/`low` are reachable, at/above it `medium`/`high`/`critical`.
+    """
+    if ratio < threshold:
+        return "safe" if ratio < threshold / 2.0 else "low"
+    remaining = max(0.0, 1.0 - threshold)
+    if remaining == 0.0 or ratio < threshold + remaining / 3.0:
+        return "medium"
+    if ratio < threshold + 2.0 * remaining / 3.0:
+        return "high"
+    return "critical"
+
+
 @dataclass
 class MemorizationResult:
     """Result of memorization check on generated text."""
@@ -73,24 +104,16 @@ class MemorizationChecker:
             generated_text, reference_texts, self.ngram_size,
         )
 
-        # Count n-grams for reporting
-        words = generated_text.split()
-        total_ngrams = max(0, len(words) - self.ngram_size + 1)
-        matched_ngrams = int(ratio * total_ngrams)
+        # A159: same denominator as the probe (distinct n-grams), so
+        # matched_ngrams is the probe's real match count and not a scaled
+        # position count. The probe's own denominator is len(distinct gen
+        # n-grams); recomputing it here on a different口径 broke both fields.
+        total_ngrams = len(_distinct_ngrams(generated_text, self.ngram_size))
+        matched_ngrams = min(total_ngrams, int(round(ratio * total_ngrams)))
 
         is_memorized = ratio >= self.memorization_threshold
 
-        # Determine risk level
-        if ratio < 0.1:
-            risk_level = "safe"
-        elif ratio < 0.3:
-            risk_level = "low"
-        elif ratio < 0.5:
-            risk_level = "medium"
-        elif ratio < 0.8:
-            risk_level = "high"
-        else:
-            risk_level = "critical"
+        risk_level = _risk_level(ratio, self.memorization_threshold)
 
         if is_memorized:
             logger.warning(
@@ -140,13 +163,23 @@ class MemorizationChecker:
 
         Returns:
             Perplexity threshold.
+
+        Raises:
+            ValueError: percentile outside [0, 100]. An unclamped negative
+                percentile used to reach a NEGATIVE list index, i.e. a
+                threshold near the MAXIMUM perplexity — the opposite direction,
+                silently (A159).
         """
+        if not (0.0 <= float(percentile) <= 100.0):
+            raise ValueError(
+                f"percentile must be within [0, 100], got {percentile!r}"
+            )
         if not validation_perplexities:
             return 10.0  # Default
 
         sorted_ppl = sorted(validation_perplexities)
-        idx = int(len(sorted_ppl) * percentile / 100)
-        idx = min(idx, len(sorted_ppl) - 1)
+        idx = int(len(sorted_ppl) * float(percentile) / 100)
+        idx = max(0, min(idx, len(sorted_ppl) - 1))
         return sorted_ppl[idx]
 
 

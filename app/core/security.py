@@ -5,6 +5,7 @@ import time
 import uuid
 import logging
 from collections import defaultdict
+from dataclasses import dataclass, field
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -21,6 +22,106 @@ return n
 """
 
 _WINDOW_SECONDS = 60
+
+# A286: a Redis that is DOWN and a Redis that is UP but REFUSING WRITES are two
+# different incidents. The deploy copies moved from `--maxmemory-policy allkeys-lru` to
+# `noeviction` because sessions, rate-limit counters and login short-state live in this
+# Redis and were being evicted as if they were a disposable cache. The price of that fix
+# is that a full maxmemory now fails the counter EVAL with
+# `OOM command not allowed when used memory > 'maxmemory'.` — which lands in the same
+# `except Exception` as a dead connection. Left undistinguished, A286 would only have
+# traded "counters evicted" for "silently degraded to a single replica". Both states
+# keep the intentional fail-open posture (availability over strictness, W3); neither is
+# allowed to be silent, and each names the operator action that actually applies.
+REDIS_DEGRADED_MEMORY = "memory"
+REDIS_DEGRADED_WRITE_REFUSED = "write_refused"
+REDIS_DEGRADED_CONNECTION = "connection"
+
+_DEGRADATION_MESSAGES = {
+    REDIS_DEGRADED_MEMORY: (
+        "[RATE-LIMIT] Redis is reachable but REFUSING WRITES: %s. The Redis containers run "
+        "--maxmemory-policy noeviction (A286), so a full maxmemory fails the counter EVAL "
+        "instead of evicting session/rate-limit keys. This is NOT a transient outage: it "
+        "persists until maxmemory is raised or keys are freed. Rate limiting is per-replica "
+        "(in-process window) until then."
+    ),
+    REDIS_DEGRADED_WRITE_REFUSED: (
+        "[RATE-LIMIT] Redis is reachable but rejected the counter EVAL: %s. Check for a read "
+        "replica or an ACL user without EVAL permission. Rate limiting is per-replica "
+        "(in-process window) until then."
+    ),
+    REDIS_DEGRADED_CONNECTION: (
+        "[RATE-LIMIT] Redis unavailable, failing open to in-process window (%s). Rate "
+        "limiting is per-replica until Redis recovers."
+    ),
+}
+
+# redis-py maps the error-code prefix, so a real OOM arrives typed: see
+# redis/_parsers/base.py (`"OOM": OutOfMemoryError`). The text markers are the backstop
+# for drivers/proxies that surface the same refusal as a plain ResponseError.
+_MEMORY_ERROR_MARKERS = (
+    "oom command not allowed",
+    "used memory",
+    "cannot allocate memory",
+    "oom error",
+)
+_WRITE_REFUSAL_MARKERS = (
+    "not allowed",
+    "misconf",
+    "readonly",
+    "noperm",
+    "no permission",
+)
+
+
+def classify_redis_failure(exc: BaseException) -> str:
+    """Which Redis degradation this exception describes (A286).
+
+    ``memory`` = full maxmemory under noeviction; ``write_refused`` = reachable but not
+    permitted (replica/ACL); ``connection`` = unreachable, i.e. the W3 outage case.
+    """
+    from redis import exceptions as redis_exc
+
+    if isinstance(exc, redis_exc.OutOfMemoryError):
+        return REDIS_DEGRADED_MEMORY
+    if isinstance(exc, (redis_exc.ReadOnlyError, redis_exc.NoPermissionError,
+                        redis_exc.AuthorizationError)):
+        return REDIS_DEGRADED_WRITE_REFUSED
+    text = str(exc).lower()
+    if any(marker in text for marker in _MEMORY_ERROR_MARKERS):
+        return REDIS_DEGRADED_MEMORY
+    if any(marker in text for marker in _WRITE_REFUSAL_MARKERS):
+        return REDIS_DEGRADED_WRITE_REFUSED
+    return REDIS_DEGRADED_CONNECTION
+
+
+@dataclass
+class _RedisDegradation:
+    reason: str
+    error: str
+    count: int = 1
+    since: float = field(default_factory=time.time)
+
+
+_degradation: _RedisDegradation | None = None
+
+
+def redis_degradation_state() -> dict[str, object] | None:
+    """Current Redis rate-limit degradation, or None while Redis serves the counters.
+
+    Process-local and reset when a window succeeds again, so a health/monitoring surface
+    can report "degraded, reason=…, N requests" instead of the operator having to grep
+    the throttled WARNING (A286). Not exposed to clients — infra posture is not the
+    caller's to learn.
+    """
+    if _degradation is None:
+        return None
+    return {
+        "reason": _degradation.reason,
+        "error": _degradation.error,
+        "count": _degradation.count,
+        "since": _degradation.since,
+    }
 
 
 def _unverified_jwt_sub(authorization: str) -> str | None:
@@ -51,7 +152,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Scopes: ``auth`` (login endpoint, per-IP, strictest), ``user``
     (authenticated requests, keyed by JWT sub), ``ip`` (anonymous). Redis
     outage falls back to the legacy in-process window (fail-open) with a
-    throttled WARNING so the degradation is never silent.
+    throttled WARNING so the degradation is never silent. A Redis that is up
+    but refusing writes (full maxmemory under A286's ``noeviction``) takes the
+    same fallback but a different WARNING — see ``classify_redis_failure``.
     """
 
     _REDIS_WARNING_INTERVAL = 30.0
@@ -60,7 +163,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, requests_per_minute: int | None = None):
         super().__init__(app)
         self._local: dict[str, list[float]] = defaultdict(list)
-        self._last_redis_warning = 0.0
+        self._last_redis_warning: dict[str, float] = {}
         self._default_limit = requests_per_minute
 
     def _resolve_scopes(self, request: Request) -> list[tuple[str, str, int]]:
@@ -107,6 +210,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             headers={"Retry-After": str(max(1, retry_after)), "X-Request-ID": request_id},
         )
 
+    def _disclose_redis_failure(self, exc: Exception) -> None:
+        """Record + announce which Redis degradation just happened (A286).
+
+        Deliberately returns nothing to the caller: the fail-open posture is unchanged
+        (no 500 on an infra fault). Only the classification and the disclosure change.
+        """
+        from app.core.redis import redact_url
+
+        global _degradation
+        reason = classify_redis_failure(exc)
+        error = redact_url(str(exc)) or type(exc).__name__
+        if _degradation is not None and _degradation.reason == reason:
+            _degradation.count += 1
+        else:
+            _degradation = _RedisDegradation(reason=reason, error=error)
+        now = time.monotonic()
+        if now - self._last_redis_warning.get(reason, 0.0) > self._REDIS_WARNING_INTERVAL:
+            # Throttled per reason, so flipping between two states re-discloses at once
+            # instead of hiding behind the other state's timestamp.
+            self._last_redis_warning[reason] = now
+            logger.warning(_DEGRADATION_MESSAGES[reason], error)
+
+    def _note_redis_healthy(self) -> None:
+        """Close a disclosed degradation once the Redis window answers again (A286)."""
+        global _degradation
+        if _degradation is not None:
+            logger.info(
+                "[RATE-LIMIT] Redis counter window healthy again after %d request(s) degraded as %s.",
+                _degradation.count, _degradation.reason,
+            )
+            _degradation = None
+
     async def _redis_hit(self, request: Request, scope: str, identifier: str, limit: int) -> tuple[bool, int] | None:
         """Count one request in the Redis window. None = Redis unavailable."""
         from app.core.redis import get_redis
@@ -116,15 +251,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             redis = await get_redis()
             count = int(await redis.eval(_RATE_LIMIT_LUA, 1, key))
         except Exception as e:
-            now = time.monotonic()
-            if now - self._last_redis_warning > self._REDIS_WARNING_INTERVAL:
-                self._last_redis_warning = now
-                logger.warning(
-                    "[RATE-LIMIT] Redis unavailable, failing open to in-process "
-                    "window (%s). Rate limiting is per-replica until Redis recovers.",
-                    e,
-                )
+            self._disclose_redis_failure(e)
             return None
+        self._note_redis_healthy()
         retry_after = _WINDOW_SECONDS - int(time.time()) % _WINDOW_SECONDS
         return count > limit, retry_after
 

@@ -12,10 +12,12 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.config import get_settings
+from app.models.alert import AlertRecord, AlertStatus
 from app.models.sandbox_node import SandboxNode, NodeStatus
 from app.models.user import User
 from app.services.audit_service import audit_service
@@ -204,6 +206,7 @@ async def detect_stale_nodes(db: AsyncSession) -> int:
         select(SandboxNode).where(SandboxNode.status == NodeStatus.ONLINE.value)
     )
     stale_count = 0
+    alerts: list[dict] = []
     for node in result.scalars().all():
         if not node.last_heartbeat:
             continue
@@ -217,17 +220,14 @@ async def detect_stale_nodes(db: AsyncSession) -> int:
         node.health_state = "stale"
         stale_count += 1
 
-        from app.models.alert import AlertRecord
-
-        db.add(AlertRecord(
-            dedup_key=f"node-stale-{node.node_id}",
-            alert_type="node_stale",
-            severity="warning",
-            status="open",
-            message=f"Node {node.node_id} heartbeat overdue (> {settings.NODE_STALE_SECONDS}s)",
-            resource_type="sandbox_node",
-            resource_id=str(node.id),
-        ))
+        alerts.append({
+            "dedup_key": f"node-stale-{node.node_id}",
+            "alert_type": "node_stale",
+            "severity": "warning",
+            "message": f"Node {node.node_id} heartbeat overdue (> {settings.NODE_STALE_SECONDS}s)",
+            "resource_type": "sandbox_node",
+            "resource_id": str(node.id),
+        })
         await audit_service.log(
             db, action="node.stale_detected", resource_type="sandbox_node",
             resource_id=str(node.id),
@@ -235,6 +235,7 @@ async def detect_stale_nodes(db: AsyncSession) -> int:
         )
     if stale_count:
         await db.flush()
+        await _record_node_alerts(db, alerts)
         logger.warning("[NodeOps] %d nodes marked stale", stale_count)
     return stale_count
 
@@ -254,6 +255,7 @@ async def recover_stale_nodes(db: AsyncSession) -> int:
         select(SandboxNode).where(SandboxNode.status == NodeStatus.ONLINE.value)
     )
     offline_count = 0
+    alerts: list[dict] = []
     for node in result.scalars().all():
         if not node.last_heartbeat:
             continue
@@ -266,17 +268,14 @@ async def recover_stale_nodes(db: AsyncSession) -> int:
         node.health_state = "offline"
         offline_count += 1
 
-        from app.models.alert import AlertRecord
-
-        db.add(AlertRecord(
-            dedup_key=f"node-offline-{node.node_id}",
-            alert_type="node_offline",
-            severity="critical",
-            status="open",
-            message=f"Node {node.node_id} automatically taken offline (heartbeat silent > {2 * settings.NODE_STALE_SECONDS}s)",
-            resource_type="sandbox_node",
-            resource_id=str(node.id),
-        ))
+        alerts.append({
+            "dedup_key": f"node-offline-{node.node_id}",
+            "alert_type": "node_offline",
+            "severity": "critical",
+            "message": f"Node {node.node_id} automatically taken offline (heartbeat silent > {2 * settings.NODE_STALE_SECONDS}s)",
+            "resource_type": "sandbox_node",
+            "resource_id": str(node.id),
+        })
         await audit_service.log(
             db, action="node.auto_offline", resource_type="sandbox_node",
             resource_id=str(node.id),
@@ -284,5 +283,83 @@ async def recover_stale_nodes(db: AsyncSession) -> int:
         )
     if offline_count:
         await db.flush()
+        await _record_node_alerts(db, alerts)
         logger.warning("[NodeOps] %d stale nodes taken offline", offline_count)
     return offline_count
+
+
+async def _record_node_alerts(db: AsyncSession, alerts: list[dict]) -> None:
+    """Write node alerts idempotently (A28).
+
+    ``AlertRecord.dedup_key`` is UNIQUE and these signals are stable per node, so
+    a re-detection (health_state reset by unisolate/register, then stale again)
+    used to hit an IntegrityError inside the sweep — which cost the rest of that
+    batch its node marking and audit rows, every round, forever. The same shape
+    as ``alert_center._insert_or_merge`` (A120): merge into the existing row when
+    the key is already there, and give the INSERT its own SAVEPOINT so a
+    concurrent replica that committed the same key in between cannot take the
+    batch down. A savepoint — never ``db.rollback()`` — because the caller's
+    session still holds the node rows it just marked.
+    """
+    if not alerts:
+        return
+    keys = [entry["dedup_key"] for entry in alerts]
+    existing_rows = await db.execute(select(AlertRecord).where(AlertRecord.dedup_key.in_(keys)))
+    existing = {record.dedup_key: record for record in existing_rows.scalars().all()}
+
+    now = datetime.now(timezone.utc)
+    for entry in alerts:
+        record = existing.get(entry["dedup_key"])
+        if record is not None:
+            _merge_alert_occurrence(record, entry, now)
+            logger.info(
+                "[NodeOps] alert %s already open — merged the occurrence (count=%d)",
+                entry["dedup_key"], record.occurrence_count,
+            )
+            continue
+        record = AlertRecord(
+            dedup_key=entry["dedup_key"],
+            alert_type=entry["alert_type"],
+            severity=entry["severity"],
+            status="open",
+            message=entry["message"],
+            resource_type=entry["resource_type"],
+            resource_id=entry["resource_id"],
+            occurrence_count=1,
+            first_seen_at=now,
+            last_seen_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            async with db.begin_nested():
+                db.add(record)
+                await db.flush()
+        except IntegrityError:
+            winner = (await db.execute(
+                select(AlertRecord).where(AlertRecord.dedup_key == entry["dedup_key"])
+            )).scalar_one_or_none()
+            if winner is None:
+                raise
+            logger.warning(
+                "[NodeOps] alert %s was raised by another worker — merging the occurrence",
+                entry["dedup_key"],
+            )
+            _merge_alert_occurrence(winner, entry, now)
+    await db.flush()
+
+
+def _merge_alert_occurrence(record: AlertRecord, entry: dict, now: datetime) -> None:
+    """Fold a repeated signal into the alert row that already owns the dedup key."""
+    record.occurrence_count = (record.occurrence_count or 0) + 1
+    record.last_seen_at = now
+    record.message = entry["message"]
+    record.severity = entry["severity"]
+    record.updated_at = now
+    if record.status != AlertStatus.OPEN.value:
+        record.status = AlertStatus.OPEN.value
+        record.resolved_by = None
+        record.resolved_at = None
+        record.acknowledged_by = None
+        record.acknowledged_at = None
+

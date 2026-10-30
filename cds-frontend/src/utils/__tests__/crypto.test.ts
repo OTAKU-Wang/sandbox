@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   SM2_KEY_STORAGE_DISCLOSURE,
@@ -67,8 +67,13 @@ describe('SM2 私钥托管的披露口径（A258）', () => {
   });
 
   it('签署页不再声称「私钥安全存储在本地」，而是引用上述披露常量', async () => {
+    // 【测试环境接线，不是断言】jsdom 环境下 `import.meta.url` 不是 file: URL，
+    // `fileURLToPath(new URL(…, import.meta.url))` 会在读文件前抛
+    // `TypeError: The URL must be of scheme file`。改成从 vitest 进程 cwd
+    // （cds-frontend/，车道命令在其下跑）拼同一个文件的绝对路径；
+    // 下面两条断言（读 ContractDetail.tsx，含常量名 / 不含旧说法）一字未改。
     const page = await readFile(
-      fileURLToPath(new URL('../../pages/Contracts/ContractDetail.tsx', import.meta.url)),
+      resolve(process.cwd(), 'src/pages/Contracts/ContractDetail.tsx'),
       'utf8',
     );
     expect(page).toContain('SM2_KEY_STORAGE_DISCLOSURE');

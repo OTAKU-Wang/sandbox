@@ -17,6 +17,13 @@ from app.models.contract import Contract
 
 logger = logging.getLogger(__name__)
 
+# A160b: which PDP actually produced a decision, and why a fallback was taken.
+POLICY_SOURCE_OPA = "opa"
+POLICY_SOURCE_PYTHON_FALLBACK = "python-fallback"
+POLICY_SOURCE_LOCAL_CHECK = "local-check"
+FALLBACK_CAUSE_UNAVAILABLE = "opa_unavailable"
+FALLBACK_CAUSE_CLIENT_CLOSED = "opa_client_closed"
+
 
 class Decision(str, Enum):
     ALLOW = "allow"
@@ -46,13 +53,21 @@ class PolicyDecision:
     denied_fields: list[str] = field(default_factory=list)
     field_masks: dict[str, str] = field(default_factory=dict)  # field → mask_pattern
     quota_limits: dict | None = None
+    # A160b: an ALLOW decided by OPA and an ALLOW decided by the in-process fallback
+    # must not be indistinguishable to the reader — especially after shutdown, when
+    # the production PDP is permanently absent rather than briefly unreachable.
+    policy_source: str = "unknown"
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 class PolicyEvaluator:
     """PDP — evaluates access requests against policy bundles.
 
     Delegates to OPA sidecar for Rego evaluation when available.
-    Falls back to Python evaluation if OPA is unreachable.
+    Falls back to Python evaluation if OPA is unreachable, and discloses it on the
+    decision (`policy_source` / `degraded` / `degraded_reason`) instead of emitting
+    an identical ALLOW either way (A160b).
     """
 
     async def evaluate(self, request: AccessRequest, db: AsyncSession) -> PolicyDecision:
@@ -71,6 +86,7 @@ class PolicyEvaluator:
             return PolicyDecision(
                 decision=Decision.DENY,
                 reason="No active policy bundle found for contract",
+                policy_source=POLICY_SOURCE_LOCAL_CHECK,
             )
 
         # Verify bundle integrity
@@ -81,6 +97,7 @@ class PolicyEvaluator:
             return PolicyDecision(
                 decision=Decision.DENY,
                 reason="Policy bundle integrity check failed",
+                policy_source=POLICY_SOURCE_LOCAL_CHECK,
             )
 
         # Try OPA evaluation first
@@ -88,9 +105,17 @@ class PolicyEvaluator:
         if opa_result is not None:
             decision = opa_result
         else:
-            # Fallback: Python evaluation
-            logger.warning("OPA unavailable, falling back to Python PDP")
+            # Fallback: Python evaluation — disclosed, because "OPA is briefly down"
+            # and "this process closed the OPA client" must not read the same (A160b).
+            fallback_cause = self._opa_fallback_cause()
+            logger.warning(
+                "OPA PDP not in play (%s) — decision taken by the in-process Python fallback PDP",
+                fallback_cause,
+            )
             decision = self._evaluate_python(request, bundle)
+            decision.policy_source = POLICY_SOURCE_PYTHON_FALLBACK
+            decision.degraded = True
+            decision.degraded_reason = fallback_cause
 
         # DP budget check — only apply on successful policy evaluation
         if decision.decision == Decision.ALLOW and request.epsilon_cost > 0:
@@ -99,9 +124,21 @@ class PolicyEvaluator:
                 return PolicyDecision(
                     decision=Decision.DENY,
                     reason="DP epsilon budget exhausted for this contract",
+                    policy_source=decision.policy_source,
+                    degraded=decision.degraded,
+                    degraded_reason=decision.degraded_reason,
                 )
 
         return decision
+
+    @staticmethod
+    def _opa_fallback_cause() -> str:
+        """Why the OPA PDP is not in play: permanently closed, or just unreachable."""
+        from app.services.opa_client import opa_client
+
+        if getattr(opa_client, "is_shutdown", False):
+            return FALLBACK_CAUSE_CLIENT_CLOSED
+        return FALLBACK_CAUSE_UNAVAILABLE
 
     async def _evaluate_via_opa(self, request: AccessRequest, bundle: PolicyBundle) -> PolicyDecision | None:
         """Evaluate via OPA sidecar. Returns None if OPA is unavailable."""
@@ -141,20 +178,32 @@ class PolicyEvaluator:
                 allowed_fields, denied_fields, field_masks = self._evaluate_field_acl(
                     request.fields, field_acl
                 )
+                if request.fields and not allowed_fields:
+                    # A95: 与 Python 回落同一口径——字段级控制不能只在回落路径上生效。
+                    return PolicyDecision(
+                        decision=Decision.DENY,
+                        reason="All requested fields are denied by field ACL",
+                        allowed_fields=allowed_fields,
+                        denied_fields=denied_fields,
+                        field_masks=field_masks,
+                        policy_source=POLICY_SOURCE_OPA,
+                    )
                 return PolicyDecision(
                     decision=Decision.ALLOW,
                     reason="OPA policy evaluation passed",
                     allowed_fields=allowed_fields,
                     denied_fields=denied_fields,
                     field_masks=field_masks,
+                    policy_source=POLICY_SOURCE_OPA,
                 )
             else:
                 return PolicyDecision(
                     decision=Decision.DENY,
                     reason="OPA policy evaluation denied",
+                    policy_source=POLICY_SOURCE_OPA,
                 )
         except Exception as e:
-            logger.error(f"OPA evaluation error: {e}")
+            logger.error(f"OPA evaluation error: {e}", exc_info=True)
             return None
 
     def _evaluate_python(self, request: AccessRequest, bundle: PolicyBundle) -> PolicyDecision:

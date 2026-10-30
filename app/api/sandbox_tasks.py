@@ -1,9 +1,10 @@
 """Sandbox Tasks API — task lifecycle within sandbox sessions."""
+import json
 import uuid
 import hashlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,13 +61,50 @@ async def _enforce_task_purpose(db: AsyncSession, session: SandboxSession, purpo
         )
 
 
+# A87/A216: payload fields the JSON body may carry (the query-string form of
+# the same names stays supported for existing clients). Unknown body keys are
+# ignored so a future client can add fields without breaking older servers.
+_TASK_BODY_STR_FIELDS = (
+    "code", "language", "purpose", "rag_query", "answer_mode", "generative_model_id",
+)
+_TASK_BODY_FIELDS = _TASK_BODY_STR_FIELDS + ("timeout_seconds",)
+
+
+async def _parse_task_body(request: Request) -> dict:
+    """Read the optional JSON body for POST /sandbox-tasks (A87/A216).
+
+    Never echo body content back in an error: the body is tenant script text /
+    RAG query data, and an error-response leak is the second path by which it
+    would reach logs (the first being the query string itself).
+    """
+    raw = await request.body()
+    if not raw or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="request body must be valid JSON")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="request body must be a JSON object")
+    for field in _TASK_BODY_STR_FIELDS:
+        if field in parsed and parsed[field] is not None and not isinstance(parsed[field], str):
+            raise HTTPException(status_code=422, detail=f"body field {field} must be a string")
+    timeout_raw = parsed.get("timeout_seconds")
+    if timeout_raw is not None and (
+        isinstance(timeout_raw, bool) or not isinstance(timeout_raw, (int, str))
+    ):
+        raise HTTPException(status_code=422, detail="body field timeout_seconds must be an integer")
+    return {k: v for k, v in parsed.items() if k in _TASK_BODY_FIELDS and v is not None}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_task(
+    request: Request,
     session_id: uuid.UUID,
     task_type: str = "query",
     code: str | None = None,
     language: str | None = None,
-    timeout_seconds: int = 3600,
+    timeout_seconds: int | None = None,
     purpose: str | None = None,
     rag_query: str | None = None,
     answer_mode: str | None = None,
@@ -83,7 +121,33 @@ async def create_task(
     registered ``generative_model_id``) answers via a provider ONNX bundle.
     It flows through the same pipeline (code scan → sandbox run → output
     gateway) as any other task.
+
+    A87/A216: ``code``/``language``/``timeout_seconds``/``purpose``/``rag_query``/
+    ``answer_mode``/``generative_model_id`` may arrive in an optional JSON body
+    instead of the query string, so script text never lands on the request line
+    (access/proxy logs, URL caches) and is not capped by client/server URL
+    length limits. The query-parameter form remains accepted; on overlap the
+    body value wins.
     """
+    # A87/A216: merge the optional JSON body over the query parameters.
+    body = await _parse_task_body(request)
+    if body:
+        code = body.get("code", code)
+        language = body.get("language", language)
+        purpose = body.get("purpose", purpose)
+        rag_query = body.get("rag_query", rag_query)
+        answer_mode = body.get("answer_mode", answer_mode)
+        generative_model_id = body.get("generative_model_id", generative_model_id)
+        if "timeout_seconds" in body:
+            try:
+                timeout_seconds = int(body["timeout_seconds"])
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="timeout_seconds must be positive"
+                )
+    if timeout_seconds is None:
+        timeout_seconds = 3600
+
     # Validate session
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
     session = result.scalar_one_or_none()

@@ -37,13 +37,13 @@ export interface ExposureRequest {
 
 export const fieldExposureApi = {
   getVisibility: (productId: string): Promise<FieldVisibilityConfig> =>
-    api.get(`/field-exposure/products/${productId}/field-visibility`),
+    api.get(`/field-exposure/products/${encodeURIComponent(productId)}/field-visibility`),
 
   setVisibility: (
     productId: string,
     data: { default_sensitivity: FieldSensitivity; field_rules: Record<string, FieldRule> },
   ): Promise<FieldVisibilityConfig> =>
-    api.put(`/field-exposure/products/${productId}/field-visibility`, data),
+    api.put(`/field-exposure/products/${encodeURIComponent(productId)}/field-visibility`, data),
 
   createRequest: (data: { product_id: string; requested_fields: string[]; justification?: string }): Promise<ExposureRequest> =>
     api.post('/field-exposure/exposure-requests', data),
@@ -52,11 +52,11 @@ export const fieldExposureApi = {
     api.get('/field-exposure/exposure-requests', { params }),
 
   reviewRequest: (requestId: string, data: { approved_fields?: string[]; rejection_reason?: string }): Promise<ExposureRequest> =>
-    api.post(`/field-exposure/exposure-requests/${requestId}/review`, data),
+    api.post(`/field-exposure/exposure-requests/${encodeURIComponent(requestId)}/review`, data),
 
   revokeRequest: (requestId: string): Promise<ExposureRequest> =>
-    api.post(`/field-exposure/exposure-requests/${requestId}/revoke`),
+    api.post(`/field-exposure/exposure-requests/${encodeURIComponent(requestId)}/revoke`),
 
   getApprovedFields: (productId: string): Promise<{ product_id: string; buyer_id: string; approved_fields: string[]; total_approved: number }> =>
-    api.get(`/field-exposure/products/${productId}/approved-fields`),
+    api.get(`/field-exposure/products/${encodeURIComponent(productId)}/approved-fields`),
 };

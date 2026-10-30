@@ -33,7 +33,15 @@ class MPCKeyRecord(Base):
 
 class MPCKeyShareRecord(Base):
     __tablename__ = "mpc_key_shares"
-    __table_args__ = (Index("ix_mpc_shares_key", "key_id"),)
+    __table_args__ = (
+        # A214/E2-37: UNIQUE replaces the plain ix_mpc_shares_key instead of
+        # sitting next to it — that index was the leading column of this one.
+        # Two rows for one (key_id, share_index) mean two y-values on the same
+        # Shamir x-coordinate: reconstruction either divides by zero or, since
+        # share_reconstruct only sees the subset it was handed, rebuilds a key
+        # that decrypts to garbage while looking valid.
+        Index("uq_mpc_key_shares_key_index", "key_id", "share_index", unique=True),
+    )
 
     share_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     key_id: Mapped[str] = mapped_column(

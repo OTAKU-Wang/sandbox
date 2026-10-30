@@ -19,7 +19,13 @@ from app.models.user import User
 from app.models.data_product import DataProduct
 from app.models.data_resource import DataResource, ResourceStatus
 from app.models.contract import Contract, ContractStatus
+from app.models.sandbox_session import SandboxLevel
 from app.services.audit_service import audit_service
+from app.services.capability_matrix import (
+    LEVEL_METADATA,
+    SUPPLY_DATA_LEVELS,
+    can_carry_supply_data,
+)
 from app.services.data_product_sandbox import (
     dev_sandbox,
     DevMode,
@@ -140,17 +146,21 @@ async def _resolve_dev_contract(
 
     When DEV_SANDBOX_REQUIRE_CONTRACT is enabled (production default), a dev
     session that loads a data product must reference an effective contract
-    that covers the product. Returns None when the gate is disabled.
+    that covers the product. Returns None only when **no** contract is
+    referenced (possible solely with the gate disabled) — a contract that *is*
+    referenced is validated in full, clauses included, whatever the switch says.
     """
-    if not get_settings().DEV_SANDBOX_REQUIRE_CONTRACT:
-        return None
-
     if not body.contract_id:
-        raise HTTPException(
-            status_code=400,
-            detail="contract_id is required when attaching a data product "
-                   "(DEV_SANDBOX_REQUIRE_CONTRACT is enabled)",
-        )
+        if get_settings().DEV_SANDBOX_REQUIRE_CONTRACT:
+            raise HTTPException(
+                status_code=400,
+                detail="contract_id is required when attaching a data product "
+                       "(DEV_SANDBOX_REQUIRE_CONTRACT is enabled)",
+            )
+        # 开关的语义是「挂供数**必须**带合约」，不是「带了合约也可以不看条款」。
+        # 不带合约且开关关着 ⇒ 这条会话不受合约治理；一旦带了合约，存在性/双方/
+        # 覆盖/档位条款是一个整体，不能只挑其中方便的几条校（A55）。
+        return None
 
     result = await db.execute(select(Contract).where(Contract.id == body.contract_id))
     contract = result.scalar_one_or_none()
@@ -203,6 +213,74 @@ def _dev_dp_budget(body: "CreateDevSessionRequest", contract: Contract | None) -
         # Contract governs this session but has no DP budget — no DP allowed.
         return None
     return body.dp_epsilon_budget
+
+
+def _reject_unusable_level(level: str) -> None:
+    """A55: 客户端传来的档位字符串先过平台档位真值，才轮到解密供数。
+
+    两步都是**拒绝**，绝不换一档继续跑（SS-13 不降级）：字面必须是一个真实存在的
+    档位，且该档位在本节点确实有运行面。修复前的次序是「先把密态供数解密落盘，
+    再在 get_adapter 处抛裸 ValueError」——一次注定失败的请求先做了一次不可逆的
+    解密，而调用方拿到的是兜底 500 而不是 W2 的 400。
+    """
+    known = sorted(lv.value for lv in SandboxLevel)
+    if level not in known:
+        raise CDSError(
+            f"Unknown sandbox level '{level}'",
+            code="VALIDATION_ERROR",
+            http_status=400,
+            detail={"sandbox_level": level, "known_levels": known},
+        )
+    try:
+        dev_sandbox.runtime.get_adapter(level)
+    except CDSError:
+        # l2c 数据面未启用：get_adapter 自己已经给出诚实的 400 RUNTIME_UNAVAILABLE。
+        raise
+    except ValueError as exc:
+        raise CDSError(
+            f"Sandbox level '{level}' has no runtime adapter on this node; "
+            "isolation is never downgraded to another level (SS-13)",
+            code="RUNTIME_UNAVAILABLE",
+            http_status=400,
+            detail={"level": level, "reason": "no_runtime_adapter", "available_levels": known},
+        ) from exc
+
+
+def _reject_unfit_supply_data_level(level: str, contract: Contract | None) -> None:
+    """A55: 真供数落盘前的权威强度序裁决（SS-19 定档腿的平台那一半）。
+
+    合约条款（``allowed_sandbox_levels``）已在 `_resolve_dev_contract` 里参与裁决；
+    这里补的是另一半：**隔离下限是平台不变量，不由合约数据决定**（与
+    `workflow_service.pick_test_sandbox_level` 的 CR BLOCKER-1 同一判据）。一纸只放
+    行 L0 的合约能让 L0 过条款成员校验，却仍然在平台下限之下——按 SS-13 **拒绝**，
+    既不静默换到 l2c，也不因为「合约点了头」就把密态供数放进进程隔离。本函数在
+    download+decrypt 前调用：一次注定失败的请求不得先做一不可逆的解密。
+    """
+    if can_carry_supply_data(level):
+        return
+    reason = (
+        "level_deprecated"
+        if LEVEL_METADATA.get(level, {}).get("deprecated")
+        else "below_supply_data_floor"
+    )
+    contract_allowed = (
+        sorted({lv.strip() for lv in (contract.allowed_sandbox_levels or "").split(",") if lv.strip()})
+        if contract is not None
+        else None
+    )
+    raise CDSError(
+        f"Sandbox level '{level}' may not carry supply data; the isolation floor is a "
+        "platform invariant and is never relaxed by contract data (SS-13: refuse, never "
+        "silently run at another level)",
+        code="LEGACY_LEVEL_RETIRED",
+        http_status=400,
+        detail={
+            "sandbox_level": level,
+            "reason": reason,
+            "supply_data_levels": list(SUPPLY_DATA_LEVELS),
+            "contract_allowed_sandbox_levels": contract_allowed,
+        },
+    )
 
 
 class CreateDevSessionRequest(BaseModel):
@@ -275,6 +353,9 @@ async def create_dev_session(
     if body.idle_policy == "pause":
         raise HTTPException(status_code=400, detail="dev sandbox sessions do not support idle_policy='pause'")
 
+    # A55: 合约之外的另一半——请求档位必须是平台真实存在且有运行面的档位。
+    _reject_unusable_level(body.sandbox_level)
+
     # Resolve data path from data product if provided
     data_path = None
     staged_file: Path | None = None
@@ -327,6 +408,8 @@ async def create_dev_session(
                     detail=detail,
                 )
             from app.services.storage_service import storage_service
+            # A55: 强度序在下解密之前把关——合约只放行 L0 也不能把供数放进 L0。
+            _reject_unfit_supply_data_level(body.sandbox_level, contract)
             try:
                 # A52: 对象存储读 + 信封解密 + 落盘都是阻塞 I/O，走线程，
                 # 不得占事件循环（同文件 execute、sandbox_sessions 同一先例）。

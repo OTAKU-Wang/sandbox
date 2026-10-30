@@ -1,0 +1,10 @@
+Processing /home/<user>/Documents/workspace/sandbox/sdk
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: cds-sdk
+  Building wheel for cds-sdk (pyproject.toml): started
+  Building wheel for cds-sdk (pyproject.toml): finished with status 'done'
+  Created wheel for cds-sdk: filename=cds_sdk-0.3.0-py3-none-any.whl size=24244 sha256=0b5f2562a06cc7f0a2eec8698629749ac0e375a4cdd2adca6b50fdd19e017e4b
+  Stored in directory: /tmp/pip-ephem-wheel-cache-8e2i_ywt/wheels/53/dc/ec/0abf8d7baf70881014d961e4b4ce50d5a089c40747e4f74a5c
+Successfully built cds-sdk
+WHEEL_OK cds_sdk-0.3.0-py3-none-any.whl 7 entries

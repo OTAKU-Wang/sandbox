@@ -32,12 +32,13 @@ src/
 ## CONVENTIONS (deviations from stock Vite/React)
 - Stack: Vite 8 · React 19 · TS ~6.0 · antd 5 · Tailwind v4 via `@tailwindcss/vite` (NO tailwind.config.js) · react-query 5 (global `retry: 1`, `refetchOnWindowFocus: false`) · react-router 7 · zustand 5 · ESLint 10 flat config.
 - `tsconfig.app.json`: `noUnusedLocals`/`noUnusedParameters` deliberately false; `verbatimModuleSyntax` + `erasableSyntaxOnly` on.
+- Three TS projects are built by `tsc -b`: `app` (product code, `types` MUST stay `["vite/client"]` so a stray `process`/`Buffer` in shipped code still errors), `test` (`tsconfig.test.json` — same options, only widened by `"node"` in `types`, because static gates under `src/**/__tests__/` read source files off disk via `node:fs`; must include `src/test/**/*` or every `toBeInTheDocument`-style matcher loses its types), `node` (vite.config). Test files are `exclude`d from `app` — never move them back in.
 - Backend field renames absorbed at the service boundary: `as unknown as X` + `normalize*` helpers.
 - High-risk mutations (revoke key/cert, terminate) send `{reason, ticket_id}` in the DELETE body: `api.delete(url, { data })`.
 - `nginx.conf`: SPA fallback + `/api/` → k8s service `cds-api:8000`, SSE on (`proxy_buffering off`, HTTP/1.1, 300s read timeout) + security headers.
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- SM2 private key in localStorage (`cds_sm2_privkey_<userId>`, utils/crypto.ts) — tolerated only because the backend re-verifies; do not extend this pattern to other secrets.
+- SM2 private key in localStorage (`cds_sm2_privkey_<userId>`, utils/crypto.ts) — tolerated only because the backend re-verifies; do not extend this pattern to other secrets. The posture is disclosed, not hidden: `SM2_KEY_STORAGE_DISCLOSURE` (utils/crypto.ts) is rendered on the contract-signing page and pinned by `src/utils/__tests__/crypto.test.ts`, which forbids copy like 「私钥安全存储在本地」/「不落盘」.
 - Refresh-failure path hard-redirects `window.location.href = '/login'` (services/api.ts), bypassing React Router — do not add more hard redirects.
 - page→offset pagination is computed inline in each service (no shared helper) — keep inline until a real refactor.
 - `README.md` is the untouched stock Vite template — not project documentation.

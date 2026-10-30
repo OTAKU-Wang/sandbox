@@ -236,7 +236,36 @@ export const LOG_ACTION_LABELS: Record<string, string> = {
   'session.auto_resume_rejected': '会话自动恢复被拒',
 };
 
-const NOISY_DETAIL_KEYS = new Set(['_sm2_signature', 'signature', 'watermark', 'report_hash', 'released_output_hash', 'quote', 'attestation']);
+/** 完整性工件（签名/水位/哈希/证明）：它们不是业务内容，也不进单行摘要（与下面的 hidden 计数无关）。 */
+const NOISY_DETAIL_KEYS = new Set(['_sm2_signature', 'signature', 'watermark', 'report_hash', 'released_output_hash', 'quote', 'attestation', 'evidence_hash']);
+
+/**
+ * A265：日志单行摘要走**白名单**，不走黑名单。
+ *
+ * 旧实现是 8 个「噪声键」的黑名单，后果是任何没登记的字段都被拼上屏：
+ * `command_preview=`（命令原文）、`sql=` / `query=`（查询与参数）、`path=`（文件路径）、
+ * `params=`、`error=`（里面常见 DSN、内网 IP、连接串）……等于把审计详情原文抄进调试环境，
+ * 随截图/录屏/存证外流。
+ *
+ * 纳入口径（只收「这次操作跑得怎么样」的枚举/布尔/计数/时长/阈值，不收标识符、路径、命令、
+ * SQL、自由文本与错误原因）：后端新增 detail 字段时默认**不上屏**，要展示就显式登记到这里。
+ * 被隐掉的内容会在行尾说「N 项内容未展示」（不假装 detail 是空的）；
+ * 需要原文去「沙箱会话」详情的审计流（那里有权限与审计口径）。
+ */
+const DISPLAYABLE_DETAIL_KEYS = new Set([
+  // 执行元数据
+  'language', 'exit_code', 'duration_ms', 'timeout_seconds',
+  'output_size', 'output_truncated', 'output_blocked', 'audit_events_collected',
+  // 会话/沙箱口径与状态迁移
+  'sandbox_level', 'sandbox_mode', 'previous_status', 'pre_pause_status', 'resumed_to',
+  'extended_seconds', 'extend_seconds', 'schema_version', 'supported', 'attestation_required',
+  // 文件与管理动作的计数、开关（文件名/路径本身是内容，不进白名单）
+  'size', 'bytes', 'file_count', 'deleted', 'discarded_files', 'encrypted',
+  'passed', 'blocked', 'active', 'key_destroyed', 'container_destroyed',
+]);
+
+/** 单行摘要最多拼几个字段；超出部分计入「未展示」，不静默丢。 */
+const MAX_DIGEST_FIELDS = 6;
 
 function clockOf(value: string | null | undefined): string {
   if (!value) return '--:--:--';
@@ -248,41 +277,87 @@ function clockOf(value: string | null | undefined): string {
 
 export { clockOf };
 
-function detailDigest(detail: unknown): string {
-  if (!detail || typeof detail !== 'object') return '';
+interface DetailDigest {
+  /** 已上屏的 `k=v` 片段 */
+  parts: string[];
+  /** 有值但没上屏的字段个数（签名/哈希那类完整性工件不计：它们不是内容） */
+  hidden: number;
+}
+
+/** A265：白名单外的字段-return 不拼、只计数；嵌套结构（severities/参数等）同样只计数。 */
+function detailDigest(detail: unknown): DetailDigest {
   const parts: string[] = [];
+  let hidden = 0;
+  if (!detail || typeof detail !== 'object') return { parts, hidden };
   Object.entries(detail as Record<string, unknown>).forEach(([key, value]) => {
-    if (NOISY_DETAIL_KEYS.has(key) || value === null || value === undefined) return;
-    if (typeof value === 'object') return; // 嵌套结构（severities/watermark 等）不进单行摘要
+    if (NOISY_DETAIL_KEYS.has(key)) return;
+    if (value === null || value === undefined) return; // 后端明说「没有」，不算被藏起来的内容
+    const scalar = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+    if (!scalar || !DISPLAYABLE_DETAIL_KEYS.has(key)) {
+      hidden += 1;
+      return;
+    }
+    if (parts.length >= MAX_DIGEST_FIELDS) {
+      hidden += 1;
+      return;
+    }
     parts.push(`${key}=${String(value)}`);
   });
-  return parts.slice(0, 6).join(' · ');
+  return { parts, hidden };
+}
+
+/**
+ * A264：`exit_code` 的唯一解读口径——后端没给 / 非数字（审计写入失败、字段漂移、旧数据）
+ * 一律 null，既不折算成 0（假装成功）也不折算成非 0（假装失败）。toneOf / isProblem /
+ * lastExecutionFromLogs 三处共用，日志行与状态芯片不得各读各的。
+ */
+export function exitCodeOf(detail: Record<string, unknown>): number | null {
+  const value = detail.exit_code;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function toneOf(action: string, detail: Record<string, unknown>): LogTone {
   if (action.endsWith('_failed') || action.includes('rejected') || action.includes('denied') || action.includes('blocked')) return 'error';
-  if (action === 'sandbox.execute' || action === 'sandbox.exec') return Number(detail.exit_code ?? 0) === 0 ? 'ok' : 'error';
+  if (action === 'sandbox.execute' || action === 'sandbox.exec') {
+    // A264：退出码未记录是单独一档（warn），既不假称成功也不假称失败。
+    const exit = exitCodeOf(detail);
+    if (exit === null) return 'warn';
+    return exit === 0 ? 'ok' : 'error';
+  }
   if (action === 'sandbox.output_inspected') return detail.blocked ? 'error' : detail.passed ? 'ok' : 'warn';
   if (action === 'sandbox.terminate') return 'warn';
   return 'info';
 }
 
 function isProblem(action: string, detail: Record<string, unknown>): boolean {
-  if (action === 'sandbox.execute' || action === 'sandbox.exec') return Number(detail.exit_code ?? 0) !== 0;
+  if (action === 'sandbox.execute' || action === 'sandbox.exec') {
+    const exit = exitCodeOf(detail);
+    return exit !== null && exit !== 0;
+  }
   if (action === 'sandbox.output_inspected') return !!detail.blocked;
   return toneOf(action, detail) === 'error';
 }
 
-/** 一条后端审计事件 → 一行日志（[HH:MM:SS] 语义 · 关键字段）。 */
+/** 一条后端审计事件 → 一行日志（[HH:MM:SS] 语义 · 关键字段 · 被隐去的内容如实报数）。 */
 export function logLineFromAudit(entry: SessionLogEntry): WorkbenchLogLine {
   const detail = (entry.detail && typeof entry.detail === 'object' ? entry.detail : {}) as Record<string, unknown>;
   const label = LOG_ACTION_LABELS[entry.action] ?? entry.action;
-  const digest = detailDigest(detail);
+  const { parts, hidden } = detailDigest(detail);
+  // A264：执行类事件缺退出码时如实说出来（与 formatDuration 的「耗时未记录」同口径），
+  // 不能静默省略让读者以为「没写就是成功」。
+  const isExec = entry.action === 'sandbox.execute' || entry.action === 'sandbox.exec';
+  const shown = [
+    ...parts,
+    ...(isExec && exitCodeOf(detail) === null ? ['退出码未记录'] : []),
+  ].join(' · ');
+  const head = shown ? `${label} · ${shown}` : label;
+  // A265：有内容没上屏就要说出来，不能让用户以为 detail 本来是空的（文案里「未展示」三个字连续，测试按此匹配）。
+  const text = hidden ? `${head} · ${hidden} 项内容未展示` : head;
   return {
     key: `a:${entry.id}`,
     at: entry.created_at,
     clock: clockOf(entry.created_at),
-    text: digest ? `${label} · ${digest}` : label,
+    text,
     tone: toneOf(entry.action, detail),
     problem: isProblem(entry.action, detail),
   };
@@ -311,25 +386,50 @@ export function applyViewCleared(lines: WorkbenchLogLine[], clearAt: string | nu
 }
 
 export interface LastExecution {
-  ok: boolean;
+  /** A264：true=退出码 0；false=退出码非 0；null=退出码未记录（既非成功也非失败）。 */
+  ok: boolean | null;
   at: string | null;
   durationMs: number | null;
   blocked: boolean;
 }
 
-/** 最近一次真实执行：审计流里最后一条 sandbox.execute / sandbox.exec。 */
+/**
+ * A267：把 `created_at` 实测成一个毫秒数，解析不了（缺失、空串、`刚刚` 这类非时间串）就是 null。
+ * 旧实现走 `String(b.created_at).localeCompare(...)`：`undefined` 被拍成字符串 'undefined'，
+ * 字典序比任何时间戳都大，于是「没记时间」的记录反而抢下「最近一次执行」。
+ */
+function timeValue(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** created_at 倒序：有真时间的在前（新→旧），没时间的排到最后；两边都没时间就不猜次序（保持后端给的序）。 */
+function byCreatedAtDesc(a: SessionLogEntry, b: SessionLogEntry): number {
+  const ta = timeValue(a.created_at);
+  const tb = timeValue(b.created_at);
+  if (ta === null && tb === null) return 0;
+  if (ta === null) return 1;
+  if (tb === null) return -1;
+  return tb - ta;
+}
+
+/** 最近一次真实执行：审计流里最后一条 sandbox.execute / sandbox.exec（A267：没时间的绝不排到有时间的前面）。 */
 export function lastExecutionFromLogs(logs: SessionLogEntry[]): LastExecution | null {
   const rows = logs
     .filter((entry) => entry.action === 'sandbox.execute' || entry.action === 'sandbox.exec')
-    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    .sort(byCreatedAtDesc);
   const latest = rows[0];
   if (!latest) return null;
   const detail = (latest.detail && typeof latest.detail === 'object' ? latest.detail : {}) as Record<string, unknown>;
-  const exit = typeof detail.exit_code === 'number' ? detail.exit_code : null;
+  const exit = exitCodeOf(detail);
   const duration = typeof detail.duration_ms === 'number' ? detail.duration_ms : null;
   return {
-    ok: exit === 0,
-    at: latest.created_at ?? null,
+    // A264：缺退出码 → null（未记录档），不再与「退出码非 0」共享 ok=false。
+    ok: exit === null ? null : exit === 0,
+    // A267：只有能解析的时间才写进 at；解析不了的一律交 null，由界面如实写「时间未记录」，绝不拿串冒充时间。
+    at: timeValue(latest.created_at) === null ? null : String(latest.created_at),
     durationMs: duration,
     blocked: !!detail.output_blocked,
   };
@@ -355,6 +455,13 @@ export function runStatusView(
     const duration = formatDuration(backend.durationMs);
     if (backend.blocked) {
       return { tone: 'warn', text: `输出被阻断 · ${duration}`, hint: '最近一次执行退出码 0 但输出被管控策略阻断（sandbox.execute.detail.output_blocked）。' };
+    }
+    if (backend.ok === null) {
+      return {
+        tone: 'warn',
+        text: `退出码未记录 · ${duration}`,
+        hint: '本会话审计流最后一条 sandbox.execute 没有 exit_code（审计写入失败/字段漂移/旧数据）：拿不到退出码时既不假称成功也不假称失败。',
+      };
     }
     return {
       tone: backend.ok ? 'ok' : 'error',

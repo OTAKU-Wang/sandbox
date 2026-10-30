@@ -24,7 +24,12 @@ helper:
 	mkdir -p bin
 	cp -f sm4gcm/sm4_gcm bin/sm4_gcm
 
-test:
+# `test` depends on `helper` (A204②): the GM negative paths in plugin_test.go and
+# a204_test.go FAIL CLOSED when sm4gcm/sm4_gcm is missing, so on a clean checkout
+# `make test` must build the helper first instead of reporting a green gate with
+# zero national-crypto coverage. Raw `go test ./...` without the helper therefore
+# fails by design — run `make test` (or `make helper` first).
+test: helper
 	go test ./...
 
 docker:

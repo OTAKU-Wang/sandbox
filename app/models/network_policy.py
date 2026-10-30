@@ -94,5 +94,5 @@ class NetworkPolicy(Base):
         if self.mode == "deny_all":
             return False
         if not self.allowed_ports:
-            return True  # If no port restriction, all ports are allowed
+            return False  # A68: empty allowlist denies, same posture as ip/domain
         return port in self.allowed_ports

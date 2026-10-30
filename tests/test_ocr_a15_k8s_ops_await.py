@@ -90,7 +90,7 @@ async def _operator_headers(db_session) -> dict:
     from app.models.user import UserRole
 
     user = User(email=f"ops-{uuid.uuid4().hex[:8]}@test", username=f"ops{uuid.uuid4().hex[:6]}",
-                password_hash="x", role=UserRole.OPERATOR.value)
+                hashed_password="x", role=UserRole.OPERATOR)
     db_session.add(user)
     await db_session.flush()
     await db_session.refresh(user)
@@ -136,7 +136,7 @@ async def test_k8s_session_logs_come_from_the_pod(client, db_session, monkeypatc
     calls = _install_adapter(monkeypatch, FakeAdapter(with_client=True))
     headers = await _operator_headers(db_session)
     session = SandboxSession(
-        user_id=uuid.uuid4(), status="running", timeout_seconds=60,
+        user_id=uuid.uuid4(), data_product_id=uuid.uuid4(), status="running", timeout_seconds=60,
         sandbox_level="k8s", container_id=f"k8s-{POD}",
     )
     db_session.add(session)
@@ -178,10 +178,8 @@ async def test_role_gate_unchanged(client, db_session, monkeypatch):
 
 
 async def _make(client, db_session, role: str, name: str):
-    from app.models.user import UserRole
-
     user = User(email=f"{name}-{uuid.uuid4().hex[:8]}@test", username=f"{name}{uuid.uuid4().hex[:6]}",
-                password_hash="x", role=UserRole(role).value)
+                hashed_password="x", role=role)
     db_session.add(user)
     await db_session.flush()
     await db_session.refresh(user)

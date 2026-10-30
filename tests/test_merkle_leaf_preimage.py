@@ -55,9 +55,23 @@ BASE_TIME = datetime(2026, 3, 4, 5, 6, 7, 800000, tzinfo=timezone.utc)
 # this is what proves the refactor moved no byte. (tests/test_ss17_audit_verify_
 # ordering.py:47 keeps its own copy for the same reason.)
 
+def _legacy_ts(value) -> str:
+    """Timestamp as the frozen format renders it — canonical aware UTC.
+
+    SQLite returns naive datetimes while PostgreSQL (`timestamptz`) returns aware
+    ones, so the raw interpolation hashed the *driver's* artefact instead of the
+    row's fact (A5). The rule is restated here on purpose: this file is the
+    independent witness, so it re-implements the format rather than importing the
+    helper under test — change one and they diverge, which is the point.
+    """
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return str(value)
+
+
 def _legacy_preimage(rec) -> bytes:
     return (
-        f"{rec.id}|{rec.action}|{rec.resource_type}|{rec.resource_id}|{rec.created_at}"
+        f"{rec.id}|{rec.action}|{rec.resource_type}|{rec.resource_id}|{_legacy_ts(rec.created_at)}"
     ).encode()
 
 
@@ -412,4 +426,9 @@ def test_leaf_format_is_single_sourced():
     assert api_src.count("merkle_leaf_preimage(") == 4
     assert egress_src.count("merkle_leaf_preimage(") == 1
     # … and the format itself appears exactly once, in the helper.
-    assert helper_src.count("resource_type}|{log.resource_id}|{log.created_at}") == 1
+    # … and the format itself appears exactly once, in the helper. The timestamp
+    # goes through leaf_timestamp(): leaf bytes must not depend on whether the
+    # driver returned an aware (PostgreSQL) or naive (SQLite) datetime (A5).
+    assert helper_src.count(
+        "resource_type}|{log.resource_id}|{leaf_timestamp(log.created_at)}"
+    ) == 1

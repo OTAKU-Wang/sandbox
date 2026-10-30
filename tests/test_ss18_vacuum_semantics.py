@@ -8,6 +8,8 @@
 判据原文见 specs/ss-18-prototype-alignment.md §8 P0′：空/全空白输入必须诚实失败或显式
 no_op。翻 ``passed`` 会连带改 DP/合规闸语义，所以这里翻的是**成果闸**、披露的是**统计量**。
 """
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
@@ -103,11 +105,31 @@ def test_report_defaults_are_empty_lists_for_plain_text_scene() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gateway_api_reports_empty_output(client: AsyncClient, auth_headers: dict) -> None:
+async def test_gateway_api_reports_empty_output(
+    client: AsyncClient, auth_headers: dict, publish_product
+) -> None:
+    """API 层的真空判据：A21 后 `/gateway` 必须绑定调用者自己的会话（不传 session_id
+    等于绕过属主与合约上限），所以这里先建一个真会话，再交 0 行载荷。"""
+    product = await client.post(
+        "/api/v1/data-products",
+        json={"name": f"SS18 Vacuum {uuid.uuid4().hex[:8]}"},
+        headers=auth_headers,
+    )
+    assert product.status_code == 201
+    product_id = product.json()["id"]
+    await publish_product(product_id)
+    session = await client.post(
+        "/api/v1/sandbox-sessions",
+        json={"data_product_id": product_id},
+        headers=auth_headers,
+    )
+    assert session.status_code == 201
+
     resp = await client.post("/api/v1/output-control/gateway", json={
         "data": [],
         "output_format": "json",
         "allowed_output_formats": ["json"],
+        "session_id": session.json()["id"],
     }, headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()

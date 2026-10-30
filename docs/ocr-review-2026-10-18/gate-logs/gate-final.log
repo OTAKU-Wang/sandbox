@@ -1,0 +1,47 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.3, pluggy-1.6.0
+rootdir: /home/kratos/Documents/workspace/sandbox
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, timeout-2.4.0, cov-7.1.0, anyio-4.13.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 600.0s
+timeout method: signal
+timeout func_only: False
+collected 329 items
+
+tests/test_observability.py .......                                      [  2%]
+tests/test_error_contract.py ..........                                  [  5%]
+tests/test_auth.py ...........                                           [  8%]
+tests/test_admin_auth.py ....                                            [  9%]
+tests/test_session_lifecycle.py .....                                    [ 11%]
+tests/test_contract_terminate_cascade.py .....                           [ 12%]
+tests/test_dev_sandbox_contract.py ...                                   [ 13%]
+tests/test_kms_attestation_required.py ......                            [ 15%]
+tests/test_output_gateway_enforcement.py .....                           [ 17%]
+tests/test_contract_purpose.py ......                                    [ 18%]
+tests/test_security_config_matrix.py .......................             [ 25%]
+tests/test_training_fail_closed.py ss..                                  [ 27%]
+tests/test_field_classification_policy.py ....                           [ 28%]
+tests/test_sandbox_db_policy_gate.py .......................             [ 35%]
+tests/test_dp_guardrails.py ....                                         [ 36%]
+tests/test_kms_dek_wrapped.py ...                                        [ 37%]
+tests/test_pii_ner_engine.py ..........                                  [ 40%]
+tests/test_blockchain_backend_disclosure.py .....                        [ 41%]
+tests/test_rag_embedding.py ................                             [ 46%]
+tests/test_rag_service.py ...............                                [ 51%]
+tests/test_rag_runner.py .....                                           [ 52%]
+tests/test_rag_task.py ......                                            [ 54%]
+tests/test_rag_ingest.py .....                                           [ 56%]
+tests/test_rag_generative.py .....                                       [ 57%]
+tests/test_rag_transformers.py ....                                      [ 58%]
+tests/test_mpc_capabilities.py ....                                      [ 60%]
+tests/test_k8s_client.py .....                                           [ 61%]
+tests/test_k8s_n7.py .........                                           [ 64%]
+tests/test_k8s_ops.py ......                                             [ 66%]
+tests/test_rate_limit_distributed.py .......                             [ 68%]
+tests/test_tenant_quota_persistence.py ....                              [ 69%]
+tests/test_migrations.py ...                                             [ 70%]
+tests/test_deploy_manifests.py ......................                    [ 77%]
+tests/test_pz10_mfa.py ....................                              [ 83%]
+tests/test_capability_matrix_consistency.py .
+[归档说明] 上方为被中断的部分运行（停在 83%，无终值，我早先一次 pkill 误杀）。终值见同目录 gate-final-40files.log：GATE_RC=0 / 327 passed / 2 skipped / 114s。

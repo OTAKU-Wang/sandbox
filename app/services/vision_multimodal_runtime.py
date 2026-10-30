@@ -39,6 +39,40 @@ def _stable_unit_interval(*parts: object) -> float:
     return int(digest[:8], 16) / 0xFFFFFFFF
 
 
+# ─── OCR A152: honest-degradation gate for the byte-level "redaction" steps ───
+# FaceBlurStep / DICOMStripStep / LicensePlateStep below never touch real image
+# pixels: face blur only stamps a `|cds_step=` marker, the DICOM/plate steps only
+# regex synthetic `k=v` payloads. Until a real detector/blur backend is wired
+# they are simulations and must disclose themselves (项目铁律 禁伪造):
+#   * ALLOW_SIMULATION=false → the step refuses instead of claiming redaction;
+#   * ALLOW_SIMULATION=true  → every processed byte payload carries the
+#     `cds_redaction_simulated` disclosure and TrainingResult says so too.
+SIMULATED_REDACTION_MARKER = b"|cds_redaction_simulated=1"
+SIMULATED_REDACTION_BACKEND = "byte-level-marker-simulation"
+
+
+def _redaction_simulation_allowed() -> bool:
+    from app.core.config import get_settings
+
+    return bool(get_settings().ALLOW_SIMULATION)
+
+
+def _refuse_fake_redaction(step_name: str) -> None:
+    if not _redaction_simulation_allowed():
+        raise NotImplementedError(
+            f"{step_name}: no real detection/redaction backend is wired — this step "
+            "does not modify image pixels, so it refuses to claim redaction "
+            "while ALLOW_SIMULATION=false"
+        )
+
+
+def _disclose_simulated_redaction(image_data: bytes) -> bytes:
+    if SIMULATED_REDACTION_MARKER in image_data:
+        return image_data
+    return image_data + SIMULATED_REDACTION_MARKER
+
+
+
 class VisionTask(str, Enum):
     """Vision model task types."""
     CLASSIFICATION = "classification"
@@ -56,6 +90,13 @@ class PipelineStepType(str, Enum):
     HORIZONTAL_FLIP = "horizontal_flip"
     RESIZE_CROP = "resize_crop"
     NORMALIZE = "normalize"
+
+
+REDACTION_STEP_TYPES = frozenset({
+    PipelineStepType.FACE_BLUR,
+    PipelineStepType.DICOM_STRIP,
+    PipelineStepType.LICENSE_PLATE_MOSAIC,
+})
 
 
 @dataclass
@@ -135,6 +176,12 @@ class TrainingResult:
     metrics: list[TrainingMetrics] = field(default_factory=list)
     error: str | None = None
     duration_seconds: float = 0.0
+    # OCR A152: True when any requested redaction ran through the byte-level
+    # simulation steps — a reader must never see redaction silently claimed.
+    redaction_simulated: bool = False
+    # OCR A152b: which backend produced that redaction (None when none ran), so a
+    # report / UI badge can tell `byte-level-marker-simulation` from a real detector.
+    redaction_backend: str | None = None
 
 
 # Allowed multimodal base models (SS-04 §4.4)
@@ -168,20 +215,27 @@ class FaceBlurStep(PipelineStepBase):
         self._method = method
 
     def apply(self, image_data: bytes) -> bytes:
+        _refuse_fake_redaction("FaceDetectAndBlurStep")
         decoded = DecodeStep().apply(image_data)
-        return _append_processing_marker(decoded, f"face_blur:{self._method}")
+        # No real detector here: pixels are untouched — disclose it (OCR A152).
+        return _disclose_simulated_redaction(
+            _append_processing_marker(decoded, f"face_blur:{self._method}"))
 
 
 class DICOMStripStep(PipelineStepBase):
     SENSITIVE_TAGS = ["PatientName", "PatientID", "PatientBirthDate", "InstitutionName"]
 
     def apply(self, image_data: bytes) -> bytes:
+        _refuse_fake_redaction("DICOMTagStripStep")
         decoded = DecodeStep().apply(image_data)
         redacted = decoded
         for tag in self.SENSITIVE_TAGS:
             pattern = rb"(?i)(?:^|[;\n\r])" + re.escape(tag.encode()) + rb"\s*=\s*[^;\n\r]*"
             redacted = re.sub(pattern, b"", redacted)
-        return _append_processing_marker(redacted, "dicom_tags_stripped")
+        # Byte-level regex over synthetic payloads only — not a real DICOM
+        # parser; disclose so the strip is never read as verified (OCR A152).
+        return _disclose_simulated_redaction(
+            _append_processing_marker(redacted, "dicom_tags_stripped"))
 
 
 class LicensePlateStep(PipelineStepBase):
@@ -189,13 +243,15 @@ class LicensePlateStep(PipelineStepBase):
         self._method = method
 
     def apply(self, image_data: bytes) -> bytes:
+        _refuse_fake_redaction("LicensePlateStep")
         decoded = DecodeStep().apply(image_data)
         redacted = re.sub(
             rb"(?i)(plate|license_plate)\s*=\s*[A-Z0-9-]{5,12}",
             rb"\1=[MOSAIC]",
             decoded,
         )
-        return _append_processing_marker(redacted, f"license_plate:{self._method}")
+        return _disclose_simulated_redaction(
+            _append_processing_marker(redacted, f"license_plate:{self._method}"))
 
 
 def _append_processing_marker(image_data: bytes, marker: str) -> bytes:
@@ -224,6 +280,9 @@ class SecureImageDataLoader:
         self._batch_size = batch_size
         self._images: list[bytes] = []
         self._labels: list[int] = []
+        # OCR A152b: consumer-visible accounting of simulated redaction actually run.
+        self._simulated_redaction_ops = 0
+        self._simulated_warned = False
 
     def load(self) -> None:
         """Load images from authorized products.
@@ -259,6 +318,9 @@ class SecureImageDataLoader:
         return batches
 
     def _apply_pipeline_step(self, image_data: bytes, step: PipelineStep) -> bytes:
+        if step.step_type in REDACTION_STEP_TYPES and _redaction_simulation_allowed():
+            self._simulated_redaction_ops += 1
+            self._warn_simulated_redaction_once()
         if step.step_type == PipelineStepType.DECODE:
             return DecodeStep().apply(image_data)
         if step.step_type == PipelineStepType.FACE_BLUR:
@@ -274,6 +336,33 @@ class SecureImageDataLoader:
         if step.step_type == PipelineStepType.NORMALIZE:
             return _append_processing_marker(image_data, "normalize")
         raise ValueError(f"Unsupported pipeline step: {step.step_type}")
+
+    def _warn_simulated_redaction_once(self) -> None:
+        if self._simulated_warned:
+            return
+        self._simulated_warned = True
+        logger.warning(
+            "Vision redaction is running through the byte-level simulation "
+            "(backend=%s): image pixels are NOT modified, so the cds_step= markers "
+            "must not be read as verified redaction",
+            SIMULATED_REDACTION_BACKEND,
+        )
+
+    def get_redaction_summary(self) -> dict:
+        """How much of this loader's redaction is simulated (OCR A152b).
+
+        Same disclosure contract as
+        `VisionTrainingRuntime.get_redaction_summary()` in vision_pipeline.py: a
+        report or badge reads `is_simulation` / `backend` instead of inferring
+        redaction from a marker appended to the bytes.
+        """
+        simulated = self._simulated_redaction_ops
+        return {
+            "total": len(self._images),
+            "simulated": simulated,
+            "is_simulation": simulated > 0,
+            "backend": SIMULATED_REDACTION_BACKEND if simulated else None,
+        }
 
     @property
     def num_samples(self) -> int:
@@ -361,6 +450,11 @@ class VisionModelTrainingRuntime:
     ) -> TrainingResult:
         start = time.monotonic()
         pipeline = build_image_pipeline(config.redaction_rules)
+        # Fail fast before burning an epoch: with ALLOW_SIMULATION=false a
+        # requested redaction has no honest backend (OCR A152).
+        for step in pipeline.steps:
+            if step.step_type in REDACTION_STEP_TYPES:
+                _refuse_fake_redaction(f"pipeline step {step.step_type.value}")
 
         dataloader = SecureImageDataLoader(
             product_ids=data_product_ids,
@@ -413,6 +507,18 @@ class VisionModelTrainingRuntime:
             watermark_injected=watermark_ok,
             metrics=metrics,
             duration_seconds=time.monotonic() - start,
+            # Every redaction this pipeline could run is the byte-level
+            # simulation (no pixel backend exists) — say so (OCR A152).
+            redaction_simulated=bool(
+                config.redaction_rules.face_blur
+                or config.redaction_rules.dicom_strip
+                or config.redaction_rules.license_plate_mosaic
+            ),
+            redaction_backend=(
+                SIMULATED_REDACTION_BACKEND
+                if any(s.step_type in REDACTION_STEP_TYPES for s in pipeline.steps)
+                else None
+            ),
         )
 
     def _inject_watermark(self, session_id: str) -> bool:

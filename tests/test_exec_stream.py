@@ -186,3 +186,96 @@ async def _token_for(client) -> str:
         "password": "testpass123",
     })
     return resp.json()["access_token"]
+
+
+class _RecordingRuntime:
+    """Stands in for the sandbox runtime so a stream test can see what the
+    handler actually handed the executor."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def execute_streaming(self, container_id, command, shell, *, env_vars=None,
+                                timeout=None, extra_binds=None, on_line=None):
+        self.calls.append({
+            "container_id": container_id,
+            "command": command,
+            "extra_binds": extra_binds,
+        })
+        if on_line:
+            await on_line("stdout", f"ran:{command}")
+        return {"exit_code": 0}
+
+
+@pytest.mark.asyncio
+async def test_stream_resolves_declared_shared_volume_binds(client, ws_db, monkeypatch):
+    """A24 pin: the stream path must resolve the session's shared-volume binds and
+    pass them to the runtime. Before the fix `db` was a global lookup inside `_run`
+    and the swallowed `except: binds = []` hid the NameError, so a session with a
+    declared mount ran WITHOUT it through WS only - the non-stream exec path worked,
+    which is why no existing test could fail on it."""
+    from app.api.session_stream import issue_ws_ticket
+
+    user, session, _ = await _mk_running_session(ws_db)
+    ticket = (await issue_ws_ticket(str(user.id), user.role))["ticket"]
+
+    seen: dict = {}
+    pins = [("/tmp/cds-shared-pin", "/workspace/shared/pin", False)]
+
+    async def _fake_resolve(db, session_id):
+        seen["session_id"] = session_id
+        seen["db"] = db
+        return pins
+
+    runtime = _RecordingRuntime()
+
+    async def _fake_runtime():
+        return runtime
+
+    monkeypatch.setattr("app.services.shared_volumes.resolve_binds", _fake_resolve)
+    monkeypatch.setattr("app.services.sandbox_manager.get_sandbox_manager", _fake_runtime)
+
+    tc = TestClient(app)
+    with tc.websocket_connect(
+        f"/api/v1/sandbox-sessions/{session.id}/exec/stream?ticket={ticket}"
+    ) as ws:
+        ws.send_json({"type": "start", "command": "echo pin", "timeout": 30})
+        frames = _drain(ws)
+
+    assert seen.get("session_id") == session.id, f"resolve_binds never ran: {seen} {frames}"
+    assert seen.get("db") is not None, "resolve_binds must get a live session, not a closed one"
+    assert runtime.calls, f"runtime never executed: {frames}"
+    assert runtime.calls[0]["extra_binds"] == pins, runtime.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_refuses_exec_when_volume_resolution_fails(client, ws_db, monkeypatch):
+    """A24 fail-closed half: an unresolvable mount surfaces as an error frame and the
+    command is NOT started with binds=[] (hiding the degradation is forbidden)."""
+    from app.api.session_stream import issue_ws_ticket
+
+    user, session, _ = await _mk_running_session(ws_db)
+    ticket = (await issue_ws_ticket(str(user.id), user.role))["ticket"]
+
+    async def _boom(db, session_id):
+        raise RuntimeError("volume backend down")
+
+    runtime = _RecordingRuntime()
+
+    async def _fake_runtime():
+        return runtime
+
+    monkeypatch.setattr("app.services.shared_volumes.resolve_binds", _boom)
+    monkeypatch.setattr("app.services.sandbox_manager.get_sandbox_manager", _fake_runtime)
+
+    tc = TestClient(app)
+    with tc.websocket_connect(
+        f"/api/v1/sandbox-sessions/{session.id}/exec/stream?ticket={ticket}"
+    ) as ws:
+        ws.send_json({"type": "start", "command": "echo must-not-run", "timeout": 30})
+        frames = _drain(ws)
+
+    errors = [f for f in frames if f["type"] == "error"]
+    assert errors, f"no error frame surfaced while mounts were unresolved: {frames}"
+    assert errors[0].get("code") == "RUNTIME_UNAVAILABLE", errors[0]
+    assert runtime.calls == [], f"command ran without its declared mounts: {runtime.calls}"

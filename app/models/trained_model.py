@@ -8,7 +8,7 @@ inference_usage — one row per invoke for token/output metering.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,7 +31,7 @@ class TrainedModel(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     format: Mapped[str] = mapped_column(String(32), nullable=False)  # onnx/pickle/safetensors
     artifact_ref: Mapped[str] = mapped_column(String(512), nullable=False)  # storage object name
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="registered")
     watermark_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

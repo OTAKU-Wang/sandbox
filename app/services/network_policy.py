@@ -285,6 +285,9 @@ class NetworkPolicyEngine:
         self._rate_limiters: dict[str, _TokenBucket] = {}
         self._dns_proxies: dict[str, asyncio.AbstractServer] = {}
         self._dns_port_counter = 10053
+        # A156: which port belongs to WHICH session — the global counter alone cannot
+        # answer that once two sessions coexist.
+        self._dns_ports: dict[str, int] = {}
         self._netns_counter = 0
 
     async def _session_is_l2c(self, session_id: str, db=None) -> bool:
@@ -345,6 +348,21 @@ class NetworkPolicyEngine:
 
         Returns policy enforcement details.
         """
+        # A68: "allowlist" with zero allowed ports is self-contradictory — enforced as
+        # given it means "no port rule at all", i.e. fail-open. Refuse at the engine
+        # boundary too (defense in depth behind the schema) instead of storing a config
+        # whose port dimension does nothing.
+        if config.mode == "allowlist" and not config.allowed_ports:
+            from app.core.errors import CDSError
+
+            raise CDSError(
+                "allowlist mode requires at least one allowed port; use mode=deny_all "
+                "to block all egress",
+                code="VALIDATION_ERROR",
+                http_status=422,
+                detail={"session_id": session_id, "mode": config.mode, "allowed_ports": []},
+            )
+
         self._policies[session_id] = config
 
         # SS-10 CB-04 l2c branch (spec §3.5): early return — l2c never
@@ -414,6 +432,7 @@ class NetworkPolicyEngine:
             logger.warning(f"[net-policy] {session_id}: 'ip' command not available, "
                            "cannot create network namespace for allowlist mode")
             config.mode = "deny_all"
+            self._degrade(result, "ip_tool_unavailable")
             return result
 
         # Create network namespace + veth pair
@@ -425,26 +444,50 @@ class NetworkPolicyEngine:
         if not ns_created:
             logger.warning(f"[net-policy] {session_id}: failed to create netns, falling back to deny_all")
             config.mode = "deny_all"
+            self._degrade(result, "netns_unavailable")
             return result
 
         result["netns_name"] = netns_name
         result["veth_host"] = veth_host
         result["veth_sandbox"] = veth_sandbox
 
-        # Set up iptables rules
-        if self._iptables_available and config.allowed_ips:
+        # Set up iptables rules — A156: the chain is built for ANY allowlist policy.
+        # Gating it on config.allowed_ips left a domain/port-only policy in a fresh netns
+        # with zero rules, i.e. default ACCEPT = full egress while reporting "allowlist".
+        if self._iptables_available:
             chain = self._create_iptables_chain(netns_name, config)
+            if not chain:
+                logger.warning(f"[net-policy] {session_id}: failed to create iptables chain, "
+                               "falling back to deny_all")
+                config.mode = "deny_all"
+                await self.remove_policy(session_id)
+                self._degrade(result, "iptables_unavailable")
+                return result
             result["iptables_chain"] = chain
 
         # Start DNS proxy for domain filtering
         if config.dns_proxy_enabled and config.allowed_domains:
             dns_port = await self._start_dns_proxy(session_id, config)
             result["dns_proxy_port"] = dns_port
+            # A156: the proxy binds the HOST loopback on 10053+. A sandbox inside the
+            # netns cannot reach 127.0.0.1, the port is not 53 and nothing injects a
+            # resolv.conf, so the domain allowlist is not actually in force on this path
+            # — report that instead of letting the netns/chain names imply it is.
+            result["domain_filtering"] = "not-enforced" if dns_port else "unavailable"
+            logger.warning(f"[net-policy] {session_id}: DNS proxy bound on host loopback "
+                           f"(127.0.0.1:{dns_port}, not 53) — domain allowlist NOT enforced "
+                           f"for the netns guest")
 
         logger.info(f"[net-policy] {session_id}: allowlist "
                      f"ips={config.allowed_ips} domains={config.allowed_domains} "
                      f"netns={netns_name}")
         return result
+
+    @staticmethod
+    def _degrade(result: dict[str, object], reason: str) -> None:
+        """Record an enforcement downgrade honestly: what is in force now, and why."""
+        result["mode"] = "deny_all"
+        result["degraded"] = reason
 
     async def remove_policy(self, session_id: str, db=None) -> None:
         """Remove all network policy enforcement for a session.
@@ -503,77 +546,58 @@ class NetworkPolicyEngine:
 
         logger.info(f"[net-policy] {session_id}: policy removed")
 
+    async def _run_host_cmd(self, argv: list[str]):
+        def _run():
+            return subprocess.run(argv, capture_output=True, timeout=5)
+
+        return await asyncio.get_event_loop().run_in_executor(None, _run)
+
+    async def _drop_partial_netns(self, netns_name: str, veth_host: str) -> None:
+        """Best-effort teardown of half-built netns resources after a failed step."""
+        for argv in (["ip", "netns", "del", netns_name], ["ip", "link", "del", veth_host]):
+            try:
+                await self._run_host_cmd(argv)
+            except Exception as exc:
+                logger.warning(f"[net-policy] partial-netns cleanup {argv!r} failed: {exc}")
+
     async def _create_netns(self, netns_name: str, veth_host: str, veth_sandbox: str) -> bool:
-        """Create a network namespace with veth pair for controlled network access."""
-        try:
-            loop = asyncio.get_event_loop()
+        """Create a network namespace with veth pair for controlled network access.
 
-            # Create network namespace
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "netns", "add", netns_name],
-                capture_output=True, timeout=5,
-            ))
+        A156: every step is checked. The unchecked version reported success for a
+        namespace that was never built (non-root, name conflict, unsupported `ip`
+        subcommand), and callers wrote the returned netns name into the audit trail.
+        """
+        steps: list[list[str]] = [
+            ["ip", "netns", "add", netns_name],
+            ["ip", "link", "add", veth_host, "type", "veth", "peer", "name", veth_sandbox],
+            ["ip", "link", "set", veth_sandbox, "netns", netns_name],
+            ["ip", "addr", "add", "10.66.0.1/24", "dev", veth_host],
+            ["ip", "link", "set", veth_host, "up"],
+            ["ip", "netns", "exec", netns_name, "ip", "addr", "add", "10.66.0.2/24", "dev", veth_sandbox],
+            ["ip", "netns", "exec", netns_name, "ip", "link", "set", veth_sandbox, "up"],
+            ["ip", "netns", "exec", netns_name, "ip", "link", "set", "lo", "up"],
+            ["ip", "netns", "exec", netns_name, "ip", "route", "add", "default", "via", "10.66.0.1"],
+            ["sysctl", "-w", f"net.ipv4.conf.{veth_host}.forwarding=1"],
+        ]
+        if self._iptables_available:
+            steps.append(["iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "10.66.0.0/24",
+                          "-j", "MASQUERADE"])
 
-            # Create veth pair
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "link", "add", veth_host, "type", "veth", "peer", "name", veth_sandbox],
-                capture_output=True, timeout=5,
-            ))
-
-            # Move sandbox end into the network namespace
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "link", "set", veth_sandbox, "netns", netns_name],
-                capture_output=True, timeout=5,
-            ))
-
-            # Configure host end
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "addr", "add", "10.66.0.1/24", "dev", veth_host],
-                capture_output=True, timeout=5,
-            ))
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "link", "set", veth_host, "up"],
-                capture_output=True, timeout=5,
-            ))
-
-            # Configure sandbox end
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "netns", "exec", netns_name, "ip", "addr", "add", "10.66.0.2/24", "dev", veth_sandbox],
-                capture_output=True, timeout=5,
-            ))
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "netns", "exec", netns_name, "ip", "link", "set", veth_sandbox, "up"],
-                capture_output=True, timeout=5,
-            ))
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "netns", "exec", netns_name, "ip", "link", "set", "lo", "up"],
-                capture_output=True, timeout=5,
-            ))
-
-            # Default route via host
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["ip", "netns", "exec", netns_name, "ip", "route", "add", "default", "via", "10.66.0.1"],
-                capture_output=True, timeout=5,
-            ))
-
-            # Enable IP forwarding on host for this veth
-            await loop.run_in_executor(None, lambda: subprocess.run(
-                ["sysctl", "-w", f"net.ipv4.conf.{veth_host}.forwarding=1"],
-                capture_output=True, timeout=5,
-            ))
-
-            # NAT for outbound traffic from sandbox
-            if self._iptables_available:
-                await loop.run_in_executor(None, lambda: subprocess.run(
-                    ["iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "10.66.0.0/24",
-                     "-j", "MASQUERADE"],
-                    capture_output=True, timeout=5,
-                ))
-
-            return True
-        except Exception as e:
-            logger.error(f"[net-policy] Failed to create netns {netns_name}: {e}")
-            return False
+        for step in steps:
+            try:
+                proc = await self._run_host_cmd(step)
+            except Exception as exc:
+                logger.error(f"[net-policy] {step[:4]} raised for {netns_name}: {exc}")
+                await self._drop_partial_netns(netns_name, veth_host)
+                return False
+            if proc.returncode != 0:
+                logger.error(
+                    f"[net-policy] {step!r} failed for {netns_name} "
+                    f"(rc={proc.returncode}): {(proc.stderr or b'').decode(errors='replace')[:200]}"
+                )
+                await self._drop_partial_netns(netns_name, veth_host)
+                return False
+        return True
 
     async def _remove_netns(self, session_id: str) -> None:
         """Remove network namespace and veth pair."""
@@ -696,6 +720,7 @@ class NetworkPolicyEngine:
         )
 
         self._dns_proxies[session_id] = transport
+        self._dns_ports[session_id] = port
         logger.info(f"[dns-proxy] {session_id}: listening on 127.0.0.1:{port} "
                      f"domains={config.allowed_domains}")
         return port
@@ -703,6 +728,7 @@ class NetworkPolicyEngine:
     async def _stop_dns_proxy(self, session_id: str) -> None:
         """Stop DNS proxy for a session."""
         transport = self._dns_proxies.pop(session_id, None)
+        self._dns_ports.pop(session_id, None)
         if transport:
             transport.close()
             logger.info(f"[dns-proxy] {session_id}: stopped")
@@ -727,8 +753,9 @@ class NetworkPolicyEngine:
         if not self.check_rate_limit(session_id):
             return False
 
-        # Check port
-        if config.allowed_ports and dest_port not in config.allowed_ports:
+        # Check port — A68 fail-closed: an empty port allowlist allows NOTHING
+        # (same posture as the ip/domain dimensions), never "no filter".
+        if dest_port not in config.allowed_ports:
             return False
 
         # Check IP
@@ -774,7 +801,9 @@ class NetworkPolicyEngine:
         if not config.dns_proxy_enabled or not config.allowed_domains:
             return {}
 
-        port = self._dns_port_counter - 1  # Last assigned port
+        port = self._dns_ports.get(session_id)  # A156: this session's own proxy, not the last one handed out
+        if port is None:
+            return {}
         return {
             "CDS_DNS_PROXY": f"127.0.0.1:{port}",
         }

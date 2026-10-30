@@ -70,7 +70,10 @@ tree_ok=1
   && [ "${N:-0}" -gt 0 ] \
   && find app tests alembic -name '*.py' -type f -print0 | sort -z | xargs -0 -r md5sum | md5sum ) \
   > "$LOGDIR/tree.md5" 2>"$LOGDIR/tree.md5.err" || tree_ok=0
-if [ "$tree_ok" -ne 0 ] || ! grep -Eq '[0-9a-f]{32}' "$LOGDIR/tree.md5"; then
+# tree_ok 语义：成功=1、失败=0（上面 `|| tree_ok=0`）。旧判据写成 `-ne 0` 把
+# 「哈希成功」当成失败报 STEP_FAIL tree_hash，并使 else（与 sync_tree 清单比对）
+# 成为死代码 —— 树一致性自该步进以来从未真正校验过（10-19 实测才发现）。
+if [ "$tree_ok" -ne 1 ] || ! grep -Eq '[0-9a-f]{32}' "$LOGDIR/tree.md5"; then
   echo "STEP_FAIL tree_hash"; FAILS=$((FAILS+1))
 else
   REMOTE_AGG="$(awk '{print $1}' "$LOGDIR/tree.md5")"

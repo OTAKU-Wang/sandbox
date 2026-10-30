@@ -1,0 +1,11 @@
+FE_IMAGE_REQUESTED=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:20-bookworm-slim
+FE_IMAGE_DIGEST=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node@sha256:73f01b213b9c5c5fd883cae99a61c2084c4e5211c79e4c8310b587d4d183516a
+NPM_CI_RC=0
+TSC_RC=2
+VITEST_RC=1
+BUILD_RC=2
+FE_TSC_TAIL=src/utils/__tests__/crypto.test.ts(2,25): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.~src/utils/__tests__/crypto.test.ts(76,15): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.~error TS5083: Cannot read file '/work/tsconfig.test.json'.~
+FE_VITEST_TAIL=[2m Test Files [22m [1m[31m66 failed[39m[22m[90m (66)[39m~[2m      Tests [22m [2mno tests[22m~
+FE_BUILD_TAIL=src/utils/__tests__/crypto.test.ts(2,25): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.~src/utils/__tests__/crypto.test.ts(76,15): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.~error TS5083: Cannot read file '/work/tsconfig.test.json'.~
+FE_LANE_DONE rc=1
+FE_LANE_EXIT=1

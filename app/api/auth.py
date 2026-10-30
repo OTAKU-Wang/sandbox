@@ -471,8 +471,17 @@ async def mfa_recover(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Spend one recovery code and re-enroll: a fresh secret is returned and
-    the account stays locked from MFA login until /mfa/verify confirms it."""
+    """Spend one recovery code and re-enroll: a fresh secret is returned and the
+    enrollment drops to UNCONFIRMED until /mfa/verify confirms it.
+
+    A14 honesty note: while unconfirmed the login gate is NOT enforced (see
+    ``login`` above and the ``confirmed`` contract in models/user_mfa.py — an
+    enrolled-but-unverified row never blocks password login, pinned by
+    tests/test_pz10_mfa.py::test_unconfirmed_enrollment_does_not_block_login),
+    so verify the new secret promptly. That window is exactly why this endpoint
+    spends a recovery code first: the recovery code IS the second factor, so a
+    password alone can never take an account out of MFA enforcement — the same
+    rule the A14 gate enforces on /mfa/enroll."""
     mfa = await _get_mfa(db, current_user.id)
     if not mfa:
         raise HTTPException(status_code=400, detail="Not enrolled: call POST /auth/mfa/enroll first")

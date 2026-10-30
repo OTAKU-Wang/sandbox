@@ -10,6 +10,7 @@ from uuid import UUID
 
 import httpx
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -59,8 +60,7 @@ class AlertCenterService:
             if existing is None:
                 existing = await self._get_by_dedup_key(db, dedup_key)
             if existing is None:
-                existing = self._record_from_alert(alert, dedup_key, now)
-                db.add(existing)
+                existing = await self._insert_or_merge(db, alert, dedup_key, now)
             else:
                 self._merge_occurrence(existing, alert, now)
             seen[dedup_key] = existing
@@ -176,6 +176,36 @@ class AlertCenterService:
             )
             record.updated_at = datetime.now(timezone.utc)
         await db.flush()
+
+    async def _insert_or_merge(
+        self,
+        db: AsyncSession,
+        alert: Alert,
+        dedup_key: str,
+        now: datetime,
+    ) -> AlertRecord:
+        """Insert one new record, or merge into the row that won the race.
+
+        ``dedup_key`` is UNIQUE while the pre-check in :meth:`ingest_alerts` is a
+        separate statement, so a concurrent collector can commit the same key in
+        between (A120). The INSERT gets its own SAVEPOINT: ``db.rollback()`` would
+        expire every object the caller still holds in this request session, and a
+        bare raise would take the whole batch — plus the audit row written by the
+        same request — down with it.
+        """
+        record = self._record_from_alert(alert, dedup_key, now)
+        try:
+            async with db.begin_nested():
+                db.add(record)
+                await db.flush()
+        except IntegrityError:
+            winner = await self._get_by_dedup_key(db, dedup_key)
+            if winner is None:
+                raise
+            logger.debug("[AlertCenter] dedup race lost for %s; merging into the winner", dedup_key)
+            self._merge_occurrence(winner, alert, now)
+            return winner
+        return record
 
     async def _get_by_dedup_key(self, db: AsyncSession, dedup_key: str) -> AlertRecord | None:
         result = await db.execute(select(AlertRecord).where(AlertRecord.dedup_key == dedup_key))

@@ -287,7 +287,8 @@ def test_prepare_tongsuo_fail_closed_and_invariants() -> None:
     value = line.split("=", 1)[1].strip()
     assert len(value) == 64 and all(c in "0123456789abcdef" for c in value)
     assert "TONGSUO_TARBALL_SHA256:-" not in src
-    assert "160000" in src and re.search(r"0-9a-f\{40\}", src), "gitlink mode/sha 必须校验"
+    # 针脚修正：被测脚本写的是 ERE '^[0-9a-f]{40}$'，旧针 0-9a-f\{40\} 要求 f 与 { 相邻，永远不可能命中
+    assert "160000" in src and re.search(r"\[0-9a-f\]\{40\}", src), "gitlink mode/sha 必须校验"
     assert "ext::" in src, "必须拦截 ext:: 传输协议（已知 RCE 向量）"
     assert "***@" in src, "带凭据 URL 打印前必须脱敏"
     assert ".tongsuo-pin" in src, "tarball 落地必须留可复核的 pin 标记"
@@ -338,7 +339,12 @@ def test_e2e_k8s_uses_real_sdk_surface() -> None:
 def test_e2e_k8s_teardown_is_verified_before_pass() -> None:
     src = _read("e2e-k8s.sh")
     assert "pod still present after teardown" in src or "teardown" in src
-    assert src.index("PASS:") > src.index("finally"), "PASS 只能在 finally（teardown+pod 删除核验）之后打印"
+    # 针脚修正：旧针用 src.index("PASS:")，会先撞上第 27 行的变量名 ${CDS_E2E_PASS:-}；
+    # 改为定位真正打印出来的判定行，判据（PASS 必须晚于 finally）不变
+    verdict = re.search(r"^\s*print\(.*PASS:", src, re.M)
+    assert verdict is not None and verdict.start() > src.index("finally"), (
+        "PASS 只能在 finally（teardown+pod 删除核验）之后打印"
+    )
     assert "describe" in src and "stdout" in src, "超时诊断必须打印 kubectl describe 输出"
 
 

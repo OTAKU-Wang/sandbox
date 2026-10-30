@@ -7,6 +7,9 @@ metadata:
     app: clickhouse
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: clickhouse
@@ -40,8 +43,13 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
           readinessProbe:
-            exec:
-              command: ["clickhouse-client", "--query", "SELECT 1"]
+            # 旧 exec 探针的成败取决于 clickhouse-client 的隐式认证上下文（本文件只给
+            # CLICKHOUSE_USER=cds_ch 设了密码，探针命令不带 -p，能否连上取决于镜像里
+            # default 用户的本地免密约定）——就绪信号不该建立在这个无人控制的上下文上，
+            # 而且每次探测都要建立一个服务端会话。/ping 是镜像文档化的免凭据健康端点。
+            httpGet:
+              path: /ping
+              port: 8123
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:

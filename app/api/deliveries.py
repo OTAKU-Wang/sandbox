@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -836,6 +837,41 @@ def _endpoint_dict(endpoint: ApiEndpoint) -> dict[str, Any]:
     }
 
 
+def _slug_conflict(slug: str) -> CDSError:
+    return CDSError("该 slug 已被占用", code="ENDPOINT_SLUG_TAKEN", http_status=409, detail={"slug": slug})
+
+
+_SLUG_SUFFIX_ATTEMPTS = 20
+
+
+async def _slug_in_use(db: AsyncSession, slug: str) -> bool:
+    """A11：占用探测只读这一行（走 uq_api_endpoints_slug 的等值索引），不再把整表物化成 ORM 对象集。"""
+    res = await db.execute(select(ApiEndpoint.id).where(ApiEndpoint.slug == slug).limit(1))
+    return res.first() is not None
+
+
+async def _reserve_slug(db: AsyncSession, name: str, slug: str | None) -> str:
+    """定下可用 slug：显式入参撞名直接 409；未给则按 generate_slug 的后缀规则逐个试探。"""
+    requested = slug.strip().lower() if slug else ""
+    if requested:
+        if await _slug_in_use(db, requested):
+            raise _slug_conflict(requested)
+        return requested
+
+    taken: set[str] = set()
+    for _ in range(_SLUG_SUFFIX_ATTEMPTS):
+        candidate = dv.generate_slug(name, taken)
+        if not await _slug_in_use(db, candidate):
+            return candidate
+        taken.add(candidate)
+    raise CDSError(
+        "自动生成的 slug 连续冲突，请显式指定 slug",
+        code="ENDPOINT_SLUG_TAKEN",
+        http_status=409,
+        detail={"prefix": dv.generate_slug(name, set()), "attempts": _SLUG_SUFFIX_ATTEMPTS},
+    )
+
+
 @router.post("/openapi/endpoints", status_code=201)
 async def create_openapi_endpoint(
     body: OpenApiEndpointCreate,
@@ -862,10 +898,7 @@ async def create_openapi_endpoint(
             http_status=412,
         )
 
-    taken = {e.slug for e in (await db.execute(select(ApiEndpoint))).scalars().all()}
-    slug = body.slug.strip().lower() if body.slug else dv.generate_slug(body.name, taken)
-    if slug in taken:
-        raise CDSError("该 slug 已被占用", code="ENDPOINT_SLUG_TAKEN", http_status=409, detail={"slug": slug})
+    slug = await _reserve_slug(db, body.name, body.slug)
 
     endpoint = ApiEndpoint(
         owner_id=current_user.id,
@@ -880,7 +913,13 @@ async def create_openapi_endpoint(
         published_at=datetime.now(timezone.utc),
     )
     db.add(endpoint)
-    await db.flush()
+    try:
+        # 上面的探测与这条 INSERT 之间存在同瞬并发窗口，最终裁判是唯一约束；
+        # 用保存点只吞掉这次 INSERT（不动请求事务，鉴权用户与后续审计继续可用）。
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError as exc:
+        raise _slug_conflict(slug) from exc
     await audit_service.log(
         db, action="openapi.endpoint_created", resource_type="contract",
         user_id=current_user.id, resource_id=str(contract.id),

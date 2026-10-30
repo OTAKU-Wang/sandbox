@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Form, Input, Button, Card, Typography, message, Space, Tag } from 'antd';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { authApi } from '../../services/authApi';
@@ -13,6 +13,7 @@ const { Title, Text } = Typography;
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const login = useAuthStore((s) => s.login);
   const [loading, setLoading] = useState(false);
   // 登录前无 JWT：消费公开矩阵面（/health 能力区，SS-11 PZ-13）；/api/v1/meta 需认证。
@@ -38,7 +39,8 @@ export default function Login() {
       const resp = await authApi.login(values);
       login(resp.user, resp.access_token, resp.refresh_token);
       message.success('登录成功');
-      navigate('/');
+      // A306：回 ProtectedRoute 记录的来路（含 query），无来路才去 /。
+      navigate((location.state as { from?: string } | null)?.from ?? '/');
     } catch (err) {
       message.error(describeAuthError(err));
     } finally {

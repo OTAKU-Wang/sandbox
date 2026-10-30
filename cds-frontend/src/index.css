@@ -92,9 +92,12 @@ body {
 }
 
 /* 弱化菜单项（原型「开发指引文档 / 环境与配额说明」灰字，但仍可点击）：
-   strict-1-home.md §4/§8-10 用「颜色 #a6adb8 + 字号 12px」双重弱化（常规项 14px/#1d2129）。 */
+   strict-1-home.md §4/§8-10 用「颜色 #a6adb8 + 字号 12px」双重弱化（常规项 14px/#1d2129）。
+   A221：#a6adb8 坐在白底侧栏（.cds-sidebar background #ffffff）上只有 2.26:1，而这是 12px
+   的可点击导航项，不过 WCAG AA 4.5:1 ⇒ 换 #6b7280（对 #ffffff = 4.83:1），
+   弱化只由 12px 字号承担，不再靠不可读的灰度。 */
 .cds-menu-muted {
-  color: #a6adb8;
+  color: #6b7280;
   font-size: 12px;
 }
 
@@ -299,7 +302,8 @@ body {
 
 /* 图 2-1 状态胶囊：进行中绿底绿字 / 已结束灰底灰字，带小圆图标。
    strict-2-1.md §2/§6：药丸 h24（全圆角 r≈12）、圆点与文字间隙 8、左内距 10；
-   进行中底 #e8f7ee 字 #00a870，已结束底 #f2f3f5 字 ≈#86909c。 */
+   进行中底 #e8f7ee 字 #00a870，已结束底 #f2f3f5 字原读数 ≈#86909c。
+   A221：#86909c/#f2f3f5 = 2.92:1 不过 AA ⇒ 字色抬到 #4e5969（对 #f2f3f5 = 6.40:1）。 */
 .cds-state-chip {
   flex: none;
   align-self: center;
@@ -322,7 +326,7 @@ body {
   background: currentColor;
 }
 .cds-state-chip.is-green { background: var(--cds-success-soft); color: var(--cds-success); }
-.cds-state-chip.is-gray { background: #f2f3f5; color: #86909c; }
+.cds-state-chip.is-gray { background: #f2f3f5; color: #4e5969; }
 
 /* 真值任务名 16px/600 #1d2129（pitch 16，strict-2-1.md §4「卡片标题（任务名）」）。 */
 .cds-task-card-title {
@@ -350,19 +354,22 @@ body {
   align-items: center;
 }
 
+/* A221：标签原读数 #86909c 在白卡底（.cds-task-card background #ffffff）上是 3.24:1，
+   12px 小字不过 AA ⇒ 标签与图标一起换 #6b7280（对 #ffffff = 4.83:1，同一族同支灰）。 */
 .cds-task-card-specs dt {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #86909c;
+  color: #6b7280;
 }
 
 .cds-task-card-specs dt .anticon {
-  color: #86909c;
+  color: #6b7280;
 }
 
-/* 真值元信息：标签 12px / #86909c，时间值 12px / #5b6574（右缘对齐 +359）。 */
+/* 真值元信息：标签 12px / #6b7280（A221 抬对比度，原读数 #86909c），
+   时间值 12px / #5b6574（右缘对齐 +359）。 */
 .cds-task-card-specs dd {
   margin: 0 0 0 auto;
   font-size: 12px;
@@ -555,6 +562,9 @@ body {
   .cds-header {
     height: auto;
     min-height: 64px;
+    /* A220：基态 64px 行高是桌面定高顶栏的居中手段，折叠态必须一并收掉；
+       本断点下方 .cds-brand-text span 允许换行，漏收就是 64px/行撑开顶栏并被 overflow 裁切。 */
+    line-height: normal;
     padding: 10px 14px;
     gap: 12px;
     align-items: flex-start;
@@ -677,9 +687,13 @@ body {
   outline-offset: 1px;
 }
 
-/* 进度条：原型实测填充带高 ≈15px，antd size="small" 的 6px 视觉过细 */
-:is(.cds-home, .cds-detail) .ant-progress-inner,
-:is(.cds-home, .cds-detail) .ant-progress-bg {
+/* 进度条：本屏折线填充带统一 12px（antd size="small" 的 6px 视觉过细；原型墨迹读数 ≈15px
+   含描边，落地值取 12——A219 把注释与代码对齐到这个 12px，要改高就两处一起改）。
+   A219 另一半：只染折线填充体，去掉 `.ant-progress-inner`——它在 antd v5 里同时是
+   circle/dashboard 进度环的外层容器（尺寸由内联 style 按 width prop 写），这条
+   !important 会把环容器压成 12px。`!important` 保留：折线填充体的 h 是 antd 写在内联 style
+   上的（strokeWidth），样式表普通声明赢不过内联值。 */
+:is(.cds-home, .cds-detail) .ant-progress-line .ant-progress-bg {
   height: 12px !important;
 }
 

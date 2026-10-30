@@ -18,6 +18,12 @@ def _validate_cidrs(values: list[str]) -> list[str]:
 
 
 def _validate_ports(values: list[int]) -> list[int]:
+    if not values:
+        # A68: an empty port allowlist used to pass validation and then acted as
+        # "no port filter at all" downstream. Zero-trust: refuse it, point at deny_all.
+        raise ValueError(
+            "allowed_ports must not be empty; use mode=deny_all to block all egress"
+        )
     for port in values:
         if port < 1 or port > 65535:
             raise ValueError(f"Invalid port: {port}. Must be between 1 and 65535")

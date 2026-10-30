@@ -593,8 +593,11 @@ class TestMultiSourceEncrypted:
 
     def test_register_json_encrypted(self, engine, dek, tmp_path):
         """Import JSON file with SM4 column encryption."""
-        json_file = tmp_path / "test_data.json"
-        json_file.write_text(json.dumps(VARCHAR_DATA))
+        _jd = os.path.join("/tmp/cds-uploads", tmp_path.name)
+        os.makedirs(_jd, exist_ok=True)
+        json_file = os.path.join(_jd, "test_data.json")
+        with open(json_file, "w", encoding="utf-8") as _fh:
+            _fh.write(json.dumps(VARCHAR_DATA))
 
         info = engine.register_json(
             "json_import", str(json_file),

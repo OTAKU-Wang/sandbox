@@ -18,7 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
-from app.models.connector import Connector, ConnectorStatus, ConnectorSession, generate_api_key
+from app.models.connector import (
+    Connector,
+    ConnectorStatus,
+    ConnectorSession,
+    derive_key_prefix,
+    generate_api_key,
+)
 from app.schemas.high_risk_operation import HighRiskOperationRequest
 from app.models.data_product import DataProduct, DataProductStatus
 from app.models.contract import Contract, ContractStatus
@@ -168,7 +174,7 @@ async def register_connector(
         space_url=space_url,
         description=description,
         api_key_hash=key_hash,
-        api_key_prefix=api_key[:15],
+        api_key_prefix=derive_key_prefix(api_key),
         status=ConnectorStatus.ACTIVE.value,
         registered_by=current_user.id,
     )
@@ -238,7 +244,9 @@ async def get_connector_heartbeat_status(
         "space_id": connector.space_id,
         "status": "healthy" if connector.is_healthy else "unknown",
         "last_seen": connector.last_heartbeat.isoformat() if connector.last_heartbeat else None,
-        "latency_ms": 0,
+        # A318：心跳只观测 is_healthy / last_heartbeat，本服务不测 RTT。
+        # null = 未测量；写 0 就是把常量当实测值展示（禁伪造铁律）。
+        "latency_ms": None,
     }
 
 
@@ -303,7 +311,7 @@ async def rotate_connector_key(
 
     api_key, key_hash = generate_api_key()
     connector.api_key_hash = key_hash
-    connector.api_key_prefix = api_key[:15]
+    connector.api_key_prefix = derive_key_prefix(api_key)
     await db.flush()
     await audit_service.log(
         db, action="connector.rotate_key", resource_type="connector",

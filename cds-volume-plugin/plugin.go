@@ -26,11 +26,68 @@ func NewPlugin(cfg Config, c Cipher, kms *KMSClient) *Plugin {
 	return &Plugin{cfg: cfg, cipher: c, kms: kms}
 }
 
+// Classification sentinels for the two rejection classes this layer produces. The gRPC
+// layer had to classify them by message prefix (server.go inputRejectionPrefixes, A199)
+// because plugin.go exposed no typed error — so rewording a message here silently
+// reclassifies a bad request as FailedPrecondition, which Cubelet reads as "retry later".
+// errors.Is is now the classifier; the message stays for the operator.
+var (
+	// ErrInvalidVolumeID: volume_id is not one [A-Za-z0-9._-] path segment.
+	ErrInvalidVolumeID = errors.New("invalid volume_id")
+	// ErrVolumeNotContained: well-formed id that does not resolve inside VolumeRoot.
+	ErrVolumeNotContained = errors.New("volume_id does not resolve to one directory under the volume root")
+)
+
+// volumeNotContainedError carries the id for the audit log while staying
+// errors.Is()-able against ErrVolumeNotContained (same shape as sandboxPathError).
+// The message is byte-identical to the pre-sentinel one: server.go's interim
+// classification and the a199 mapErr table are keyed on it.
+type volumeNotContainedError struct{ id string }
+
+func (e *volumeNotContainedError) Error() string {
+	return fmt.Sprintf("volume_id %q does not resolve to one directory under the volume root (fail-closed)", e.id)
+}
+
+func (e *volumeNotContainedError) Unwrap() error { return ErrVolumeNotContained }
+
+// validateVolumeID is the RPC-boundary check for the one input that decides which
+// directory on the host a request touches. A199 (OCR 2026-10-18): the id arrives
+// over the socket from the control plane and is consumed only by paths(), so it has
+// to be exactly one path segment. The whitelist is the shape the control plane
+// actually sends — `cds-data-<session_id>` (cube_runtime_adapter.py:277,532,734,996).
 func validateVolumeID(id string) error {
-	if id == "" || len(id) > 200 || strings.ContainsAny(id, "/\\") || id == "." || id == ".." {
-		return fmt.Errorf("invalid volume_id %q", id)
+	if id == "" || len(id) > 200 {
+		return fmt.Errorf("%w: %d byte(s), want 1-200 (fail-closed)", ErrInvalidVolumeID, len(id))
+	}
+	if id == "." || id == ".." || strings.Contains(id, "..") {
+		return fmt.Errorf("%w %q: must be one path segment that does not traverse (fail-closed)", ErrInvalidVolumeID, id)
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-', c == '_', c == '.':
+		default:
+			// The offending byte is named, never the whole id: this input is hostile.
+			return fmt.Errorf("%w: byte %d is %#x, outside [A-Za-z0-9._-] (fail-closed)", ErrInvalidVolumeID, i, c)
+		}
 	}
 	return nil
+}
+
+// volumeChecked is the entry guard for every volume RPC: it validates the id AND
+// proves the resolved directory is the direct child of VolumeRoot that this id
+// names, so containment no longer rests on paths() cleaning the input (A199).
+func (r *Plugin) volumeChecked(volumeID string) (volumePaths, error) {
+	if err := validateVolumeID(volumeID); err != nil {
+		return volumePaths{}, err
+	}
+	p := r.paths(volumeID)
+	rel, err := filepath.Rel(r.cfg.VolumeRoot, p.dir)
+	if err != nil || rel != volumeID {
+		return volumePaths{}, &volumeNotContainedError{id: volumeID}
+	}
+	return p, nil
 }
 
 func zeroize(b []byte) {
@@ -47,13 +104,13 @@ func zeroize(b []byte) {
 // Idempotent: a repeat Create for an existing volume returns its existing
 // private_data.
 func (r *Plugin) CreateVolume(ctx context.Context, volumeID, name string) (string, error) {
-	if err := validateVolumeID(volumeID); err != nil {
+	p, err := r.volumeChecked(volumeID)
+	if err != nil {
 		return "", err
 	}
 	if name == "" {
 		name = volumeID
 	}
-	p := r.paths(volumeID)
 	if m, err := r.loadManifest(volumeID); err == nil {
 		return privateDataJSON(m.DekRef)
 	} else if !IsVolumeNotFound(err) {
@@ -130,6 +187,9 @@ func ParsePrivateData(payload string) (ref string, err error) {
 // PutVolumeData SM4-GCM encrypts the data blob at rest. Single-shot: a
 // second put is accepted only if byte-identical (idempotent retry).
 func (r *Plugin) PutVolumeData(ctx context.Context, volumeID, aad string, data []byte) (uint64, bool, error) {
+	if _, err := r.volumeChecked(volumeID); err != nil {
+		return 0, false, err
+	}
 	m, err := r.loadManifest(volumeID)
 	if err != nil {
 		return 0, false, err
@@ -142,10 +202,19 @@ func (r *Plugin) PutVolumeData(ctx context.Context, volumeID, aad string, data [
 	}
 	p := r.paths(volumeID)
 	if m.HasData {
+		// Manifest.AAD is the AAD the existing bytes were sealed with (Put writes
+		// it back), so a retry that replays a different AAD is a caller error,
+		// not something to paper over with a GCM auth failure.
+		if aad != m.AAD {
+			return 0, false, fmt.Errorf("volume %s is sealed under a different AAD (aad mismatch — fail-closed): "+
+				"an idempotent retry must replay the AAD the data was sealed with", volumeID)
+		}
 		existing, err := r.readStagedPlain(ctx, m, aad)
 		if err != nil {
 			return 0, false, fmt.Errorf("cannot verify existing data: %w (fail-closed)", err)
 		}
+		// Decrypted comparison buffer: cleared on every exit, as Attach does (A202).
+		defer zeroize(existing)
 		if bytes.Equal(existing, data) {
 			return uint64(len(data)), true, nil
 		}
@@ -182,6 +251,10 @@ func (r *Plugin) PutVolumeData(ctx context.Context, volumeID, aad string, data [
 	}
 	m.HasData = true
 	m.DataSizeBytes = uint64(len(data))
+	// Record the AAD that actually sealed these bytes. Attach and every later
+	// Open use Manifest.AAD; leaving the create-time default here makes the whole
+	// volume unreadable the moment a caller supplies its own AAD (A201).
+	m.AAD = aad
 	if err := r.saveManifest(m); err != nil {
 		return 0, false, err
 	}
@@ -196,6 +269,9 @@ func (r *Plugin) PutVolumeData(ctx context.Context, volumeID, aad string, data [
 // stage file. Every failure is fail-closed: a volume that cannot be
 // decrypted is an error, never plaintext.
 func (r *Plugin) Attach(ctx context.Context, volumeID, baseDir, sandboxID, privateData string, refCount int64) (hostPath string, metadata map[string]string, err error) {
+	if _, verr := r.volumeChecked(volumeID); verr != nil {
+		return "", nil, verr
+	}
 	m, err := r.loadManifest(volumeID)
 	if err != nil {
 		return "", nil, err
@@ -218,6 +294,7 @@ func (r *Plugin) Attach(ctx context.Context, volumeID, baseDir, sandboxID, priva
 		if st, serr := os.Stat(stageFile); serr != nil || st.Size() == 0 {
 			// stage lost (e.g. manual rm): re-stage below.
 		} else {
+			r.recordStage(volumeID, hostPath)
 			return hostPath, attachMetadata(m, baseDir), nil
 		}
 	}
@@ -261,6 +338,9 @@ func (r *Plugin) Attach(ctx context.Context, volumeID, baseDir, sandboxID, priva
 		return "", nil, err
 	}
 	zeroize(plain)
+	// The stage pointer is what lets Detach/Destroy find this cleartext later;
+	// without it a caller that loses volume_base_dir leaves the plaintext behind.
+	r.recordStage(volumeID, hostPath)
 	return hostPath, attachMetadata(m, baseDir), nil
 }
 
@@ -310,11 +390,28 @@ func (r *Plugin) readStagedPlain(ctx context.Context, m *Manifest, aad string) (
 // Detach removes the staging plaintext. With refCount == 0 the file is
 // shredded (zeroed then unlinked) — spec: plaintext directory is wiped at
 // session end; the ciphertext tree is untouched.
+//
+// The staging location is the one Attach recorded, not only the base_dir this
+// caller happens to pass: a Detach whose base_dir is stale must still wipe the
+// cleartext rather than report success with it still on disk (A200).
 func (r *Plugin) Detach(ctx context.Context, volumeID, baseDir string, refCount int64) error {
+	if _, err := r.volumeChecked(volumeID); err != nil {
+		return err
+	}
 	hostPath, err := stageDir(baseDir, volumeID)
 	if err != nil {
 		return err
 	}
+	if err := r.detachStage(volumeID, hostPath, refCount); err != nil {
+		return err
+	}
+	if refCount == 0 {
+		r.clearStageRecord(volumeID)
+	}
+	return nil
+}
+
+func (r *Plugin) detachStage(volumeID, hostPath string, refCount int64) error {
 	stageFile := filepath.Join(hostPath, "data")
 	if refCount > 0 {
 		if _, serr := os.Stat(stageFile); serr != nil {
@@ -322,7 +419,15 @@ func (r *Plugin) Detach(ctx context.Context, volumeID, baseDir string, refCount 
 		}
 		return nil
 	}
-	fi, err := os.Stat(stageFile)
+	recorded := r.stagedDirOf(volumeID)
+	if recorded != "" && filepath.Clean(recorded) != filepath.Clean(hostPath) {
+		log.Printf("WARNING: Detach(%s) volume_base_dir %q is not where Attach staged the volume (%q) — both locations are wiped (fail-closed)",
+			volumeID, hostPath, recorded)
+		if err := r.wipeStagedPlaintext(recorded); err != nil {
+			return err
+		}
+	}
+	_, err := os.Stat(stageFile)
 	if os.IsNotExist(err) {
 		// already gone: best-effort rmdir, not an error.
 		_ = os.Remove(hostPath)
@@ -331,16 +436,78 @@ func (r *Plugin) Detach(ctx context.Context, volumeID, baseDir string, refCount 
 	if err != nil {
 		return err
 	}
-	if err := shredFile(stageFile, fi.Size()); err != nil {
-		return fmt.Errorf("stage shred failed, plaintext retained: %w (fail-closed)", err)
+	return r.wipeStagedPlaintext(hostPath)
+}
+
+// stageRecord is the plugin-side pointer to the live staging dir of a volume.
+// It lives inside the root-owned ciphertext tree, so only the plugin (root) can
+// read or rewrite it — a sandbox tenant cannot redirect a shred.
+type stageRecord struct {
+	VolumeID string    `json:"volume_id"`
+	StageDir string    `json:"stage_dir"`
+	StagedAt time.Time `json:"staged_at"`
+}
+
+func (r *Plugin) stageRecordPath(volumeID string) string {
+	return filepath.Join(r.paths(volumeID).dir, "stage.json")
+}
+
+func (r *Plugin) recordStage(volumeID, dir string) {
+	b, err := json.Marshal(stageRecord{VolumeID: volumeID, StageDir: dir, StagedAt: time.Now().UTC()})
+	if err != nil {
+		log.Printf("WARNING: cannot encode stage record for %s: %v", volumeID, err)
+		return
 	}
-	_ = os.Remove(hostPath)
+	if err := writeAtomic(r.stageRecordPath(volumeID), b, 0600); err != nil {
+		log.Printf("WARNING: stage record for %s at %s not written: %v — Destroy/Detach can only find the plaintext through the caller's volume_base_dir",
+			volumeID, volumeID, err)
+	}
+}
+
+func (r *Plugin) stagedDirOf(volumeID string) string {
+	b, err := os.ReadFile(r.stageRecordPath(volumeID))
+	if err != nil {
+		return ""
+	}
+	var rec stageRecord
+	if json.Unmarshal(b, &rec) != nil || rec.VolumeID != volumeID {
+		return ""
+	}
+	return rec.StageDir
+}
+
+func (r *Plugin) clearStageRecord(volumeID string) {
+	_ = os.Remove(r.stageRecordPath(volumeID))
+}
+
+// wipeStagedPlaintext shreds <dir>/data and drops the now-empty stage dir. A
+// stage that is already gone is not an error; a shred that fails is, and the
+// cleartext is retained for retry.
+func (r *Plugin) wipeStagedPlaintext(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	stageFile := filepath.Join(dir, "data")
+	fi, err := os.Stat(stageFile)
+	if os.IsNotExist(err) {
+		_ = os.Remove(dir)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := shredFile(stageFile, fi.Size()); err != nil {
+		return fmt.Errorf("stage shred failed, plaintext retained at %s: %w (fail-closed)", dir, err)
+	}
+	_ = os.Remove(dir)
 	return nil
 }
 
-// shredFile overwrites a file with zeros (best effort per chunk) then
-// unlinks it. Returns the first hard error encountered. A read-only
-// target (stage files are 0400) is made writable before shredding —
+// shredFile overwrites a file with zeros, flushes them to the device and only
+// then unlinks it. A shred that failed anywhere along the way RETAINS the file
+// and reports the error: unlinking after a failed zero-fill would claim the
+// data is gone when its bytes were never destroyed (iron law "shred 失败要报错").
+// A read-only target (stage files are 0400) is made writable before shredding —
 // the file is destroyed immediately afterwards.
 func shredFile(path string, size int64) error {
 	var firstErr error
@@ -364,43 +531,80 @@ func shredFile(path string, size int64) error {
 			firstErr = err
 		}
 	}
+	// Without this the zeroing may live only in the page cache while the unlink
+	// already went to the journal — "shredded" would survive no power loss.
+	if err := f.Sync(); err != nil && firstErr == nil {
+		firstErr = err
+	}
 	if err := f.Close(); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	if err := os.Remove(path); err != nil && firstErr == nil {
-		firstErr = err
+	if firstErr != nil {
+		return firstErr
 	}
-	return firstErr
+	return os.Remove(path)
 }
 
 // Destroy revokes the volume DEK at the KMS (crypto-erase: the wrapped key
-// is destroyed first), then wipes the ciphertext tree. If KMS revoke fails
-// the files are RETAINED — deleting data with a live DEK would leave the
-// key dangling (fail-closed, spec: Destroy → crypto-erase → audit).
+// is destroyed first), then wipes the staged plaintext and the ciphertext tree.
+// If KMS revoke fails the files are RETAINED — deleting data with a live DEK
+// would leave the key dangling (fail-closed, spec: Destroy → crypto-erase →
+// audit). A shred that fails is reported the same way: "destroyed" may never
+// be returned for bytes that were not destroyed (A200).
 func (r *Plugin) Destroy(ctx context.Context, volumeID string) error {
+	if _, err := r.volumeChecked(volumeID); err != nil {
+		return err
+	}
 	m, err := r.loadManifest(volumeID)
 	if err != nil {
 		return err
+	}
+	staged := r.stagedDirOf(volumeID)
+	if staged != "" {
+		if _, serr := os.Stat(filepath.Join(staged, "data")); serr == nil {
+			log.Printf("WARNING: Destroy(%s) while the volume still has staged plaintext at %s — "+
+				"crypto-erase wipes it; an attached volume should be Detached first", volumeID, staged)
+		}
 	}
 	if err := r.kms.RevokeDEK(ctx, m.DekRef); err != nil {
 		return fmt.Errorf("DEK revoke failed, volume data RETAINED: %w (fail-closed)", err)
 	}
 	p := r.paths(volumeID)
-	for _, f := range []string{p.ct, p.nonce, p.tag, p.mani} {
+	if err := r.wipeStagedPlaintext(staged); err != nil {
+		return fmt.Errorf("crypto-erase incomplete, volume tree RETAINED for retry: %w (fail-closed)", err)
+	}
+	var shredErr error
+	for _, f := range []string{p.ct, p.nonce, p.tag, p.mani, r.stageRecordPath(volumeID)} {
 		fi, serr := os.Stat(f)
-		if serr != nil {
+		if os.IsNotExist(serr) {
 			continue
 		}
-		_ = shredFile(f, fi.Size())
+		if serr != nil {
+			shredErr = fmt.Errorf("%s: %w", f, serr)
+			break
+		}
+		if herr := shredFile(f, fi.Size()); herr != nil {
+			shredErr = fmt.Errorf("%s: %w", f, herr)
+			break
+		}
+	}
+	if shredErr != nil {
+		// Stop at the first failure: continuing would tear the tree down around a
+		// file that could not be destroyed and leave no state to retry from.
+		return fmt.Errorf("crypto-erase shred failed, volume tree RETAINED for retry: %w (fail-closed)", shredErr)
 	}
 	if err := os.Remove(p.dir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("volume dir removal: %w", err)
 	}
+	r.clearStageRecord(volumeID)
 	return nil
 }
 
 // GetVolumeInfo reports metadata for observability (spec step 5: data
 // volume read-only observability; full plaintext is never returned).
 func (r *Plugin) GetVolumeInfo(volumeID string) (*Manifest, error) {
+	if _, err := r.volumeChecked(volumeID); err != nil {
+		return nil, err
+	}
 	return r.loadManifest(volumeID)
 }

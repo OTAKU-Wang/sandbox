@@ -6,6 +6,7 @@ Falls back to standard TLS when Tongsuo/OpenSSL-SM2 is not available.
 import os
 import ssl
 import uuid
+import hashlib
 import logging
 import tempfile
 import base64
@@ -111,6 +112,12 @@ class SM2Certificate:
     cert_type: str = "signing"  # signing | encryption
     cert_pem: str = ""
     key_pem: str = ""
+    # A104: what a strict (RFC 5280) parser and the crypto backend really say
+    # about the PEM above — the DER is built by certificate_service, not here.
+    interop_ok: bool = False
+    interop_error: str = ""
+    fingerprint_alg: str = ""
+    crypto_backend: str = ""
 
 
 @dataclass
@@ -123,6 +130,52 @@ class TLCPConfig:
     ca_cert_path: str | None = None
     ciphers: str = "ECDHE-SM2-WITH-SM4-SM3:SM2-WITH-SM4-SM3"
     verify_mode: int = ssl.CERT_REQUIRED
+
+
+def _strict_parse_report(pem: str) -> tuple[bool, str]:
+    """Ask a strict X.509 parser whether this PEM is usable by a real TLCP peer.
+
+    A104: the DER comes from the hand-rolled builder in ``certificate_service``;
+    top-level parsing can succeed while every extension is unreadable, so the
+    extensions and the signature encoding are checked explicitly.
+    """
+    try:
+        from cryptography import x509
+    except ImportError:
+        return False, "cryptography is not installed — PEM was not checked by a strict parser"
+    try:
+        parsed = x509.load_pem_x509_certificate(pem.encode())
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    problems: list[str] = []
+    try:
+        for ext in parsed.extensions:
+            ext.value
+    except Exception as e:
+        problems.append(f"extensions unreadable by a strict parser ({type(e).__name__}: {e})")
+    if not parsed.signature[:1] == b"\x30":
+        problems.append(
+            f"signature is {len(parsed.signature)} raw r||s bytes, not a DER "
+            "ECDSA-Sig-Value (GM/T 0006 / RFC 5758)"
+        )
+    return (not problems), "; ".join(problems)
+
+
+def _sm3_backend() -> str:
+    """Which hash the fingerprint below really is (PZ-04/MR-A14 disclosure)."""
+    try:
+        import gmssl.sm3  # noqa: F401
+
+        return "sm3"
+    except ImportError:
+        return "sha256-fallback"
+
+
+def _crypto_backend() -> str:
+    version = ssl.OPENSSL_VERSION
+    if "Tongsuo" in version:
+        return f"tongsuo ({version})"
+    return f"software — no TLCP-capable OpenSSL ({version}); gmssl={_HAS_GMSSL}"
 
 
 class TLCPService:
@@ -180,6 +233,15 @@ class TLCPService:
         cert.cert_pem = self._build_cert_pem(cert, private_key, public_key, organization)
         cert.key_pem = self._build_key_pem(private_key, public_key)
         cert.fingerprint = self._fingerprint_pem(cert.cert_pem)
+        cert.fingerprint_alg = _sm3_backend()
+        cert.crypto_backend = _crypto_backend()
+        cert.interop_ok, cert.interop_error = _strict_parse_report(cert.cert_pem)
+        if not cert.interop_ok:
+            logger.warning(
+                "[TLCP][A104] certificate %s (%s) is NOT verifiable by a strict X.509 "
+                "parser — a real TLCP peer will reject it: %s",
+                cert_id, cert.subject, cert.interop_error,
+            )
 
         # Save to disk
         cert_dir = self.cert_store / cert_id
@@ -210,8 +272,15 @@ class TLCPService:
         return False
 
     def verify_certificate(self, cert_pem: str) -> dict:
-        """Verify a certificate's validity."""
+        """Verify a certificate's validity.
+
+        A104: ``valid`` answers the validity-window question only; ``interop``
+        carries what a strict RFC 5280 parser says about the same PEM, so a
+        hand-built certificate cannot be reported to an API caller as
+        peer-verifiable when it is not.
+        """
         fingerprint = self._fingerprint_pem(cert_pem)
+        interop_ok, interop_error = _strict_parse_report(cert_pem)
         for cert in self._certificates.values():
             if cert.fingerprint == fingerprint:
                 now = datetime.now()
@@ -224,6 +293,7 @@ class TLCPService:
                     "expired": expired,
                     "not_yet_valid": not_yet_valid,
                     "fingerprint": cert.fingerprint,
+                    "interop": {"parseable": interop_ok, "error": interop_error},
                 }
 
         try:
@@ -243,9 +313,14 @@ class TLCPService:
                 "expired": expired,
                 "not_yet_valid": not_yet_valid,
                 "fingerprint": fingerprint,
+                "interop": {"parseable": interop_ok, "error": interop_error},
             }
         except Exception as e:
-            return {"valid": False, "error": f"Certificate parse failed: {e}"}
+            return {
+                "valid": False,
+                "error": f"Certificate parse failed: {e}",
+                "interop": {"parseable": interop_ok, "error": interop_error},
+            }
 
     def build_ssl_context(self, config: TLCPConfig | None = None) -> ssl.SSLContext:
         """Build an SSL context with TLCP SM2 cipher suites.
@@ -381,12 +456,14 @@ class TLCPService:
         return f"-----BEGIN EC PRIVATE KEY-----\n{lines}\n-----END EC PRIVATE KEY-----\n"
 
     def _fingerprint_pem(self, pem: str) -> str:
-        der = self._pem_to_der(pem, "CERTIFICATE")
-        if _HAS_GMSSL:
-            return _sm3.sm3_hash(list(der))
-        import hashlib
+        """Fingerprint over the DER via the repo's gated SM3 helper.
 
-        return hashlib.sha256(der).hexdigest()
+        A104: the previous local ``hashlib.sha256`` branch was an undisclosed
+        fallback for the very value ``verify_certificate`` uses as identity.
+        """
+        from app.utils.crypto import sm3_hash
+
+        return sm3_hash(self._pem_to_der(pem, "CERTIFICATE"))
 
     def _pem_to_der(self, pem: str, label: str) -> bytes:
         begin = f"-----BEGIN {label}-----"

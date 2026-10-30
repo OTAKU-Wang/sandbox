@@ -7,6 +7,9 @@ metadata:
     app: redis
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redis
@@ -20,12 +23,18 @@ spec:
           image: redis:7-alpine
           ports:
             - containerPort: 6379
+          # A286: noeviction — sessions, rate-limit counters and login short-state live in
+          # this Redis, so allkeys-lru evicted them under memory pressure (random logouts,
+          # rate limit silently opening) instead of applying backpressure. maxmemory stays:
+          # pressure must surface as a disclosed write refusal (app/core/security.py
+          # separates OOM from a Redis outage) rather than an unbounded pod OOM-killed by
+          # the kubelet. Must move with the other five deploy copies.
           command:
             - redis-server
             - --maxmemory
             - "512mb"
             - --maxmemory-policy
-            - allkeys-lru
+            - noeviction
             - --save
             - "60"
             - "1000"
@@ -42,9 +51,15 @@ spec:
           volumeMounts:
             - name: redisdata
               mountPath: /data
+          # kubelet expands $(VAR) only in command/args, NOT in probe commands: the old
+          # probe passed the literal "$(REDIS_PASSWORD)" to redis-cli, so a healthy
+          # instance never became Ready. Expand it with a shell inside the container
+          # instead; --no-auth-warning keeps the secret out of the container log, and
+          # the PONG grep is required because redis-cli exits 0 even on NOAUTH/WRONGPASS.
+          # (The --requirepass argument above is fine: that IS command/args.)
           readinessProbe:
             exec:
-              command: ["redis-cli", "-a", "$(REDIS_PASSWORD)", "ping"]
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:

@@ -58,6 +58,7 @@ export default function ExecStreamTerminal({
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const connectingRef = useRef(false);
   const reconnectRef = useRef(false);
   const [state, setState] = useState<ConnState>('idle');
   const [command, setCommand] = useState(defaultCommand);
@@ -79,10 +80,15 @@ export default function ExecStreamTerminal({
 
   const connectAndRun = useCallback(
     async (cmd: string) => {
-      if (socketRef.current) {
+      // A248：守卫不能只看 socketRef —— 它要等下面那个 await 之后才被赋值，而「运行」在
+      // connecting 态并未禁用 Input 那条通道，双击就会吃两张 ticket、开两条流，
+      // 第一条被 socketRef 覆盖后再也关不掉。connectingRef 是跨越那个 await 的互斥量。
+      if (disabled) return;
+      if (connectingRef.current || socketRef.current) {
         writeLine('[终端] 已有流在运行，请等待 exit 帧', '33');
         return;
       }
+      connectingRef.current = true;
       setState('connecting');
       let ticket: string;
       try {
@@ -90,10 +96,14 @@ export default function ExecStreamTerminal({
         if (!minted.ticket) throw new Error('ticket unavailable');
         ticket = minted.ticket;
       } catch {
+        connectingRef.current = false;
         writeLine('[终端] 获取 WS ticket 失败（需要登录）', '31');
         setState('closed');
         return;
       }
+      connectingRef.current = false;
+      // await 期间会话可能已离开 running（disabled 翻真），或另一条连接赢了 —— 都不再开新 socket。
+      if (disabled || socketRef.current) return;
 
       const wsBase = resolveWsBase();
       const socket = new WebSocket(
@@ -156,11 +166,14 @@ export default function ExecStreamTerminal({
         writeLine('[终端] 连接错误', '31');
       };
     },
-    [sessionId, writeLine],
+    [sessionId, writeLine, disabled],
   );
 
+  // A248：disabled 必须在依赖里。会话从 running 转终态后组件早退渲染 Alert、宿主 div 被卸，
+  // 只依 [closeSocket] 的 effect 既不重跑也不跑 cleanup ⇒ xterm 与 WebSocket 继续活着往
+  // 已不存在的元素里写，与本组件自己的口径（仅 running 可用）相左。
   useEffect(() => {
-    if (!hostRef.current || termRef.current) return;
+    if (disabled || !hostRef.current || termRef.current) return;
     const term = new Terminal({
       theme: { background: '#101418', foreground: '#d8e0e8' },
       fontSize: 13,
@@ -182,8 +195,9 @@ export default function ExecStreamTerminal({
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      setState('closed');
     };
-  }, [closeSocket]);
+  }, [closeSocket, disabled]);
 
   useEffect(() => {
     if (state !== 'open') return;

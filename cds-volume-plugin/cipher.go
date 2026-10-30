@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"time"
 )
@@ -27,16 +28,81 @@ const (
 	tagLen   = 16
 )
 
+// Helper budget bounds (A176). CDS_VOLUME_PLUGIN_SUBPROC_TIMEOUT_MS is a
+// millisecond knob; a budget under a second cannot be honoured by a subprocess
+// spawn at all, so it is raised to the floor instead of silently becoming "0".
+const (
+	minHelperTimeout     = time.Second
+	defaultHelperTimeout = 10 * time.Second
+)
+
+// checkHelperBudget is the single source of truth for what the millisecond knob
+// may say. Both boot paths call it — Config.Validate() (so a bad value is refused
+// as a config error, exit 2) and NewCipher (so a hand-built Config cannot slip
+// past it) — instead of each restating the threshold (A202③). Only a budget that
+// cannot fire at all is refused here: a sub-second value stays legal and is
+// raised to the floor by NewTongsuoCipherTimeout, with a WARNING.
+func checkHelperBudget(d time.Duration) error {
+	if d <= 0 {
+		return fmt.Errorf("helper budget %s cannot bound a subprocess: CDS_VOLUME_PLUGIN_SUBPROC_TIMEOUT_MS "+
+			"must be a positive number of milliseconds (fail-closed, refusing to boot)", d)
+	}
+	return nil
+}
+
 // TongsuoCipher drives the libtongsuo-linked sm4_gcm helper as a subprocess
 // with a strict binary stdin/stdout protocol (see sm4gcm/sm4_gcm.h).
 // Any non-zero helper exit is a hard error — there is no fallback path.
 type TongsuoCipher struct {
 	helperPath string
-	timeout    int // seconds
+	timeout    time.Duration // budget actually applied to each helper call
+	configured time.Duration // budget the operator configured, for honest errors
 }
 
+// NewTongsuoCipher keeps the historical whole-second signature (plugin_test.go,
+// selftest). Production configuration goes through NewCipher, which must NOT
+// funnel a millisecond value through it: int(Seconds()) used to turn 200ms into
+// 0s and make every helper call time out instantly (A176).
 func NewTongsuoCipher(helperPath string, timeoutSecs int) *TongsuoCipher {
-	return &TongsuoCipher{helperPath: helperPath, timeout: timeoutSecs}
+	return NewTongsuoCipherTimeout(helperPath, time.Duration(timeoutSecs)*time.Second)
+}
+
+func NewTongsuoCipherTimeout(helperPath string, timeout time.Duration) *TongsuoCipher {
+	effective := timeout
+	if effective <= 0 {
+		effective = defaultHelperTimeout
+	} else if effective < minHelperTimeout {
+		effective = minHelperTimeout
+	}
+	if effective != timeout {
+		log.Printf("WARN: sm4 helper budget %s is not usable as configured; using %s "+
+			"(CDS_VOLUME_PLUGIN_SUBPROC_TIMEOUT_MS, fail-closed floor %s)", timeout, effective, minHelperTimeout)
+	}
+	return &TongsuoCipher{helperPath: helperPath, timeout: effective, configured: timeout}
+}
+
+// checkKeyMaterial is the fail-closed input gate of the Cipher interface (A177).
+// The helper frame is fixed-offset (key(16)||nonce(12)||aadlen(4)||aad||[tag]||body),
+// and Seal/Open fill the key slot with copy(), which moves min(len(key),16) bytes:
+// without this gate a short key silently becomes a zero-padded key, a long key is
+// silently truncated, and a wrong nonce/tag desynchronises the C helper's reads.
+// It also pins both backends to the SM4 shape, so data sealed by the dev fallback
+// is always openable by the production helper.
+func checkKeyMaterial(op string, key, nonce []byte) error {
+	if len(key) != dekLen {
+		return fmt.Errorf("%s: key must be %d bytes, got %d (fail-closed)", op, dekLen, len(key))
+	}
+	if len(nonce) != nonceLen {
+		return fmt.Errorf("%s: nonce must be %d bytes, got %d (fail-closed)", op, nonceLen, len(nonce))
+	}
+	return nil
+}
+
+func checkTagLength(op string, tag []byte) error {
+	if len(tag) != tagLen {
+		return fmt.Errorf("%s: tag must be %d bytes, got %d (fail-closed)", op, tagLen, len(tag))
+	}
+	return nil
 }
 
 func (c *TongsuoCipher) Name() string { return "sm4-gcm(tongsuo)" }
@@ -58,11 +124,36 @@ func (c *TongsuoCipher) run(op string, stdin []byte) ([]byte, error) {
 			return nil, fmt.Errorf("sm4 helper %s: %v: %s", op, err, errBuf.String())
 		}
 		return outBuf.Bytes(), nil
-	case <-time.After(time.Duration(c.timeout) * time.Second):
-		_ = cmd.Process.Kill()
-		<-done
-		return nil, fmt.Errorf("sm4 helper %s: timeout after %ds (fail-closed)", op, c.timeout)
+	case <-time.After(c.timeout):
+		return nil, c.timeoutErr(op, cmd, done)
 	}
+}
+
+// timeoutErr reports a helper that outlived its budget. The Kill error is part of
+// the report, and waiting for the reaping goroutine is bounded: cmd.Wait() reaps
+// the process and then blocks until every stdout/stderr copy finishes, so a
+// descendant of the helper that still holds those pipes keeps `done` from ever
+// firing — an unbounded <-done here would pin the calling gRPC handler goroutine
+// for the life of that process, voiding the fail-closed timeout this branch
+// exists to guarantee (A178).
+func (c *TongsuoCipher) timeoutErr(op string, cmd *exec.Cmd, done <-chan error) error {
+	killErr := cmd.Process.Kill()
+	grace := 2 * c.timeout
+	reaped := false
+	select {
+	case <-done:
+		reaped = true
+	case <-time.After(grace):
+	}
+
+	err := fmt.Errorf("sm4 helper %s: timeout after %s (configured %s, fail-closed)", op, c.timeout, c.configured)
+	if killErr != nil {
+		err = fmt.Errorf("%w; helper process could not be killed: %v", err, killErr)
+	}
+	if !reaped {
+		err = fmt.Errorf("%w; helper process was not reaped within %s of Kill (a descendant still holds its pipes)", err, grace)
+	}
+	return err
 }
 
 func helperFrame(nonce, aad, mid, body []byte) []byte {
@@ -79,6 +170,9 @@ func helperFrame(nonce, aad, mid, body []byte) []byte {
 }
 
 func (c *TongsuoCipher) Seal(key, nonce, aad, plaintext []byte) ([]byte, []byte, error) {
+	if err := checkKeyMaterial("sm4 seal", key, nonce); err != nil {
+		return nil, nil, err
+	}
 	in := helperFrame(nonce, aad, nil, plaintext)
 	copy(in, key)
 	out, err := c.run("encrypt", in)
@@ -92,6 +186,12 @@ func (c *TongsuoCipher) Seal(key, nonce, aad, plaintext []byte) ([]byte, []byte,
 }
 
 func (c *TongsuoCipher) Open(key, nonce, aad, ciphertext, tag []byte) ([]byte, error) {
+	if err := checkKeyMaterial("sm4 open", key, nonce); err != nil {
+		return nil, err
+	}
+	if err := checkTagLength("sm4 open", tag); err != nil {
+		return nil, err
+	}
 	in := helperFrame(nonce, aad, tag, ciphertext)
 	copy(in, key)
 	out, err := c.run("decrypt", in)
@@ -118,10 +218,16 @@ func (c *AESGCMCipher) gcm(key, nonce []byte) (cipher.AEAD, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cipher.NewGCMWithNonceSize(b, len(nonce))
+	// NewGCM, not NewGCMWithNonceSize: the SM4 helper only ever reads a 12-byte
+	// nonce, so accepting another size here would seal data the production
+	// backend can never open (A177).
+	return cipher.NewGCM(b)
 }
 
 func (c *AESGCMCipher) Seal(key, nonce, aad, plaintext []byte) ([]byte, []byte, error) {
+	if err := checkKeyMaterial("aes seal", key, nonce); err != nil {
+		return nil, nil, err
+	}
 	g, err := c.gcm(key, nonce)
 	if err != nil {
 		return nil, nil, err
@@ -131,6 +237,12 @@ func (c *AESGCMCipher) Seal(key, nonce, aad, plaintext []byte) ([]byte, []byte, 
 }
 
 func (c *AESGCMCipher) Open(key, nonce, aad, ciphertext, tag []byte) ([]byte, error) {
+	if err := checkKeyMaterial("aes open", key, nonce); err != nil {
+		return nil, err
+	}
+	if err := checkTagLength("aes open", tag); err != nil {
+		return nil, err
+	}
 	g, err := c.gcm(key, nonce)
 	if err != nil {
 		return nil, err
@@ -149,7 +261,10 @@ func (c *AESGCMCipher) Open(key, nonce, aad, ciphertext, tag []byte) ([]byte, er
 func NewCipher(cfg Config) (Cipher, error) {
 	switch cfg.Backend {
 	case "tongsuo":
-		return NewTongsuoCipher(cfg.HelperPath, int(cfg.SubprocTimeout.Seconds())), nil
+		if err := checkHelperBudget(cfg.SubprocTimeout); err != nil {
+			return nil, err
+		}
+		return NewTongsuoCipherTimeout(cfg.HelperPath, cfg.SubprocTimeout), nil
 	case "aes_fallback":
 		return NewAESGCMCipher(), nil
 	default:

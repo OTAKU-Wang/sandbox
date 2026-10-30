@@ -17,7 +17,7 @@ sandbox/
 │   └── tongsuo-build/  # second vendored Tongsuo — DO NOT EDIT
 ├── deploy/             # NEW: cube-node host bring-up + e2e-remote / local deploy harnesses
 ├── sdk/                # cds_sdk, standalone sync httpx REST client (/api/v1)
-├── alembic/            # migrations, single LINEAR chain 0000→0021, additive-only
+├── alembic/            # migrations, single LINEAR chain 0000→0031, additive-only
 ├── tests/              # 211 .py / 208 collected modules, 45.7k LOC; two-tier CI (gate + informational)
 ├── k8s/                # k3s manifest deploy path (deploy.sh, NodePort 30080/30081)
 ├── helm/               # cds chart (helm/cds), production path (ns cds-system)
@@ -44,12 +44,12 @@ sandbox/
 | Frontend complexity concentration | cds-frontend/src/pages/Sandbox/SessionDetail.tsx | 1613 LOC; 41 lazy pages in 16 domain folders |
 | Volume-plugin ↔ KMS contract | cds-volume-plugin/kms.go ↔ app/schemas/kms.py | machine contract (plugin README §KMS 契约); no Python test covers it |
 | API error contract | docs/error-codes.md | {code,message,detail,request_id}, ~55 codes; parsed by test_capability_matrix_consistency (API↔FE↔SDK↔doc lock) |
-| Agent handoff (env/lanes/pitfalls) | docs/agent-handoff-2026-10-16.md | read first on a new machine; open work = specs/ss-18-prototype-alignment.md §8 |
+| Agent handoff (env/lanes/pitfalls) | docs/agent-handoff-2026-10-19.md | read first on a new machine (2026-10-19: authoritative tests run LOCALLY, remote = hardware gates only); older rounds: docs/agent-handoff-2026-10-16.md; open work = specs/ss-18-prototype-alignment.md §8 |
 | Remote verification lanes | scripts/remote-harness/{sync_tree,source_lane,fe_lane}.sh | tests run on the remote harness (user rule); needs CDS_LANE_DB_URL; never drop the venv PATH export |
 | Mock/simulation registry | docs/mock-remediation-plan.md | MR-A1..A15, honest-degradation rules |
 | Freshest state + open-defect ledger | docs/cr-2026-10-15-review.md | 187 L; §5 = remote-only test rule |
 | Deploy | root compose ×4, k8s/, helm/, deploy/e2e-remote, deploy/local | seven config copies — see UNIQUE STYLES |
-| CI gates | .github/workflows/ci.yml | backend py3.11; 34-file gate list green; full suite informational |
+| CI gates | .github/workflows/ci.yml | backend py3.11; 40-file gate list green (count machine-locked by tests/test_ci_workflow_policy.py); full suite informational |
 
 ## CODE MAP
 No LSP index exists in this workspace; entries come from the writer digests and ref counts are grep-based, not LSP-counted.
@@ -70,7 +70,7 @@ No LSP index exists in this workspace; entries come from the writer digests and 
 ## CONVENTIONS
 - Env config: pydantic BaseSettings, `env_prefix="CDS_"`, `.env`; `get_settings()` is lru_cached — tests must `cache_clear`, but prod-mode tests instead monkeypatch the cached `Settings` and `delenv` TESTING/PYTEST_CURRENT_TEST (only test_k8s_n7.py uses cache_clear).
 - API errors follow the W2 contract {code, message, detail, request_id}; `SESSION_TERMINATED`=410 must stop client retries (consumed by cds_sdk).
-- Alembic chain is linear and additive-only (0000→0021; 0019–0021 are the SS-15 revisions): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
+- Alembic chain is linear and additive-only (0000→0031; 0019–0021 SS-15, 0022–0026 SS-18/19, 0027–0031 the OCR-review round): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
 - `tests/conftest.py` (472 L) pins 12 env vars via `os.environ.setdefault` BEFORE importing app.main; never import the app ahead of conftest.
 - KMS wire fields are a cross-language contract: `app/schemas/kms.py` and `cds-volume-plugin/kms.go` must move together (test_kms_volume_keys.py pins the Go field names).
 - Mixed Chinese/English docstrings, user-facing strings, and requirements.txt comments (国密) — keep the mix.
@@ -103,7 +103,9 @@ pip install -r requirements.txt && pip install -e ./sdk   # CI installs the SDK 
 uvicorn app.main:app                # :8000; Dockerfile.api: python:3.12-slim, 2-stage
 python -m compileall -q app tests alembic
 python scripts/verify_schema_parity.py   # alembic vs create_all parity, CI gate
-CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" alembic upgrade head && ALEMBIC_COMPARE_TYPES=0 alembic check
+CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" .venv/bin/python -m alembic upgrade head && ALEMBIC_COMPARE_TYPES=0 .venv/bin/python -m alembic check
+# 必须走 .venv 里的 alembic：PATH 上的 ~/.local/bin/alembic 用系统 python（protobuf 7.35.0），
+# 与仓内 gencode 7.35.1 冲突，会在 import app._stubs 时抛 Protobuf VersionError 假失败。
 python -m pytest                    # asyncio_mode=auto, testpaths=tests, timeout=600, 3 files mark `slow`
                                     # NOT authoritative locally — real numbers come from the remote py3.12 image
 python -m pytest tests/test_capability_matrix_consistency.py tests/test_pz04_honesty_gates.py  # doc↔code gates
@@ -129,9 +131,9 @@ bash deploy/cube-node/preflight.sh  # then install.sh, then verify.sh --json (ex
 - S4 is CLOSED: firecracker seccomp retry is gated by SECCOMP_FALLBACK_ALLOWED exactly like sandbox_runtime (the two digests cite MR-A13 and MR-A6 for it — reconcile against docs/mock-remediation-plan.md).
 - Prod compose knowingly ships software-simulation switches TRUE until real-hardware acceptance; the FG gate series now runs to FG-017 (Cube node bring-up); registry = docs/mock-remediation-plan.md (MR-A1..A15).
 - Sandbox guest path contract has ONE source of truth: `GUEST_DATA_DIR=/sandbox/data` (readonly declaration), `GUEST_OUTPUT_DIR=/sandbox/output` (the only harvested dir), `GUEST_WORK_DIR=/scratch` (compat-harvested), `GUEST_EXEC_DIR=/results/.cds-exec` (never harvested) in `app/services/cube_runtime_adapter.py`. Declared volumes do not reach the guest on cold start (data is injected over the exec channel), so "readonly" means declaration + harvest exclusion, NOT hypervisor enforcement — never claim stronger. Changing a path must also re-pin the literal mount assertions in `tests/test_cube_runtime_adapter.py`.
-- Stale docs to distrust: ci/known-failures.md still says the gate tier is 24 files (ci.yml lists 34); sdk/cds_sdk/__init__.py `__version__` is 0.2.0 vs pyproject 0.3.0; specs/ has no ss-14 file (SS-14 = the remote-e2e round, docs/e2e-2026-10-13-remote/); docs naming a frontend `rag` service are dead.
+- Stale docs to distrust: the gate-tier file list is parsed LIVE from ci.yml (`.gate-scratch/final_lane.sh` prints `GATE_FILES`) — never quote a hardcoded count in docs; the SDK version is single-sourced from `sdk/pyproject.toml` `[project].version` (A78, 2026-10-20 — the old `__init__.py` 0.2.0 drift is closed and a test forbids a literal `__version__ = "` from returning; specs/ has no ss-14 file (SS-14 = the remote-e2e round, docs/e2e-2026-10-13-remote/); docs naming a frontend `rag` service are dead.
 - k8s/deploy.sh applies 10 of 14 manifests — kafka.yaml / debezium.yaml (CDC) are manual. The helm chart has no MinIO template, and `minio/minio:latest` is unpinned in compose/k8s.
-- contracts/AuditRegistry.sol `anchorRoot` has no access control (43 L — anyone may anchor a root).
+- contracts/AuditRegistry.sol 访问控制已于 2026-10-20 修复（A195）：`owner` + `authorizedAnchors` + `onlyAnchorer` 修饰符，事件事带 `anchorer`；旧函数名 `anchorRoot` 已不存在，现在的是 `anchorAudit`/`verifyAudit`/`anchoredBy`/`verifyAuditBy`/`setAuthorizedAnchor`。真链 revert 行为仍 HARDWARE-GATED（本机无 solc/web3），门禁是源码级结构断言。
 - Known infra drift: postgres user `cds` vs `cds_admin`; `CDS_LOG_JSON` true (prod compose) vs "false" (helm); 8-col vs 40-col audit_events init SQL.
 - Committed dev artifacts: k8s/secrets.yaml (DEV-ONLY credentials — rotate in any real environment) and logs/cds-egress/access.jsonl (30 real session records).
 - tests/test_e2e_full_lifecycle.py is permanently ignored in CI (hits a real cluster); dev/test DBs bootstrapped by create_all get `alembic stamp head`.

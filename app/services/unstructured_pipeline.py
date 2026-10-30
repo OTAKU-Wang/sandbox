@@ -5,6 +5,7 @@ Input files are mounted read-only, output is encrypted into object storage and
 only release metadata passes through the shared output review path.
 """
 import hashlib
+import logging
 import uuid
 import json
 import mimetypes
@@ -15,6 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.sandbox_runtime import BwrapAdapter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -71,11 +74,27 @@ class UnstructuredPipeline:
         return task
 
     async def execute_task(self, task_id: str) -> PipelineResult:
-        """Execute a submitted task inside sandbox."""
+        """Execute a submitted task inside sandbox.
+
+        A165②: 工作目录无条件回收。成功、失败、输入缺失三条退出路径都必须
+        rmtree ``<workspace_root>/<task_id>``：明文输入、OCR 全文、抽帧图不得永久
+        残留在宿主机（旧实现里 /tmp/cds-pipeline/<task_id> 从不回收，也不进会话
+        生命周期）。要交付的东西在回收前已全部离开工作目录：产物已加密进对象存储
+        （_persist_artifacts），输出审查（_review_output）同样在回收之前完成。
+        """
         task = self._tasks.get(task_id)
         if not task:
             return PipelineResult(task_id=task_id, task_type="unknown", success=False, output={}, duration_ms=0, error="Task not found")
 
+        workspace = self.workspace_root / task_id
+        try:
+            return await self._execute_in_workspace(task)
+        finally:
+            self._erase_workspace(workspace)
+
+    async def _execute_in_workspace(self, task: PipelineTask) -> PipelineResult:
+        """Run one task through sandbox. The caller always erases the workspace."""
+        task_id = task.task_id
         task.status = "running"
         task.started_at = datetime.now(timezone.utc)
         task.attempts = []
@@ -457,8 +476,13 @@ print(json.dumps(results, ensure_ascii=False))
 '''
 
     def _dicom_script(self, filename: str) -> str:
+        # A165③: 脱敏失败必须让任务失败（非零退出码）。旧实现把 partial_success=True
+        # 写进一个全仓无人读取的字段后照常报成功 ⇒ 「影像元数据已剥离」是不可核验的说法。
+        # 铁律「宁可拒绝，不可伪造」：引擎缺失、根本没有 DICOM 输入、单文件脱敏异常，
+        # 一律 stderr 点名 + 非零退出；沙箱退出码非零 ⇒ execute_task 把任务判为失败。
         return f'''"""DICOM processing script — strips sensitive tags inside sandbox."""
 import json
+import sys
 from pathlib import Path
 
 INPUT = Path("/workspace/input")
@@ -472,13 +496,27 @@ SENSITIVE_TAGS = [
     "StudyID", "AccessionNumber",
 ]
 
-results = {{"files": [], "removed_tags": [], "partial_success": False}}
+DICOM_SUFFIXES = (".dcm", ".dicom", "")
 
-for dcm_file in INPUT.glob("*"):
-    if dcm_file.suffix.lower() not in (".dcm", ".dicom", ""):
-        continue
+# 先枚举输入：引擎不可用时也要点名哪些文件没被脱敏
+targets = sorted(p for p in INPUT.glob("*") if p.is_file() and p.suffix.lower() in DICOM_SUFFIXES)
+
+if not targets:
+    print(f"DICOM de-identification refused: no DICOM file under {{INPUT}}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    import pydicom
+except ImportError:
+    for pending in targets:
+        print(f"DICOM de-identification FAILED for {{pending.name}}: pydicom engine not available in sandbox", file=sys.stderr)
+    sys.exit(1)
+
+results = {{"files": [], "removed_tags": []}}
+failed = []
+
+for dcm_file in targets:
     try:
-        import pydicom
         ds = pydicom.dcmread(str(dcm_file), force=True)
         removed = []
         for tag in SENSITIVE_TAGS:
@@ -493,16 +531,14 @@ for dcm_file in INPUT.glob("*"):
             "removed_tags": removed,
         }})
         results["removed_tags"].extend(removed)
-    except ImportError:
-        results["partial_success"] = True
-        results["files"].append({{
-            "filename": dcm_file.name,
-            "chars": 0,
-            "note": "DICOM engine not available",
-        }})
     except Exception as e:
-        results["partial_success"] = True
-        results["files"].append({{"filename": dcm_file.name, "error": str(e)}})
+        # 单文件脱敏失败 = 整个任务失败：未脱敏的影像绝不能当「已脱敏」交付
+        print(f"DICOM de-identification FAILED for {{dcm_file.name}}: {{e}}", file=sys.stderr)
+        failed.append(dcm_file.name)
+
+if failed:
+    print(f"DICOM de-identification aborted, {{len(failed)}} file(s) left unsanitized", file=sys.stderr)
+    sys.exit(1)
 
 with open(OUTPUT / "result.json", "w") as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
@@ -564,6 +600,20 @@ print(json.dumps(results, ensure_ascii=False))
                 shutil.rmtree(child)
             else:
                 child.unlink()
+
+    @staticmethod
+    def _erase_workspace(workspace: Path) -> None:
+        """A165②: crypto-erase 不了的本地工作目录 —— 至少在退出时必须删干净。
+
+        删除失败不静默吞掉：日志披露（项目铁律 honest degradation），但也不能因为
+        回收失败而把已经跑完的任务改成失败 —— 结果已经给出，掩盖告警更糟。
+        """
+        if not workspace.exists():
+            return
+        try:
+            shutil.rmtree(workspace)
+        except OSError as exc:
+            logger.warning("pipeline workspace erase failed for %s: %s", workspace, exc)
 
     @staticmethod
     def _set_stage(task: PipelineTask, stage: str, status: str, **detail: Any) -> None:

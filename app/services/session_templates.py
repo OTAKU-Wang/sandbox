@@ -82,25 +82,64 @@ BUILTIN_TEMPLATES: dict[str, dict] = {
 }
 
 
+def _str_map(raw, *, where: str) -> dict[str, str]:
+    """Coerce one template sub-map; a wrong-shaped entry raises so its own
+    template is skipped instead of breaking session creation (A136)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where} must be a JSON object, got {type(raw).__name__}")
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(value, bool | int | float):
+            value = str(value)
+        elif not isinstance(value, str):
+            logger.warning(
+                "[SessionTemplates] skipping %s entry %r: value must be a string, got %s",
+                where, key, type(value).__name__,
+            )
+            continue
+        out[str(key)] = value
+    return out
+
+
 def _merged_registry() -> dict[str, dict]:
     registry = {k: dict(v) for k, v in BUILTIN_TEMPLATES.items()}
     raw = (get_settings().SESSION_TEMPLATES_JSON or "").strip()
-    if raw:
+    if not raw:
+        return registry
+    try:
+        override = json.loads(raw)
+    except Exception as e:
+        logger.warning("[SessionTemplates] ignoring invalid CDS_SESSION_TEMPLATES_JSON: %s", e)
+        return registry
+    if not isinstance(override, dict):
+        logger.warning(
+            "[SessionTemplates] ignoring CDS_SESSION_TEMPLATES_JSON: expected a JSON object, got %s",
+            type(override).__name__,
+        )
+        return registry
+    for name, tpl in override.items():
+        if not isinstance(tpl, dict):
+            logger.warning(
+                "[SessionTemplates] ignoring template %r: expected an object, got %s",
+                name, type(tpl).__name__,
+            )
+            continue
         try:
-            override = json.loads(raw)
-            if isinstance(override, dict):
-                for name, tpl in override.items():
-                    if isinstance(tpl, dict):
-                        registry[str(name)] = {
-                            "description": str(tpl.get("description", "")),
-                            "files": {str(k): str(v) for k, v in (tpl.get("files") or {}).items()},
-                            "env": {str(k): str(v) for k, v in (tpl.get("env") or {}).items()},
-                            # SS-10 CB-05: optional reference to a CDS cube
-                            # template (id or name) this JSON template maps to.
-                            "cube_template_id": tpl.get("cube_template_id"),
-                        }
-        except (ValueError, TypeError) as e:
-            logger.warning("[SessionTemplates] ignoring invalid CDS_SESSION_TEMPLATES_JSON: %s", e)
+            registry[str(name)] = {
+                "description": str(tpl.get("description", "")),
+                "files": _str_map(tpl.get("files"), where=f"{name}.files"),
+                "env": _str_map(tpl.get("env"), where=f"{name}.env"),
+                # SS-10 CB-05: optional reference to a CDS cube
+                # template (id or name) this JSON template maps to.
+                "cube_template_id": tpl.get("cube_template_id"),
+            }
+        except Exception as e:
+            logger.warning(
+                "[SessionTemplates] ignoring template %r from CDS_SESSION_TEMPLATES_JSON: %s",
+                name, e,
+            )
     return registry
 
 

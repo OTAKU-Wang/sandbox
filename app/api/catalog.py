@@ -2,8 +2,9 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import ColumnElement, select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -11,6 +12,27 @@ from app.models.user import User
 from app.models.data_product import DataProduct, DataProductStatus
 
 router = APIRouter()
+
+
+def _not_superseded_in_version_chain() -> ColumnElement[bool]:
+    """A72: a product published more than once must occupy ONE catalog row.
+
+    `publish_product` never demotes the previous row of the same version chain, so
+    N publishes leave N `published` rows. A chain row is superseded exactly when a
+    row created from it (`parent_id`) is itself published — filtering those out keeps
+    the newest published row per chain, and (unlike filtering on `is_latest`) keeps a
+    published row discoverable while a newer version is still a draft.
+    """
+    successor = aliased(DataProduct)
+    return ~(
+        select(1)
+        .select_from(successor)
+        .where(
+            successor.parent_id == DataProduct.id,
+            successor.status == DataProductStatus.PUBLISHED.value,
+        )
+        .exists()
+    )
 
 
 @router.get("")
@@ -24,9 +46,20 @@ async def search_catalog(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Search published data products. Only returns products with status='published'."""
-    query = select(DataProduct).where(DataProduct.status == DataProductStatus.PUBLISHED.value)
-    count_query = select(func.count()).select_from(DataProduct).where(DataProduct.status == DataProductStatus.PUBLISHED.value)
+    """Search published data products.
+
+    Only returns products with status='published', one row per version chain
+    (superseded published versions are excluded, A72).
+    """
+    not_superseded = _not_superseded_in_version_chain()
+    query = select(DataProduct).where(
+        DataProduct.status == DataProductStatus.PUBLISHED.value, not_superseded
+    )
+    count_query = (
+        select(func.count())
+        .select_from(DataProduct)
+        .where(DataProduct.status == DataProductStatus.PUBLISHED.value, not_superseded)
+    )
 
     if q:
         search_filter = or_(

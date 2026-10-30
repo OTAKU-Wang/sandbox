@@ -419,8 +419,12 @@ export default function AuditLog() {
         />
       </Card>
 
+      {/* A228：详情弹窗挂在 body 的 portal 里，既不在 .cds-audit-screen 下、也没人挂
+          .cds-audit-modal-root ⇒ auditLog.css:19-28 那批本屏令牌（灰面板底 t-* 标签配色）
+          整块取不到。rootClassName 落在 .ant-modal-root 上，正是 CSS 已备好的那个钩子。 */}
       <Modal
         className="cds-detail-modal cds-audit-modal"
+        rootClassName="cds-audit-modal-root"
         open={!!detailId}
         width={720}
         onCancel={() => setDetailId(null)}

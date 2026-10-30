@@ -93,7 +93,11 @@ func testPlugin(t *testing.T, backend string, helperPath string) (*Plugin, *mock
 		Backend:        backend,
 		MaxVolumeBytes: 1 << 30,
 	}
-	p := NewPlugin(cfg, c, NewKMSClient(srv.URL, "test-token"))
+	kms, err := NewKMSClient(srv.URL, "test-token")
+	if err != nil {
+		t.Fatalf("kms client for mock KMS: %v", err)
+	}
+	p := NewPlugin(cfg, c, kms)
 	return p, m, root, srv.Close
 }
 
@@ -300,7 +304,11 @@ func TestDestroyFailClosedOnRevokeFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// point the plugin at a dead KMS so revoke fails
-	p.kms = NewKMSClient("http://127.0.0.1:1", "tok")
+	deadKMS, err := NewKMSClient("http://127.0.0.1:1", "tok")
+	if err != nil {
+		t.Fatalf("loopback KMS endpoint must construct: %v", err)
+	}
+	p.kms = deadKMS
 	if err := p.Destroy(ctx, "vol-r"); err == nil {
 		t.Fatal("destroy with revoke failure must fail")
 	}
@@ -314,12 +322,36 @@ func TestDestroyFailClosedOnRevokeFailure(t *testing.T) {
 	}
 }
 
-// cipher negative paths for both backends (tongsuo if helper present).
+// gmHelperPath locates the SM4-GCM C helper for the gate and FAILS the test when
+// it is absent. Two defects retired here (A204②): the path used to be
+// filepath.Join("..", "sm4gcm", "sm4_gcm"), which resolves to the REPO ROOT (the
+// helper actually lives at cds-volume-plugin/sm4gcm/sm4_gcm, i.e. package-relative),
+// and a missing helper was neither t.Skip nor t.Fatal — the map simply stayed
+// aes-only, so `go test ./...` reported GREEN while the SM4-GCM negative paths
+// (tampered ct/tag, AAD mismatch) had run exactly 0 times. A gate that cannot see
+// the national-crypto backend must not report success: fail closed, build it with
+// `make helper` (the Makefile `test:` target now depends on `helper`).
+func gmHelperPath(t *testing.T) string {
+	t.Helper()
+	for _, cand := range []string{
+		filepath.Join("sm4gcm", "sm4_gcm"),
+		filepath.Join("bin", "sm4_gcm"),
+	} {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() && fi.Mode().Perm()&0o111 != 0 {
+			return cand
+		}
+	}
+	t.Fatalf("no executable SM4-GCM helper at sm4gcm/sm4_gcm or bin/sm4_gcm: refusing to report a " +
+		"green gate with zero national-crypto coverage (A202/A204②). Build it first: " +
+		"cd cds-volume-plugin && make helper")
+	return ""
+}
+
+// cipher negative paths for BOTH backends; the GM leg cannot be skipped (A204②).
 func TestCipherNegativePaths(t *testing.T) {
-	helper := filepath.Join("..", "sm4gcm", "sm4_gcm")
-	ciphers := map[string]Cipher{"aes_fallback": NewAESGCMCipher()}
-	if _, err := os.Stat(helper); err == nil {
-		ciphers["tongsuo"] = NewTongsuoCipher(helper, 30)
+	ciphers := map[string]Cipher{
+		"aes_fallback": NewAESGCMCipher(),
+		"tongsuo":      NewTongsuoCipher(gmHelperPath(t), 30),
 	}
 	for name, c := range ciphers {
 		t.Run(name, func(t *testing.T) {

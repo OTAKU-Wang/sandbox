@@ -1,0 +1,43 @@
+Vault authentication failed — falling back to software HSM
+HSM fallback in use: backend=software-fallback is_simulation=True — the KEK lives in this process, NOT in an HSM (dev/test only; disable via HSM_SOFTWARE_FALLBACK_ALLOWED=false). Disclosed at WARNING so it survives production log levels (A94/T12).
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0000_baseline_all_tables, W5 baseline — creates all live tables from an empty database.
+INFO  [alembic.runtime.migration] Running upgrade 0000_baseline_all_tables -> 0001_p0_security_hardening, P0 security hardening — additive columns for gap A1/A3/B3.
+INFO  [alembic.runtime.migration] Running upgrade 0001_p0_security_hardening -> 0002_session_usability, Session usability (Round 39) — additive columns for files/snapshots/pause.
+INFO  [alembic.runtime.migration] Running upgrade 0002_session_usability -> 0003_idle_policy, W9 — idle auto-pause policy columns on sandbox_sessions.
+INFO  [alembic.runtime.migration] Running upgrade 0003_idle_policy -> 0004_session_operations, W11 — session_operations table for async long-running operations.
+INFO  [alembic.runtime.migration] Running upgrade 0004_session_operations -> 0005_node_operations, W14 — node operations columns on sandbox_nodes.
+INFO  [alembic.runtime.migration] Running upgrade 0005_node_operations -> 0006_task_queue, W16 — task_queue table (multi-replica durable queue).
+INFO  [alembic.runtime.migration] Running upgrade 0006_task_queue -> 0007_shared_volumes, W15 — shared volumes + attachments.
+INFO  [alembic.runtime.migration] Running upgrade 0007_shared_volumes -> 0008_mpc_persistence, N3 — mpc_keys + mpc_key_shares tables (Shamir share persistence).
+INFO  [alembic.runtime.migration] Running upgrade 0008_mpc_persistence -> 0009_trained_models, N5 — trained_models + inference_usage tables (inference service sandbox).
+INFO  [alembic.runtime.migration] Running upgrade 0009_trained_models -> 0010_rag_generative, N6 — sandbox_tasks rag params + rag_generative_models table (RAG phase 2).
+INFO  [alembic.runtime.migration] Running upgrade 0010_rag_generative -> 0011_chain_anchoring_records, PZ-03 — chain_anchoring_records table (SS-11 §7.2, FG-005 software side).
+INFO  [alembic.runtime.migration] Running upgrade 0011_chain_anchoring_records -> 0012_user_mfa, PZ-10 — user_mfa table (SS-11 §7.2): TOTP secret + recovery codes (encrypted at rest).
+INFO  [alembic.runtime.migration] Running upgrade 0012_user_mfa -> 0013_volume_keys, CB-01 — volume_keys table (SS-10 CB-03): plugin-generated, KEK-wrapped
+volume DEK lifecycle backing the Go volume plugin's control-plane KMS surface
+(POST/DELETE /api/v1/kms/volume-keys*). Additive-only.
+INFO  [alembic.runtime.migration] Running upgrade 0013_volume_keys -> 0014_cube_templates, CB-05 — cube template registry tables (SS-10, spec §6.2 m2):
+``cube_templates`` (template/artifact registry row incl. probe config) +
+``cube_template_nodes`` (per-node distribution state machine). Additive-only.
+INFO  [alembic.runtime.migration] Running upgrade 0014_cube_templates -> 0015_cube_egress_dedup, CB-06 — cube_egress_dedup table (SS-10): idempotency-key dedup for the
+cube node egress audit tailer (POST /internal/audit/egress). At-least-once
+pushes from the node; unique on (node_id, file_name, offset, line_no).
+Additive-only.
+INFO  [alembic.runtime.migration] Running upgrade 0015_cube_egress_dedup -> 0016_sandbox_tee_policy, SS-13 — sandbox_sessions TEE policy + trust root (single-path cutover).
+INFO  [alembic.runtime.migration] Running upgrade 0016_sandbox_tee_policy -> 0017_api_keys, SS-12 — platform API keys (machine credentials with functional scope domains).
+INFO  [alembic.runtime.migration] Running upgrade 0017_api_keys -> 0018_owner_fks, SS-14 e2e (D-e2e-08) — trained_models.product_id index missing from chain.
+INFO  [alembic.runtime.migration] Running upgrade 0018_owner_fks -> 0019_flow_orchestration, SS-15 — 数据开发到成果交付的完整业务闭环（合约交付配置 + 调度 + Notebook + 工作负载提升 + 三条交付通道）。
+INFO  [alembic.runtime.migration] Running upgrade 0019_flow_orchestration -> 0020_webhook_detached_history, 0020: 推送投递历史在订阅删除后保留
+INFO  [alembic.runtime.migration] Running upgrade 0020_webhook_detached_history -> 0021_delivery_bundle_ownership, 0021: 数据集交付包归属记录
+INFO  [alembic.runtime.migration] Running upgrade 0021_delivery_bundle_ownership -> 0022_compute_run_params, 0022: 生产运行参数与规格覆盖
+INFO  [alembic.runtime.migration] Running upgrade 0022_compute_run_params -> 0023_task_fields, SS-18 P0-①: 开发任务字段落库（任务 = 开发笔记本，§2 决策，不另起任务表）。
+INFO  [alembic.runtime.migration] Running upgrade 0023_task_fields -> 0024_bundle_review_columns, SS-18 P0-②: 交付中心展示列落库（T5 审查状态 / 内容水印状态 / 数据表行数）。
+INFO  [alembic.runtime.migration] Running upgrade 0024_bundle_review_columns -> 0025_notebook_data_resource_ids, SS-19 G2: 开发任务可只注入合约授权集里的部分数据资源（图 2-2「已选择数据」面板）。
+INFO  [alembic.runtime.migration] Running upgrade 0025_notebook_data_resource_ids -> 0026_notebook_description, SS-19 G1: 新增开发任务整页化（图 2-2「基本信息」卡）带来的任务描述列。
+INFO  [alembic.runtime.migration] Running upgrade 0026_notebook_description -> 0027_connector_key_prefix_width, A6: connectors.api_key_prefix 加宽 varchar(8) -> varchar(16)
+INFO  [alembic.runtime.migration] Running upgrade 0027_connector_key_prefix_width -> 0028_ocr_review_models, OCR 复核修复（poolA-models）：模式层四件事，一条 revision 装完。
+INFO  [alembic.runtime.migration] Running upgrade 0028_ocr_review_models -> 0029_ocr_size_bigint_op_lease, OCR 复核修复第二批（poolA2-models）：A203 剩余三列 + A82 操作租约列与排他索引。
+INFO  [alembic.runtime.migration] Running upgrade 0029_ocr_size_bigint_op_lease -> 0030_ocr_seed_cipher_unique_guards, OCR 复核修复第三批（poolA3-models）：A186 key_seed 密文化 + A214 唯一约束单一来源守卫。
+INFO  [alembic.runtime.migration] Running upgrade 0030_ocr_seed_cipher_unique_guards -> 0031_ocr_seed_bigint, OCR 复核修复（backend-seed-a）：A186 最后一条腿 —— ``key_seed`` 熵从 31 位加宽到 63 位。

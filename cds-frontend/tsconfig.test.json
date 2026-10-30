@@ -1,0 +1,35 @@
+{
+  // 测试专用工程：与 tsconfig.app.json 的编译/严格度选项逐字一致，唯一差别是 types。
+  // 为什么单独开一个工程：src/**/__tests__ 下有静态门用 node:fs 读源码（A258 那两条），
+  // 需要 node 的类型；而 tsconfig.app.json 的 types 必须保持只有 vite/client，
+  // 否则 process/Buffer 这类 Node 全局会被并进产品代码的类型面，产品代码误用 Node 全局就查不出来。
+  // 这里只把测试文件（以及 __tests__/ 下的 fixture 模块）单独收进来，产品代码仍由 app 工程检查。
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "types": ["vite/client", "node"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    // setup.ts 带进 `@testing-library/jest-dom/vitest` 的全局增强（toBeInTheDocument 等 matcher 的类型），
+    // 测试工程必须一并看到它，否则所有断言行的 matcher 类型会集体报错。
+    "src/test/**/*",
+    "src/**/__tests__/**/*",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.spec.ts",
+    "src/**/*.spec.tsx"
+  ]
+}

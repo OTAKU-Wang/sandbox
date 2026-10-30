@@ -103,5 +103,5 @@ export async function listOpsPvcs(): Promise<PvcsResponse> {
 }
 
 export async function getOpsLogs(sessionId: string, tail = 200): Promise<LogsResponse> {
-  return api.get(`/ops/logs/${sessionId}`, { params: { tail } });
+  return api.get(`/ops/logs/${encodeURIComponent(sessionId)}`, { params: { tail } });
 }

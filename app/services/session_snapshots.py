@@ -30,10 +30,12 @@ import io
 import json
 import logging
 import os
+import shutil
+import stat
 import tarfile
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.core.config import get_settings
 
@@ -63,6 +65,11 @@ def _tar_bytes(workspace: Path) -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for p in sorted(workspace.rglob("*")):
+            # A118: the workspace tree is shared with the guest, so sandbox code can
+            # drop links in it. Never dereference one into the archive — that would
+            # copy data from outside the sandbox into a snapshot the tenant reads back.
+            if p.is_symlink():
+                continue
             if p.is_file() or p.is_dir():
                 tar.add(str(p), arcname=str(p.relative_to(workspace)), recursive=False)
     return buf.getvalue()
@@ -138,8 +145,85 @@ def _verify_integrity(tar_path: Path, manifest: dict) -> None:
         raise SnapshotError(f"snapshot {manifest.get('snapshot_id')} failed integrity check (checksum mismatch)")
 
 
+_filter_support: bool | None = None
+
+
+def _data_filter_supported() -> bool:
+    """Whether this interpreter's tarfile offers the safe ``filter="data"`` (3.12+).
+
+    A119: probed once instead of discovered by catching ``TypeError`` around the
+    extraction — the catch is what used to justify a second, unguarded unpack.
+    """
+    global _filter_support
+    if _filter_support is None:
+        _filter_support = callable(getattr(tarfile, "data_filter", None))
+    return _filter_support
+
+
+def _check_member(member: tarfile.TarInfo) -> None:
+    """Reject any member that could write outside the destination (no-filter path)."""
+    name = member.name.replace("\\", "/")
+    parts = PurePosixPath(name).parts
+    if not name or name.startswith("/") or ".." in parts:
+        raise SnapshotError(f"snapshot member would escape the workspace: {member.name!r}")
+    if member.issym() or member.islnk():
+        raise SnapshotError(f"snapshot member is a link (rejected): {member.name!r} -> {member.linkname!r}")
+    if not (member.isfile() or member.isdir()):
+        raise SnapshotError(f"unsupported snapshot member type: {member.name!r}")
+
+
+def _extract_snapshot(tar_path: Path, dest: Path) -> None:
+    """Unpack a snapshot into ``dest`` — guarded on every path.
+
+    With the data filter available it is used; without it, every member is
+    validated before a single byte is written. A guarded extraction that fails
+    part-way is a hard error, never a reason to retry unguarded.
+    """
+    with tarfile.open(tar_path, "r:gz") as tar:
+        if _data_filter_supported():
+            try:
+                tar.extractall(path=str(dest), filter="data")  # noqa: S202 - data filter + self-produced archives
+                return
+            except TypeError as exc:
+                raise SnapshotError(
+                    f"snapshot {tar_path.name}: tarfile data filter unusable ({exc}); "
+                    "refusing to extract without path protection"
+                ) from exc
+
+    with tarfile.open(tar_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            _check_member(member)
+        tar.extractall(path=str(dest))  # noqa: S202 - every member validated just above
+
+
+def _sibling_tmp(workspace: Path, purpose: str) -> Path:
+    """Hidden scratch dir beside the workspace — outside the sandbox bind, same filesystem."""
+    return workspace.parent / f".{workspace.name}.cds-{purpose}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _discard_tree(path: Path) -> None:
+    """Delete a tree without ever following a link out of it (rmtree unlinks links)."""
+    if not path.exists():
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():
+        logger.error(
+            "[SessionSnapshots] could not fully discard %s — it sits outside the sandbox "
+            "bind and needs operator cleanup",
+            path,
+        )
+
+
 def rollback(workspace: Path, snapshot_id: str) -> dict:
-    """Restore the workspace from a snapshot (current content is discarded)."""
+    """Restore the workspace from a snapshot (current content is discarded).
+
+    A117: unpack-then-swap, never delete-then-unpack. The archive is expanded
+    into a sibling staging directory first; only once that is complete does the
+    current workspace move aside and the staged tree take its place. A corrupt
+    member, ENOSPC or a rename that cannot happen (e.g. the workspace is a mount
+    point) therefore leaves the workspace exactly as it was and the attempt
+    stays retryable.
+    """
     workspace = Path(workspace)
     snapshot_id = str(snapshot_id or "")
     if "/" in snapshot_id or "\\" in snapshot_id or ".." in snapshot_id or not snapshot_id:
@@ -153,28 +237,56 @@ def rollback(workspace: Path, snapshot_id: str) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     _verify_integrity(tar_path, manifest)
 
-    # Discard current workspace content (snapshots live outside the bind).
-    discarded = 0
-    for p in workspace.rglob("*"):
-        if p.is_file():
-            discarded += 1
-    for p in sorted(workspace.rglob("*"), reverse=True):
-        if p.is_dir() and not any(p.iterdir()):
-            p.rmdir()
-        elif p.is_file():
-            p.unlink()
+    discarded = sum(1 for p in workspace.rglob("*") if p.is_file())
 
-    with tarfile.open(tar_path, "r:gz") as tar:
+    staging = _sibling_tmp(workspace, "stage")
+    backup: Path | None = None
+    workspace_mode: int | None = None
+    try:
+        staging.mkdir(parents=True, exist_ok=False)
+        _extract_snapshot(tar_path, staging)
+        # Pre-guard snapshots taken before directory entries were archived:
+        # the runtime expects tmp/ (exec staging) and the files API keeps its
+        # store under files/ — both must exist after a rollback.
+        (staging / "tmp").mkdir(parents=True, exist_ok=True)
+        (staging / "files").mkdir(parents=True, exist_ok=True)
+
+        if workspace.exists():
+            if not workspace.is_dir():
+                raise SnapshotError(f"workspace path is not a directory: {workspace}")
+            workspace_mode = stat.S_IMODE(workspace.stat().st_mode)
+            backup = _sibling_tmp(workspace, "prev")
+            os.replace(workspace, backup)
         try:
-            tar.extractall(path=str(workspace), filter="data")  # noqa: S202 - data filter + self-produced archives
-        except TypeError:  # Python < 3.12 without data filter backport
-            tar.extractall(path=str(workspace))
-
-    # Pre-guard snapshots taken before directory entries were archived:
-    # the runtime expects tmp/ (exec staging) and the files API keeps its
-    # store under files/ — both must exist after a rollback.
-    (workspace / "tmp").mkdir(parents=True, exist_ok=True)
-    (workspace / "files").mkdir(parents=True, exist_ok=True)
+            os.replace(staging, workspace)
+        except OSError:
+            if backup is not None:
+                os.replace(backup, workspace)
+                backup = None
+            raise
+        if workspace_mode is not None:
+            try:
+                os.chmod(workspace, workspace_mode)
+            except OSError as exc:
+                logger.warning(
+                    "[SessionSnapshots] could not restore workspace mode %o on %s: %s",
+                    workspace_mode, workspace, exc,
+                )
+        if backup is not None:
+            _discard_tree(backup)
+    except Exception:
+        if backup is not None and not workspace.exists():
+            try:
+                os.replace(backup, workspace)
+                backup = None
+            except OSError:
+                logger.error(
+                    "[SessionSnapshots] rollback of %s failed and the previous workspace could not be "
+                    "moved back into place; it is preserved at %s",
+                    snapshot_id, backup,
+                )
+        _discard_tree(staging)
+        raise
 
     logger.info(
         "[SessionSnapshots] rolled back %s for session %s (discarded %d files)",

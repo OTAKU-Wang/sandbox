@@ -9,7 +9,7 @@ vocab — honest conditional answer synthesis, fail-closed without the bundle.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import BigInteger, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,5 +24,5 @@ class RAGGenerativeModel(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     artifact_ref: Mapped[str] = mapped_column(String(512), nullable=False)
     vocab_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

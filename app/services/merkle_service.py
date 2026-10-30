@@ -7,6 +7,7 @@ Supports FISCO BCOS blockchain anchoring.
 import hashlib
 import logging
 from dataclasses import dataclass
+from datetime import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,28 @@ LEAF_FIELD_SEP = "|"
 LEAF_ESCAPE_CHAR = "\\"
 
 
+def leaf_timestamp(value) -> str:
+    """Render one timestamp for the frozen leaf, driver-independently.
+
+    The leaf bytes are the anchored fact, so they must not depend on which DB
+    driver produced the row. PostgreSQL returns `timestamptz` values tz-aware
+     (`2026-10-19 12:00:00+00:00`), while SQLite returns them naive
+    (`2026-10-19 12:00:00`) — the same row therefore hashed to two different
+    leaves depending on where it was read, and a root computed from in-memory
+    objects (as an auditor or a test would) disagreed with a root recomputed
+    from a DB re-read (A5).
+
+    Canonical form = aware UTC: exactly what PostgreSQL already returns, so
+    nothing changes for rows anchored on PostgreSQL. A naive value is read as
+    UTC (the column's declared semantics), never as local time.
+    """
+    if value is None:
+        return str(value)
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return str(value)
+
+
 def merkle_leaf_preimage(log) -> bytes:
     """Return the exact bytes hashed into the Merkle tree for one audit row.
 
@@ -87,7 +110,7 @@ def merkle_leaf_preimage(log) -> bytes:
 
     Pinned literally by tests/test_merkle_leaf_preimage.py.
     """
-    return f"{log.id}|{log.action}|{log.resource_type}|{log.resource_id}|{log.created_at}".encode()
+    return f"{log.id}|{log.action}|{log.resource_type}|{log.resource_id}|{leaf_timestamp(log.created_at)}".encode()
 
 
 def escape_leaf_field(value: str | None) -> str | None:

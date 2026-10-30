@@ -69,6 +69,16 @@ async def create_agent_task(
     if tool_err:
         raise HTTPException(status_code=422, detail=tool_err)
     _enforce_tool_roles(current_user, body.tool_ids)
+    # A158: same single entry point, now fed with the acting role and the
+    # run's effective step budget — the fallback gate behind _enforce_tool_roles
+    # (roles semantics identical; budget = effective step budget).
+    gated_err = tool_registry.validate_run(
+        body.tool_ids,
+        role=current_user.role,
+        budget=_step_budget(body.step_budget),
+    )
+    if gated_err:
+        raise HTTPException(status_code=422, detail=gated_err)
 
     if len(body.tool_ids) > settings.AGENT_MAX_TOOLS:
         raise HTTPException(status_code=422, detail=f"too many tools (max {settings.AGENT_MAX_TOOLS})")
@@ -86,6 +96,7 @@ async def create_agent_task(
         code = build_agent_runner(
             body.prompt,
             body.tool_ids,
+            role=current_user.role,
             step_budget=body.step_budget,
             token_budget=body.token_budget,
             rag_index_file=rag_index_file,

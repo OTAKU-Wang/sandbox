@@ -1,9 +1,10 @@
 """KMS API — DEK lifecycle management."""
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,9 +88,39 @@ def _undurable_key_error(key_id: str) -> CDSError:
     )
 
 
+# A287b: the JSON body may carry product_id (the form the legacy console
+# template sends); the query-string form of the same name stays supported for
+# existing clients, and on overlap the body value wins. This is the A87 shape
+# from sandbox_tasks.py — do not invent a third merge rule. Unknown body keys
+# are ignored so a future client can add fields without breaking older servers.
+async def _parse_create_key_body(request: Request) -> dict:
+    """Read the optional JSON body for POST /keys (A287b, mirroring A87).
+
+    Never echo body content back in an error: the error response would be a
+    second path by which tenant identifiers reach logs (the first being the
+    query string itself).
+    """
+    raw = await request.body()
+    if not raw or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="request body must be valid JSON")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="request body must be a JSON object")
+    product_raw = parsed.get("product_id")
+    if product_raw is None:
+        return {}
+    if not isinstance(product_raw, str):
+        raise HTTPException(status_code=422, detail="body field product_id must be a string")
+    return {"product_id": product_raw}
+
+
 @router.post("/keys", status_code=status.HTTP_201_CREATED)
 async def create_dek(
-    product_id: uuid.UUID,
+    request: Request,
+    product_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.ADMIN)),
 ):
@@ -99,7 +130,24 @@ async def create_dek(
     ``get_current_user`` alone, so any logged-in buyer or data provider could mint
     platform DEKs for arbitrary product ids; the shipped console only reaches this
     through the identity-management page (operator/admin).
+
+    A287b: ``product_id`` may arrive either as the query parameter (the original
+    wire form, kept for every existing client) or in an optional JSON body (the
+    form identities.html sends). Neither present is still a 422 — an ACTIVE DEK
+    without a product is never minted.
     """
+    # A287b: merge the optional JSON body over the query parameter (body wins).
+    body = await _parse_create_key_body(request)
+    if "product_id" in body:
+        try:
+            product_id = uuid.UUID(body["product_id"])
+        except ValueError:
+            raise HTTPException(status_code=422, detail="product_id must be a valid UUID")
+    if product_id is None:
+        raise HTTPException(
+            status_code=422, detail="product_id is required (query parameter or JSON body)",
+        )
+
     # Generate DEK (wrapped with KEK inside kms_service)
     result = kms_service.generate_data_key(str(product_id))
     key_id = result["key_id"]
@@ -261,6 +309,10 @@ async def rotate_dek(
     # Mark old as rotated
     dek.status = DEKStatus.ROTATED.value
     dek.rotated_to = new_key_id
+    # A121 deliberate contrast with revoke: a ROTATED-out key keeps its wrapped
+    # blobs ON PURPOSE. Rotation is versioning — ciphertext written under
+    # version N must stay decryptable after N+1 exists — so crypto-erasing here
+    # would destroy customer data, not protect it. Only REVOKED erases.
 
     # Audit
     audit = KeyAuditLog(
@@ -296,14 +348,29 @@ async def revoke_dek(
     if dek.status in (DEKStatus.REVOKED.value, DEKStatus.DESTROYED.value):
         raise HTTPException(status_code=400, detail=f"Key already {dek.status}")
 
-    dek.status = DEKStatus.REVOKED.value
-    dek.revoked_at = datetime.now(timezone.utc)
-
-    # Terminate all active sessions using this key
+    # Terminate all active sessions using this key. Must run BEFORE the
+    # revoke-semantics writes below: KeyMetadata is an alias of DataEncryptionKey
+    # (models/kms.py P1-10 dedup), and terminate_sessions_by_key stamps
+    # status=destroyed on that same row — writing REVOKED first would be
+    # silently overwritten in the same session's flush.
     from app.services.sandbox_runtime import sandbox_runtime
     terminated_count = await sandbox_runtime.terminate_sessions_by_key(
         key_id, db, reason="key_revoked"
     )
+
+    # A121: "data becomes inaccessible" is only true once every copy of the key
+    # material is gone. Before this, revoke flipped a status while the wrapped
+    # blob stayed in the row AND in process memory — the key kept distributing
+    # exactly as before. Mirror the volume-key revoke's crypto-erase (that route
+    # nulls wrapped_key); the DEK has three persisted representations, all three
+    # go NULL in this same transaction, and the in-memory blob is evicted.
+    dek.status = DEKStatus.REVOKED.value
+    dek.revoked_at = datetime.now(timezone.utc)
+    dek.encrypted_key = None
+    dek.wrapped_payload = None
+    dek.sm2_encrypted_payload = None
+    dek.destroyed_at = None  # a revoke is not a silent destroy; revoked_at is the truth
+    kms_service.destroy_key(key_id)  # also drops the persisted-mark bookkeeping
 
     # Audit
     audit = KeyAuditLog(

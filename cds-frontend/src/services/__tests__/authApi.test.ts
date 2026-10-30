@@ -5,16 +5,25 @@
 // 1) authApi 不再导出这个口子，且合法端点一个都没被顺手删掉；
 // 2) services/ 这一层任何模块都不得把私钥放进上行请求体（跨模块的机器不变量，静态门）。
 import { readFile, readdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { authApi } from '../authApi';
 
+// 【测试环境接线，不是断言】本仓库 vitest 跑在 environment: 'jsdom' 下，测试模块的
+// `import.meta.url` 是 vite dev server 的 http: URL，`fileURLToPath()` 卜在调用当场抛
+// `TypeError: The URL must be of scheme file`，导致下面那条静态门根本跑不到断言。
+// 改用 vitest 进程的 cwd 定位源码目录（车道命令是 cds-frontend/ 下的
+// `node_modules/.bin/vitest run`，cwd = cds-frontend），扫的文件集合与断言一字未改。
+// 目录不存在时 readdir 直接抛错，一个 .ts 也没扫到时也抛错——避免拿空集合把静态门扫成假绿。
+const SERVICES_DIR = resolve(process.cwd(), 'src/services');
+
 const SERVICE_FILES = async (): Promise<Array<{ name: string; source: string }>> => {
-  const names = (await readdir(new URL('../', import.meta.url))).filter((name) => name.endsWith('.ts'));
+  const names = (await readdir(SERVICES_DIR)).filter((name) => name.endsWith('.ts'));
+  if (names.length === 0) throw new Error(`未在服务目录扫到任何 .ts 源文件：${SERVICES_DIR}（cwd 不对？）`);
   return Promise.all(
     names.map(async (name) => ({
       name,
-      source: await readFile(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8'),
+      source: await readFile(resolve(SERVICES_DIR, name), 'utf8'),
     })),
   );
 };

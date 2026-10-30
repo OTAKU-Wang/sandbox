@@ -1,0 +1,7 @@
+src/services/__tests__/authApi.test.ts(7,35): error TS2591: Cannot find name 'node:fs/promises'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+src/services/__tests__/authApi.test.ts(8,31): error TS2591: Cannot find name 'node:url'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+src/services/__tests__/authApi.test.ts(13,74): error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/services/__tests__/authApi.test.ts(15,22): error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/utils/__tests__/crypto.test.ts(1,26): error TS2591: Cannot find name 'node:fs/promises'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+src/utils/__tests__/crypto.test.ts(2,31): error TS2591: Cannot find name 'node:url'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+src/utils/__tests__/crypto.test.ts(5,3): error TS2305: Module '"../crypto"' has no exported member 'SM2_KEY_STORAGE_DISCLOSURE'.

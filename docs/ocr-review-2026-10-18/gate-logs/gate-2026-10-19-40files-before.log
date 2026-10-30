@@ -1,0 +1,62 @@
+........................................................................ [ 21%]
+.............ss......................................................... [ 43%]
+........................................................................ [ 65%]
+....................................F................................... [ 87%]
+..............................FFFF.......                                [100%]
+=================================== FAILURES ===================================
+E   AssertionError: dev-only services drifted: got set(), expected exactly {'cds-jupyter'}
+    assert set() == {'cds-jupyter'}
+      
+      Extra items in the right set:
+      'cds-jupyter'
+      Use -v to get more diff
+/root/cds-test/src/tests/test_deploy_manifests.py:88: AssertionError: dev-only services drifted: got set(), expected exactly {'cds-jupyter'}
+E   AssertionError: ci.yml gate list has 40 files but ci/known-failures.md declares 36 — gate coverage drifted; update ci.yml and this sentence together
+    assert 36 == 40
+/root/cds-test/src/tests/test_ci_workflow_policy.py:234: AssertionError: ci.yml gate list has 40 files but ci/known-failures.md declares 36 — gate coverage drifted; update ci.yml and this sentence together
+E   AssertionError: ci/check_full_suite_budget.py missing — soft gate unimplemented
+    assert False
+     +  where False = exists()
+     +    where exists = PosixPath('/root/cds-test/src/ci/check_full_suite_budget.py').exists
+/root/cds-test/src/tests/test_ci_workflow_policy.py:270: AssertionError: ci/check_full_suite_budget.py missing — soft gate unimplemented
+E   assert 2 == 1
+     +  where 2 = CompletedProcess(args=['/root/cds-test/venv/bin/python', '/root/cds-test/src/ci/check_full_suite_budget.py', '/tmp/pyt...bin/python: can't open file '/root/cds-test/src/ci/check_full_suite_budget.py': [Errno 2] No such file or directory\n").returncode
+     +    where CompletedProcess(args=['/root/cds-test/venv/bin/python', '/root/cds-test/src/ci/check_full_suite_budget.py', '/tmp/pyt...bin/python: can't open file '/root/cds-test/src/ci/check_full_suite_budget.py': [Errno 2] No such file or directory\n") = _run_budget(PosixPath('/tmp/pytest-of-root/pytest-17/test_budget_script_fails_on_gr0/over.xml'), PosixPath('/tmp/pytest-of-root/pytest-17/test_budget_script_fails_on_gr0/baseline.json'))
+/root/cds-test/src/tests/test_ci_workflow_policy.py:298: assert 2 == 1
+E   AssertionError: /root/cds-test/venv/bin/python: can't open file '/root/cds-test/src/ci/check_full_suite_budget.py': [Errno 2] No such file or directory
+      
+    assert 2 == 0
+     +  where 2 = CompletedProcess(args=['/root/cds-test/venv/bin/python', '/root/cds-test/src/ci/check_full_suite_budget.py', '/tmp/pyt...bin/python: can't open file '/root/cds-test/src/ci/check_full_suite_budget.py': [Errno 2] No such file or directory\n").returncode
+/root/cds-test/src/tests/test_ci_workflow_policy.py:308: AssertionError: /root/cds-test/venv/bin/python: can't open file '/root/cds-test/src/ci/check_full_suite_budget.py': [Errno 2] No such file or directory
+=============================== warnings summary ===============================
+tests/test_blockchain_backend_disclosure.py::TestAnchorDisclosure::test_anchor_never_claims_consortium_with_pg_backend
+  /root/cds-test/venv/lib/python3.12/site-packages/sqlalchemy/sql/visitors.py:116: RuntimeWarning: coroutine 'Connection._cancel' was never awaited
+    def _compiler_dispatch(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_k8s_ops.py::test_deployments_degrade_honestly_without_cluster
+tests/test_k8s_ops.py::test_network_policies_list_from_db
+tests/test_k8s_ops.py::test_pvcs_list_from_db
+tests/test_k8s_ops.py::test_logs_fall_back_to_audit_trail
+  /root/cds-test/venv/lib/python3.12/site-packages/fastapi/routing.py:360: RuntimeWarning: coroutine 'get_k8s_adapter' was never awaited
+    return await dependant.call(**values)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_jupyter_gateway_isolation.py::TestUnavailablePaths::test_ticket_refused_without_redis
+  /root/cds-test/venv/lib/python3.12/site-packages/jwt/api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_frontend_api_contract.py::test_frontend_calls_resolve_to_real_routes
+  /root/cds-test/venv/lib/python3.12/site-packages/fastapi/openapi/utils.py:303: UserWarning: Duplicate Operation ID proxy_api_jupyter__path__put for function proxy at /root/cds-test/src/app/api/jupyter_proxy.py
+    warnings.warn(message, stacklevel=1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deploy_manifests.py::test_prod_dev_service_topology_consistent
+FAILED tests/test_ci_workflow_policy.py::test_gate_count_matches_known_failures_doc
+FAILED tests/test_ci_workflow_policy.py::test_budget_script_exists_and_is_wired_into_ci
+FAILED tests/test_ci_workflow_policy.py::test_budget_script_fails_on_growth
+FAILED tests/test_ci_workflow_policy.py::test_budget_script_honest_when_baseline_unestablished
+5 failed, 322 passed, 2 skipped, 7 warnings in 194.46s (0:03:14)

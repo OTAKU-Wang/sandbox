@@ -1,0 +1,8 @@
+# 改前读数（2026-10-19 远程车道 lane3_fast 的后端步骤门：import 冒烟 / alembic upgrade / alembic check / schema parity）
+STEP_OK runtime Python 3.12.15
+STEP_OK tree_sync
+STEP_OK compileall
+STEP_OK import_smoke
+STEP_OK alembic_upgrade
+STEP_OK alembic_check
+STEP_OK schema_parity

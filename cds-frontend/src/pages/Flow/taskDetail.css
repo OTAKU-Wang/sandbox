@@ -8,7 +8,9 @@
 
 .cds-t24 {
   --t24-ink: #1d2129;
-  --t24-grey: #86909c;
+  /* A233：灰注原色 #86909c 对卡片白底只有 3.24:1、对 #f7f8fa 值盒底 3.05:1，两处都不过 AA 4.5:1
+     （10 处引用全走这个变量，改一处即全量生效）。#616b78：对 #ffffff 5.41，对 #f7f8fa 5.09。 */
+  --t24-grey: #616b78;
   --t24-blue: #1b6ef3;
   --t24-tile: #f8fbff;
   --t24-box: #f7f8fa;
@@ -88,21 +90,23 @@
   font-size: 14px;
 }
 
+/* A233：浅底同色系深字在 14px 下全部不过 AA 4.5:1（完成 2.78 / 失败 3.25 / 进行中 4.04）。
+   底色不动（原型实测值），只把字色提到同色系更深的档：5.26 / 4.88 / 5.71。 */
 .cds-t24 .t24-tag.is-ok.ant-tag {
   background: #e8f7ee;
-  color: #00a870;
+  color: #08744a;
   border-color: #e8f7ee;
 }
 
 .cds-t24 .t24-tag.is-err.ant-tag {
   background: #fdecee;
-  color: #f53f3f;
+  color: #cf1322;
   border-color: #fdecee;
 }
 
 .cds-t24 .t24-tag.is-run.ant-tag {
   background: #e8f1ff;
-  color: #1b6ef3;
+  color: #1456cc;
   border-color: #e8f1ff;
 }
 
@@ -148,10 +152,12 @@
   font-size: 16px;
 }
 
-.cds-t24 .t24-chip.is-green { background: #e8f7ee; color: #00a870; }
-.cds-t24 .t24-chip.is-blue { background: #e8f1ff; color: var(--t24-blue); }
-.cds-t24 .t24-chip.is-purple { background: #f1ecff; color: #7f60f8; }
-.cds-t24 .t24-chip.is-orange { background: #fff3e8; color: #f47034; }
+/* A233：四枚芯片同样只动字色（背色是原型实测值），对各自浅底：5.26 / 5.71 / 5.14 / 4.78
+   （原 2.78 / 4.04 / 3.69 / 2.67）。`--t24-blue` 本体不动（还被按钮/进度条引用）。 */
+.cds-t24 .t24-chip.is-green { background: #e8f7ee; color: #08744a; }
+.cds-t24 .t24-chip.is-blue { background: #e8f1ff; color: #1456cc; }
+.cds-t24 .t24-chip.is-purple { background: #f1ecff; color: #7444d6; }
+.cds-t24 .t24-chip.is-orange { background: #fff3e8; color: #b84a12; }
 
 /* 标题 12px 灰 y306..316、值 16px 黑 y323..339，文字列在块左 +68（=16 内缩 +40 芯片 +12 间隙） */
 .cds-t24 .t24-tile .ant-statistic-title {
@@ -260,11 +266,16 @@
   line-height: 16px;
 }
 
+/* A232：值大量是后端原样下发的长串（任务号、合约号、notebook 路径），原本两盒都没有
+   min-width/overflow/overflow-wrap ⇒ 长 token 不换行会直接溢出 #f7f8fa 盒外。 */
 .cds-t24 .t24-field-box {
   display: flex;
   align-items: center;
   margin-top: 8px;
   min-height: 42px;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: 11px 10px; /* 图值盒 h42：行高 20 + 上下 11（旧 12 得 44） */
   background: var(--t24-box);
   border-radius: 6px;
@@ -307,6 +318,9 @@
   justify-content: space-between;
   margin-top: 8px;
   min-height: 42px;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: 11px 10px;
   background: var(--t24-box);
   border-radius: 6px;
@@ -365,9 +379,14 @@
   line-height: 20px; /* 图行 ink h20（y994..1014），行盒不多撑 */
 }
 
+/* A232：本行是 flex + nowrap，长值（如「8 / 16 GiB」后的口径注）会把行撑开；
+   min-width: 0 才能缩到内容宽以下，配合 ellipsis 截断。 */
 .cds-t24 .t24-mem-value {
   color: var(--t24-grey);
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -446,6 +465,21 @@
   color: var(--t24-blue);
 }
 
+/* A233：上面那条特异度 (0,3,1)，高于 antd v5 自带的 `.ant-typography:hover` (0,2,0)（v5 的 hash 类
+   包在 `:where()` 里不计特异度）⇒ 悬停变色被一起压住。同层补回悬停色（#0d4bb0 对白 7.92:1）。 */
+.cds-t24 .t24-table a.ant-typography:hover,
+.cds-t24 .t24-table .ant-table-tbody a:hover {
+  color: #0d4bb0;
+}
+
+/* A233：本文件原本零 `:focus-visible`，表内可点元件只能靠光标形状判断；补键盘焦点环。 */
+.cds-t24 .t24-table a.ant-typography:focus-visible,
+.cds-t24 .t24-table .ant-table-tbody a:focus-visible,
+.cds-t24 .t24-table button:focus-visible {
+  outline: 2px solid var(--t24-blue);
+  outline-offset: 1px;
+}
+
 /* 表下补的「未取回/差额」说明按图不存在，但铁律要求如实写差额：留 12px 灰，不撑破卡 */
 .cds-t24 .t24-table-foot {
   display: block;
@@ -461,13 +495,45 @@
   font-size: 13px;
 }
 
-/* 详情弹窗按同族 4-2 裁图口径 720 宽（antd 默认 520） */
+/* 详情弹窗按同族 4-2 裁图口径 720 宽（antd 默认 520）。
+   A231：antd Modal 走 portal 挂在 body 上，不受 `.cds-t24` 约束 ⇒ 这条 720 定宽原本是全文唯一的
+   横向硬约束，视口 <720（分屏笔电、1024 缩放 125%）直接横向滞动。内联 style 只写 width、没写
+   max-width ⇒ 补一条 vw 相对的 max-width 就能夹住（clamp 优先于 width，不需 !important）。
+   **成立区间：720 定宽只在视口 ≥752 成立，以下按 100vw−32 收窄。** */
 .cds-t24-modal.ant-modal {
   width: 720px !important;
+  max-width: calc(100vw - 32px);
   top: 64px;
 }
 
 .cds-t24-modal .ant-modal-body {
   max-height: 62vh;
   overflow: auto;
+}
+
+/* A231：本文件此前零断点。矮屏一档（≤700 高）里 顶距 64 + 头/脚上界 150 + 体上限 62vh 会把 footer
+   顶出屏（解 (64+150)/(1−0.62) ⇒ 视口高 <564 必溢）⇒ 压顶距到 16 并把体上限改成 100vh−220，
+   使 顶距+非体+体 ≤ 视口高（700 档：16+150+480 = 646 ≤ 700）。 */
+@media (max-height: 700px) {
+  .cds-t24-modal.ant-modal {
+    top: 16px;
+  }
+
+  .cds-t24-modal .ant-modal-body {
+    max-height: calc(100vh - 220px);
+  }
+}
+
+/* A231：横向窄档。卡 E 的 328px 定宽轨 + 两条流式配额列在窄档会被压到读数不可读
+   （`.t24-quota-box` 是 space-between，值与右端 G 小片会被顶到两端），四列小卡同档也过挤。
+   释放点算术：328 + 2×26 + 2×200 + 外壳（左标 219 + 内容内距 48 + 卡身 48 + 定标扣减 37）= 1132
+   ⇒ 取 1199：既晚于下限，也不吃掉 1440 原型档的三列/四列版式。 */
+@media (max-width: 1199px) {
+  .cds-t24 .t24-res {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cds-t24 .t24-tile-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

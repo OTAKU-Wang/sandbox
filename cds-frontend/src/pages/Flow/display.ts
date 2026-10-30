@@ -9,6 +9,8 @@ import {
   UNKNOWN_TEXT,
   WorkloadStatus,
   describePublishGateCode,
+  isValidApiSlug,
+  openApiCallPathForSlug,
 } from '../../services/flow';
 import type { CellExecuteResult, Notebook, Workload, WorkloadTestRun } from '../../services/flow';
 
@@ -224,8 +226,16 @@ export function attemptLabel(attempt: number | null | undefined, maxAttempts: nu
   return typeof maxAttempts === 'number' ? `${attempt}/${maxAttempts}` : `${attempt}`;
 }
 
+/** slug 不合法/缺失时的展示占位：宁给一个明说的占位，不给一个能复制的假路径（与 Guide 页字面一致）。 */
+export const OPEN_API_PATH_PLACEHOLDER = '/open/v1/{slug}';
+
+/**
+ * 展示用的外部调用路径：与在线试调用走同一口径（A246）——`isValidApiSlug` 先拦、
+ * `openApiCallPathForSlug` 拼接并转义，非法 slug 显示占位符。
+ * 这条路径会被当调用示例与 apiUrl 复制出去，不能把后端下发的 slug 原样注进 URL。
+ */
 export function openApiPathForSlug(slug: string): string {
-  return `/open/v1/${slug}`;
+  return isValidApiSlug(slug) ? openApiCallPathForSlug(slug) : OPEN_API_PATH_PLACEHOLDER;
 }
 
 // ---------- 成果包交付列（SS-18 §8 P0-②：后端打包时落在交付包行上） ----------

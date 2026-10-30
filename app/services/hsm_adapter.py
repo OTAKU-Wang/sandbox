@@ -17,7 +17,20 @@ logger = logging.getLogger(__name__)
 
 
 class HSMAdapter(ABC):
-    """Abstract HSM interface for key operations."""
+    """Abstract HSM interface for key operations.
+
+    A94 (honest degradation / T12): every adapter declares where its keys
+    actually live. `is_simulation` is True for any adapter with NO hardware
+    backing, and `backend` is a machine-readable name for boot disclosure.
+    Without these two markers a caller (kms_service today) cannot tell a
+    software-KEK process from a real HSM, which is exactly the discrimination
+    the honest-degradation rule requires.
+    """
+
+    #: True when keys live in this process rather than in hardware/Vault.
+    is_simulation: bool = False
+    #: Machine-readable backend id ("vault-transit" | "software-fallback").
+    backend: str = "unknown"
 
     @abstractmethod
     def generate_kek(self, key_id: str) -> bytes:
@@ -63,6 +76,9 @@ class VaultTransitAdapter(HSMAdapter):
 
     Production implementation — uses Vault for KEK management.
     """
+
+    is_simulation = False
+    backend = "vault-transit"
 
     def __init__(self, vault_addr: str = "", vault_token: str = ""):
         self._vault_addr = vault_addr
@@ -173,8 +189,11 @@ class VaultTransitAdapter(HSMAdapter):
                     hash_algorithm="sha2-256",
                 )
                 sig_hex = response["data"]["signature"]
-                # Vault returns "vault:v1:<base64>" format
-                import base64
+                # Vault returns "vault:v1:<base64>" format. The module-level
+                # `base64` import is the only one: a second `import base64`
+                # here made it a FUNCTION-LOCAL name, so the `base64.b64encode`
+                # a few lines above always raised UnboundLocalError and the
+                # real Vault signing path could never succeed (A94c).
                 sig_b64 = sig_hex.split(":")[-1]
                 return base64.b64decode(sig_b64)
             except Exception as e:
@@ -190,7 +209,14 @@ class SoftwareHSMAdapter(HSMAdapter):
     """Software fallback HSM for development/testing.
 
     Stores keys in memory. NOT for production use.
+
+    A94: the fallback must be discernible from the outside — `is_simulation`
+    and `backend` are the markers the boot disclosure (T12) and any caller
+    read to know the KEK is a process-local random value, not hardware.
     """
+
+    is_simulation = True
+    backend = "software-fallback"
 
     def __init__(self):
         self._keys: dict[str, bytes] = {}
@@ -287,8 +313,27 @@ def create_hsm_adapter() -> HSMAdapter:
             "HSM/Vault unavailable and HSM_SOFTWARE_FALLBACK_ALLOWED=false — "
             "refusing to fall back to the software HSM"
         )
-    logger.info("Using software HSM fallback (dev/test only)")
+    logger.warning(
+        "HSM fallback in use: backend=software-fallback is_simulation=True — the KEK "
+        "lives in this process, NOT in an HSM (dev/test only; disable via "
+        "HSM_SOFTWARE_FALLBACK_ALLOWED=false). Disclosed at WARNING so it survives "
+        "production log levels (A94/T12)."
+    )
     return SoftwareHSMAdapter()
+
+
+def describe_hsm_backend(adapter: HSMAdapter | None = None) -> dict[str, object]:
+    """A94: machine-readable disclosure of the active HSM backend for boot (T12).
+
+    Carries no key material — only which backend is live and whether it is a
+    simulation. main.py's fallback disclosure is the consumer that still needs
+    to read this (NEEDS-OWNER: app/main.py).
+    """
+    a = adapter if adapter is not None else hsm_adapter
+    return {
+        "backend": getattr(a, "backend", "unknown"),
+        "is_simulation": bool(getattr(a, "is_simulation", False)),
+    }
 
 
 # Singleton

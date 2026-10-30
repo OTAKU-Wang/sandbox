@@ -97,6 +97,33 @@ LEVEL_METADATA: dict[str, dict] = {
 LEVEL_ORDER = ("L0", "L1", "L2", "l2c", "L3", "k8s")
 
 # ---------------------------------------------------------------------------
+# A55: 档位强度序 —— 承载供数的会话可用档位（唯一权威，由强到弱）
+#
+# 与 workflow_service.pick_test_sandbox_level 的 CR BLOCKER-1 阶梯同源：会话一旦
+# 装载真实供数，运行面只能是 l2c（Cube MicroVM，SS-13 单路径）或 L3（bwrap），
+# 下限 L3。L0 是本表自己写明「开发调试用，不可写入合约」的进程隔离；L1 无硬件时是
+# software_confidential 诚实降级（FG-001）；L2/k8s 在 SS-10 后弃用且受 legacy 门控。
+# 这条下限是**平台不变量**，不由合约数据决定：一纸只放行 L0 的合约不得把密态供数跑到
+# L0 上去 —— 违规时按 SS-13 拒绝（LEGACY_LEVEL_RETIRED），绝不静默换成更强的档，
+# 也绝不因为「合约同意了」就放行更弱的档。
+# ---------------------------------------------------------------------------
+SUPPLY_DATA_LEVELS: tuple[str, ...] = (LEVEL_L2C, "L3")
+
+
+def supply_data_level_rank(level: str) -> int | None:
+    """强度序里的名次（0 = 最强）；``None`` = 该档不得承载供数。
+
+    只回答「这个档位能不能装真实供数、在可装档位里排第几」，不给 L0/L1/L2 之间
+    编造强弱关系 —— 它们一律是「不可承载」，不是「更弱一档」。
+    """
+    return SUPPLY_DATA_LEVELS.index(level) if level in SUPPLY_DATA_LEVELS else None
+
+
+def can_carry_supply_data(level: str) -> bool:
+    """该档位是否允许承载解密后的供数（A55 判据；调用方不得另抄一份档位表）。"""
+    return supply_data_level_rank(level) is not None
+
+# ---------------------------------------------------------------------------
 # Capability matrix — {level x capability} -> {state, note, evidence?}
 # Baseline: 2026-10-12 code-verified (spec ss-11 §2.1).
 # ---------------------------------------------------------------------------
@@ -346,10 +373,15 @@ def get_capability_matrix() -> dict:
 
 def health_capability_section() -> dict:
     """Compact capability block for the additive /health section:
-    level list + the l2c (L2') planned flag."""
+    level list + the l2c (L2') planned flag.
+
+    A9: ``l2c_planned`` is True while the L2' row still has *any* planned
+    capability cell (per the row comments: RT-06 per-VM TEE, CB-04 envd
+    streaming). The previous ``all(...)`` could never be True on a mixed row —
+    dead logic that read "L2' not ready" as "ready"."""
     return {
         "levels": list(LEVEL_ORDER),
-        "l2c_planned": all(
+        "l2c_planned": any(
             _MATRIX[LEVEL_L2C][cap]["state"] == STATE_PLANNED for cap in CAPABILITIES
         ),
         "baseline": MATRIX_BASELINE_DATE,

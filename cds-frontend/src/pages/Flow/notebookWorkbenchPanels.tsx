@@ -48,6 +48,12 @@ export interface FileDirectoryPanelProps {
   /** 勾选后的真动作：只有会话上传文件那条链能真取回。 */
   onDownloadSelected: () => void;
   downloading: boolean;
+  /**
+   * A294 第三态：本轮下载里「未读取到 X-CDS-Output-Review 披露」的文件数（父级统计后传入）。
+   * >0 时页脚不得再无条件断言「逐个过 T5 输出审查后取回」——头没到页面 = 审查结果未知，
+   * 把未知渲染成通过踩 honest degradation 铁律。null/0 = 披露齐全，保持现文案。
+   */
+  disclosureMissingCount?: number | null;
 }
 
 function flatten(list: WorkbenchFileNode[]): WorkbenchFileNode[] {
@@ -137,6 +143,7 @@ export function FileDirectoryPanel(props: FileDirectoryPanelProps) {
     onToggle,
     onDownloadSelected,
     downloading,
+    disclosureMissingCount,
   } = props;
   const chosenCount = flatten(nodes).filter((node) => selected.includes(node.key)).length;
 
@@ -195,7 +202,15 @@ export function FileDirectoryPanel(props: FileDirectoryPanelProps) {
           {chosenCount ? (
             <div className="nbw-panel-foot-action">
               <a onClick={downloading ? undefined : onDownloadSelected}>下载选中 {chosenCount} 个</a>
-              <span style={{ marginLeft: 6 }}>（逐个过 T5 输出审查后取回）</span>
+              {/* A294：有未取到披露的文件时换成第三态口径（哨兵与 SessionDetail/NotebookWorkbench 连续同文），
+                  不得让「（逐个过 T5 输出审查后取回）」在未知上继续断言。 */}
+              {disclosureMissingCount && disclosureMissingCount > 0 ? (
+                <span style={{ marginLeft: 6 }}>
+                  （本轮 {disclosureMissingCount} 个文件未读取到输出审查披露，不代表已过审）
+                </span>
+              ) : (
+                <span style={{ marginLeft: 6 }}>（逐个过 T5 输出审查后取回）</span>
+              )}
             </div>
           ) : null}
         </div>

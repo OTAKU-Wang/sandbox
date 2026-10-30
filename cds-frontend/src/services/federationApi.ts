@@ -13,8 +13,12 @@ export interface TrustRelationship {
   trust_level: string;
   status: string;
   allowed_operations: string[];
-  created_at: string;
-  updated_at?: string;
+  /**
+   * A262：created_at 是跨空间互信记录的证据的一部分，后端没给就是 null（界面显示 UNKNOWN_TEXT），
+   * 绝不用 `new Date()` 兜一个「看起来完全正常」的当前时间——那是伪造审计时间。
+   */
+  created_at: string | null;
+  updated_at?: string | null;
 }
 
 export interface CatalogSyncEntry {
@@ -62,6 +66,21 @@ interface TrustResponse {
   status: string;
   allowed_operations?: string[];
   created_at?: string;
+  updated_at?: string;
+}
+
+/** 缺字段/空串/非字符串一律报 null：中性兜底，不编时间（A262）。 */
+const toAuditTime = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() !== '' ? value : null;
+
+/** 时间缺失时的展示口径，与 services/flow.ts 的 `UNKNOWN_TEXT` 同词。 */
+export const TRUST_TIME_UNKNOWN = '未记录';
+
+/** 只在能解析时格式化；缺了给「未记录」，解不了原样透出——不出 1970、也不出「现在」（A262）。 */
+export function formatTrustTimestamp(value: string | null): string {
+  if (!value) return TRUST_TIME_UNKNOWN;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? value : new Date(ms).toLocaleString();
 }
 
 const normalizeTrust = (item: TrustResponse): TrustRelationship => ({
@@ -72,7 +91,7 @@ const normalizeTrust = (item: TrustResponse): TrustRelationship => ({
   trust_level: item.trust_level,
   status: item.status,
   allowed_operations: item.allowed_operations || [],
-  created_at: item.created_at || new Date().toISOString(),
+  created_at: toAuditTime(item.created_at),
 });
 
 export const federationApi = {

@@ -214,7 +214,10 @@ export default function SessionDetail() {
 
   // PZ-16 ③：文件审查预告（X-CDS-Output-Review 头解析结果，按文件名缓存）
   // 与 409 阻断发现摘要（不放开，仅展示 findings）
-  const [fileReviews, setFileReviews] = useState<Record<string, { status: 'passed' | 'redacted' | 'blocked'; findings: number }>>({});
+  const [fileReviews, setFileReviews] = useState<Record<string, { status: 'passed' | 'redacted' | 'blocked' | 'unreviewed'; findings: number }>>({});
+  // A294：拿不到 X-CDS-Output-Review（跨域未配 expose_headers 时浏览器不会把这个头交给 JS）
+  // 是第三种状态，必须显式说出来——“没报警”不等于“审查通过”（honest degradation 铁律）。
+  const [unreviewedDownload, setUnreviewedDownload] = useState<string | null>(null);
   const [blockedDownload, setBlockedDownload] = useState<{
     filename: string;
     findingsCount: number;
@@ -519,14 +522,24 @@ export default function SessionDetail() {
       URL.revokeObjectURL(url);
       // PZ-16 ③：缓存 X-CDS-Output-Review 结果供文件表徽标展示（下载前预告）
       setBlockedDownload(null);
-      if (review) {
-        setFileReviews((prev) => ({ ...prev, [filename]: { status: review.status, findings: review.findings } }));
-      }
+      setFileReviews((prev) => ({
+        ...prev,
+        [filename]: review
+          ? { status: review.status, findings: review.findings }
+          : { status: 'unreviewed' as const, findings: 0 },
+      }));
       if (review?.status === 'redacted') {
         setDownloadRedactedFile(filename);
+        setUnreviewedDownload(null);
         message.info('该文件已通过输出审查，内容已脱敏');
+      } else if (!review) {
+        // A294：披露没到页面 = 审查结果未知，绝不静默报“下载成功”当成通过
+        setDownloadRedactedFile(null);
+        setUnreviewedDownload(filename);
+        message.warning('下载完成，但未读取到输出审查披露（X-CDS-Output-Review）：不代表输出已通过审查');
       } else {
         setDownloadRedactedFile(null);
+        setUnreviewedDownload(null);
         message.success('下载成功');
       }
     },
@@ -1127,6 +1140,18 @@ export default function SessionDetail() {
             style={{ marginBottom: 12 }}
           />
         )}
+        {unreviewedDownload && (
+          // A294：披露缺失得活到用户亲手处置，不能只靠一闪而过的 toast
+          <Alert
+            type="warning"
+            showIcon
+            message="未读取到输出审查披露"
+            description={`文件 "${unreviewedDownload}" 已下载，但页面没有拿到 X-CDS-Output-Review 头（跨域部署未配 expose_headers 时必然如此）：内容是否被脱敏、命中几项风险，本页无从得知——这不代表输出通过了 T5 审查。`}
+            closable
+            onClose={() => setUnreviewedDownload(null)}
+            style={{ marginBottom: 12 }}
+          />
+        )}
         {blockedDownload && (
           // PZ-16 ③：409 输出审查阻断 — 发现摘要面板（不放开，联系管理员）
           <Alert
@@ -1182,10 +1207,11 @@ export default function SessionDetail() {
                     <Text code>{name}</Text>
                     {record.encrypted && <Tag color="gold">已加密</Tag>}
                     {review && (
-                      <Tooltip title="T5 输出审查结果预告（X-CDS-Output-Review 语义：passed/redacted; findings=N）">
+                      <Tooltip title="T5 输出审查结果预告（X-CDS-Output-Review 语义：passed/redacted; findings=N）；该头没到页面时标「审查披露缺失」，不代表通过">
                         {review.status === 'passed' && <Tag color="green">审查通过</Tag>}
                         {review.status === 'redacted' && <Tag color="orange">已脱敏 · 发现 {review.findings} 项</Tag>}
                         {review.status === 'blocked' && <Tag color="red">已阻断 · 发现 {review.findings} 项</Tag>}
+                        {review.status === 'unreviewed' && <Tag color="volcano">审查披露缺失</Tag>}
                       </Tooltip>
                     )}
                   </Space>

@@ -34,7 +34,7 @@ from app.models.field_exposure import (
     FieldVisibilityConfig,
 )
 from app.services.audit_service import audit_service
-from app.services.quota_manager import quota_manager
+from app.services.quota_manager import QuotaBackendUnavailable, quota_manager
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +91,20 @@ def sm3_hash(data: str) -> str:
         return hashlib.sha256(data.encode()).hexdigest()
 
 
+METERING_TABLE = "gateway_metering"
+
+
 class GatewayService:
     """Contract execution gateway service."""
 
     def __init__(self):
         self._clickhouse_client = None
+        self._metering_table_ready = False
+        self._metering_backend = "unknown"
+        self._metering_written = 0
+        self._metering_failed = 0
+        self._metering_dropped = 0
+        self._last_metering_error = ""
 
     # === Authentication ===
 
@@ -180,9 +189,15 @@ class GatewayService:
                           rows_requested: int = 0) -> tuple[bool, str]:
         """Check if the request is within daily quota limits (Redis-backed).
 
-        Returns (allowed, reason).
+        Returns (allowed, reason). An unreadable usage counter is not zero usage: the
+        request is refused instead of silently passing the gate (A146).
         """
-        usage = await quota_manager.get_gateway_usage(cred.app_id)
+        try:
+            usage = await quota_manager.get_gateway_usage(cred.app_id, strict=True)
+        except QuotaBackendUnavailable as e:
+            logger.error("[gateway][A146] daily usage unreadable for %s (%s) — request refused",
+                         cred.app_id, e)
+            return False, "daily quota usage unverifiable (quota backend unavailable)"
 
         # Pre-check: already at or over limit?
         if cred.quota_rows > 0 and usage["rows"] >= cred.quota_rows:
@@ -207,12 +222,63 @@ class GatewayService:
             bytes_limit=cred.quota_bytes,
         )
 
+    def metering_health(self) -> dict:
+        """A164: metering must not fail silently — totals reported to the API are only
+        as good as these counters. Read-only view of the write-outcome accounting."""
+        return {
+            "backend": self._metering_backend,
+            "table": METERING_TABLE,
+            "table_ready": self._metering_table_ready,
+            "written": self._metering_written,
+            "failed": self._metering_failed,
+            "dropped": self._metering_dropped,
+            "last_error": self._last_metering_error,
+        }
+
+    def reset_metering_health(self) -> None:
+        self._metering_table_ready = False
+        self._metering_backend = "unknown"
+        self._metering_written = 0
+        self._metering_failed = 0
+        self._metering_dropped = 0
+        self._last_metering_error = ""
+
+    def _ensure_metering_table(self, client) -> None:
+        """A164 root cause: nothing in the repo ever executed the DDL for this table, so
+        every INSERT failed and was swallowed. ``clickhouse_schema`` is the in-repo truth
+        for the layout and its CREATE is ``IF NOT EXISTS``, so it is safe to run here."""
+        if self._metering_table_ready:
+            return
+        from app.services.clickhouse_schema import clickhouse_schema
+
+        ddl = clickhouse_schema.generate_create_sql(METERING_TABLE)
+        if not ddl:
+            raise RuntimeError(f"no DDL defined for metering table {METERING_TABLE}")
+        client.execute(ddl)
+        self._metering_table_ready = True
+        logger.info("[gateway] ensured ClickHouse metering table %s", METERING_TABLE)
+
     def record_metering(self, record: MeteringRecord):
-        """Record metering data to ClickHouse."""
+        """Record metering data to ClickHouse.
+
+        Never raises, but every outcome is counted: a dropped/failed record used to be a
+        single warning line while the metering endpoints kept answering 0 (A164).
+        """
+        client = self._get_clickhouse()
+        if not client:
+            self._metering_backend = "unavailable"
+            self._metering_dropped += 1
+            self._last_metering_error = "ClickHouse backend unavailable — metering record dropped"
+            logger.error(
+                "[gateway][A164] Metering dropped (%d total): no ClickHouse backend — "
+                "gateway metering totals will stay at 0",
+                self._metering_dropped,
+            )
+            return
+
+        self._metering_backend = "clickhouse"
         try:
-            client = self._get_clickhouse()
-            if not client:
-                return
+            self._ensure_metering_table(client)
             client.execute(
                 """INSERT INTO gateway_metering
                    (request_id, timestamp, contract_id, app_id, consumer_id,
@@ -234,7 +300,15 @@ class GatewayService:
                 ]],
             )
         except Exception as e:
-            logger.warning(f"[gateway] Metering write failed: {e}")
+            self._metering_failed += 1
+            self._last_metering_error = f"{type(e).__name__}: {e}"
+            logger.error(
+                "[gateway][A164] Metering write failed (%d total): %s — reported metering "
+                "totals understate real gateway traffic",
+                self._metering_failed, self._last_metering_error,
+            )
+            return
+        self._metering_written += 1
 
     # === Data Product Access ===
 

@@ -261,6 +261,7 @@ class AuditTail:
         pusher: Pusher,
         overflow_marker: Path,
         batch_max: int = DEFAULT_PUSH_BATCH_MAX,
+        poll_interval: float = DEFAULT_POLL_INTERVAL_SEC,
     ):
         self.node_id = node_id
         self.audit_file = audit_file
@@ -269,6 +270,7 @@ class AuditTail:
         self.pusher = pusher
         self.overflow_marker = overflow_marker
         self.batch_max = batch_max
+        self.poll_interval = poll_interval
         self.state = TailState()
 
     # -- source reading ---------------------------------------------------
@@ -495,6 +497,58 @@ def _env(key: str, default: str | None = None) -> str | None:
     return v if v not in (None, "") else None
 
 
+def _poll_interval() -> float:
+    """Parse AUDIT_TAILER_POLL_INTERVAL_SEC at build time, not in the run loop.
+
+    A non-numeric value would raise *after* startup (systemd restart loop with a
+    crash per attempt) and ``0`` would turn the tail loop into a busy poll
+    against the audit file and the CDS endpoint — both are config errors and must
+    be reported as a startup refusal instead.
+    """
+    raw = _env("AUDIT_TAILER_POLL_INTERVAL_SEC") or str(DEFAULT_POLL_INTERVAL_SEC)
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        raise TailerConfigError(
+            f"AUDIT_TAILER_POLL_INTERVAL_SEC is not a number: {raw!r}"
+        ) from None
+    if not 0 < val <= 3600:
+        raise TailerConfigError(
+            f"AUDIT_TAILER_POLL_INTERVAL_SEC must be in (0, 3600], got {raw!r} "
+            "(0 = busy loop; larger stalls the audit link)"
+        )
+    return val
+
+
+def _validate_tls_material(cert: str, key: str, ca: str) -> None:
+    """Load the mTLS material exactly as the pusher's TLS stack will load it.
+
+    Presence + non-empty size is NOT enough: an unparseable ca.crt fails inside
+    httpx on the first batch — i.e. only while traffic flows, long after the
+    deployment that shipped the broken file.  Loading it here fails at startup
+    instead (fail-closed: loud CRITICAL + systemd Restart, never a silently
+    absent audit link).
+    """
+    import ssl  # stdlib only — validating needs no extra package on the node
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        ctx.load_verify_locations(cafile=ca)
+    except Exception as e:
+        raise TailerConfigError(
+            f"TLS_CA cannot be loaded as a CA bundle: {ca}: {e!r} — refusing to "
+            "start (fail-closed: every batch would fail the handshake later)"
+        ) from e
+    try:
+        ctx.load_cert_chain(certfile=cert, keyfile=key)
+    except Exception as e:
+        raise TailerConfigError(
+            f"TLS client cert/key cannot be loaded: {cert} + {key}: {e!r} — "
+            "refusing to start (fail-closed: no plaintext fallback for the "
+            "audit link)"
+        ) from e
+
+
 def build_from_env(pusher: Pusher | None = None) -> AuditTail:
     """Build the tailer from AUDIT_TAILER_* env vars.  Fail-closed:
     missing required keys or mTLS material raise TailerConfigError."""
@@ -518,12 +572,23 @@ def build_from_env(pusher: Pusher | None = None) -> AuditTail:
     ]
     if missing:
         raise TailerConfigError(f"missing required env: {', '.join(missing)}")
+    if not endpoint.lower().startswith("https://"):
+        # The Bearer service token and the audit records themselves ride this
+        # connection: a plaintext endpoint would ship both in the clear, and the
+        # mTLS client material would be sent to whatever answers the port.
+        raise TailerConfigError(
+            f"AUDIT_TAILER_CDS_ENDPOINT must be https://, got {endpoint!r} — "
+            "refusing to start (fail-closed: the service token and audit "
+            "records must never cross a plaintext link)"
+        )
+    poll_interval = _poll_interval()
     for name, path in (("TLS_CERT", cert), ("TLS_KEY", key), ("TLS_CA", ca)):
         if not Path(path).is_file() or Path(path).stat().st_size == 0:
             raise TailerConfigError(
                 f"{name} file missing or empty: {path} — refusing to start "
                 "(fail-closed: no plaintext fallback for the audit link)"
             )
+    _validate_tls_material(cert, key, ca)
     audit_dir = Path(_env("AUDIT_TAILER_AUDIT_DIR") or DEFAULT_AUDIT_DIR)
     queue_max = int(_env("AUDIT_TAILER_QUEUE_MAX") or DEFAULT_QUEUE_MAX)
     offset_file = _env("AUDIT_TAILER_OFFSET_FILE") or DEFAULT_OFFSET_FILE
@@ -543,6 +608,7 @@ def build_from_env(pusher: Pusher | None = None) -> AuditTail:
         queue=queue,
         pusher=pusher,
         overflow_marker=marker,
+        poll_interval=poll_interval,
     )
 
 
@@ -572,7 +638,9 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _sig)
     signal.signal(signal.SIGINT, _sig)
 
-    poll = float(_env("AUDIT_TAILER_POLL_INTERVAL_SEC") or DEFAULT_POLL_INTERVAL_SEC)
+    # Already parsed and range-checked by build_from_env() — a bad value can
+    # never reach the loop.
+    poll = tail.poll_interval
     logger.info(
         "audit tailer starting: node_id=%s file=%s push->%s",
         tail.node_id, tail.audit_file, _env("AUDIT_TAILER_CDS_ENDPOINT"),

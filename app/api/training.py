@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import BigInteger, Integer, SmallInteger, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,7 @@ from app.core.deps import get_current_user, require_roles
 from app.models.audit_log import AuditLog
 from app.models.user import User, UserRole
 from app.models.training_job import TrainingJob, TrainingJobStatus, TrainingJobType
-from app.models.watermark_record import WatermarkRecord
+from app.models.watermark_record import EncryptedKeySeed, WatermarkRecord
 from app.services.crypto_service import crypto_service
 from app.services.audit_service import audit_service
 from app.services.llm_sft_runtime import (
@@ -56,6 +56,24 @@ _NUMPY_EXTENSIONS = {".npz", ".npy"}
 _PICKLE_EXTENSIONS = {".pkl", ".pickle"}
 _SAFETENSORS_EXTENSIONS = {".safetensors"}
 _TRAINING_OUTPUT_ROOT = Path(os.environ.get("CDS_TRAINING_OUTPUT_DIR", "/tmp/cds_training_outputs"))
+
+
+class _DataOnlyUnpickler(pickle.Unpickler):
+    """A22: 只允许纯数据 pickle（dict/list/标量等无类引用载荷）。
+
+    检查点查看腿把 `output_path` 下的文件直接送进反序列化器，而
+    `__reduce__` 可把任意可调用对象写进载荷（pickle 反序列化＝RCE）；
+    输出目录被共享/可写时一次「查看检查点」即在 API 进程内执行任意代码。
+    因此任何类解析（find_class）一律拒绝；需要类重建的载荷（如张量）
+    由 torch 腿的 weights_only 白名单路径接管，不走本类。
+    """
+
+    def find_class(self, module: str, name: str):
+        raise pickle.UnpicklingError(
+            f"checkpoint pickle references {module}.{name} — only plain-data "
+            "payloads are accepted (A22: unpickling attacker-controlled "
+            "checkpoints executes code)"
+        )
 
 
 @dataclass
@@ -480,12 +498,56 @@ async def list_training_job_checkpoints(
 # Model-weight watermarking
 # ---------------------------------------------------------------------------
 
+def _key_seed_column_max() -> int:
+    """key_seed 的合法上界 = watermark_records.key_seed 的列宽（A167）。
+
+    边界取自列类型而不是字面量：列改成 BigInteger/SmallInteger 时这里自动跟着变。
+    未知列类型直接拒绝猜测（fail-closed）。
+    A186b: the column has been an ``EncryptedKeySeed`` sealed blob (physical
+    ``TEXT``) since revision 0030, so the domain comes from the decorator's
+    INTEGER base class — Integer→BigInteger widens the accepted seed space to
+    0…2**63-1, which is the finding's entropy half («水印的全部安全性 = 这颗
+    31-bit 种子»). The blob is variable-length base64, so the storage shape is
+    checked too: a bounded character column is refused rather than accepted and
+    then clipped (fail-closed).
+    """
+    col_type = WatermarkRecord.__table__.c.key_seed.type
+    if isinstance(col_type, EncryptedKeySeed):
+        impl = col_type.impl
+        if getattr(impl, "length", None) is not None:
+            raise RuntimeError(
+                "watermark_records.key_seed seals into a variable-length blob but its "
+                f"storage column is bounded ({impl!r}) — refusing to accept seeds whose "
+                "sealed form may not fit the column"
+            )
+    if isinstance(col_type, BigInteger):
+        return 2**63 - 1
+    if isinstance(col_type, SmallInteger):
+        return 2**15 - 1
+    if isinstance(col_type, Integer):
+        return 2**31 - 1
+    raise RuntimeError(
+        f"watermark_records.key_seed column type {type(col_type).__name__} has no known "
+        "integer width — refusing to guess the key_seed bound"
+    )
+
+
+_KEY_SEED_MAX = _key_seed_column_max()
+
+
 class WatermarkEmbedRequest(BaseModel):
     owner_id: str = Field(..., description="Owner identifier for watermark")
     model_id: str = Field(..., description="Model identifier for watermark")
     layer_names: list[str] = Field(..., min_length=1, description="Layer names to embed into")
     num_bits: int = Field(64, ge=8, le=512, description="Number of watermark bits")
-    key_seed: int | None = Field(None, description="PRNG seed (auto-generated if omitted)")
+    # A167: 与 num_bits 一样必须有边界。越界值过去能一路走到落库才因 int4 溢出 500，
+    # 而那时 checkpoint 已被改写、唯一的审计行已被回滚。
+    key_seed: int | None = Field(
+        None,
+        ge=0,
+        le=_KEY_SEED_MAX,
+        description=f"PRNG seed (auto-generated if omitted), allowed 0…{_KEY_SEED_MAX}",
+    )
 
 
 class WatermarkEmbedResponse(BaseModel):
@@ -494,7 +556,10 @@ class WatermarkEmbedResponse(BaseModel):
     num_bits: int
     layers_watermarked: list[str]
     layer_positions: dict[str, list[int]]
-    key_seed: int
+    # A186: 只回不可逆指纹。key_seed 是明文列，一旦同时回显，水印定位密钥就等于直接
+    # 交给调用方（app/services/model_watermark.py: “It must never be widened to a
+    # client response”）。
+    key_seed_fingerprint: str
     embed_time_ms: float
 
 
@@ -506,7 +571,30 @@ class WatermarkVerifyResponse(BaseModel):
     extracted_bits: list[int]
 
 
-def _resolve_checkpoint_path(job: TrainingJob) -> Path:
+def _confine_to_output_root(path: Path) -> Path:
+    """A77: 把 API 侧要反序列化/回写的检查点钉在服务端自己写的训练输出根目录内。
+
+    `output_path` 目前全仓只被服务端写，但它是全仓唯一的宿主侧反序列化 sink：任何
+    「以后让调用方传路径」的改动、或同机邻居往该目录放文件，都会把一次「查看检查点」
+    变成 API 进程内任意代码执行。这里按解析后的真实路径判包含（同时堆死符号链接逃逸）。
+    """
+    root = _TRAINING_OUTPUT_ROOT.resolve()
+    try:
+        resolved = path.resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not resolve checkpoint path: {exc}")
+    if resolved != root and root not in resolved.parents:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Model checkpoint {path} resolves outside the training output root {root}: "
+                "only server-written training outputs may be loaded (A77)"
+            ),
+        )
+    return resolved
+
+
+def _resolve_checkpoint_path(job: TrainingJob, *, confine_to_output_root: bool = False) -> Path:
     if not job.output_path:
         raise HTTPException(status_code=400, detail="Training job has no output model")
     path = Path(job.output_path).expanduser()
@@ -537,12 +625,12 @@ def _resolve_checkpoint_path(job: TrainingJob) -> Path:
                 status_code=400,
                 detail=f"No supported model checkpoint found in {path}",
             )
-        return candidates[0]
+        return _confine_to_output_root(candidates[0]) if confine_to_output_root else candidates[0]
     if not path.exists():
         raise HTTPException(status_code=400, detail=f"Model checkpoint not found: {path}")
     if not path.is_file():
         raise HTTPException(status_code=400, detail=f"Model checkpoint is not a file: {path}")
-    return path
+    return _confine_to_output_root(path) if confine_to_output_root else path
 
 
 def _load_raw_checkpoint(path: Path) -> tuple[Any, str]:
@@ -553,7 +641,9 @@ def _load_raw_checkpoint(path: Path) -> tuple[Any, str]:
         try:
             import torch
 
-            return torch.load(path, map_location="cpu"), "torch"
+            # A22: 显钉 weights_only（requirements 只钉 torch>=2.0.0，<2.6 默认
+            # weights_only=False，不能依赖新版默认值保护）。
+            return torch.load(path, map_location="cpu", weights_only=True), "torch"
         except ModuleNotFoundError as exc:
             errors.append(f"torch unavailable: {exc}")
             return None
@@ -576,7 +666,9 @@ def _load_raw_checkpoint(path: Path) -> tuple[Any, str]:
             if suffix == ".npz":
                 with np.load(path, allow_pickle=False) as data:
                     return {name: data[name] for name in data.files}, "npz"
-            loaded = np.load(path, allow_pickle=True)
+            # A22: 非 npz 腿同样禁 pickle（allow_pickle=True 会让载荷里的
+            # __reduce__ 在 API 进程内执行），不保留 object 数组查看能力。
+            loaded = np.load(path, allow_pickle=False)
             if isinstance(loaded, np.ndarray) and loaded.shape == ():
                 item = loaded.item()
                 if isinstance(item, dict):
@@ -592,7 +684,7 @@ def _load_raw_checkpoint(path: Path) -> tuple[Any, str]:
     def try_pickle() -> tuple[Any, str] | None:
         try:
             with path.open("rb") as fh:
-                return pickle.load(fh), "pickle"
+                return _DataOnlyUnpickler(fh).load(), "pickle"
         except Exception as exc:
             errors.append(f"pickle load failed: {exc}")
             return None
@@ -668,9 +760,12 @@ def _extract_state_dict(raw: Any) -> tuple[dict[str, Any], str | None]:
     return _strip_module_prefix_if_consistent(raw_mapping), None
 
 
-def _load_model_checkpoint(job: TrainingJob) -> LoadedModelCheckpoint:
-    """Load and normalise a checkpoint from a training job output path."""
-    path = _resolve_checkpoint_path(job)
+def _load_model_checkpoint(job: TrainingJob, *, confine_to_output_root: bool = False) -> LoadedModelCheckpoint:
+    """Load and normalise a checkpoint from a training job output path.
+
+    HTTP 面不得使用本函数的默认形式，必须走 `_load_api_checkpoint`（A77）。
+    """
+    path = _resolve_checkpoint_path(job, confine_to_output_root=confine_to_output_root)
     raw, format_name = _load_raw_checkpoint(path)
     state_dict, state_key = _extract_state_dict(raw)
     if not state_dict:
@@ -682,6 +777,11 @@ def _load_model_checkpoint(job: TrainingJob) -> LoadedModelCheckpoint:
         state_key=state_key,
         format_name=format_name,
     )
+
+
+def _load_api_checkpoint(job: TrainingJob) -> LoadedModelCheckpoint:
+    """路由处理器唯一的检查点入口：解析 + 限制在输出根目录内（A77）。"""
+    return _load_model_checkpoint(job, confine_to_output_root=True)
 
 
 def _load_model_state_dict(job: TrainingJob) -> dict:
@@ -822,12 +922,24 @@ async def embed_watermark(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Watermark already embedded for this job")
 
-    key_seed = body.key_seed if body.key_seed is not None else random.randint(0, 2**31 - 1)
+    # A167: 边界必须在动磁盘之前判完。越界种子过去要等到 flush() 落库才抛 int4 溢出，
+    # 那时 checkpoint 已被改写而唯一的审计行被事务回滚。
+    _seed_bound = _key_seed_column_max()
+    if body.key_seed is not None and not 0 <= body.key_seed <= _seed_bound:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"key_seed must be within 0…{_seed_bound} (watermark_records.key_seed "
+                "column width); rejected before the checkpoint is modified"
+            ),
+        )
+
+    key_seed = body.key_seed if body.key_seed is not None else random.randint(0, _seed_bound)
     watermark_bits = model_watermark_service.generate_watermark_bits(
         body.owner_id, body.model_id, body.num_bits,
     )
 
-    checkpoint = _load_model_checkpoint(job)
+    checkpoint = _load_api_checkpoint(job)
 
     try:
         wm_result = model_watermark_service.embed_watermark(
@@ -863,7 +975,7 @@ async def embed_watermark(
         num_bits=body.num_bits,
         layers_watermarked=list(wm_result.metadata.layer_positions.keys()),
         layer_positions=wm_result.metadata.layer_positions,
-        key_seed=key_seed,
+        key_seed_fingerprint=wm_result.metadata.key_seed_fingerprint,
         embed_time_ms=wm_result.embed_time_ms,
     )
 
@@ -895,7 +1007,7 @@ async def verify_watermark(
         record.owner_id, record.model_id, record.num_bits,
     )
 
-    checkpoint = _load_model_checkpoint(job)
+    checkpoint = _load_api_checkpoint(job)
 
     from app.services.model_watermark import WatermarkMetadata
 

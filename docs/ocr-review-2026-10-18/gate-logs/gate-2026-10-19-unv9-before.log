@@ -1,0 +1,401 @@
+........................................................................ [ 31%]
+.................................FFF...FFF.FF.................FFFFFFFFFF [ 63%]
+F....FFFF...F..F.F.........FFFFFFFFFFFF.FFFFF.F..F.FFF.FFFFFFFFFFFFFFF.. [ 95%]
+.FFFFFFFFFF                                                              [100%]
+=================================== FAILURES ===================================
+E   AssertionError: 禁止对 losetup 已关联的文件再 -o loop（双关联）
+    assert 'mount -o loop "$EXT4"' not in '#!/usr/bin/...,\n}))\nPY\n'
+      
+      'mount -o loop "$EXT4"' is contained here:
+        MNT"
+        if ! mount -o loop "$EXT4" "$MNT" 2>"$WORK/mount.err"; then
+      ?      +++++++++++++++++++++
+            cat "$WORK/mount.err" >&2
+            echo "ERROR: loop mount failed (build host needs CAP_SYS_ADMIN / /dev/loop*)" >&2...
+      
+      ...Full output truncated (28 lines hidden), use '-vv' to show
+/root/cds-test/src/tests/test_ops_scripts_gates.py:260: AssertionError: 禁止对 losetup 已关联的文件再 -o loop（双关联）
+E   AssertionError: 发布必须先写 OUT_DIR 内临时名再同 FS rename
+    assert '.artifact.ext4.' in '#!/usr/bin/env bash\n# scripts/cube-rootfs-convert.sh — SS-10 CB-05 fallback build tool (M1).\n#\n# 红线 2: this tool r...ytes": int(size),\n    "probe_config": {"type": "http", "port": 80, "path": "/", "expected_status": "2xx"},\n}))\nPY\n'
+/root/cds-test/src/tests/test_ops_scripts_gates.py:269: AssertionError: 发布必须先写 OUT_DIR 内临时名再同 FS rename
+E   AssertionError: gitlink mode/sha 必须校验
+    assert ('160000' in '#!/usr/bin/env bash\nset -euo pipefail\n# 准备 vendored Tongsuo 源码：cds-volume-plugin 镜像（Dockerfile 的 tongsuo 阶段\n# COPY...exit 1; }\nhave_src "$DEST" || { say "FAIL: submodule 内容不完整"; exit 1; }\nsay "READY path=$DEST sha=$PIN (submodule)"\n' and None)
+     +  where None = <function search at 0x7f6c40bc0e00>('0-9a-f\\{40\\}', '#!/usr/bin/env bash\nset -euo pipefail\n# 准备 vendored Tongsuo 源码：cds-volume-plugin 镜像（Dockerfile 的 tongsuo 阶段\n# COPY...exit 1; }\nhave_src "$DEST" || { say "FAIL: submodule 内容不完整"; exit 1; }\nsay "READY path=$DEST sha=$PIN (submodule)"\n')
+     +    where <function search at 0x7f6c40bc0e00> = re.search
+/root/cds-test/src/tests/test_ops_scripts_gates.py:290: AssertionError: gitlink mode/sha 必须校验
+E   AssertionError: PASS 只能在 finally（teardown+pod 删除核验）之后打印
+    assert 1218 > 5669
+     +  where 1218 = <built-in method index of str object at 0xc5dd910>('PASS:')
+     +    where <built-in method index of str object at 0xc5dd910> = '#!/usr/bin/env bash\n# CDS K8s runtime end-to-end smoke (N7).\n#\n# Runs AFTER the cluster is up and CDS is deployed ...N7)."\nelse\n    log "SKIP: namespace $NS 没有 app=cds-sandbox PVC —— 本轮未覆盖共享卷路径（显式跳过，不计通过）"\nfi\n\nlog "e2e-k8s done"\n'.index
+     +  and   5669 = <built-in method index of str object at 0xc5dd910>('finally')
+     +    where <built-in method index of str object at 0xc5dd910> = '#!/usr/bin/env bash\n# CDS K8s runtime end-to-end smoke (N7).\n#\n# Runs AFTER the cluster is up and CDS is deployed ...N7)."\nelse\n    log "SKIP: namespace $NS 没有 app=cds-sandbox PVC —— 本轮未覆盖共享卷路径（显式跳过，不计通过）"\nfi\n\nlog "e2e-k8s done"\n'.index
+/root/cds-test/src/tests/test_ops_scripts_gates.py:341: AssertionError: PASS 只能在 finally（teardown+pod 删除核验）之后打印
+E   AssertionError: 密钥落盘基目录必须 0700（/tmp 世界可写劫持面）
+    assert 'umask 077' in '#!/usr/bin/env bash\n# FISCO BCOS development environment initialiser for CDS\n# Run after docker compose -f docker-c...ST}:${RPC_PORT}"\necho "  Console: ${CONSOLE_DIR}/console.sh"\necho "──────────────────────────────────────────────"\n'
+/root/cds-test/src/tests/test_ops_scripts_gates.py:349: AssertionError: 密钥落盘基目录必须 0700（/tmp 世界可写劫持面）
+E   AssertionError: CA 探针必须拒绝私钥形状（防烘焙进可分发镜像）
+    assert 'PRIVATE KEY' in '#!/usr/bin/env bash\n# =============================================================================\n# SS-10 CB-04 步...TX/cube-egress-ca.crt"\n\necho "building ${TAG} (context: $CTX)"\ndocker build -t "$TAG" "$CTX"\necho "done: ${TAG}"\n'
+/root/cds-test/src/tests/test_ops_scripts_gates.py:364: AssertionError: CA 探针必须拒绝私钥形状（防烘焙进可分发镜像）
+E   AssertionError: policy_decisions 缺保留策略（无限增长违反数据最小化）
+    assert 'TTL' in "\n(\n    decision_id UUID DEFAULT generateUUIDv4(),\n    timestamp DateTime64(3, 'UTC'),\n    user_id UUID,\n    cont...ing) DEFAULT ''\n)\nENGINE = MergeTree()\nPARTITION BY toYYYYMM(timestamp)\nORDER BY (timestamp, user_id, contract_id)"
+/root/cds-test/src/tests/test_ops_scripts_gates.py:388: AssertionError: policy_decisions 缺保留策略（无限增长违反数据最小化）
+E   AssertionError: 高基数回溯列（session/resource/request/contract/sandbox）需要跳数索引
+    assert 0 >= 5
+     +  where 0 = <built-in method count of str object at 0xc5e1960>('INDEX')
+     +    where <built-in method count of str object at 0xc5e1960> = "\n(\n    -- Core identification\n    event_id UUID DEFAULT generateUUIDv4(),\n    timestamp DateTime64(3, 'UTC'),\n  ...ARTITION BY toYYYYMM(timestamp)\nORDER BY (timestamp, user_id, action, resource_type)\nTTL timestamp + INTERVAL 7 YEAR".count
+/root/cds-test/src/tests/test_ops_scripts_gates.py:395: AssertionError: 高基数回溯列（session/resource/request/contract/sandbox）需要跳数索引
+E   AssertionError: assert 'root' in ('' + '[cube-node-install] ERROR: 上游安装器不存在: /home/kratos/Documents/workspace/CubeSandbox/deploy/one-click/install-compute.sh（CUBE_UPSTREAM_DIR=/home/kratos/Documents/workspace/CubeSandbox）\n')
+     +  where '' = CompletedProcess(args=['bash', '/root/cds-test/src/deploy/cube-node/install.sh'], returncode=1, stdout='', stderr='[cu...ace/CubeSandbox/deploy/one-click/install-compute.sh（CUBE_UPSTREAM_DIR=/home/kratos/Documents/workspace/CubeSandbox）\n').stdout
+     +  and   '[cube-node-install] ERROR: 上游安装器不存在: /home/kratos/Documents/workspace/CubeSandbox/deploy/one-click/install-compute.sh（CUBE_UPSTREAM_DIR=/home/kratos/Documents/workspace/CubeSandbox）\n' = CompletedProcess(args=['bash', '/root/cds-test/src/deploy/cube-node/install.sh'], returncode=1, stdout='', stderr='[cu...ace/CubeSandbox/deploy/one-click/install-compute.sh（CUBE_UPSTREAM_DIR=/home/kratos/Documents/workspace/CubeSandbox）\n').stderr
+/root/cds-test/src/tests/test_cube_node_scripts.py:451: AssertionError: assert 'root' in ('' + '[cube-node-install] ERROR: 上游安装器不存在: /home/kratos/Documents/workspace/CubeSandbox/deploy/one-click/install-compute.sh（CUBE_UPSTREAM_DIR=/home/kratos/Documents/workspace/CubeSandbox）\n')
+E   AssertionError: audit-tailer.env 必须先收紧 umask/预建再渲染（0640+umask 竞态）
+    assert None
+     +  where None = <function search at 0x7f6c40bc0e00>('umask 077|install -m 0600 /dev/null', '#!/usr/bin/env bash\n# install.sh — SS-10 CB-02：Cube 计算节点安装/升级幂等 wrapper\n#\n# 流程（spec §4 CB-02 步骤 1，幂等：可重复执行；节点重装/上游...，§5.2 钉住版本）；"\nlog "    tee 能力由 preflight 探测落存 ${CDS_CUBE_CAPABILITIES_FILE}（SS-13 RT-03，随 capabilities 上报）"\nexit 0\n')
+     +    where <function search at 0x7f6c40bc0e00> = re.search
+/root/cds-test/src/tests/test_cube_node_scripts.py:457: AssertionError: audit-tailer.env 必须先收紧 umask/预建再渲染（0640+umask 竞态）
+E   AssertionError: audit_tailer: status=skip 违反 pass|fail|skipped 契约
+    assert 'skip' in ('pass', 'fail', 'skipped')
+/root/cds-test/src/tests/test_cube_node_scripts.py:508: AssertionError: audit_tailer: status=skip 违反 pass|fail|skipped 契约
+E   AssertionError: TLS 记录头被当成 HTTP/2 SETTINGS —— 假阳性
+    assert 'pass' == 'fail'
+      
+      - fail
+      + pass
+/root/cds-test/src/tests/test_cube_node_scripts.py:544: AssertionError: TLS 记录头被当成 HTTP/2 SETTINGS —— 假阳性
+E   AssertionError: volume_sock 需要 connect 探测或如实降级声明
+    assert ('AF_UNIX' in '#!/usr/bin/env bash\n# verify.sh — SS-10 CB-02：Cube 计算节点安装后验收（post-install acceptance）\n#\n# 检查项（spec §4 CB-02 步骤 1 验...点 verify 完成 =="\nfi\nif awk -F\'\\t\' \'$2=="fail"{f=1} END{exit f+0}\' "${RESULT_FILE}"; then\n  exit 0\nfi\nexit 1\n' or '陈旧' in 'check_volume_sock() {\n  if [[ -S "${SOCK_PATH}" ]]; then\n    record volume_sock pass "socket 存活: ${SOCK_PATH}"\n  else\n    record volume_sock fail "socket 不存在: ${SOCK_PATH}（CB-03 插件未部署/未启动）"\n  fi\n  say_last volume_sock\n}' or '未做活性探测' in 'check_volume_sock() {\n  if [[ -S "${SOCK_PATH}" ]]; then\n    record volume_sock pass "socket 存活: ${SOCK_PATH}"\n  else\n    record volume_sock fail "socket 不存在: ${SOCK_PATH}（CB-03 插件未部署/未启动）"\n  fi\n  say_last volume_sock\n}')
+/root/cds-test/src/tests/test_cube_node_scripts.py:553: AssertionError: volume_sock 需要 connect 探测或如实降级声明
+E   AssertionError: CA 在场必须 load_verify_locations(cafile=…)
+    assert None
+     +  where None = <function search at 0x7f6c40bc0e00>('cafile', 'check_tls_sidecar() {\n  local out\n  if ! out="$(CDS_TLS_CA="${TLS_CA}" CDS_TLS_EXPECT="${TLS_EXPECT}" python3 - "${...} 未出示 CDS 证书（${out:-连接失败}）"\n  else\n    record tls_sidecar pass "证书含 CDS 标记（${out}）"\n  fi\n  say_last tls_sidecar\n}')
+     +    where <function search at 0x7f6c40bc0e00> = re.search
+/root/cds-test/src/tests/test_cube_node_scripts.py:565: AssertionError: CA 在场必须 load_verify_locations(cafile=…)
+E   assert 'MOCK' in ('[FAIL] cubelet_grpc: <ip>:9999 无 HTTP/2 应答（cubelet 未运行或端口不符）\n[FAIL] tls_sidecar: TLS sidecar <ip>:54491 未出...ot/pytest-18/test_verify_mock_guard0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）\n== CDS Cube 节点 verify 完成 ==\n' + 'Traceback (most recent call last):\n  File "<stdin>", line 3, in <module>\n  File "/opt/py312/lib/python3.12/socket.p...et.py", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n')
+     +  where '[FAIL] cubelet_grpc: <ip>:9999 无 HTTP/2 应答（cubelet 未运行或端口不符）\n[FAIL] tls_sidecar: TLS sidecar <ip>:54491 未出...ot/pytest-18/test_verify_mock_guard0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）\n== CDS Cube 节点 verify 完成 ==\n' = CompletedProcess(args=['bash', '/root/cds-test/src/deploy/cube-node/verify.sh'], returncode=1, stdout='[FAIL] cubelet_...t.py", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n').stdout
+     +  and   'Traceback (most recent call last):\n  File "<stdin>", line 3, in <module>\n  File "/opt/py312/lib/python3.12/socket.p...et.py", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n' = CompletedProcess(args=['bash', '/root/cds-test/src/deploy/cube-node/verify.sh'], returncode=1, stdout='[FAIL] cubelet_...t.py", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n').stderr
+/root/cds-test/src/tests/test_cube_node_scripts.py:580: assert 'MOCK' in ('[FAIL] cubelet_grpc: <ip>:9999 无 HTTP/2 应答（cubelet 未运行或端口不符）\n[FAIL] tls_sidecar: TLS sidecar <ip>:54491 未出...ot/pytest-18/test_verify_mock_guard0/mock/var/lib/cds/cube-node/NODE_CAPABILITIES.json）\n== CDS Cube 节点 verify 完成 ==\n' + 'Traceback (most recent call last):\n  File "<stdin>", line 3, in <module>\n  File "/opt/py312/lib/python3.12/socket.p...et.py", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n')
+E   assert 1 == 2
+     +  where 1 = CompletedProcess(args=['bash', '/root/cds-test/src/deploy/cube-node/verify.sh', '--json=1'], returncode=1, stdout='[FA...t.py", line 850, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n').returncode
+/root/cds-test/src/tests/test_cube_node_scripts.py:592: assert 1 == 2
+E   assert 'CDS_CUBE_TEE_DEVICE_ROOT' in 'check_tee_probe() {\n  if ! command -v python3 >/dev/null 2>&1; then\n    record tee_probe fail "python3 不存在，无法执行 TEE...E}）" ;;\n    *)           record tee_probe fail "tee_probe.py 输出格式异常: ${TEE_LINE}" ;;\n  esac\n  say_last tee_probe\n}'
+/root/cds-test/src/tests/test_cube_node_scripts.py:601: assert 'CDS_CUBE_TEE_DEVICE_ROOT' in 'check_tee_probe() {\n  if ! command -v python3 >/dev/null 2>&1; then\n    record tee_probe fail "python3 不存在，无法执行 TEE...E}）" ;;\n    *)           record tee_probe fail "tee_probe.py 输出格式异常: ${TEE_LINE}" ;;\n  esac\n  say_last tee_probe\n}'
+E   AssertionError: record() 必须把 detail 里的 tab/换行压平（| tr …）
+    assert (<re.Match object; span=(2780, 2879), match='record() { LAST_ST="$2"; LAST_DET="$3"; printf \'> and '| tr' in 'record() { LAST_ST="$2"; LAST_DET="$3"; printf \'%s\\t%s\\t%s\\n\' "$1" "$2" "$3" >> "${RESULT_FILE}"; }')
+     +  where 'record() { LAST_ST="$2"; LAST_DET="$3"; printf \'%s\\t%s\\t%s\\n\' "$1" "$2" "$3" >> "${RESULT_FILE}"; }' = <built-in method group of re.Match object at 0x7f6a9dd74040>(0)
+     +    where <built-in method group of re.Match object at 0x7f6a9dd74040> = <re.Match object; span=(2780, 2879), match='record() { LAST_ST="$2"; LAST_DET="$3"; printf \'>.group
+/root/cds-test/src/tests/test_cube_node_scripts.py:610: AssertionError: record() 必须把 detail 里的 tab/换行压平（| tr …）
+E   AssertionError: blkid 非 0/2 退出码必须中止（不得把探测失败当无文件系统直接 mkfs -f）
+    assert ('blkid_rc' in '#!/usr/bin/env bash\n# node_bringup.sh — SS-14 RT-07：本机 Cube 计算节点一键 bring-up（需 sudo）\n#\n# 用法: sudo bash deploy/cube-...E_DIR/install.sh"\n\n# 4. verify\necho "[bringup] verify..."\nbash "$NODE_DIR/verify.sh" --json\necho "BRINGUP_DONE"\n')
+/root/cds-test/src/tests/test_cube_node_scripts.py:621: AssertionError: blkid 非 0/2 退出码必须中止（不得把探测失败当无文件系统直接 mkfs -f）
+E   Failed: DID NOT RAISE TailerConfigError
+/root/cds-test/src/tests/test_cube_node_scripts.py:745: Failed: DID NOT RAISE TailerConfigError
+E   Failed: DID NOT RAISE TailerConfigError
+/root/cds-test/src/tests/test_cube_node_scripts.py:768: Failed: DID NOT RAISE TailerConfigError
+E   Failed: DID NOT RAISE TailerConfigError
+/root/cds-test/src/tests/test_cube_node_scripts.py:792: Failed: DID NOT RAISE TailerConfigError
+E   AssertionError: docker-compose.middleware.yml: POSTGRES_PASSWORD has a fallback default
+    assert <re.Match object; span=(436, 457), match='${POSTGRES_PASSWORD:-'> is None
+     +  where <re.Match object; span=(436, 457), match='${POSTGRES_PASSWORD:-'> = <function search at 0x7f6c40bc0e00>('\\$\\{POSTGRES_PASSWORD:-', '# CDS Middleware — Production-grade local deployment\n# Usage: docker compose -f docker-compose.middleware.yml up -d\...     retries: 5\n\nvolumes:\n  pgdata:\n  redisdata:\n  miniodata:\n  vaultdata:\n  chdata:\n  zkdata:\n  kafkadata:\n')
+     +    where <function search at 0x7f6c40bc0e00> = re.search
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:92: AssertionError: docker-compose.middleware.yml: POSTGRES_PASSWORD has a fallback default
+E   AssertionError: docker-compose.middleware.yml commits fallback credential 'CdsSecureP@ss2026'
+    assert 'CdsSecureP@ss2026' not in '# CDS Middl...kafkadata:\n'
+      
+      'CdsSecureP@ss2026' is contained here:
+        PASSWORD:-CdsSecureP@ss2026}
+              POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+            volumes:
+              - pgdata:/var/lib/postgresql/data
+              - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro...
+      
+      ...Full output truncated (185 lines hidden), use '-vv' to show
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:102: AssertionError: docker-compose.middleware.yml commits fallback credential 'CdsSecureP@ss2026'
+E   AssertionError: CDS_DEBUG defaults true → boot gates bypassed
+    assert 'CDS_DEBUG:-true' not in '#!/usr/bin/...EPLOY_DONE\n'
+      
+      'CDS_DEBUG:-true' is contained here:
+        (the old `CDS_DEBUG:-true` default silently bypassed all of them, which
+      ?           +++++++++++++++
+        # is how the lane could boot with an empty column DEK). The three fallback
+        # switches are pinned false exactly as docker-compose.prod.yml does: Vault is
+        # up with transit (no software-HSM fallback), the lane offers no bwrap/firecracker...
+      
+      ...Full output truncated (82 lines hidden), use '-vv' to show
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:138: AssertionError: CDS_DEBUG defaults true → boot gates bypassed
+E   AssertionError: fail-fast must name the var; got: FATAL: missing env file: /nonexistent/img.tar.gz
+      
+    assert 'CDS_COLUMN_ENCRYPTION_KEY' in 'FATAL: missing env file: /nonexistent/img.tar.gz\n'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:178: AssertionError: fail-fast must name the var; got: FATAL: missing env file: /nonexistent/img.tar.gz
+E   AssertionError: workspace is per-pod writable layer on single-node local-path; 2 replicas each wrote their own
+    assert 2 == 1
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:282: AssertionError: workspace is per-pod writable layer on single-node local-path; 2 replicas each wrote their own
+E   AssertionError: cds-app.yaml must ship a cds-app-env posture ConfigMap
+    assert None
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:298: AssertionError: cds-app.yaml must ship a cds-app-env posture ConfigMap
+E   AssertionError: clickhouse.yaml/clickhouse: PVC-backed singleton needs Recreate
+    assert None == 'Recreate'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:322: AssertionError: clickhouse.yaml/clickhouse: PVC-backed singleton needs Recreate
+E   AssertionError: kubelet does not expand $(VAR) in exec probes — literal password was authed
+    assert '$(REDIS_PASSWORD)' not in 'readinessPr...orage: 5Gi\n'
+      
+      '$(REDIS_PASSWORD)' is contained here:
+        ", "-a", "$(REDIS_PASSWORD)", "ping"]
+                    initialDelaySeconds: 5
+                    periodSeconds: 10
+                  resources:
+                    requests:...
+      
+      ...Full output truncated (35 lines hidden), use '-vv' to show
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:329: AssertionError: kubelet does not expand $(VAR) in exec probes — literal password was authed
+E   AssertionError: kafka.yaml/zookeeper lacks readinessProbe
+    assert None
+     +  where None = <built-in method get of dict object at 0x7f6a9da422c0>('readinessProbe')
+     +    where <built-in method get of dict object at 0x7f6a9da422c0> = {'name': 'zookeeper', 'image': 'confluentinc/cp-zookeeper:7.6.0', 'ports': [{'containerPort': 2181}], 'env': [{'name': 'ZOOKEEPER_CLIENT_PORT', 'value': '2181'}], ...}.get
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:359: AssertionError: kafka.yaml/zookeeper lacks readinessProbe
+E   AssertionError: k8s clickhouse DDL drifted from scripts/clickhouse-init.sql
+    assert '-- CDS Click...ERVAL 7 YEAR;' == '-- CDS Click..._id, action);'
+      
+      + -- CDS ClickHouse Audit Tables
+      - -- CDS ClickHouse Audit Log Schema (Expanded)
+      - -- 30+ columns for comprehensive audit trail
+      - -- Runs automatically on first ClickHouse start
+      - 
+        CREATE DATABASE IF NOT EXISTS cds_audit;...
+      
+      ...Full output truncated (188 lines hidden), use '-vv' to show
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:369: AssertionError: k8s clickhouse DDL drifted from scripts/clickhouse-init.sql
+E   AssertionError: rotation note must name the regeneration command
+    assert 'openssl rand' in '# ⚠️ DEV ONLY — DO NOT USE IN PRODUCTION\n# These are hard-coded development credentials committed for the 243/dev\n#...S_MINIO_ACCESS_KEY: "cds_minio_admin"\n  CDS_MINIO_SECRET_KEY: "CdsMinio2026"\n  CDS_CDC_KAFKA_BROKERS: "kafka:9092"\n'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:376: AssertionError: rotation note must name the regeneration command
+E   AssertionError: k3s normalizes to docker.io; the index.docker.io block is dead config
+    assert 'index.docker.io' not in {'docker.io': {'endpoint': ['https://docker.1ms.run', 'https://docker.m.daocloud.io']}, 'index.docker.io': {'endpoint'... {'endpoint': ['https://registry.k8s.io.m.daocloud.io']}, 'quay.io': {'endpoint': ['https://quay.m.daocloud.io']}, ...}
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:381: AssertionError: k3s normalizes to docker.io; the index.docker.io block is dead config
+E   KeyError: 'CDS_SECCOMP_FALLBACK_ALLOWED'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:393: KeyError: 'CDS_SECCOMP_FALLBACK_ALLOWED'
+E   AssertionError: config/secret changes must roll the pods
+    assert ('checksum/config' in 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{ include "cds.fullname" . }}-api\n  labels:\n    {{- incl...: sandbox-workspace\n          persistentVolumeClaim:\n            claimName: {{ include "cds.fullname" . }}-sandbox\n')
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:405: AssertionError: config/secret changes must roll the pods
+E   assert '.Values.opa.url' in 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{ include "cds.fullname" . }}-api\n  labels:\n    {{- incl...: sandbox-workspace\n          persistentVolumeClaim:\n            claimName: {{ include "cds.fullname" . }}-sandbox\n'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:413: assert '.Values.opa.url' in 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{ include "cds.fullname" . }}-api\n  labels:\n    {{- incl...: sandbox-workspace\n          persistentVolumeClaim:\n            claimName: {{ include "cds.fullname" . }}-sandbox\n'
+E   KeyError: 'accessModes'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:418: KeyError: 'accessModes'
+E   AssertionError: an overlay deleting podDisruptionBudget must not nil-pointer the whole release
+    assert 'if .Values.podDisruptionBudget' in 'apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: {{ include "cds.fullname" . }}-api\n  labels:\n ...onBudget.minAvailable }}\n  selector:\n    matchLabels:\n      {{- include "cds.api.selectorLabels" . | nindent 6 }}\n'
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:440: AssertionError: an overlay deleting podDisruptionBudget must not nil-pointer the whole release
+E   AssertionError: helm values CDS_FEDERATION_JWT_KEY_REQUIRED
+    assert None == 'true'
+     +  where None = <built-in method get of dict object at 0x7f6a9dfe3100>('CDS_FEDERATION_JWT_KEY_REQUIRED')
+     +    where <built-in method get of dict object at 0x7f6a9dfe3100> = {'CDS_DEBUG': 'false', 'LOG_LEVEL': 'info', 'CDS_LOG_JSON': 'false', 'CDS_SESSION_CLEANUP_INTERVAL_SECONDS': '300', ...}.get
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:450: AssertionError: helm values CDS_FEDERATION_JWT_KEY_REQUIRED
+E   AssertionError: helm values CDS_HSM_SOFTWARE_FALLBACK_ALLOWED
+    assert None == 'false'
+     +  where None = <built-in method get of dict object at 0x7f6a9e022e40>('CDS_HSM_SOFTWARE_FALLBACK_ALLOWED')
+     +    where <built-in method get of dict object at 0x7f6a9e022e40> = {'CDS_DEBUG': 'false', 'LOG_LEVEL': 'info', 'CDS_LOG_JSON': 'false', 'CDS_SESSION_CLEANUP_INTERVAL_SECONDS': '300', ...}.get
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:450: AssertionError: helm values CDS_HSM_SOFTWARE_FALLBACK_ALLOWED
+E   AssertionError: helm values CDS_SECCOMP_FALLBACK_ALLOWED
+    assert None == 'false'
+     +  where None = <built-in method get of dict object at 0x7f6a9e021240>('CDS_SECCOMP_FALLBACK_ALLOWED')
+     +    where <built-in method get of dict object at 0x7f6a9e021240> = {'CDS_DEBUG': 'false', 'LOG_LEVEL': 'info', 'CDS_LOG_JSON': 'false', 'CDS_SESSION_CLEANUP_INTERVAL_SECONDS': '300', ...}.get
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:450: AssertionError: helm values CDS_SECCOMP_FALLBACK_ALLOWED
+E   StopIteration
+/root/cds-test/src/tests/test_deploy_manifest_gates.py:456: StopIteration
+E   AssertionError: PEP 701 nesting (py3.11 compileall will fail): [('agent_service.py', (386, 51)), ('agent_service.py', (386, 66)), ('policy_compiler.py', (322, 59)), ('policy_compiler.py', (322, 64)), ('policy_compiler.py', (340, 59)), ('policy_compiler.py', (340, 64)), ('policy_compiler.py', (366, 59)), ('policy_compiler.py', (366, 64)), ('policy_compiler.py', (389, 59)), ('policy_compiler.py', (389, 64)), ('policy_compiler.py', (406, 59)), ('policy_compiler.py', (406, 64))]
+    assert [('agent_serv...40, 64)), ...] == []
+      
+      Left contains 12 more items, first extra item: ('agent_service.py', (386, 51))
+      Use -v to get more diff
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:58: AssertionError: PEP 701 nesting (py3.11 compileall will fail): [('agent_service.py', (386, 51)), ('agent_service.py', (386, 66)), ('policy_compiler.py', (322, 59)), ('policy_compiler.py', (322, 64)), ('policy_compiler.py', (340, 59)), ('policy_compiler.py', (340, 64)), ('policy_compiler.py', (366, 59)), ('policy_compiler.py', (366, 64)), ('policy_compiler.py', (389, 59)), ('policy_compiler.py', (389, 64)), ('policy_compiler.py', (406, 59)), ('policy_compiler.py', (406, 64))]
+E   Failed: DID NOT RAISE ValueError
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:102: Failed: DID NOT RAISE ValueError
+E   AssertionError: assert True is False
+     +  where True = <function _net_allowed at 0x7f6a9dd53a60>('https://api.example.com:6379/')
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:122: AssertionError: assert True is False
+E   AssertionError: assert True is False
+     +  where True = <function _net_allowed at 0x7f6a9dd44900>('https://<ip>:6379/api')
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:133: AssertionError: assert True is False
+E   AssertionError: assert False is True
+     +  where False = <function _net_allowed at 0x7f6a9dd45940>('https://api.example.com/x')
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:138: AssertionError: assert False is True
+E   AssertionError: dialed out
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:152: AssertionError: dialed out
+E   KeyError: '_AGENT_HTTP_MAX_TIMEOUT'
+/root/cds-test/src/tests/test_ocr_a103_a157_agent_runner.py:185: KeyError: '_AGENT_HTTP_MAX_TIMEOUT'
+E   TypeError: 'NoneType' object does not support the context manager protocol
+<agent-runner>:182: TypeError: 'NoneType' object does not support the context manager protocol
+E   AssertionError: build_corpus ran on the event loop thread — it is CPU-bound and stalls every other request in the worker (A26)
+    assert 140102941718336 != 140102941718336
+     +  where 140102941718336 = <built-in function get_ident>()
+     +    where <built-in function get_ident> = threading.get_ident
+------------------------------ Captured log call -------------------------------
+WARNING  app.services.kms_service:kms_service.py:117 [KMS] DEK dek-storage-rag/corpus/32e10c05-2321-48ca-b3e0-3d4e32b4d793/rag_index.json-4028ee0b lives only in process memory: callers that persist ciphertext under this key_id must write export_wrapped() into KeyMetadata.wrapped_payload in the same transaction and call mark_persisted(), or a restart makes that data permanently undecryptable (OCR-A161)
+WARNING  app.services.storage_service:storage_service.py:95 [storage] MinIO 不可用（No module named 'minio'），对象存储降级为本地目录 /tmp/cds-storage：该目录未入卷时容器重建会丢上传原件（库里仍为 ready），生产部署请安装 minio 客户端包并配置 CDS_MINIO_ENDPOINT
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:96: AssertionError: build_corpus ran on the event loop thread — it is CPU-bound and stalls every other request in the worker (A26)
+E   AssertionError: uploads ran on the event loop: 1 call(s) (A26)
+    assert False
+     +  where False = all(<generator object test_storage_uploads_run_off_the_event_loop.<locals>.<genexpr> at 0x7f6a9df0c930>)
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:124: AssertionError: uploads ran on the event loop: 1 call(s) (A26)
+E   AssertionError: corpus index must be the last write, got ['rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/rag_index.json', 'rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/embedding_model.bundle']
+    assert ('rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/embedding_model.bundle' and ['rag/corpus/...model.bundle'] == ['rag/corpus/...g_index.json']
+      
+      At index 0 diff: 'rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/rag_index.json' != 'rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/embedding_model.bundle'
+      Use -v to get more diff)
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:155: AssertionError: corpus index must be the last write, got ['rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/rag_index.json', 'rag/corpus/94374755-6fe3-47c7-a31f-95bb7449939e/embedding_model.bundle']
+E   AssertionError: the storage writes ran outside the per-data-product ingest lock — concurrent ingests of one product overwrite each other's index and embedding bundle (A26)
+    assert False
+     +  where False = all([False, False])
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:184: AssertionError: the storage writes ran outside the per-data-product ingest lock — concurrent ingests of one product overwrite each other's index and embedding bundle (A26)
+E   AttributeError: module 'app.api.rag' has no attribute '_INGEST_LOCKS'
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:210: AttributeError: module 'app.api.rag' has no attribute '_INGEST_LOCKS'
+E   AttributeError: <module 'app.services.rag_generative_service' from '/root/cds-test/src/app/services/rag_generative_service.py'> has no attribute 'register_generative_model'
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:232: AttributeError: <module 'app.services.rag_generative_service' from '/root/cds-test/src/app/services/rag_generative_service.py'> has no attribute 'register_generative_model'
+E   AttributeError: <module 'app.services.rag_generative_service' from '/root/cds-test/src/app/services/rag_generative_service.py'> has no attribute 'register_generative_model'
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:263: AttributeError: <module 'app.services.rag_generative_service' from '/root/cds-test/src/app/services/rag_generative_service.py'> has no attribute 'register_generative_model'
+E   AttributeError: module 'app.api.rag' has no attribute '_INGEST_LOCKS'
+/root/cds-test/src/tests/test_ocr_a26_rag_ingest_loop.py:287: AttributeError: module 'app.api.rag' has no attribute '_INGEST_LOCKS'
+E   AssertionError: a blank rejection_reason must be refused, not served: got 200 -> {'id': '0c2ad3ad-c766-419b-9245-72136a3ba67c', 'product_id': '44e2ead7-bb8f-40f4-861a-2d5d36526afd', 'buyer_id': '206873ca-7abf-4b76-8972-45ba9564a4c5', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': '6f48bdfc-7411-4643-aa3d-16798353042c', 'reviewed_at': '2026-10-19T01:05:27.937363', 'expires_at': '2026-11-18T01:05:27.937341', 'created_at': '2026-10-19T01:05:27', 'updated_at': '2026-10-19T01:05:27'}
+    assert 200 == 400
+     +  where 200 = <Response [200 OK]>.status_code
+/root/cds-test/src/tests/test_ocr_a04_exposure_review_decision.py:92: AssertionError: a blank rejection_reason must be refused, not served: got 200 -> {'id': '0c2ad3ad-c766-419b-9245-72136a3ba67c', 'product_id': '44e2ead7-bb8f-40f4-861a-2d5d36526afd', 'buyer_id': '206873ca-7abf-4b76-8972-45ba9564a4c5', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': '6f48bdfc-7411-4643-aa3d-16798353042c', 'reviewed_at': '2026-10-19T01:05:27.937363', 'expires_at': '2026-11-18T01:05:27.937341', 'created_at': '2026-10-19T01:05:27', 'updated_at': '2026-10-19T01:05:27'}
+E   AssertionError: a blank rejection_reason must be refused, not served: got 200 -> {'id': 'cb1ab8ad-ee3e-42c9-8076-39a3218f3450', 'product_id': 'aeb7453b-bfe4-4e56-8783-89a776c93a53', 'buyer_id': '39910759-8a11-461b-abd0-1a96f6610a3f', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': '094398ba-05bd-4614-9922-36cfc765069f', 'reviewed_at': '2026-10-19T01:05:28.952568', 'expires_at': '2026-11-18T01:05:28.952553', 'created_at': '2026-10-19T01:05:28', 'updated_at': '2026-10-19T01:05:28'}
+    assert 200 == 400
+     +  where 200 = <Response [200 OK]>.status_code
+/root/cds-test/src/tests/test_ocr_a04_exposure_review_decision.py:92: AssertionError: a blank rejection_reason must be refused, not served: got 200 -> {'id': 'cb1ab8ad-ee3e-42c9-8076-39a3218f3450', 'product_id': 'aeb7453b-bfe4-4e56-8783-89a776c93a53', 'buyer_id': '39910759-8a11-461b-abd0-1a96f6610a3f', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': '094398ba-05bd-4614-9922-36cfc765069f', 'reviewed_at': '2026-10-19T01:05:28.952568', 'expires_at': '2026-11-18T01:05:28.952553', 'created_at': '2026-10-19T01:05:28', 'updated_at': '2026-10-19T01:05:28'}
+E   AssertionError: a blank rejection_reason must be refused, not served: got 200 -> {'id': 'baba0794-e41d-4c46-8bb7-fd4d1cb9e995', 'product_id': 'b4676cfa-98d0-40d9-b083-956b9e110547', 'buyer_id': '71ee2a75-f88f-4e8f-8da3-73a6ca3870f9', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': 'a08dced9-8ead-4922-a6cb-5d0048fb046e', 'reviewed_at': '2026-10-19T01:05:29.983978', 'expires_at': '2026-11-18T01:05:29.983963', 'created_at': '2026-10-19T01:05:29', 'updated_at': '2026-10-19T01:05:29'}
+    assert 200 == 400
+     +  where 200 = <Response [200 OK]>.status_code
+/root/cds-test/src/tests/test_ocr_a04_exposure_review_decision.py:92: AssertionError: a blank rejection_reason must be refused, not served: got 200 -> {'id': 'baba0794-e41d-4c46-8bb7-fd4d1cb9e995', 'product_id': 'b4676cfa-98d0-40d9-b083-956b9e110547', 'buyer_id': '71ee2a75-f88f-4e8f-8da3-73a6ca3870f9', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': 'a08dced9-8ead-4922-a6cb-5d0048fb046e', 'reviewed_at': '2026-10-19T01:05:29.983978', 'expires_at': '2026-11-18T01:05:29.983963', 'created_at': '2026-10-19T01:05:29', 'updated_at': '2026-10-19T01:05:29'}
+E   AssertionError: empty approved_fields must not grant all: {'id': 'eb1eb6e2-91be-47be-9ef5-b2b6f32d2efe', 'product_id': 'cd8b3e3f-2e22-4ff1-84bb-d956509a8fb2', 'buyer_id': 'eafc15a0-34cb-4d12-b2c7-1a005a184e8d', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': 'e515794e-3760-4af1-87e0-e234a1249a75', 'reviewed_at': '2026-10-19T01:05:31.021088', 'expires_at': '2026-11-18T01:05:31.021074', 'created_at': '2026-10-19T01:05:30', 'updated_at': '2026-10-19T01:05:31'}
+    assert 200 == 400
+     +  where 200 = <Response [200 OK]>.status_code
+/root/cds-test/src/tests/test_ocr_a04_exposure_review_decision.py:114: AssertionError: empty approved_fields must not grant all: {'id': 'eb1eb6e2-91be-47be-9ef5-b2b6f32d2efe', 'product_id': 'cd8b3e3f-2e22-4ff1-84bb-d956509a8fb2', 'buyer_id': 'eafc15a0-34cb-4d12-b2c7-1a005a184e8d', 'contract_id': None, 'requested_fields': ['city', 'identity_no'], 'justification': 'risk model', 'approved_fields': ['city', 'identity_no'], 'rejection_reason': None, 'status': 'approved', 'reviewed_by': 'e515794e-3760-4af1-87e0-e234a1249a75', 'reviewed_at': '2026-10-19T01:05:31.021088', 'expires_at': '2026-11-18T01:05:31.021074', 'created_at': '2026-10-19T01:05:30', 'updated_at': '2026-10-19T01:05:31'}
+E   AssertionError: {"code":"HTTP_404","message":"Not Found","request_id":"d885146742b24b5a","detail":"Not Found"}
+    assert 404 == 200
+     +  where 404 = <Response [404 Not Found]>.status_code
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:41: AssertionError: {"code":"HTTP_404","message":"Not Found","request_id":"d885146742b24b5a","detail":"Not Found"}
+E   AssertionError: 带路径分隔的文件名把 open() 打进 500: 404
+    assert 404 == 200
+     +  where 404 = <Response [404 Not Found]>.status_code
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:58: AssertionError: 带路径分隔的文件名把 open() 打进 500: 404
+E   assert (404 == 200)
+     +  where 404 = <Response [404 Not Found]>.status_code
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:75: assert (404 == 200)
+E   AssertionError: 上传根外的绝对路径必须被拒（A3②/A165①），实得 200: {"task_id":"pipe-75eb3e3aabaa","task_type":"document","success":true,"output":{"files":[{"filename":"outside.txt","chars":36}],"total_pages":0,"total_chars":36,"output_path":"/tmp/cds-pipeline/3ba484b9/output","artifacts":[{"path":"outside.txt","storage_path":"/tmp/cds-storage/unstructured/3ba484b9/outside.txt","checksum":"dd11806368353ea05494b55a56d13eb83029d91cb53f93a60cc67fac9c8a9f28","size":36,"sha256":"f9e4f990cd35f5623c7347885c9af66ece3fafb3be2f9b5a7d1d21f3e6aa6785","content_type":"text/plain","encrypted":true,"key_id":"dek-storage-unstructured/3ba484b9/outside.txt-a1bac8e4"},{"path":"result.json","storage_path":"/tmp/cds-storage/unstructured/3ba484b9/result.json","checksum":"d6a57ef46e92af4ce97660967744e23c88b95fa265dce9830e3ff5b00877e8c7","size":124,"sha256":"e45b7be48d80e3eb5e64cff128697114442bb65808d75b06156f4dc6857b5581","content_type":"application/json","encrypted":true,"key_id":"dek-storage-unstructured/3ba484b9/result.json-45eb231c"}],"output_review":{"passed":true,"blocked":false,"stage_results":{"scene_routing":true,"format_validation":true,"dlp_scan":true,"watermark":true,"signature":true,"final_approval":true},"findings":[],"findings_count":0,"severities":[],"dp_applied":false,"watermark":"a5834d4a22514127","signature":"8ab5d401ce137347b38476c5828a297ee8c2ca3028f7cd4f2a19ff7adedbf594653ce034625247068a010f16d90531adda2f7eebf91d03187019cb05c27864cc","not_evaluated":[],"degraded":[]},"stage_status":{"workspace_prepared":{"status":"completed","updated_at":"2026-10-19T01:05:37.137909+00:00","workspace":"/tmp/cds-pipeline/3ba484b9"},"input_loaded":{"status":"completed","updated_at":"2026-10-19T01:05:37.138168+00:00","input":"outside.txt"},"sandbox_execution":{"status":"completed","updated_at":"2026-10-19T01:05:37.216107+00:00","attempt":1,"duration_ms":77},"artifact_encryption":{"status":"completed","updated_at":"2026-10-19T01:05:37.221268+00:00","artifact_count":2},"output_review":{"status":"completed","updated_at":"2026-10-19T01:05:37.249824+00:00","blocked":false}},"retry_count":0,"attempts":[{"attempt":1,"exit_code":0,"duration_ms":77,"output_truncated":false}],"duration_ms":77},"duration_ms":77,"error":null}
+    assert 200 == 400
+     +  where 200 = <Response [200 OK]>.status_code
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:93: AssertionError: 上传根外的绝对路径必须被拒（A3②/A165①），实得 200: {"task_id":"pipe-75eb3e3aabaa","task_type":"document","success":true,"output":{"files":[{"filename":"outside.txt","chars":36}],"total_pages":0,"total_chars":36,"output_path":"/tmp/cds-pipeline/3ba484b9/output","artifacts":[{"path":"outside.txt","storage_path":"/tmp/cds-storage/unstructured/3ba484b9/outside.txt","checksum":"dd11806368353ea05494b55a56d13eb83029d91cb53f93a60cc67fac9c8a9f28","size":36,"sha256":"f9e4f990cd35f5623c7347885c9af66ece3fafb3be2f9b5a7d1d21f3e6aa6785","content_type":"text/plain","encrypted":true,"key_id":"dek-storage-unstructured/3ba484b9/outside.txt-a1bac8e4"},{"path":"result.json","storage_path":"/tmp/cds-storage/unstructured/3ba484b9/result.json","checksum":"d6a57ef46e92af4ce97660967744e23c88b95fa265dce9830e3ff5b00877e8c7","size":124,"sha256":"e45b7be48d80e3eb5e64cff128697114442bb65808d75b06156f4dc6857b5581","content_type":"application/json","encrypted":true,"key_id":"dek-storage-unstructured/3ba484b9/result.json-45eb231c"}],"output_review":{"passed":true,"blocked":false,"stage_results":{"scene_routing":true,"format_validation":true,"dlp_scan":true,"watermark":true,"signature":true,"final_approval":true},"findings":[],"findings_count":0,"severities":[],"dp_applied":false,"watermark":"a5834d4a22514127","signature":"8ab5d401ce137347b38476c5828a297ee8c2ca3028f7cd4f2a19ff7adedbf594653ce034625247068a010f16d90531adda2f7eebf91d03187019cb05c27864cc","not_evaluated":[],"degraded":[]},"stage_status":{"workspace_prepared":{"status":"completed","updated_at":"2026-10-19T01:05:37.137909+00:00","workspace":"/tmp/cds-pipeline/3ba484b9"},"input_loaded":{"status":"completed","updated_at":"2026-10-19T01:05:37.138168+00:00","input":"outside.txt"},"sandbox_execution":{"status":"completed","updated_at":"2026-10-19T01:05:37.216107+00:00","attempt":1,"duration_ms":77},"artifact_encryption":{"status":"completed","updated_at":"2026-10-19T01:05:37.221268+00:00","artifact_count":2},"output_review":{"status":"completed","updated_at":"2026-10-19T01:05:37.249824+00:00","blocked":false}},"retry_count":0,"attempts":[{"attempt":1,"exit_code":0,"duration_ms":77,"output_truncated":false}],"duration_ms":77},"duration_ms":77,"error":null}
+E   AssertionError: {"code":"HTTP_404","message":"Input path not found: /tmp/cds-uploads/../a165-escape.txt","request_id":"38271d79e9cf4baa","detail":"Input path not found: /tmp/cds-uploads/../a165-escape.txt"}
+    assert 404 == 400
+     +  where 404 = <Response [404 Not Found]>.status_code
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:106: AssertionError: {"code":"HTTP_404","message":"Input path not found: /tmp/cds-uploads/../a165-escape.txt","request_id":"38271d79e9cf4baa","detail":"Input path not found: /tmp/cds-uploads/../a165-escape.txt"}
+E   AssertionError: 上传根内的相对路径是合法输入，实得 404: {"code":"HTTP_404","message":"Input path not found: 71396861938a471cb1dcc9b5f3c949cf/in.txt","request_id":"4f5e37002fb2447f","detail":"Input path not found: 71396861938a471cb1dcc9b5f3c949cf/in.txt"}
+    assert 404 == 200
+     +  where 404 = <Response [404 Not Found]>.status_code
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:120: AssertionError: 上传根内的相对路径是合法输入，实得 404: {"code":"HTTP_404","message":"Input path not found: 71396861938a471cb1dcc9b5f3c949cf/in.txt","request_id":"4f5e37002fb2447f","detail":"Input path not found: 71396861938a471cb1dcc9b5f3c949cf/in.txt"}
+E   AssertionError: 明文输入/中间产物永久残留在工作目录（A165②）
+    assert not True
+     +  where True = exists()
+     +    where exists = PosixPath('/tmp/pytest-of-root/pytest-18/test_workspace_removed_on_succ0/ws/7305487b').exists
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:154: AssertionError: 明文输入/中间产物永久残留在工作目录（A165②）
+E   AssertionError: assert not True
+     +  where True = exists()
+     +    where exists = ((PosixPath('/tmp/pytest-of-root/pytest-18/test_workspace_removed_on_fail0') / 'ws') / 'f5c7353d').exists
+     +      where 'f5c7353d' = PipelineTask(task_id='f5c7353d', task_type='document', input_path='/tmp/pytest-of-root/pytest-18/test_workspace_remove...: 'failed', 'updated_at': '2026-10-19T01:05:38.887733+00:00', 'attempt': 1, 'error': 'sandbox blew up'}}, artifacts=[]).task_id
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:166: AssertionError: assert not True
+E   AssertionError: assert not True
+     +  where True = exists()
+     +    where exists = ((PosixPath('/tmp/pytest-of-root/pytest-18/test_workspace_removed_when_in0') / 'ws') / 'ca654b9f').exists
+     +      where 'ca654b9f' = PipelineTask(task_id='ca654b9f', task_type='document', input_path='/tmp/pytest-of-root/pytest-18/test_workspace_remove...error': 'Input file not found: /tmp/pytest-of-root/pytest-18/test_workspace_removed_when_in0/nope.txt'}}, artifacts=[]).task_id
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:175: AssertionError: assert not True
+E   AssertionError: 没人读的 partial_success 字段必须删除
+    assert 'partial_success' not in '"""DICOM pr...ii=False))\n'
+      
+      'partial_success' is contained here:
+        gs": [], "partial_success": False}
+        
+        for dcm_file in INPUT.glob("*"):
+            if dcm_file.suffix.lower() not in (".dcm", ".dicom", ""):
+                continue...
+      
+      ...Full output truncated (30 lines hidden), use '-vv' to show
+/root/cds-test/src/tests/test_ocr_a3_a165_pipeline.py:186: AssertionError: 没人读的 partial_success 字段必须删除
+=============================== warnings summary ===============================
+tests/test_ocr_a3_a165_pipeline.py::TestDicomHardFail::test_dicom_strip_failure_exits_nonzero
+  tests/test_ocr_a3_a165_pipeline.py:179: PytestWarning: The test <Function test_dicom_strip_failure_exits_nonzero> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_dicom_strip_failure_exits_nonzero(self, tmp_path: Path):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_ops_scripts_gates.py::test_rootfs_convert_cleanup_and_mount_safety
+FAILED tests/test_ops_scripts_gates.py::test_rootfs_convert_publish_is_atomic_and_validated
+FAILED tests/test_ops_scripts_gates.py::test_prepare_tongsuo_fail_closed_and_invariants
+FAILED tests/test_ops_scripts_gates.py::test_e2e_k8s_teardown_is_verified_before_pass
+FAILED tests/test_ops_scripts_gates.py::test_fisco_init_security_and_idempotence
+FAILED tests/test_ops_scripts_gates.py::test_build_cube_image_ca_guard_and_traceability
+FAILED tests/test_ops_scripts_gates.py::test_clickhouse_all_tables_have_retention
+FAILED tests/test_ops_scripts_gates.py::test_clickhouse_audit_indexes_and_drift_notice
+FAILED tests/test_cube_node_scripts.py::test_install_root_required_without_mock
+FAILED tests/test_cube_node_scripts.py::test_install_structural_invariants - ...
+FAILED tests/test_cube_node_scripts.py::test_verify_contract_statuses_and_exit
+FAILED tests/test_cube_node_scripts.py::test_verify_http2_probe_requires_settings_frame
+FAILED tests/test_cube_node_scripts.py::test_verify_socket_liveness_not_stale
+FAILED tests/test_cube_node_scripts.py::test_verify_tls_ca_when_configured - ...
+FAILED tests/test_cube_node_scripts.py::test_verify_mock_guard - assert 'MOCK...
+FAILED tests/test_cube_node_scripts.py::test_verify_unknown_args_rejected - a...
+FAILED tests/test_cube_node_scripts.py::test_verify_tee_uses_device_root_and_stderr
+FAILED tests/test_cube_node_scripts.py::test_verify_record_sanitizes_detail
+FAILED tests/test_cube_node_scripts.py::test_bringup_structural_invariants - ...
+FAILED tests/test_cube_node_scripts.py::test_tailer_tls_fail_closed_rejects_plaintext_endpoint
+FAILED tests/test_cube_node_scripts.py::test_tailer_tls_material_must_load - ...
+FAILED tests/test_cube_node_scripts.py::test_tailer_poll_interval_validated_at_build
+FAILED tests/test_deploy_manifest_gates.py::test_compose_secret_vars_are_required_interpolation[docker-compose.middleware.yml]
+FAILED tests/test_deploy_manifest_gates.py::test_no_committed_fallback_passwords_in_compose[docker-compose.middleware.yml]
+FAILED tests/test_deploy_manifest_gates.py::test_remote_deploy_runs_prod_startup_posture
+FAILED tests/test_deploy_manifest_gates.py::test_remote_deploy_fails_fast_on_missing_column_key
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_cds_app_volumes_and_replicas
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_cds_app_boot_posture_and_migrations
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_stateful_singletons_use_recreate
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_probes_and_heap - Assert...
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_images_tagged_and_limits_present
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_configmaps_clickhouse_ddl_matches_canonical
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_secrets_yaml_stays_dev_only_with_rotation_note
+FAILED tests/test_deploy_manifest_gates.py::test_k8s_registries_no_dead_index_docker_io
+FAILED tests/test_deploy_manifest_gates.py::test_helm_values_carries_boot_gate_switches
+FAILED tests/test_deploy_manifest_gates.py::test_helm_api_deployment_replicas_omitted_under_hpa
+FAILED tests/test_deploy_manifest_gates.py::test_helm_opa_url_not_hardcoded_to_missing_service
+FAILED tests/test_deploy_manifest_gates.py::test_helm_workspace_pvc_and_mounts_cover_declared_paths
+FAILED tests/test_deploy_manifest_gates.py::test_helm_pdb_guarded - Assertion...
+FAILED tests/test_deploy_manifest_gates.py::test_prod_posture_synced_across_copies[CDS_FEDERATION_JWT_KEY_REQUIRED-true]
+FAILED tests/test_deploy_manifest_gates.py::test_prod_posture_synced_across_copies[CDS_HSM_SOFTWARE_FALLBACK_ALLOWED-false]
+FAILED tests/test_deploy_manifest_gates.py::test_prod_posture_synced_across_copies[CDS_SECCOMP_FALLBACK_ALLOWED-false]
+FAILED tests/test_deploy_manifest_gates.py::test_prod_posture_synced_across_copies[CDS_SM3_FALLBACK_ALLOWED-false]
+FAILED tests/test_ocr_a103_a157_agent_runner.py::test_app_tree_compiles_under_py311_lexical_rules
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157Allowlist::test_malformed_allowlist_is_rejected_at_generation_time
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157Allowlist::test_port_and_scheme_are_converged
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157Allowlist::test_ip_allowlist_still_works_and_denies_by_default
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157Allowlist::test_trailing_dot_normalises_on_both_sides
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157ToolHttp::test_method_whitelist_refuses_before_any_socket
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157ToolHttp::test_timeout_is_clamped_and_method_forwarded
+FAILED tests/test_ocr_a103_a157_agent_runner.py::TestA157ToolHttp::test_denied_url_never_reaches_urlopen
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_build_corpus_runs_off_the_event_loop
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_storage_uploads_run_off_the_event_loop
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_embedding_bundle_is_published_before_the_corpus_index
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_ingest_of_one_data_product_is_serialised
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_ingest_lock_is_not_shared_across_products
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_oversize_bundle_is_refused_before_being_buffered
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_bundle_within_the_cap_still_reaches_the_service
+FAILED tests/test_ocr_a26_rag_ingest_loop.py::test_ingest_locks_do_not_leak_across_products
+FAILED tests/test_ocr_a04_exposure_review_decision.py::test_blank_rejection_reason_never_approves[spaces]
+FAILED tests/test_ocr_a04_exposure_review_decision.py::test_blank_rejection_reason_never_approves[empty]
+FAILED tests/test_ocr_a04_exposure_review_decision.py::test_blank_rejection_reason_never_approves[newline]
+FAILED tests/test_ocr_a04_exposure_review_decision.py::test_empty_approved_fields_list_does_not_approve_everything
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestUploadSanitization::test_traversal_filename_cannot_escape_upload_root
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestUploadSanitization::test_nested_filename_flattens_instead_of_500
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestUploadSanitization::test_same_name_uploads_do_not_silently_overwrite
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestProcessPathContainment::test_absolute_path_outside_upload_root_rejected
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestProcessPathContainment::test_traversal_input_path_rejected
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestProcessPathContainment::test_relative_path_inside_upload_root_accepted
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestWorkspaceErase::test_workspace_removed_on_success
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestWorkspaceErase::test_workspace_removed_on_failure
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestWorkspaceErase::test_workspace_removed_when_input_missing
+FAILED tests/test_ocr_a3_a165_pipeline.py::TestDicomHardFail::test_dicom_strip_failure_exits_nonzero
+73 failed, 154 passed, 1 warning in 69.53s (0:01:09)

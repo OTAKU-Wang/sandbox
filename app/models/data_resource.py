@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, func, JSON, Index
+from sqlalchemy import String, DateTime, BigInteger, Integer, ForeignKey, func, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -57,7 +57,10 @@ class DataResource(Base):
     storage_path: Mapped[str | None] = mapped_column(String(512))       # MinIO object name
     encryption_key_id: Mapped[str | None] = mapped_column(String(255))  # KMS DEK reference
     chunk_refs: Mapped[list | None] = mapped_column(JSON)               # [{path, iv, auth_tag, sm3_hash, size}]
-    file_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    # A203: BigInteger — SQLite INTEGER is already 64-bit, so a 4-byte Integer
+    # only overflows on PostgreSQL (>2,147,483,647 bytes ⇒ IntegerOutOfRangeError
+    # on INSERT). Matches cube_template.size_bytes. DDL side: revision 0028.
+    file_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     sm3_checksum: Mapped[str | None] = mapped_column(String(64))       # SM3 hash of original data
 
     # Schema metadata

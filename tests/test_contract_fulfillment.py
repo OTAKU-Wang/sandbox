@@ -164,7 +164,7 @@ async def test_contract_fulfillment_fails_closed_when_runtime_provision_fails(db
         terms={},
         product_ids=[str(product.id)],
         allowed_operations="query",
-        allowed_sandbox_levels="k8s",
+        allowed_sandbox_levels="L3",
         allowed_sandbox_modes=["structured_query"],
     )
     db_session.add(contract)

@@ -1,16 +1,17 @@
 """Monitoring API — system health and statistics."""
-import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
+from app.core.redis import redact_url
+from app.services.dp_budget import dp_budget_ledger
 from app.core.config import get_settings
 from app.models.user import UserRole
 from app.core.cache import cache_get, cache_set
@@ -263,7 +264,8 @@ async def get_monitoring_stats(
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # Parallel count queries via single round-trip
+    # OCR A18: one AsyncSession serializes its own queries; issuing the counts
+    # through asyncio.gather overlapped executes on the same connection.
     active_q = select(func.count()).select_from(SandboxSession).where(SandboxSession.status == "running")
     contracts_q = select(func.count()).select_from(Contract).where(Contract.created_at >= today_start)
     products_q = select(func.count()).select_from(DataProduct)
@@ -272,15 +274,15 @@ async def get_monitoring_stats(
     insp_total_q = select(func.count()).select_from(AuditLog).where(AuditLog.action.like("output_inspection%"))
     insp_pass_q = select(func.count()).select_from(AuditLog).where(AuditLog.action == "output_inspection_pass")
 
-    results = await asyncio.gather(
-        db.execute(active_q),
-        db.execute(contracts_q),
-        db.execute(products_q),
-        db.execute(audit_q),
-        db.execute(anchored_q),
-        db.execute(insp_total_q),
-        db.execute(insp_pass_q),
-    )
+    results = [
+        await db.execute(active_q),
+        await db.execute(contracts_q),
+        await db.execute(products_q),
+        await db.execute(audit_q),
+        await db.execute(anchored_q),
+        await db.execute(insp_total_q),
+        await db.execute(insp_pass_q),
+    ]
 
     active_sessions = results[0].scalar() or 0
     today_contracts = results[1].scalar() or 0
@@ -500,10 +502,10 @@ async def get_policy_rejection(
         .group_by(AuditLog.action)
     )
 
-    total_r, rejected_r, category_r = await asyncio.gather(
-        db.execute(total_q),
-        db.execute(rejected_q),
-        db.execute(category_q),
+    total_r, rejected_r, category_r = (
+        await db.execute(total_q),
+        await db.execute(rejected_q),
+        await db.execute(category_q),
     )
 
     total = total_r.scalar() or 0
@@ -580,3 +582,45 @@ async def get_recent_events(
         })
 
     return events
+
+
+@router.get("/backend-health")
+async def get_backend_health(
+    request: Request,
+    current_user: User = Depends(require_roles(UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN)),
+):
+    """A192g: 后端健康态必须在运行时可查，而不是只能读开机日志。
+
+    A94/A192d 把 `describe_hsm_backend()` 与 `budget_backend_health()` 的口径都落好了，
+    但唯一的读者是 lifespan 那几行日志：模拟 HSM 与真 Vault、进程内 ε 预算与跨副本
+    ε 预算，运维在运行时没有任何只读面能区分它们。
+
+    只读：不查库、不写状态、不碰密钥。两个读数的语义——
+    `dp_budget_backend.authoritative/verified` 为假 ⇒ 那份 ε 预算不是跨副本共享的；
+    `hsm_backend.is_simulation` 为真 ⇒ 明文 KEK 就在本进程。`last_error` 可能是驱动
+    回显的整条连接串，出口前必须经 `redact_url`（A38）。
+    """
+    dp_backend = dict(dp_budget_ledger.budget_backend_health())
+    last_error = dp_backend.get("last_error")
+    if isinstance(last_error, str):
+        dp_backend["last_error"] = redact_url(last_error)
+
+    try:
+        recorded = request.app.state.hsm_backend  # A94b 启动时记录的那一份，本端点只读
+    except AttributeError:
+        recorded = None
+    if isinstance(recorded, dict):
+        hsm_backend = dict(recorded)
+        err = hsm_backend.get("error")
+        if isinstance(err, str):
+            hsm_backend["error"] = redact_url(err)
+    else:
+        # 没有启动披露记录（进程未走完整 lifespan）就如实报 unknown 并按模拟对待，
+        # 不得默认成硬件 HSM（同 main.py 的 A94 fail-visible 口径）。
+        hsm_backend = {"backend": "unknown", "is_simulation": True, "disclosure_missing": True}
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "dp_budget_backend": dp_backend,
+        "hsm_backend": hsm_backend,
+    }

@@ -7,6 +7,9 @@ metadata:
     app: minio
 spec:
   replicas: 1
+  # PVC 单例（local-path/RWO）：RollingUpdate 的 surge pod 永远卡在 ContainerCreating。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: minio
@@ -44,9 +47,12 @@ spec:
           volumeMounts:
             - name: miniodata
               mountPath: /data
+          # minio/minio 镜像里没有 mc 二进制（mc 在 minio/mc 镜像），旧探针从未成功过。
+          # /minio/health/live 是这个镜像自带的免凭据存活/就绪端点（API 端口 9000）。
           readinessProbe:
-            exec:
-              command: ["mc", "ready", "local"]
+            httpGet:
+              path: /minio/health/live
+              port: 9000
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:

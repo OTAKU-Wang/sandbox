@@ -315,9 +315,47 @@ def test_http_pusher_refuses_empty_token(tailer_mod, monkeypatch):
         tailer_mod.HttpPusher("https://cds:8443", "/t.crt", "/t.key", "/t.ca", "")
 
 
+def _write_tls_material(tmp_path: Path) -> None:
+    """写一套**真能加载**的自签 mTLS 三件套（crt/key/ca）。
+
+    `build_from_env` 现在会在启动期真做一次 `ssl` 加载校验（A7 fail-closed），
+    旧夹具里的假 `"PEM"` 字符串已不可能过 happy path。用 cryptography（requirements.txt
+    硬依赖）现造而不是 openssl，是为了不拿宿主机工具当硬前置。ca 就是同面自签证书本身
+    （信任锚），与真实节点部署形态一致。
+    """
+    import datetime as _dt
+    import ssl
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "cds-audit-tailer-test")])
+    not_before = _dt.datetime(2026, 1, 1)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name).issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(not_before)
+        .not_valid_after(not_before + _dt.timedelta(days=3650))
+        .sign(key, hashes.SHA256())
+    )
+    crt, key_path, ca = tmp_path / "t.crt", tmp_path / "t.key", tmp_path / "t.ca"
+    crt.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    ca.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    # 夹具自检：材料不好就直接红在这里，而不是把后面的失败归错因
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.load_verify_locations(cafile=str(ca))
+    ctx.load_cert_chain(certfile=str(crt), keyfile=str(key_path))
+
+
 def test_build_from_env_happy_path(tailer_mod, monkeypatch, tmp_path):
-    for name in ("crt", "key", "ca"):
-        (tmp_path / f"t.{name}").write_text("PEM")
+    _write_tls_material(tmp_path)
     monkeypatch.setenv("AUDIT_TAILER_NODE_ID", "n1")
     monkeypatch.setenv("AUDIT_TAILER_CDS_ENDPOINT", "https://cds:8000")
     monkeypatch.setenv("AUDIT_TAILER_TLS_CERT", str(tmp_path / "t.crt"))

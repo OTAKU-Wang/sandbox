@@ -16,10 +16,10 @@
 </div>
 
 <div class="card">
-    <h3>交易验证</h3>
+    <h3>审计记录验真</h3>
     <div style="display:flex;gap:12px;">
-        <input type="text" id="tx-hash" placeholder="输入 tx_hash 进行验证" style="flex:1;">
-        <button class="btn btn-primary" onclick="verifyTx()">验证交易</button>
+        <input type="text" id="tx-hash" placeholder="输入 record_id（审计记录 UUID）进行验证" style="flex:1;">
+        <button class="btn btn-primary" onclick="verifyTx()">验证记录</button>
     </div>
     <div id="verify-result"></div>
 </div>
@@ -61,22 +61,40 @@ async function loadAnchors() {
         $('#total-anchors').textContent = displayList.length;
         $('#verified-anchors').textContent = verified;
     } catch (e) {
-        $('#anchors-table').innerHTML = `<tr><td colspan="5" class="empty">加载失败: ${esc(e.message)}</td></tr>`;
+        // A134: API.get 的 message 内含后端响应原文，不得上屏 —— 固定文案。
+        $('#anchors-table').innerHTML = '<tr><td colspan="5" class="empty">锚定记录加载失败，请稍后重试</td></tr>';
     }
 }
 
 async function verifyTx() {
     const recordId = $('#tx-hash').value.trim();
-    if (!recordId) { alert('请输入 record_id 或 tx_hash'); return; }
+    if (!recordId) { alert('请输入 record_id（审计记录 UUID）'); return; }
     try {
-        const result = await API.get(`/api/v1/audit/verify/${recordId}`);
-        const verdict = result.valid ? badge('通过', 'success') : badge('失败', 'danger');
+        // A134: 后端 (app/api/audit.py::verify_audit_record) 只吃 record_id。
+        const result = await API.get(`/api/v1/audit/verify/${encodeURIComponent(recordId)}`);
+        // A134: 后端契约字段是 verified —— 此前读的 `valid` 字段后端从未返回，
+        // 于是无论真假都渲染红色「失败」。
+        const verdict = result.verified ? badge('通过', 'success') : badge('失败', 'danger');
+        // T8/F1 诚实披露：backend/backend_label 区分联盟链与本地 PG 追加日志，
+        // verification_note 说明校验依据。两者都是必读展示项，不得丢弃。
+        const backend = result.backend || null;
+        const backendLabel = backend ? (backend.backend_label || backend.backend || '-') : '未找到锚定记录（存证后端未知）';
+        const chainNote = backend ? (backend.is_consortium_chain ? '联盟链存证' : '非联盟链：本地防篡改追加日志') : '无法确认是否上链';
+        const verifyNote = result.verification_note || result.reason || '-';
         $('#verify-result').innerHTML = `<div class="card" style="background:var(--bg);margin-top:12px;">
             <p><strong>验证结果:</strong> ${verdict}</p>
             <p><strong>Record ID:</strong> <code>${esc(result.record_id || recordId)}</code></p>
             <p><strong>Merkle Root:</strong> <code>${esc(result.merkle_root || '-')}</code></p>
+            <p><strong>存证后端:</strong> ${esc(backendLabel)}（${esc(chainNote)}）</p>
+            <p><strong>验证说明:</strong> ${esc(verifyNote)}</p>
         </div>`;
-    } catch (e) { alert('验证失败: ' + e.message); }
+    } catch (e) {
+        // A134: 固定文案 —— 不透传 API.get 拼出的后端响应原文（e.message）。
+        $('#verify-result').innerHTML = `<div class="card" style="background:var(--bg);margin-top:12px;">
+            <p><strong>验证结果:</strong> ${badge('失败', 'danger')}</p>
+            <p>验真请求失败：请确认 record_id 为审计记录 UUID 后重试；若仍失败请联系运维查看服务端日志。</p>
+        </div>`;
+    }
 }
 
 loadAnchors();

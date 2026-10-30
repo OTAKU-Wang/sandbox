@@ -1,10 +1,11 @@
+"""Database session factory + post-commit enforcement drain (A20b)."""
 import asyncio
-import threading
-import uuid
-from concurrent.futures import Future
-
 import logging
 import sqlite3
+import threading
+import uuid
+from collections.abc import AsyncIterator
+from concurrent.futures import Future
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -36,7 +37,7 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncIterator[AsyncSession]:
     async with async_session() as session:
         try:
             yield session
@@ -44,8 +45,77 @@ async def get_db() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
+        else:
+            # A20b: 提交确实成功后的钩子。异常走 except 分支时绝不 drain ——
+            # 没有落库的登记永远不得碰到强制面。
+            await drain_post_commit_hooks(session)
         finally:
             await session.close()
+
+
+# 路由在请求会话里登记、由本模块在 commit 成功后才执行的待办队列键。
+NETPOL_PENDING_KEY = "cds_netpol_pending"
+
+
+async def drain_post_commit_hooks(session: AsyncSession) -> None:
+    """A20b（方案 A）：网络策略在落库确认后才推给强制面。
+
+    路由（app/api/network_policy.py::create_network_policy）只把操作登记到
+    ``session.info[NETPOL_PENDING_KEY]``；本函数在 get_db 的 commit 成功之后
+    按登记顺序执行，消除 A20 的「引擎里已有一条数据库里不存在的网络策略」
+    分叉（强制侧与记录侧）。
+
+    失败处置的不对称性如实说：数据行此刻已提交，推失败**不得**把已提交的
+    请求伪报成 5xx，也不得回滚请求会话（本仓实测：请求会话 rollback 会
+    expire 整个 session ⇒ 后续同步属性读取 MissingGreenlet）；每次推送各自
+    包一个 SAVEPOINT（只隔离引擎自己的写入），失败记 ERROR 日志 +
+    log_standalone 独立审计（响应已如实披露 enforcement="queued"）。
+    """
+    pending = session.info.pop(NETPOL_PENDING_KEY, None)
+    if not pending:
+        return
+
+    from app.services.network_policy import network_policy_engine
+
+    dirty = False
+    for op in pending:
+        action = op.get("action")
+        sid = op.get("session_id")
+        try:
+            async with session.begin_nested():
+                if action == "apply":
+                    await network_policy_engine.create_policy(sid, op["config"], db=session)
+                    dirty = True
+                elif action == "remove":
+                    await network_policy_engine.remove_policy(sid, db=session)
+                    dirty = True
+        except Exception as exc:
+            logger.error(
+                "[netpol-drain] post-commit %s failed for session %s: %s",
+                action, sid, exc,
+            )
+            try:
+                from app.services.audit_service import audit_service
+
+                uid = op.get("user_id")
+                await audit_service.log_standalone(
+                    action=f"network_policy.{action}_failed",
+                    resource_type="network_policy",
+                    user_id=uuid.UUID(str(uid)) if uid else None,
+                    session_id=sid,
+                    detail={
+                        "error": str(exc),
+                        "stage": "post_commit_drain",
+                        "mode": getattr(op.get("config"), "mode", None),
+                    },
+                )
+            except Exception as audit_exc:
+                logger.error("[netpol-drain] failure audit also failed: %s", audit_exc)
+    if dirty:
+        try:
+            await session.commit()
+        except Exception as exc:
+            logger.error("[netpol-drain] post-drain commit failed: %s", exc)
 
 
 # SS-14 RT-07 (2026-10-14): 同步桥 —— 同步适配器代码（cube adapter 的

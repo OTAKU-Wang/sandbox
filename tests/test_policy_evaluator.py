@@ -14,6 +14,25 @@ def evaluator():
     return PolicyEvaluator()
 
 
+@pytest.fixture(autouse=True)
+def _no_live_opa(monkeypatch):
+    """本文件测的是 Python PDP 判定，但它不能假定宿主上没有 OPA。
+
+    `PolicyEvaluator.evaluate` 是先试 OPA、拿不到才回落（policy_evaluator.py:87-93），
+    而 `_evaluate_via_opa` 会把 bundle 推到 OPA 再查。本机如果正跑着真 OPA（:8181），
+    推策略会成功、查询会返回 `result: undefined` → `False` → DENY，于是同一份代码
+    在两种宿主上给不同判决（2026-10-19 实测：本机单跑 `test_no_field_acl_allows_all` 红、
+    无 OPA 的机器全绿）。把传输边界的 push 钉成失败就能确定性地走回落分支；
+    只代理传输，不代理判决，OPA 优先路径由 OPA 自己的用例覆盖。
+    """
+    async def _push_unavailable(*args, **kwargs):
+        return False
+
+    from app.services.opa_client import opa_client
+
+    monkeypatch.setattr(opa_client, "push_policy", _push_unavailable)
+
+
 @pytest.fixture
 def sample_bundle():
     return PolicyBundle(

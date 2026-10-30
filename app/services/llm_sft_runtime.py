@@ -925,7 +925,11 @@ class LLMSFTRuntime:
 
         model_id = f"sft:{session_id}"
         bits = model_watermark_service.generate_watermark_bits("cds", model_id, num_bits=32)
-        key_seed = int(crypto_service.sm3_hash(session_id.encode())[:8], 16)
+        # A186c: 前 8 个十六进制位 = 32-bit 熵，可被离线枚举 ⇒ 水印完整性证据可被
+        # 重算/伪造。取 16 位并清掉符号位：仍 ≤ watermark_records.key_seed 的有符号
+        # 64-bit 列域（_key_seed_column_max = 2**63-1，A186b），保 63-bit 熵。
+        # 仍是 session_id 的纯函数 —— 可复现，不引入随机源。
+        key_seed = int(crypto_service.sm3_hash(session_id.encode())[:16], 16) & ((1 << 63) - 1)
         state = {
             "lora_adapter.weight": [0.001 * (i + 1) for i in range(128)],
         }

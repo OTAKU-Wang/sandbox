@@ -48,7 +48,9 @@ const LEGACY = notebook({ id: 'legacy', title: '存量笔记本', path: '/nb/leg
 const NUMBERED = notebook({ id: 'n-2', title: '流失评分', task_no: 'TASK-20261016-001', debug_method: 'web_ide', export_mode: 'bundle', debug_memory_mb: 8192, exec_memory_mb: 16384 });
 const ARCHIVED = notebook({ id: 'n-3', title: '归档任务', task_no: 'TASK-20261016-002', status: 'archived', debug_method: 'jupyter', export_mode: 'openapi', debug_memory_mb: 4096 });
 
-const cards = buildDevTaskCards([LEGACY, NUMBERED, ARCHIVED], [workload({ source_notebook_id: 'n-2', status: WorkloadStatus.Published })]);
+// A250：阶段标签「已发布生产」现在与生产执行入口同口径（env=production 且 status=published），
+// 没写 env 的负载不再能撑起这个标签——这里要的是「已发到生产」这条路径，所以补上 env。
+const cards = buildDevTaskCards([LEGACY, NUMBERED, ARCHIVED], [workload({ source_notebook_id: 'n-2', env: 'production', status: WorkloadStatus.Published })]);
 
 describe('开发任务卡片', () => {
   it('新任务把任务级字段都摆出来（内存按 GiB 显示）', () => {

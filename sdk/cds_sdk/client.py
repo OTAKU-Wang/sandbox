@@ -90,6 +90,75 @@ def _retry_after_seconds(resp: httpx.Response) -> float:
     return 1.0
 
 
+# A213 / A88: 429/503 only say "this hop did not accept the request" — a gateway
+# can answer them AFTER the backend already committed the write, so replaying a
+# write duplicates it (double session / duplicate snapshot / duplicate key).
+# Only methods whose replay has no server-side effect are resent automatically;
+# writes raise, and the caller decides (``CDSApiError.retry_after`` is populated).
+# DELETE/PUT stay out of the set: a replay of a committed delete surfaces as a
+# 404, and this API's PUT handlers are not specified as idempotent.
+# PZ-11③ / docs/error-codes.md: 410 SESSION_TERMINATED remains terminal — it is
+# not in the retry status set at all.
+_RETRY_STATUSES = (429, 503)
+_IDEMPOTENT_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _is_retryable(method: str, status_code: int, retries: int) -> bool:
+    return (
+        status_code in _RETRY_STATUSES
+        and retries > 0
+        and method.upper() in _IDEMPOTENT_METHODS
+    )
+
+
+# ── 合约签名原文的字节锁（OCR-A110 / OCR-A255）─────────────────────────────
+# 必须与后端 `app/services/crypto_service.py::contract_sign_data` 逐字同语义：原文用
+# `|` 分隔字段、`,` 分隔 purpose_scope 元素，字段里带分隔符就能拼出与另一组字段
+# 完全相同的原文，而这份原文的 SM2 签名是跨方的不可否认证据。修法与后端一致：
+# 拼接前**拒绝**而不是转义（改编码得后端/SDK/前端三边同改，各自转义会验签静默失败，
+# 见 crypto_service.py:208-216）。上限取 DB 列宽，与后端同名类常量一一对应；SDK 是
+# 独立发行包不能 import app.*，所以这里是镜像副本，三边常量+向量表由
+# tests/test_ocr_a255_xlang_parity.py 与 cds-frontend 的平价 spec 锁死。
+PAYLOAD_MAX_LEN = 64  # == CryptoService._PAYLOAD_MAX_LEN
+PAYLOAD_ROLE_MAX_LEN = 16  # == CryptoService._PAYLOAD_ROLE_MAX_LEN
+PAYLOAD_SCOPE_MAX_ITEMS = 64  # == CryptoService._PAYLOAD_SCOPE_MAX_ITEMS
+
+
+def _payload_field_issues(
+    field: str, value: Any, *, max_len: int, forbidden: str = "|"
+) -> list[dict]:
+    """一个字段能否无歧义地进原文：不含分隔符、不超列宽（后端同名函数的镜像）。"""
+    text = "" if value is None else str(value)
+    issues = [{"field": field, "reason": f"contains forbidden separator {ch!r}"}
+              for ch in forbidden if ch in text]
+    if len(text) > max_len:
+        issues.append({"field": field, "reason": f"exceeds {max_len} characters"})
+    return issues
+
+
+def _contract_payload_errors(
+    contract_id: str, contract_no: str, party_role: str, timestamp: str,
+    purpose: str | None = None, purpose_scope: list | None = None,
+) -> list[dict]:
+    """逐字段汇总歧义/越界明细，字段顺序与 reason 文案跟后端逐字一致。"""
+    check = _payload_field_issues
+    errors: list[dict] = []
+    errors += check("contract_id", contract_id, max_len=PAYLOAD_MAX_LEN)
+    errors += check("contract_no", contract_no, max_len=PAYLOAD_MAX_LEN)
+    errors += check("party_role", party_role, max_len=PAYLOAD_ROLE_MAX_LEN)
+    errors += check("timestamp", timestamp, max_len=PAYLOAD_MAX_LEN)
+    errors += check("purpose", purpose, max_len=PAYLOAD_MAX_LEN)
+    if purpose_scope is not None:
+        if len(purpose_scope) > PAYLOAD_SCOPE_MAX_ITEMS:
+            errors.append({"field": "purpose_scope",
+                           "reason": f"more than {PAYLOAD_SCOPE_MAX_ITEMS} elements"})
+        for idx, item in enumerate(purpose_scope):
+            for issue in check("purpose_scope", item,
+                               max_len=PAYLOAD_MAX_LEN, forbidden="|,"):
+                errors.append({**issue, "index": idx})
+    return errors
+
+
 class CDSResponse(dict):
     """Dict-shaped API response with structured disclosure access (PZ-11④).
 
@@ -116,10 +185,19 @@ def _parse_error(resp: httpx.Response, path: str) -> CDSApiError:
     """Build a CDSApiError from a non-2xx response (W2 shape or legacy)."""
     try:
         payload = resp.json()
-        detail = payload.get("detail", payload)
     except ValueError:
         payload = None
         detail = resp.text
+    else:
+        # A76: valid JSON is not necessarily an object — an upstream gateway can
+        # answer ``[{...}]`` / ``"error"`` / ``null``, and ``payload.get`` on those
+        # raised AttributeError, breaking the "non-2xx raises CDSApiError" contract.
+        if isinstance(payload, dict):
+            detail = payload.get("detail", payload)
+        elif payload is None:
+            detail = resp.text
+        else:
+            detail = payload
     return CDSApiError(
         resp.status_code,
         detail,
@@ -168,6 +246,7 @@ class CDSClient:
         headers: dict[str, str] | None = None,
         transport: httpx.BaseTransport | None = None,
         max_retries: int = 3,
+        task_payload_in_body: bool = True,
         app_id: str | None = None,
         app_secret: str | None = None,
         api_key: str | None = None,
@@ -186,6 +265,17 @@ class CDSClient:
         an ``api_key`` that does not start with ``cds_ak_`` all raise
         :class:`CDSError` (400) at construction — a malformed key fails
         fast and no request is ever sent.
+
+        ``task_payload_in_body`` (A87/A216) sends ``create_task``'s script /
+        RAG-query payload as a JSON request body instead of a query string, so
+        tenant code never reaches an access log or the 64 KB URL cap. It is the
+        default — ``POST /api/v1/sandbox-tasks`` reads the body form since
+        A87/A216. Pass ``task_payload_in_body=False`` to talk to a pre-body
+        server with the legacy query-string shape.
+
+        Retries are limited to idempotent reads (GET/HEAD/OPTIONS) on 429/503;
+        a write that gets 429/503 raises :class:`CDSApiError` undelivered-by-
+        retry, with ``retry_after`` from the response header.
         """
         has_token = bool(token)
         has_app = bool(app_id or app_secret)
@@ -209,6 +299,7 @@ class CDSClient:
         self._access_token = token
         self._refresh_token: str | None = None
         self._max_retries = max_retries
+        self._task_payload_in_body = task_payload_in_body
         auth_headers: dict[str, str] = {}
         if token:
             auth_headers["Authorization"] = f"Bearer {token}"
@@ -228,9 +319,7 @@ class CDSClient:
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         retries = kwargs.pop("_retries", self._max_retries)
         resp = self._client.request(method, path, **kwargs)
-        # PZ-11③ / docs/error-codes.md: 410 SESSION_TERMINATED is terminal —
-        # clients must stop retrying, so it is excluded from the retry set.
-        if resp.status_code in (429, 503) and retries > 0:
+        if _is_retryable(method, resp.status_code, retries):
             time.sleep(min(_retry_after_seconds(resp), 5.0))
             return self._request(method, path, _retries=retries - 1, **kwargs)
         if resp.status_code >= 400:
@@ -245,9 +334,12 @@ class CDSClient:
     def _request_with_headers(self, method: str, path: str, **kwargs: Any) -> tuple[Any, dict]:
         retries = kwargs.pop("_retries", self._max_retries)
         resp = self._client.request(method, path, **kwargs)
-        if resp.status_code in (429, 503) and retries > 0:
+        if _is_retryable(method, resp.status_code, retries):
             time.sleep(min(_retry_after_seconds(resp), 5.0))
             return self._request_with_headers(method, path, _retries=retries - 1, **kwargs)
+        # A212: this channel used to return the error body as success-shaped data.
+        if resp.status_code >= 400:
+            raise _parse_error(resp, path)
         body = None if resp.status_code == 204 or not resp.content else resp.json()
         if isinstance(body, dict):
             body = CDSResponse(body)
@@ -569,7 +661,29 @@ class CDSClient:
                   purpose: str | None = None, purpose_scope: list | None = None) -> str:
         """Build the canonical contract sign payload (mirrors backend
         crypto_service.contract_sign_data). Sign it with your SM2 private key
-        and pass the hex signature to sign_contract."""
+        and pass the hex signature to sign_contract.
+
+        Raises:
+            CDSError: 422 / ``VALIDATION_ERROR`` when a field would make the
+                payload ambiguous (an embedded ``|``, or ``,` inside a
+                ``purpose_scope`` element) or longer than the column width it
+                would be stored in. Such a payload is refused locally: the
+                request is never sent and nothing is signed, because a
+                signature over it is counterparty-reinterpretable evidence
+                (OCR-A110 / OCR-A255).
+        """
+        errors = _contract_payload_errors(
+            contract_id, contract_no, party_role, timestamp, purpose, purpose_scope,
+        )
+        if errors:
+            raise CDSError(422, {
+                "code": "VALIDATION_ERROR",
+                "message": (
+                    "合约签名原文不得含 `|` / `,` 分隔符，且不得超过落库列宽："
+                    "有歧义的原文可被对方重新解释，SDK 侧本地拒签，未发出请求"
+                ),
+                "errors": errors,
+            })
         base = f"CDS-SIGN|{contract_id}|{contract_no}|{party_role}|{timestamp}"
         if purpose:
             base += f"|purpose:{purpose}"
@@ -605,18 +719,32 @@ class CDSClient:
         rag_query: str | None = None,
     ) -> dict:
         """Create a sandbox task. ``task_type="rag_query"`` takes ``rag_query``
-        instead of ``code`` (system-generated RAG runner)."""
-        params: dict[str, Any] = {"session_id": session_id, "task_type": task_type}
+        instead of ``code`` (system-generated RAG runner).
+
+        A87/A216: ``code``/``rag_query`` are tenant data. By default they travel
+        in the JSON body and the request line keeps only
+        ``session_id``/``task_type``; ``CDSClient(task_payload_in_body=False)``
+        restores the legacy query-string shape for pre-body servers.
+        """
+        payload: dict[str, Any] = {}
         if code is not None:
-            params["code"] = code
+            payload["code"] = code
         if language:
-            params["language"] = language
+            payload["language"] = language
         if timeout_seconds:
-            params["timeout_seconds"] = timeout_seconds
+            payload["timeout_seconds"] = timeout_seconds
         if purpose:
-            params["purpose"] = purpose
+            payload["purpose"] = purpose
         if rag_query:
-            params["rag_query"] = rag_query
+            payload["rag_query"] = rag_query
+        if self._task_payload_in_body:
+            return self._request(
+                "POST",
+                "/api/v1/sandbox-tasks",
+                params={"session_id": session_id, "task_type": task_type},
+                json=payload,
+            )
+        params: dict[str, Any] = {"session_id": session_id, "task_type": task_type, **payload}
         return self._request("POST", "/api/v1/sandbox-tasks", params=params)
 
     def submit_task(self, session_id: str, task_id: str) -> dict:

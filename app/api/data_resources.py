@@ -19,6 +19,27 @@ from app.services.storage_service import storage_service
 router = APIRouter()
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+UPLOAD_READ_CHUNK_SIZE = 1024 * 1024  # 1MB
+
+
+async def _read_upload_bounded(file: UploadFile, limit: int) -> bytes:
+    """Read an upload in chunks, refusing at `limit` instead of after full buffering.
+
+    OCR A70: the cap used to be checked only after `await file.read()` had already
+    put the whole body (up to 500MB) in API-process memory.
+    """
+    chunk_size = min(UPLOAD_READ_CHUNK_SIZE, limit + 1)
+    buffer = bytearray()
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            return bytes(buffer)
+        buffer.extend(chunk)
+        if len(buffer) > limit:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (max {limit // 1024 // 1024}MB)",
+            )
 
 # A310: opt-in list envelope (repo convention {items,total,page,page_size}).
 MAX_PAGE_SIZE = 200
@@ -159,10 +180,8 @@ async def upload_data_resource(
     if not name:
         name = file.filename or "unnamed"
 
-    # Read file content
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)")
+    # Read file content, capped while reading (OCR A70: never buffer past the limit)
+    content = await _read_upload_bounded(file, MAX_UPLOAD_SIZE)
 
     # Detect format
     detected_format = _detect_format(file.content_type or "", file.filename or "")

@@ -33,7 +33,11 @@ VERBS = ("read", "write", "*")
 # Order is irrelevant — matching is longest-prefix-first at runtime.
 GROUP_PREFIXES: list[tuple[str, tuple[str, ...]]] = [
     ("sessions", ("/api/v1/sandbox-sessions", "/api/v1/dev-sandbox",
-                  "/api/v1/notebooks", "/api/v1/workloads")),
+                  "/api/v1/notebooks", "/api/v1/workloads",
+                  # A66: main.py mounts the SS-15 flow router under
+                  # require_group("sessions"); an unmapped prefix would make the
+                  # whole flow surface default-deny for key subjects.
+                  "/api/v1/flow")),
     ("contracts", ("/api/v1/contracts",)),
     ("data", ("/api/v1/data-products", "/api/v1/data-resources", "/api/v1/catalog")),
     ("pipeline", ("/api/v1/data-pipeline", "/api/v1/training", "/api/v1/mpc",
@@ -334,14 +338,52 @@ async def require_human(
         )
 
 
-def key_unmapped_deny(path: str, auth_header: str) -> bool:
+def key_credential_from_authorization(auth_header: str | None) -> str | None:
+    """Bearer token of an `Authorization` header, parsed the way the auth entry
+    point parses it (A65).
+
+    `fastapi.security.http.get_authorization_scheme_param` splits the header on
+    its first space and `HTTPBearer` then accepts the scheme case-insensitively
+    (`scheme.lower() != "bearer"`), so `bearer cds_ak_…` authenticates as a key
+    even though a byte comparison against `"Bearer "` does not see it. Returns
+    None when the header is not a bearer credential at all.
+    """
+    if not auth_header:
+        return None
+    scheme, _, param = auth_header.strip().partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return param.strip() or None
+
+
+def is_key_credential(value: str | None) -> bool:
+    """True when one credential value is a platform API key (`cds_ak_…`).
+
+    Shared by every guard that must recognise a key subject: `deps.resolve_auth_subject`
+    tests the bearer token right after a case-insensitive scheme check, and
+    `deps.machine_key_from_request` strips `X-CDS-API-Key` before its own prefix
+    test. A guard that instead byte-compares `"Bearer cds_ak_"` is one byte away
+    from not seeing a key the router still accepts.
+    """
+    return bool(value) and value.strip().startswith("cds_ak_")
+
+
+def key_unmapped_deny(
+    path: str, auth_header: str, api_key_header: str = ""
+) -> bool:
     """SS-12 rule 1 predicate: True when a `cds_ak_` key subject hits a path
     no functional group covers (and which is not human-only).
 
     Pure function so the default-deny check runs in raw ASGI middleware
-    (WebSocket handshakes cannot inject Request-taking dependencies).
+    (WebSocket handshakes cannot inject Request-taking dependencies). The
+    credential is read the same way the router layer reads it (A65), and
+    `api_key_header` lets a caller hand over the other credential transport
+    (`X-CDS-API-Key`) instead of only the folded bearer form.
     """
-    if not auth_header.startswith("Bearer cds_ak_"):
+    credential = key_credential_from_authorization(auth_header)
+    if not is_key_credential(credential):
+        credential = api_key_header
+    if not is_key_credential(credential):
         return False
     if is_human_only(path):
         return False

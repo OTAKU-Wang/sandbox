@@ -32,12 +32,14 @@ function passThrough(table: Record<string, StatusMeta>, value: string): StatusMe
   return table[value] ?? { color: 'default', label: value };
 }
 
-function publishedNotebookIds(workloads: Workload[]): Set<string> {
-  return new Set(
-    workloads
-      .filter((workload) => workload.status === WorkloadStatus.Published && workload.source_notebook_id)
-      .map((workload) => workload.source_notebook_id as string),
-  );
+/**
+ * 「已发布生产」的唯一口径：与生产执行入口的 `publishedProductionByTask` 取同一个集合
+ * （env=production 且 status=published）。此前这一份只过 status 不过 env，而阶段标签文案就是
+ * 「已发布生产」⇒ 只发到测试环境的任务被贴「已发布生产」，同一张卡的生产执行入口却按 env
+ * 口径禁用（NO_PRODUCTION_WORKLOAD_REASON），同一屏自相矛盾。
+ */
+function publishedProductionNotebookIds(workloads: Workload[]): Set<string> {
+  return new Set(publishedProductionByTask(workloads).keys());
 }
 
 function notebookStage(notebook: Notebook, published: ReadonlySet<string>): StatusMeta {
@@ -53,7 +55,7 @@ export function buildDevTaskRows(input: {
   workloads: Workload[];
   runs: ComputeRun[];
 }): DevTaskRow[] {
-  const publishedByNotebook = publishedNotebookIds(input.workloads);
+  const publishedByNotebook = publishedProductionNotebookIds(input.workloads);
 
   const rows: DevTaskRow[] = [
     ...input.notebooks.map((notebook): DevTaskRow => ({
@@ -306,7 +308,7 @@ export function buildDevTaskCard(
 }
 
 export function buildDevTaskCards(notebooks: Notebook[], workloads: Workload[]): DevTaskCard[] {
-  const published = publishedNotebookIds(workloads);
+  const published = publishedProductionNotebookIds(workloads);
   const production = publishedProductionByTask(workloads);
   return notebooks.map((notebook) => buildDevTaskCard(notebook, published, production));
 }

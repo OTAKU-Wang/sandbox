@@ -32,7 +32,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 # SQLite stores sa.UUID columns with NUMERIC affinity, so type comparison
 # against a migrated SQLite database produces mass false positives. CI sets

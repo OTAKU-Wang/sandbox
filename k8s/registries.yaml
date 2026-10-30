@@ -1,9 +1,8 @@
 mirrors:
+  # k3s normalizes the Docker Hub host to `docker.io`; a second `index.docker.io`
+  # block was dead config (never consulted) that made it look like the mirror was
+  # configured twice.
   "docker.io":
-    endpoint:
-      - "https://docker.1ms.run"
-      - "https://docker.m.daocloud.io"
-  "index.docker.io":
     endpoint:
       - "https://docker.1ms.run"
       - "https://docker.m.daocloud.io"

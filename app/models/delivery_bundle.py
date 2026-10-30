@@ -7,7 +7,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, func, Index
+from sqlalchemy import String, BigInteger, DateTime, Integer, ForeignKey, func, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -26,7 +26,7 @@ class DeliveryBundle(Base):
     session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sandbox_sessions.id"), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     object_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # ── 交付中心展示列（SS-18 §8 P0-②）：打包当时就写在行上，读侧不再解 MANIFEST 也不再猜。

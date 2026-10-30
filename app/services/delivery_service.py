@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -167,18 +167,20 @@ async def deliver_once(db: AsyncSession, delivery: WebhookDelivery, subscription
 
 async def dispatch_pending(db: AsyncSession, *, limit: int = 20, now: datetime | None = None) -> dict[str, int]:
     moment = now or datetime.now(timezone.utc)
+    # A169: 订阅状态下推进 SELECT —— 暂停订阅的滞留 pending 行不得占满 limit 窗口
+    # （否则活跃订阅永远排不到）；订阅缺失的行保留死信分支。
     res = await db.execute(
-        select(WebhookDelivery)
+        select(WebhookDelivery, WebhookSubscription)
+        .outerjoin(WebhookSubscription, WebhookSubscription.id == WebhookDelivery.subscription_id)
         .where(WebhookDelivery.status.in_([DeliveryStatus.PENDING.value, DeliveryStatus.FAILED.value]))
         .where((WebhookDelivery.next_retry_at.is_(None)) | (WebhookDelivery.next_retry_at <= moment))
+        .where(or_(WebhookSubscription.id.is_(None), WebhookSubscription.status == WebhookStatus.ACTIVE.value))
         .order_by(WebhookDelivery.created_at.asc())
         .limit(limit)
     )
-    due = list(res.scalars().all())
+    due = list(res.all())
     counters = {"attempted": 0, "delivered": 0, "failed": 0}
-    for delivery in due:
-        sub_res = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == delivery.subscription_id))
-        subscription = sub_res.scalar_one_or_none()
+    for delivery, subscription in due:
         if subscription is None:
             delivery.status = DeliveryStatus.DEAD.value
             delivery.last_error = "订阅已删除"

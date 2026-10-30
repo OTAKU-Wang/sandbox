@@ -44,16 +44,17 @@ export const mpcApi = {
   getCapabilities: (): Promise<MpcCapabilities> => api.get('/mpc/capabilities'),
   listKeys: (): Promise<MpcKey[]> => api.get('/mpc/keys'),
   getShares: (keyId: string): Promise<MpcShare[]> =>
-    api.get(`/mpc/keys/${keyId}/shares`),
+    api.get(`/mpc/keys/${encodeURIComponent(keyId)}/shares`),
   splitKey: (payload: SplitKeyRequest): Promise<MpcShare[]> =>
     api.post('/mpc/split', payload),
   rotateKey: (
     keyId: string,
     payload: { reason: string; ticket_id?: string | null },
-  ): Promise<MpcKey> => api.post(`/mpc/keys/${keyId}/rotate`, payload),
+  ): Promise<MpcKey> =>
+    api.post(`/mpc/keys/${encodeURIComponent(keyId)}/rotate`, payload),
   destroyKey: (
     keyId: string,
     payload: { reason: string; ticket_id?: string | null },
   ): Promise<{ key_id: string; destroyed: boolean; persisted: boolean }> =>
-    api.post(`/mpc/keys/${keyId}/destroy`, payload),
+    api.post(`/mpc/keys/${encodeURIComponent(keyId)}/destroy`, payload),
 };

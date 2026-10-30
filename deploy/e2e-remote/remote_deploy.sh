@@ -25,6 +25,12 @@ for v in POSTGRES_PASSWORD REDIS_PASSWORD CLICKHOUSE_PASSWORD MINIO_ROOT_PASSWOR
          CDS_COLUMN_ENCRYPTION_KEY CDS_MFA_SECRET_ENCRYPTION_KEY; do
   if [ -z "${!v:-}" ]; then echo "FATAL: $v is empty in $ENV_FILE"; exit 1; fi
 done
+# A89: `-z` only catches the empty string. The HS256 length floor is otherwise enforced
+# by the app at boot (config.validate_jwt_security), so a 1-byte key deploys fine and
+# then crash-loops forever — refuse at deploy time, same posture as the empty check above.
+if [ "${#CDS_JWT_SECRET_KEY}" -lt 32 ]; then
+  echo "FATAL: CDS_JWT_SECRET_KEY is ${#CDS_JWT_SECRET_KEY} bytes in $ENV_FILE — HS256 needs >= 32 (RFC 7518 3.2)"; exit 1
+fi
 # The Postgres password travels inside CDS_DATABASE_URL: URL-reserved chars
 # would silently retarget the DSN (host/fragment parsing) into "cannot connect
 # to cds-postgres" style ghosts. make_env.sh generates hex — hold that contract.
@@ -108,9 +114,14 @@ run cds-postgres postgres:16-alpine \
   -e POSTGRES_DB=cds -e POSTGRES_USER=cds -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   -p 5432:5432 -v "$(vol postgres-data):/var/lib/postgresql/data"
 
+# A286: noeviction — mirrors docker-compose.yml 1:1. Sessions, rate-limit counters and
+# login short-state live in this Redis, so allkeys-lru (evict-everything) used to drop
+# them under pressure; the cap stays so a full maxmemory surfaces as a disclosed write
+# refusal (app/core/security.py separates OOM from an outage) instead of an OOM-killed
+# container. All flags precede the image name; the container command follows `--`.
 run cds-redis redis:7-alpine \
   -p 6379:6379 -v "$(vol redis-data):/data" \
-  -- redis-server --requirepass "$REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy allkeys-lru
+  -- redis-server --requirepass "$REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy noeviction
 
 run cds-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -e CLICKHOUSE_DB=cds_audit -e CLICKHOUSE_USER=cds -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" \
@@ -121,8 +132,12 @@ run cds-minio minio/minio:RELEASE.2025-01-20T14-49-07Z \
   -p 9001:9000 -p 9002:9001 -v "$(vol minio-data):/data" \
   -- server /data --console-address ":9001"
 
+# A284: publish on loopback only. OPA's data API is unauthenticated and its result is
+# trusted as ALLOW, so a lane host reachable from anywhere must not expose a writable
+# /v1/policies; cds-api reaches opa as http://cds-opa:8181 over $NET instead. All flags
+# stay before the image name (docker run reads everything after it as the command).
 run cds-opa openpolicyagent/opa:0.68.0 \
-  -p 8181:8181 \
+  -p 127.0.0.1:8181:8181 \
   -- run --server --addr=0.0.0.0:8181 --log-level=info
 
 # pure dev mode (in-mem, no volume): idempotent across re-deploys — a file
@@ -167,9 +182,10 @@ docker run --rm --network "$NET" \
 echo "== api =="
 # A301 (batch-87): the lane runs the PRODUCTION startup posture — CDS_DEBUG
 # defaults false so validate_security_config's fifteen boot gates actually run
-# here (the old `CDS_DEBUG:-true` default silently bypassed all of them, which
-# is how the lane could boot with an empty column DEK). The three fallback
-# switches are pinned false exactly as docker-compose.prod.yml does: Vault is
+# here (the previous default fell back to "true" whenever the env file omitted
+# CDS_DEBUG, which silently bypassed all fifteen gates — that is how the lane
+# could boot with an empty column DEK). The three fallback switches are pinned
+# false exactly as docker-compose.prod.yml does: Vault is
 # up with transit (no software-HSM fallback), the lane offers no bwrap/firecracker
 # sandbox (legacy off → SS-13 honest 400), and gmssl ships in the image.
 run cds-api cds-api:latest \

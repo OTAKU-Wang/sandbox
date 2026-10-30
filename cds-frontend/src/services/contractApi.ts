@@ -17,7 +17,23 @@ export interface CreateContractRequest {
   max_output_rows?: number;
   allowed_output_formats?: string;
   inspection_rule_set?: Record<string, unknown>;
+  // A314 Gap A4 目的限定（purpose limitation）：后端 ContractCreate 就接这两个字段
+  // （app/schemas/contract.py:30-31）、创建时直接落库（app/api/contracts.py:85-86）。
+  // 不出口它们 = 从 UI 建的合约全部 purpose=null，于是只针对「带 purpose 的合约」生效的
+  // 目的门（app/api/sandbox_tasks.py Gap A4）在界面上永远不可达。
+  // 留空时这两个键根本不该出现在载荷里（见 ContractCreate 的条件展开）：
+  // 与「故意交 null」区分开，也让后端的「不传 = 不做目的限定」口径保持原样。
+  purpose?: string;
+  purpose_scope?: string[];
 }
+
+/**
+ * A317：后端 `GET /contracts/{id}/dp-budget` 的 DP 消费流水只回最近 20 条
+ * （app/api/contracts.py:302 `for e in ledger[:20]`），而且响应体里**没有** total/has_more。
+ * 所以「entries 满 20 条」就是被截断的信号，页面必须显式说明这一上限，
+ * 不许把 20 行当全量台账。后端改这个上限时必须连带改这里与页面的截断说明。
+ */
+export const DP_LEDGER_ENTRY_LIMIT = 20;
 
 export interface DPBudgetStatus {
   contract_id: string;

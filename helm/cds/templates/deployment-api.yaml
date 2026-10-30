@@ -6,12 +6,26 @@ metadata:
     {{- include "cds.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
+  # The HPA owns the replica count when autoscaling is on; rendering
+  # `replicas:` there makes every `helm upgrade` fight the autoscaler (and
+  # scale pod number back down mid-incident). Only pin it when autoscaling is
+  # disabled.
+{{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+{{- end }}
   selector:
     matchLabels:
       {{- include "cds.api.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        # Env lives in the ConfigMap and the Secret; without a checksum neither
+        # change rolls the pods, so a re-deploy silently keeps running the old
+        # values. The Secret is provisioned out-of-band (existingSecret), so its
+        # content cannot be hashed here — bump .Values.secrets.checksum after a
+        # rotation to get the same effect.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ .Values.secrets.checksum | default .Values.secrets.existingSecret | sha256sum }}
       labels:
         {{- include "cds.api.selectorLabels" . | nindent 8 }}
     spec:
@@ -75,7 +89,10 @@ spec:
                   key: CDS_CDC_KAFKA_BROKERS
                   optional: true
             - name: CDS_OPA_URL
-              value: "http://{{ include "cds.fullname" . }}-opa:{{ .Values.opa.port }}"
+              # A302: was hardcoded to `<fullname>-opa`, a Service this chart
+              # does not ship — every policy call failed with NXDOMAIN. The
+              # address is a values key the deployer points at their OPA.
+              value: {{ .Values.opa.url | quote }}
           envFrom:
             - configMapRef:
                 name: {{ include "cds.fullname" . }}-config
@@ -102,10 +119,29 @@ spec:
                 - ALL
           volumeMounts:
             - name: sandbox-workspace
-              # 真值路径是 /tmp/cds-sandbox（连字符）；旧写法 /tmp/cds_sandbox 从未覆盖真目录。
-              # L0 卷（/tmp/cds-sandbox-l0）与对象存储卷（/tmp/cds-storage）尚未由本 chart 供给 PVC：
-              # 未挂前 L0/存储写入只在容器层，重建即丢——多租户生产前必须补 PVC（对齐 compose prod 三卷）。
               mountPath: /tmp/cds-sandbox
+              subPath: sandbox
+              # 真值路径是 /tmp/cds-sandbox（连字符）；旧写法 /tmp/cds_sandbox 从未覆盖真目录。
+            - name: sandbox-workspace
+              # L0 会话工作区（sandbox_runtime.py 默认 root）：未挂卷时只存在于容器可写层。
+              mountPath: /tmp/cds-sandbox-l0
+              subPath: sandbox-l0
+            - name: sandbox-workspace
+              # storage_service.py 的对象存储回退目录：库里 ready 的对象原件。
+              mountPath: /tmp/cds-storage
+              subPath: storage
+            - name: sandbox-workspace
+              # A285: 出口审计日志目录（retention 0=永久，丢盘即审计断链）。
+              mountPath: /data/egress-audit
+              subPath: egress-audit
+            - name: sandbox-workspace
+              # A285: 共享卷根（CDS_SHARED_VOLUME_ROOT）。
+              mountPath: /data/shared-volumes
+              subPath: shared-volumes
+            - name: sandbox-workspace
+              # CDS_CUBE_RESULTS_DIR：Cube(L2') 数据面开启时的结果回收目录。
+              mountPath: /var/lib/cds/sandbox-results
+              subPath: cube-results
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -114,6 +150,10 @@ spec:
             matchLabels:
               {{- include "cds.api.selectorLabels" . | nindent 14 }}
       volumes:
+        # One RWX share (see sandbox.accessModes) carved into subPaths, so every
+        # declared runtime write path survives a pod recreate and every replica
+        # sees the same workspace. An RWO class here would Multi-Attach-stall the
+        # second replica the HPA creates.
         - name: sandbox-workspace
           persistentVolumeClaim:
             claimName: {{ include "cds.fullname" . }}-sandbox

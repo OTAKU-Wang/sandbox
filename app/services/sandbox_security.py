@@ -6,7 +6,8 @@ Implements defense-in-depth:
 3. Seccomp syscall filter
 4. Read-only root filesystem with minimal writable mounts
 5. No /proc, /sys, /dev access beyond minimum
-6. Session key injection via environment (never written to disk)
+6. Session key / DEK injection via an out-of-band channel — never on disk and
+   never in argv (`GuestSecrets`, A96)
 7. Output size limits to prevent data exfiltration via large outputs
 8. Dynamic timeout enforcement
 """
@@ -327,6 +328,158 @@ class SandboxSecurityConfig:
     resource_limits: SandboxResourceLimits = field(default_factory=SandboxResourceLimits)
 
 
+# === A96: 密钥带外投递 ===
+# bwrap 的参数在 exec 之前就已写进 argv，/proc/<pid>/cmdline 默认对所有进程可读，
+# 所以会话密钥 / DEK 一律不得入 argv：argv 里只留“有几个变量”，值由父进程经 exec 的
+# stdin 交给下面的 bootstrap，bootstrap export 之后再 exec 真正的客侧命令 —— 客侧看到的
+# 仍然是 CDS_SESSION_KEY / CDS_DEK_HEX 环境变量，契约不变。
+SECRET_ENV_NAMES = ("CDS_SESSION_KEY", "CDS_DEK_HEX", "CDS_KEY_ID")
+
+GUEST_SECRET_BOOTSTRAP = """
+i=0
+while [ "$i" -lt "$1" ]; do
+    IFS= read -r cds_name || { echo "A96: secret channel closed early (父进程未经 stdin 投递)" >&2; exit 97; }
+    IFS= read -r cds_value || { echo "A96: secret value missing for $cds_name" >&2; exit 97; }
+    export "$cds_name=$cds_value"
+    i=$((i+1))
+done
+shift
+unset cds_name cds_value i
+exec "$@"
+"""
+
+GUEST_SECRET_ARGV0 = "cds-secret-init"
+
+_SECRET_PIPE_LIMIT = 64 * 1024
+
+
+class GuestSecrets:
+    """客侧密钥的带外投递通道（A96）：值经 exec 的 stdin 送达，绝不进 argv。
+
+    调用方接线（推荐形态，对任何 bwrap 版本都成立）::
+
+        secrets = GuestSecrets()
+        args, seccomp_fd = build_bwrap_args(..., secrets=secrets)
+        proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=..., stderr=...)
+        secrets.deliver(proc)   # 写完即关写端；没接线时客侧 bootstrap 以 rc=97 报错退出
+
+    或者自己拿 fd：`stdin=secrets.stdin_fd` + `secrets.push()`。通道为空时不要拿
+    `stdin_fd`——那会把子进程的 stdin 变成一条永不 EOF 的管道。
+    """
+
+    def __init__(self) -> None:
+        self._pairs: list[tuple[str, str]] = []
+        self._fds: tuple[int, int] | None = None
+        self._pushed = False
+
+    @staticmethod
+    def _check_name(name: str) -> None:
+        ok = bool(name) and name[0].isalpha() and all(c.isalnum() or c == "_" for c in name)
+        if not ok:
+            raise ValueError(f"非法环境变量名，不能经带外通道投递: {name!r}")
+
+    def set(self, name: str, value: str) -> None:
+        """登记一个待投递变量；同名重复登记不同值时直接报错（协议按行分帧，不容错位）。"""
+        self._check_name(name)
+        text = str(value)
+        if "\n" in text or "\r" in text or "\0" in text:
+            raise ValueError(f"{name}: 带外通道按行分帧，密钥值不得含换行/NUL")
+        for seen, old in self._pairs:
+            if seen == name and old != text:
+                raise ValueError(f"{name}: 同一通道内被登记了两个不同的值")
+            if seen == name:
+                return
+        self._pairs.append((name, text))
+
+    def extend(self, pairs) -> None:
+        for name, value in pairs:
+            self.set(name, value)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(name for name, _ in self._pairs)
+
+    def __len__(self) -> int:
+        return len(self._pairs)
+
+    @property
+    def payload(self) -> bytes:
+        return "".join(f"{name}\n{value}\n" for name, value in self._pairs).encode()
+
+    def _guard_payload(self) -> bytes:
+        """载荷超管缓冲会写爆管道并把父进程挂住，密钥不可能这么大 ⇒ 当场拒绝。"""
+        data = self.payload
+        if len(data) > _SECRET_PIPE_LIMIT:
+            raise ValueError(f"A96: 带外通道载荷 {len(data)} B 超过管道缓冲上限 {_SECRET_PIPE_LIMIT} B")
+        return data
+
+    @property
+    def stdin_fd(self) -> int:
+        """子进程 stdin 用的读端 fd（配 `push()`）。空通道返回它会挂住子进程。"""
+        if not self._pairs:
+            raise RuntimeError("GuestSecrets 为空：不要把它当作子进程的 stdin")
+        if self._fds is None:
+            self._fds = os.pipe()
+        return self._fds[0]
+
+    def push(self) -> None:
+        """经 `stdin_fd` 投递并关闭写端（幂等）。"""
+        if self._pushed:
+            return
+        read_fd = self.stdin_fd
+        assert self._fds is not None
+        self._pushed = True
+        try:
+            os.write(self._fds[1], self._guard_payload())
+        finally:
+            os.close(self._fds[1])
+            self._fds = (read_fd, -1)
+
+    def deliver(self, proc) -> None:
+        """经 `proc.stdin`（调用方需以 `stdin=subprocess.PIPE` 起进程）投递后关闭写端。"""
+        if self._pushed:
+            return
+        stdin = getattr(proc, "stdin", None)
+        if not self._pairs:
+            self._pushed = True
+            if stdin is not None:
+                stdin.close()
+            return
+        if stdin is None:
+            raise RuntimeError(
+                "A96: 密钥未经 stdin 投递——起进程时必须传 stdin=subprocess.PIPE 并调用 deliver()，"
+                "否则客侧 bootstrap 会因没有密钥以 rc=97 退出。"
+            )
+        self._pushed = True
+        try:
+            try:
+                stdin.flush()
+            except (AttributeError, ValueError):
+                pass
+            # 直接写 fd：调用方可能用 text=True 起进程，buffer 层只认 str 不认 bytes
+            os.write(stdin.fileno(), self._guard_payload())
+        finally:
+            stdin.close()
+
+    def close(self) -> None:
+        """释放通道 fd（未投递时也要调用，避免 fd 泄漏）。"""
+        if self._fds is not None:
+            for fd in self._fds:
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            self._fds = None
+        self._pairs.clear()
+
+    def __enter__(self) -> "GuestSecrets":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
 def build_bwrap_args(
     workspace: Path,
     code_file: str,
@@ -340,7 +493,8 @@ def build_bwrap_args(
     user_id: str = "",
     sandbox_level: str = "L3",
     command: list[str] | None = None,
-) -> list[str]:
+    secrets: GuestSecrets | None = None,
+) -> tuple[list[str], int | None]:
     """Build hardened bwrap command arguments.
 
     Args:
@@ -348,7 +502,9 @@ def build_bwrap_args(
         code_file: Path to the code file inside the sandbox
         language: "python", "sql", or "shell"
         config: Security configuration (uses defaults if None)
-        session_key: Optional session key to inject via env var
+        session_key: Optional session key, delivered out-of-argv via ``secrets``
+        secrets: 密钥带外通道（A96）；有密钥要送时请传，缺省时密钥仍不进 argv，
+            但客侧 bootstrap 因收不到值而以 rc=97 拒绝执行
         env_vars: Additional environment variables
         dns_proxy_port: If set, configure /etc/resolv.conf to use DNS proxy
         encryption_config: SM4 column encryption config (DEK injected via env, never on disk)
@@ -481,15 +637,35 @@ def build_bwrap_args(
     # Resource limits via prlimit
     # These are set on the bwrap process itself
     env_args = []
+    secret_count = 0
 
-    # Inject session key via environment variable (never written to disk)
+    # A96: 会话密钥与 SM4 DEK 只经带外通道走，绝不入 argv（不落盘也不落 argv）
+    pending: list[tuple[str, str]] = []
     if session_key:
-        env_args += ["--setenv", "CDS_SESSION_KEY", session_key]
-
-    # Inject SM4 DEK via environment variable (never written to disk)
+        pending.append(("CDS_SESSION_KEY", session_key))
     if encryption_config and encryption_config.dek_hex:
-        env_args += ["--setenv", "CDS_DEK_HEX", encryption_config.dek_hex]
-        env_args += ["--setenv", "CDS_KEY_ID", encryption_config.key_id]
+        pending.append(("CDS_DEK_HEX", encryption_config.dek_hex))
+        if encryption_config.key_id:
+            pending.append(("CDS_KEY_ID", encryption_config.key_id))
+    if env_vars:
+        # `_workspace_dek_env()` 这类调用方把 DEK 混在 env_vars 里一起送过来
+        for name in SECRET_ENV_NAMES:
+            value = env_vars.get(name)
+            if value:
+                pending.append((name, value))
+    if pending:
+        if secrets is None:
+            # 没带外通道也不能把明文写进 argv：照旧挂 bootstrap，但值无处投递，
+            # 客侧以 rc=97 拒绝执行 —— 宁可执行失败，不可泄漏（接线见 GuestSecrets）。
+            logger.warning(
+                "A96: 未传 GuestSecrets 带外通道，%d 个会话密钥/DEK 不经 argv 投递；"
+                "客侧 bootstrap 将以 rc=97 拒绝执行（不降级、不泄漏）",
+                len(pending),
+            )
+            secret_count = len(pending)
+        else:
+            secrets.extend(pending)
+            secret_count = len(secrets)
 
     # Inject audit logging env vars
     if session_id:
@@ -521,9 +697,11 @@ def build_bwrap_args(
         if language == "shell":
             env_args += ["--setenv", "CDS_AUDIT_HELPER", "/workspace/tmp/.audit_helper.sh"]
 
-    # Inject additional env vars
+    # Inject additional env vars (密钥类变量已在上面走带外通道，不在此列)
     if env_vars:
         for k, v in env_vars.items():
+            if k in SECRET_ENV_NAMES:
+                continue
             env_args += ["--setenv", k, v]
 
     # Set PATH for Python/bash
@@ -533,13 +711,22 @@ def build_bwrap_args(
 
     # Command to execute
     if command:
-        args += list(command)
+        guest_cmd = list(command)
     elif language == "python":
-        args += ["python3", code_file]
+        guest_cmd = ["python3", code_file]
     elif language == "sql":
-        args += ["python3", "-c", _build_sql_runner(code_file, encryption_config)]
+        guest_cmd = ["python3", "-c", _build_sql_runner(code_file, encryption_config)]
     else:
-        args += ["bash", code_file]
+        guest_cmd = ["bash", code_file]
+
+    if secret_count:
+        # A96: argv 里只出现变量个数；值在 exec 后经 stdin 交给 bootstrap
+        args += [
+            "sh", "-c", GUEST_SECRET_BOOTSTRAP, GUEST_SECRET_ARGV0, str(secret_count),
+            *guest_cmd,
+        ]
+    else:
+        args += guest_cmd
 
     return args, seccomp_fd
 
@@ -573,7 +760,7 @@ def _build_sql_runner(code_file: str, encryption_config: EncryptionConfig | None
     """Generate Python code that executes SQL in a sandboxed DuckDB.
 
     When encryption_config is provided, the runner:
-    - Reads DEK from CDS_DEK_HEX env var (injected by bwrap --setenv)
+    - Reads DEK from the CDS_DEK_HEX env var (exported by the GuestSecrets bootstrap, A96)
     - Decrypts SM4-encrypted columns in query results before output
     - Supports SM4-SIV (deterministic) and SM4-GCM (randomized) modes
     """
@@ -760,7 +947,7 @@ def secure_wipe_file(path: Path) -> bool:
 
 # ── Workspace file encryption (SM4-GCM) ──────────────────────────────
 # Format: [nonce(12)][tag(16)][ciphertext]
-# DEK is injected via CDS_DEK_HEX env var at sandbox runtime.
+# DEK 运行时以 CDS_DEK_HEX 递入，但走 GuestSecrets 带外通道，不进 argv（A96）。
 
 _WORKSPACE_NONCE_LEN = 12
 _WORKSPACE_TAG_LEN = 16

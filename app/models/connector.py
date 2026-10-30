@@ -39,7 +39,7 @@ class Connector(Base):
 
     # Authentication
     api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 of the API key
-    api_key_prefix: Mapped[str] = mapped_column(String(8), nullable=False)  # First 8 chars for identification
+    api_key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)  # Random-segment display prefix (A6: width = derive_key_prefix slice)
 
     # Capabilities
     supported_protocols: Mapped[list] = mapped_column(JSON, nullable=False, default=lambda: ["catalog", "contract", "sandbox-proxy"])
@@ -84,9 +84,26 @@ class ConnectorSession(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+API_KEY_SCHEME = "cds-conn-"
+
+
 def generate_api_key() -> tuple[str, str]:
     """Generate a connector API key. Returns (full_key, sha256_hash)."""
-    full_key = f"cds-conn-{secrets.token_urlsafe(32)}"
+    full_key = f"{API_KEY_SCHEME}{secrets.token_urlsafe(32)}"
     import hashlib
     key_hash = hashlib.sha256(full_key.encode()).hexdigest()
     return full_key, key_hash
+
+
+def derive_key_prefix(full_key: str) -> str:
+    """Display prefix identifying one connector's key (A6).
+
+    Takes the first ``api_key_prefix``-width characters of the RANDOM segment
+    (skipping the constant ``cds-conn-`` scheme, which every key shares and
+    would make a head-truncation worthless). The width is read from the column
+    itself, never a literal, so the write sites and the schema cannot drift
+    apart again — the old ``api_key[:15]`` into ``varchar(8)`` guaranteed a
+    ``value too long`` 500 on PostgreSQL.
+    """
+    width = Connector.__table__.c.api_key_prefix.type.length
+    return full_key[len(API_KEY_SCHEME):len(API_KEY_SCHEME) + width]

@@ -114,6 +114,10 @@ def build_mock_root(root: Path, *, with_kvm: bool = True, fs_type: str = "xfs",
 def base_env(mock_root: Path, **extra: str | int | None) -> dict[str, str]:
     env = os.environ.copy()
     env["CDS_CUBE_MOCK_ROOT"] = str(mock_root)
+    # 本文件整体就是 mock 演练 harness：verify.sh 的诚实门禁要求演练入口显式认账
+    # （没有 CDS_CUBE_ACCEPT_MOCK=1 就拒绝把 MOCK 结果当成节点验收），同族
+    # tests/test_cube_node_scripts.py 的 base_env 同样如此。
+    env["CDS_CUBE_ACCEPT_MOCK"] = "1"
     env["CDS_CUBE_DATA_DIR"] = str(mock_root / "data" / "cubelet")
     env["CDS_CUBE_VOLUME_PLUGIN_SOCKET"] = str(mock_root / "run" / "cds.sock")
     env["CDS_CUBE_CUBELET_BIN"] = str(mock_root / "bin" / "cubelet")
@@ -399,7 +403,9 @@ def test_verify_json_contract_all_green(tmp_path: Path, cds_cert: Path) -> None:
     # systemctl 垫片在场 → unit active → pass
     assert checks["audit_tailer"]["status"] == "pass"
     # CB-01 端点未配置 → skipped
-    assert checks["cds_node_probe"]["status"] == "skip"
+    # 契约集是 pass|fail|skipped（`deploy/cube-node/AGENTS.md`:10/32、`verify.sh`:18），
+    # 旧钉的 `skip` 是发射端的越集值（紧上方那行注释本来就写 skipped）。
+    assert checks["cds_node_probe"]["status"] == "skipped"
     for c in checks.values():
         assert set(c) == {"status", "detail"}
 
@@ -433,7 +439,8 @@ def test_verify_tailer_pending_skips(tmp_path: Path, cds_cert: Path) -> None:
     assert r.returncode == 0
     doc = json.loads(r.stdout)
     assert doc["ok"] is True
-    assert doc["checks"]["audit_tailer"]["status"] == "skip"
+    # 同上：tailer 未交付时发射 `skipped`（契约值），不是 `skip`
+    assert doc["checks"]["audit_tailer"]["status"] == "skipped"
 
 
 def test_preflight_sandbox_cidr_upstream_default_clash_fails(tmp_path: Path) -> None:

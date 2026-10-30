@@ -5,7 +5,7 @@ Stores bilateral trust agreements and audit entries so they survive restarts.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Boolean, Text, func, Index, JSON
+from sqlalchemy import String, DateTime, Boolean, Text, func, Index, JSON, text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -19,6 +19,20 @@ class FederationTrustRecord(Base):
         Index("ix_federation_trusts_local", "local_space_id"),
         Index("ix_federation_trusts_remote", "remote_space_id"),
         Index("ix_federation_trusts_status", "status"),
+        # A124: one live trust per space pair. load_trusts_from_db() has no
+        # ORDER BY and overwrites its space_id -> trust map per row, so a second
+        # active row silently decides which trust_level/allowed_operations win
+        # after a restart. Partial so revoke history and a later re-establish
+        # stay persistable; `suspended` is deliberately NOT covered because
+        # establish_trust() always INSERTs a fresh row.
+        Index(
+            "uq_federation_trusts_active_pair",
+            "local_space_id",
+            "remote_space_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

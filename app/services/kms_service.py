@@ -9,8 +9,11 @@ This adds a second layer of protection — even if the KEK is compromised,
 the attacker still needs the SM2 private key to recover the DEK.
 """
 import logging
+import threading
 import uuid
 import os
+
+from hashlib import sha256
 
 from app.services.hsm_adapter import hsm_adapter
 from app.services.crypto_service import crypto_service
@@ -19,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 # Well-known KEK ID for wrapping DEKs
 _KEK_ID = "cds-master-kek"
+# OCR-A140: 认领探测用的哨兵明文 —— 不是密钥材料，只用来证明 HSM 里那把 KEK
+# 真能 wrap/unwrap 往返（「存在即复用」的判据）。
+_KEK_PROBE = b"cds-kek-claim-probe"
+
+# A138: a key hand-off must be a row in key_distributions with a real expiry —
+# the TTL sweep then crypto-erases it. One hour matches the session-key lifetime
+# the sandbox grants; a config knob would need config.py (NEEDS-OWNER).
+KEY_DISTRIBUTION_TTL_SECONDS = 3600
+# Bounded so a stopped TTL loop can never grow memory without limit; the oldest
+# un-persisted hand-offs are dropped with an ERROR, never silently.
+_MAX_PENDING_DISTRIBUTIONS = 4096
 
 
 class KMSService:
@@ -29,7 +43,13 @@ class KMSService:
                        optionally → sm2_encrypt(DEK, cert_pubkey) → store SM2 ciphertext
       get_key()           → retrieve wrapped → hsm.unwrap_dek(KEK, wrapped) → plaintext
       distribute_key()    → unwrap + return hex (with optional TEE attestation check)
-      destroy_key()       → delete from store + hsm revoke
+                       → buffered key_distributions row flushed by the TTL loop (A138)
+      destroy_key()       → erase from the in-memory store only
+
+    A121 honesty note: the HSM/Vault adapters expose NO revoke primitive, so
+    destroy_key() cannot revoke anything inside the HSM — the KEK keeps being
+    able to unwrap any blob an operator may still hold. Anything stronger needs
+    a real HSM key-policy API (hsm_adapter.py, NEEDS-OWNER).
 
     P0-8: Two-layer encryption — KEK wrapping + SM2 encryption with cert public key.
     P0-9: TEE attestation required before key distribution.
@@ -37,6 +57,7 @@ class KMSService:
 
     def __init__(self):
         self._hsm = hsm_adapter
+        self._kek_lock = threading.Lock()
         self._wrapped_keys: dict[str, bytes] = {}  # wrapped DEK blobs
         self._sm2_encrypted_keys: dict[str, bytes] = {}  # SM2-encrypted DEK blobs
         self._cert_public_keys: dict[str, str] = {}  # key_id → SM2 public key used
@@ -50,25 +71,62 @@ class KMSService:
         self._durability_warned = False
         self._unrecoverable_imports = 0
         self._kek_ready = False
+        # A138: key hand-offs buffered until the TTL loop persists them into
+        # key_distributions (distribute_key is sync and holds no DB session).
+        self._pending_distributions: list[dict] = []
+
+    def _kek_usable(self) -> bool:
+        """HSM 里是否已有一把本进程真能用的主密钥（OCR-A140「先查」）。
+
+        `hsm_adapter` 没有 key_exists 接口，而认领所需的性质是「能 wrap 也能 unwrap
+        回来」；任何异常（含 Vault 不可达）都算不可用 —— 探测自身绝不把降级说成成功。
+        """
+        try:
+            probe = self._hsm.wrap_dek(_KEK_ID, _KEK_PROBE)
+            return self._hsm.unwrap_dek(_KEK_ID, probe) == _KEK_PROBE
+        except Exception:
+            return False
 
     def _ensure_kek(self):
-        """Generate the master KEK in HSM if not already done."""
+        """原子认领主密钥：已存在即复用，绝不以同一个 id 覆写（OCR-A140）。
+
+        修复前是无锁 check-then-act：事件循环线程与 to_thread worker 同时读到
+        `_kek_ready is False` 就各自调 `generate_kek("cds-master-kek")`，而软件 HSM 的
+        `generate_kek` 无条件 `self._keys[key_id] = os.urandom(32)`
+        （app/services/hsm_adapter.py:199）—— 后到的那次覆写让先前封存的 wrapped DEK
+        永久解不开（unwrap 只记一条 error 就返回 None）。锁把认领收成一个临界区，
+        双检让后来的线程复用结果；mint 后还要回读自检，不过就不认领
+        （`_kek_ready` 保持 False），免得 DEK 被封进一把连自检都过不了的密钥。
+
+        跨进程的认领需要一张 KEK 认领表（本仓没有；见 OCR-A140 证据 NOTE），而软件
+        HSM 的 KEK 本就只存在于进程内存（A139 已披露），所以本临界区覆盖的正是
+        缺陷实际发生的那个面。
+        """
         if self._kek_ready:
             return
-        try:
-            self._hsm.generate_kek(_KEK_ID)
+        with self._kek_lock:
+            if self._kek_ready:
+                return
+            if self._kek_usable():
+                self._kek_ready = True
+                logger.info("[KMS] Master KEK already usable in HSM — reusing it")
+                return
+            try:
+                self._hsm.generate_kek(_KEK_ID)
+                if not self._kek_usable():
+                    raise RuntimeError("KEK 认领后自检失败：wrap/unwrap 往返不通")
+            except Exception as e:
+                logger.error(f"[KMS] Failed to initialize KEK: {e}")
+                from app.core.errors import CDSError
+
+                raise CDSError(
+                    "密管服务不可用，无法初始化主密钥（KEK）",
+                    code="KMS_UNAVAILABLE",
+                    http_status=503,
+                    detail={"reason": str(e)},
+                ) from e
             self._kek_ready = True
             logger.info("[KMS] Master KEK initialized in HSM")
-        except Exception as e:
-            logger.error(f"[KMS] Failed to initialize KEK: {e}")
-            from app.core.errors import CDSError
-
-            raise CDSError(
-                "密管服务不可用，无法初始化主密钥（KEK）",
-                code="KMS_UNAVAILABLE",
-                http_status=503,
-                detail={"reason": str(e)},
-            ) from e
 
     def _sm2_encrypt(self, plaintext: bytes, public_key: str) -> bytes:
         """SM2-encrypt data with a certificate public key (P0-8)."""
@@ -265,10 +323,70 @@ class KMSService:
             return None
         try:
             plaintext = self._hsm.unwrap_dek(_KEK_ID, wrapped)
-            return plaintext.hex()
         except Exception as e:
             logger.error(f"[KMS] Failed to unwrap session key {key_id}: {e}")
             return None
+        # A138: this is THE key hand-off point (every TEE/business caller funnels
+        # through here), so this is where the key_distributions ledger row is
+        # minted. Buffered in-process because distribute_key is sync; the TTL
+        # loop flushes within one sweep interval.
+        self._record_distribution(
+            key_id, session_id,
+            quote=attestation,
+            attestation_status="verified" if (attestation or tee_quote) else "not_required",
+        )
+        return plaintext.hex()
+
+    def _record_distribution(self, key_id: str, session_id: str, *, quote: bytes | None, attestation_status: str) -> None:
+        """Buffer a key hand-off for the key_distributions ledger (A138).
+
+        ``session_key_enc`` holds the KEK-WRAPPED blob (at-rest safe, same class
+        of material as the ``encrypted_key`` column), never plaintext — and the
+        TTL sweep crypto-erases it at expiry, which is the whole point of the
+        ``expires_at`` contract.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        if len(self._pending_distributions) >= _MAX_PENDING_DISTRIBUTIONS:
+            dropped = self._pending_distributions.pop(0)
+            logger.error(
+                "[KMS] distribution ledger overflow: dropped oldest un-persisted hand-off "
+                "(key=%s session=%s) — TTL loop not running?", dropped.get("key_id"), dropped.get("session_id"),
+            )
+        wrapped = self._wrapped_keys.get(key_id)
+        self._pending_distributions.append({
+            "key_id": key_id,
+            "session_id": session_id,
+            "tee_quote_hash": sha256(quote).hexdigest() if quote else None,
+            "attestation_status": attestation_status,
+            "session_key_enc": wrapped.hex() if wrapped else None,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=KEY_DISTRIBUTION_TTL_SECONDS),
+        })
+
+    async def flush_pending_distributions(self, db) -> int:
+        """Persist buffered hand-offs into key_distributions (A138).
+
+        Called by the TTL loop (and directly by tests). The row is written as
+        ACTIVE with a real ``expires_at`` so ``cleanup_expired_distributions``
+        has something to enforce — before this existed the sweep queried a table
+        with no writers and the advertised TTL was fiction.
+        """
+        from app.models.kms import KeyDistribution, DistributionStatus
+
+        pending, self._pending_distributions = self._pending_distributions, []
+        for rec in pending:
+            db.add(KeyDistribution(
+                key_id=rec["key_id"],
+                session_id=rec["session_id"],
+                status=DistributionStatus.ACTIVE.value,
+                tee_quote_hash=rec["tee_quote_hash"],
+                attestation_status=rec["attestation_status"],
+                session_key_enc=rec["session_key_enc"],
+                expires_at=rec["expires_at"],
+            ))
+        if pending:
+            await db.flush()
+        return len(pending)
 
     def _verify_attestation(
         self,
@@ -357,7 +475,13 @@ class KMSService:
             return False
 
     def destroy_key(self, key_id: str) -> bool:
-        """Destroy a key — removes wrapped blob and SM2 ciphertext from store.
+        """Destroy a key — erase the wrapped blob and SM2 ciphertext from the
+        in-memory store. DB rows are the caller's transaction (the revoke route
+        crypto-erases them in the same flush, A121).
+
+        A121 honesty: there is no HSM revoke to call — the adapters expose none.
+        The KEK itself remains able to unwrap any blob that escaped before
+        destruction; key-policy-level revocation inside the HSM is NEEDS-OWNER.
 
         Returns True if key was found and destroyed.
         """
@@ -476,6 +600,10 @@ class KMSService:
 
         for dist in expired:
             dist.status = DistributionStatus.EXPIRED.value
+            # A138: expiry must be a crypto-erase, not a status flip. While the
+            # wrapped blob sat on the row, "expired" was decoration — unwrap +
+            # re-hand-out stayed one SELECT away. The blob goes NULL here.
+            dist.session_key_enc = None
             # Terminate associated session if exists
             if dist.session_id:
                 try:
@@ -515,6 +643,9 @@ async def _ttl_cleanup_loop():
         try:
             await asyncio.sleep(300)  # Every 5 minutes
             async with async_session() as db:
+                # A138: flush buffered hand-offs FIRST so the sweep below can
+                # enforce expiry on rows that actually exist.
+                await kms_service.flush_pending_distributions(db)
                 await kms_service.cleanup_expired_distributions(db)
                 await db.commit()
         except asyncio.CancelledError:
