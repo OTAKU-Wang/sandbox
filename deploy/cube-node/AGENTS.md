@@ -1,13 +1,15 @@
-# deploy/cube-node/ — Cube 计算节点 bring-up (scored 8: 10 files / ~1.7k LOC, 100% bash+python, CI-gated by `.github/workflows/cube-node-smoke.yml`, and the only place the node 红线 are enforced)
+# deploy/cube-node/ — Cube 计算节点 bring-up (scored 8: 11 files / 2.4k LOC, 100% bash+python, and the only place the node 红线 are enforced)
 
 Parent `deploy/AGENTS.md` owns the shared script conventions (sentinels, env-file secrets, no-pipe-exit-codes). Everything here is node-specific.
+
+Automatic coverage: `tests/test_cube_node_scripts.py` (793 L, 32 tests) + `tests/test_cube_node_tooling.py` (553 L, 18 subprocess runs under a `CDS_CUBE_MOCK_ROOT` shim) — `.github/workflows/cube-node-smoke.yml` is dispatch-only, so those two files are the real gate.
 
 ## WHERE TO LOOK
 | Task | File |
 |------|------|
-| Pre-install hard gate — 10 independent checks, any FAIL → exit 1 | `preflight.sh` (431): kvm, data_fs (XFS+reflink), ebpf, cubelet_bin (sha vs pinned bundle), volume_sock, tls_sidecar, containerd, resources, tee_probe, **sandbox_cidr** |
+| Pre-install hard gate — 10 independent checks, any FAIL → exit 1 | `preflight.sh` (577): kvm, data_fs (XFS+reflink), ebpf, cubelet_bin (sha vs pinned bundle), volume_sock, tls_sidecar, containerd, resources, tee_probe, **sandbox_cidr** |
 | Install/upgrade, idempotent, refuses non-root | `install.sh` (330) — runs preflight, then the upstream `install-compute.sh`, then the three CDS components. `CUBE_UPSTREAM_DIR` is **required** outside mock mode (no personal-home default) |
-| Post-install acceptance | `verify.sh` (378): `--json` → `{"ok", "checks":{name:{status: pass|fail|skipped, detail}}, "tee"}`; exit 0 only when nothing failed; unknown args → exit 2; `CDS_CUBE_MOCK_ROOT` without `CDS_CUBE_ACCEPT_MOCK=1` → refused |
+| Post-install acceptance | `verify.sh` (380): `--json` → `{"ok", "checks":{name:{status: pass|fail|skipped, detail}}, "tee"}`; exit 0 only when nothing failed; unknown args → exit 2; `CDS_CUBE_MOCK_ROOT` without `CDS_CUBE_ACCEPT_MOCK=1` → refused |
 | One-shot local node (XFS loop disk → install → verify) | `node_bringup.sh` (176) — needs `CUBE_UPSTREAM_DIR` + `CDS_ALLOW_INSECURE_GRPC=yes` (its plaintext fallback is opt-in) |
 | Audit log tailer (disk queue, watermark resume, write-stop protection, mTLS+Bearer push) | `audit_tailer.py` (664) — startup also rejects a non-`https://` endpoint, unloadable TLS material, and a non-positive `AUDIT_TAILER_POLL_INTERVAL_SEC` |
 | TEE capability probe (node-local copy of the tdx/sev_snp matrix, stdlib only) | `tee_probe.py` (164) — `--json`, single-line `tee=tdx|sev_snp|none` |
@@ -18,7 +20,8 @@ Parent `deploy/AGENTS.md` owns the shared script conventions (sentinels, env-fil
 - Units/config ship as templates with `__VAR__` placeholders (`__CUBELET_GRPC_PORT__`, `__TLS_PROXY_PORT__`, `__CDS_CUBE_AUDIT_TAILER_BIN__`) rendered by `install.sh`.
 - Upstream version comes from `scripts/cube-bundle-manifest.json` (fallback `v0.7.3-rc2`); the pin unit is the upstream git sha.
 - `CDS_CUBE_MOCK_ROOT=DIR` redirects `/dev/kvm`, `/proc/*`, `/sys/fs/bpf`, `/var/lib`, `/etc/cds`, `/etc/systemd/system` under DIR and prepends `DIR/bin` to PATH — the shared non-root rehearsal path of preflight/install/verify. Test-only; production must not set it, and `verify.sh` refuses the combination unless `CDS_CUBE_ACCEPT_MOCK=1` says the caller knows it is rehearsing.
-- Node state lives in `/var/lib/cds/cube-node/` (`INSTALL_STATE.json`, `NODE_CAPABILITIES.json` — preflight upserts `tee=` there, and it is reported at registration). Log lines: `[cube-node-install] …`; `die()` = stderr + exit 1.
+- Test seam for the tailer is `build_from_env(pusher=…)` + the `Pusher` Protocol (`HttpPusher` is the production impl) — tests inject a fake pusher instead of a server; `AUDIT_TAILER_*` is its whole env contract (`CDS_ENDPOINT`, `SERVICE_TOKEN`, `NODE_ID`, `TLS_CERT/KEY/CA`, `OFFSET_FILE`, `POLL_INTERVAL_SEC`).
+- Node state lives in `/var/lib/cds/cube-node/` (`INSTALL_STATE.json`, `NODE_CAPABILITIES.json` — preflight upserts `tee=` there, and it is reported at registration). Log lines: `[cube-node-install] …`; `die()` = stderr + exit 1. `tee_probe` stdout is the single `tee=…` line, its JSON goes to stderr — that split is the contract.
 - The three CDS components (volume plugin, stunnel TLS sidecar, audit tailer) install as their OWN systemd units, next to — never inside — the stock upstream units.
 
 ## ANTI-PATTERNS (红线)

@@ -137,3 +137,13 @@ admin 密码经 app 自身散列函数重置（lane 测试身份，非真实凭�
   高于 dotenv，钉得动；engine/async_session 本就有打桩，这次把 settings 面钉齐）。
   开发者 .env 从此不能污染任何用例。
 - 读数闭环：门禁同树 **339/3/0**（与波3零红一致）；全量复跑读数见下一节。
+
+## D-e2e-28b【测试装置缺陷·与 28 同根】lifespan 直挂全局单例：毒源点名 a192d 装配取证
+- DB 钉针后全量仍 27 红（基线 26），增量锁定 ss12::window_rolls_over（全量红、单跑绿）。
+- 机制：app/main.py lifespan 把 `quota_manager._redis` **直接赋值不还原**；
+  `test_ocr_a192d_dp_backend_assembly` 故意走真实 lifespan 取证——compose 栈开着时
+  get_redis 连真库成功，全局单例从此走 Redis 限速路径，读进程内字典的用例 KeyError。
+  最小复现两文件 13 秒坐实（外加负控：Redis 不可达时不红，证明「栈开着」是扳机）。
+- 双保险修复：①conftest 钉 `CDS_REDIS_URL` 到不可达端点（env 源压 dotenv，日常形态免疫）；
+  ②conftest 全局 autouse 逐用例还原 `quota_manager._redis`（任何来源的泄漏不漏给下
+  一个测试；a192d 自身体内取证无感）。②下最强污染条件（外壳强设真 URL）复现转绿。

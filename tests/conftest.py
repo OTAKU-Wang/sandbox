@@ -12,6 +12,12 @@ os.environ["TESTING"] = "1"
 # （engine/async_session 由下方 fixture 打桩），这里把 settings 面也钉死，开发者
 # .env 不再能污染任何用例。env 源优先级高于 dotenv，钉得动。
 os.environ.setdefault("CDS_DATABASE_URL", "sqlite+aiosqlite:///./ci_conftest.db")
+# 同根第二雷（同日实弹）：compose 栈开着时 .env 的 REDIS_URL 同理会渗进来，
+# 任何走到 lifespan 的用件会把 quota_manager._redis 接上**真 Redis**（app/main.py
+# 直接赋值不还原），此后 check_key_rate_limit 走 Redis 路径——读进程内字典的
+# 测试以 KeyError 形态随机红（ss12::window_rolls_over 全量红、单跑绿）。套件口径
+# ＝fakeredis 显式打桩，这里同样钉死，真栈开着也不能污染。
+os.environ.setdefault("CDS_REDIS_URL", "redis://127.0.0.1:1/0")
 # P0 fail-closed switches (plan docs/ai-sandbox-gap-remediation-plan.md §5.1):
 # the existing test baseline runs with the relaxed values that dev uses.
 # Enforcement behaviour is covered by dedicated tests that monkeypatch the
@@ -421,6 +427,21 @@ def _restore_legacy_gate_defaults(request, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "CUBE_DATAPLANE_ENABLED", False)
     monkeypatch.setattr(settings, "SANDBOX_LEGACY_ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_quota_redis_wiring():
+    """D-e2e-28 的进程全局兜底：lifespan（app/main.py）把 quota_manager._redis
+    **直接赋值不还原**，凡走真实 lifespan 的用例（a192d 装配取证）在 Redis 可达
+    时就把全局单例接上了——后续读进程内限速字典的用例（ss12::window_rolls_over）
+    以 KeyError 随机红。env 钉只挡 dotenv 渗入，这里对任何来源的改写做逐用例还原，
+    毒不漏给下一个测试；装配用例自身在体内取证，还原对其无感。"""
+    from app.services.quota_manager import quota_manager
+
+    before = quota_manager._redis
+    yield
+    if quota_manager._redis is not before:
+        quota_manager._redis = before
 
 
 @pytest_asyncio.fixture(autouse=True)

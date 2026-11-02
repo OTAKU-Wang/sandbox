@@ -1,57 +1,60 @@
 # app/
 
-**Score 17** (282 files, 9 subdirs, ~70.8k LOC — highest reference density in repo). FastAPI backend entry of CDS (Confidential Data Sandbox) — GM/T national crypto (SM2/SM3/SM4), uvicorn on :8000.
+**Score 16** (296 py files / 88,445 LOC in 8 subpackages; `app.main:app` referenced from 29 other files). FastAPI backend of CDS (密态沙箱) — GM/T crypto surface (SM2/SM3/SM4/TLCP), uvicorn :8000. This file = boot wiring + package-wide rules only; every subdirectory's own detail lives in its AGENTS.md.
 
 ## STRUCTURE
 ```
-app/
-├── main.py       # 401 L: 44 include_router calls, 8+ lifespan subsystems, 3 ASGI middlewares
-├── core/         # infra: config, database, deps, scopes, errors, pagination (see core/)
-├── api/          # 44 route modules, ~15.9k LOC — prefixes assigned ONLY in main.py (see api/)
-├── services/     # 117 flat modules, ~45.7k LOC — sandbox runtimes, pipelines, crypto/KMS (see services/)
-├── models/       # 43 ORM files + empty __init__.py / 101 classes, one entity per file (see models/)
-├── schemas/      # 11 pydantic wire modules + __init__.py, 1,148 LOC (see schemas/)
-├── utils/        # crypto.py (SM4Cipher, sm3_hash), watermark.py (zero-width/LSB stego)
-├── _stubs/       # GENERATED pinned gRPC stubs — never hand-edit (see _stubs/)
-├── templates/    # legacy Jinja admin pages — NOT the real UI (React lives in cds-frontend/)
-└── static/       # 63-line fetch client + CSS for the legacy admin pages
+app/                        # counts measured 2026-11-02
+├── main.py      # 721 L — the ONLY wiring point: 46 router mounts, 8 middlewares, 6 background loops
+├── core/        # 15 modules / 3,111 L — Settings, engine+session, authN, W2 errors, telemetry (see core/)
+├── api/         # 48 modules / 21,231 L — route modules; prefixes exist ONLY in main.py (see api/)
+├── services/    # 120 modules / 56,040 L — flat, zero subpackages: runtimes, pipelines, KMS, output policy (see services/)
+├── models/      # 45 modules / 3,070 L — one entity per file, 103 classes (see models/)
+├── schemas/     # 12 modules / 1,213 L — pydantic wire models (see schemas/)
+├── utils/       # 4 modules / 769 L — crypto honesty gates + attribution watermarking (see utils/)
+├── _stubs/      # 33 generated CubeSandbox gRPC files / 2,290 L — never hand-edit (see _stubs/)
+├── templates/   # 6 Jinja pages for legacy /admin/* — NOT the product UI (that is cds-frontend/)
+└── static/      # css + js served under /static through `_KeyBlockedStatic` (main.py)
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Boot wiring, subsystem order | main.py `lifespan` | security validate → Redis → create_all → pipeline → KMS TTL → key restore → cleanup loop → CDC → Merkle; each in its own try/except |
-| Routers & prefixes | main.py `include_router` block | health/metrics at root; `open_api` at `/open/v1`; `cube_egress` at `/internal/audit`; `session_stream` WS absolute; `admin` on a separate app (main.py:398) |
-| Machine-credential (API-key) authorization | core/scopes.py `require_group` | every router carries `Depends(require_group(...))` or `require_human`; unmapped path prefix = default-deny |
-| Sandbox-level capability truth | services/capability_matrix.py | single authority for real/simulated/unsupported/planned; never duplicate the matrix |
-| Error contract | core/errors.py + core/error_handlers.py | W2: `{code, message, detail, request_id}`, Retry-After, 410 for terminal states |
-| Deployment gates | core/config.py `validate_security_config` | raises in prod for unsafe flags, warns for ALLOW_SIMULATION |
-| Queue semantics | models/task_queue.py | `enqueue`/`claim_next`/`complete`/`requeue_stale` — business logic lives in the model module |
+| Subsystem boot / shutdown order | `main.py:230` `lifespan` | one try/except per subsystem; 6 `create_task` loops — duckdb sweeper 226, TTL cleanup 322, session cleanup 378, container reconcile 399, compute scheduler 408, webhook dispatcher 419 — each behind `TESTING` ± a feature flag |
+| Router mounts + SS-12 gates | `main.py:614-672` | 40 `require_group("<g>")`, 6 `require_human`, 2 prefix-less absolute mounts (`session_stream`, `jupyter_proxy`: no scope gate by design, so machine keys cannot reach them); `open_api` at `/open/v1`, `cube_egress` at `/internal/audit` |
+| Default-deny for machine keys | `main.py:509` `Ss12KeyDefaultDenyMiddleware` | raw ASGI on purpose — an app-level `HTTPBearer` dependency broke WS handshakes; delegates to `scopes.key_unmapped_deny` so guard and routes parse credentials identically (A65/A67) |
+| Human-only `/static` | `main.py:679` `_KeyBlockedStatic` | same predicate (`effective_key_credential`): a human JWT + leftover key header must stay a human subject |
+| Legacy admin pages | `main.py:713` `_register_admin_pages(app)`, called at L721 | ONE ASGI app (there is no second app); needs `ADMIN_PAGES_ENABLED`, which prod boot rejects |
+| Boot-time honesty | `main.py` `hsm_backend_disclosure` 162, `dp_budget_backend_wiring` 124, `jwt_key_source` 82, `durable_queue_wiring` 62 → `app.state` (241/245) + WARNING logs | these underscore-adjacent helpers are machine-consumed: renaming them breaks `test_ocr_a75_boot_wiring_honesty`, `a89_jwt_boot_disclosure`, `a94*`, `a192d` |
+| create_all gate | `main.py:53` `_create_all_allowed` | `DEBUG` ∨ `TESTING=1` ∨ `"sqlite" in DATABASE_URL`; production = Alembic only |
+| Anything one level down | `core/`, `api/`, `services/`, `models/`, `schemas/`, `utils/`, `_stubs/` AGENTS.md | capability truth = `services/capability_matrix.py`; W2 error contract + the 18 prod gates = `core/`; queue semantics = `models/task_queue.py` |
 
 ## CONVENTIONS
-- Middleware order is load-bearing (W1): Starlette makes the LAST-added middleware outermost. `main.py` adds `Ss12KeyDefaultDenyMiddleware` first, `MetricsMiddleware` second, `RequestIDMiddleware` third (→ RequestID outermost) — do not reorder. The SS-12 gate is raw ASGI because an HTTPBearer dependency there broke WS handshakes.
-- SS-12 authorization is applied at MOUNT time, not per route: `main.py` passes `Depends(require_group("<group>"))` (or `require_human` for auth/users/api-keys/internal/static) into `include_router`; a new prefix must be added to `core/scopes.py` `GROUP_PREFIXES` or key subjects get 403 on it.
-- `main.py` imports every model module explicitly so `Base.metadata.create_all` sees all tables; a new model file MUST be added there.
-- `create_all` runs only in DEBUG/TESTING/`sqlite`-in-DATABASE_URL; production requires Alembic (`alembic upgrade head` + `scripts/verify_schema_parity.py` gate). `alembic/env.py` imports `app.main` so autogenerate sees exactly this import set.
-- All `__init__.py` are empty and there is no `__all__` — import modules by full path (`app.services.foo`), never via package re-export. Sole exception: `app/_stubs/cube/**/__init__.py` carry a "generated — do not edit" docstring.
-- Async SQLAlchemy 2.0 only; `Base`/`get_db` come from `app.core.database`; models use `str, Enum` columns and PG JSONB dialect types.
-- Spec-reference comments (W1–W16, N3–N10, T1–T12, Gap A/B/E, G-###, SS-10…SS-15, PZ-01…PZ-16, MR-A1…MR-A15, D-e2e-##, CB-00…CB-06, "Round 39/40") reference remediation docs in `docs/` + `specs/` — read them before restructuring flagged code.
-- Mixed Chinese/English in docstrings and some user-facing HTTPException details (e.g. 429 quota messages).
+- Middleware add-order is load-bearing (W1/A43): `main.py` adds `Ss12KeyDefaultDeny` (573) → `Metrics` (581) → `RequestIDContext` (591) → `RequestID` (592). Starlette makes the LAST-added outermost, so RequestID is outermost and `RequestIDContext` sits just inside it. `setup_security()` then adds CORS, SecurityHeaders, RateLimit and RequestSizeLimit (8 middlewares total).
+- SS-12 authorization is applied at MOUNT time, not per route: each `include_router` carries `Depends(require_group("<group>"))` (or `require_human` for auth/users/api-keys/internal/static). A new prefix must land in `core/scopes.py` `GROUP_PREFIXES`, else key subjects get 403 `API_KEY_SCOPE_DENIED` before routing.
+- Model registration: `main.py` imports 32 of the 45 model modules across 10 lines; the rest reach `Base.metadata` transitively via `app.api`/`app.services`, and `refresh_session` registers through the `app/models/__init__.py` barrel. `scripts/verify_schema_parity.py` — not the import list — is the real guard.
+- `create_all` is gated by `_create_all_allowed`; `alembic/env.py` imports `app.main`, so autogenerate sees whatever this import set reaches, no more.
+- `__init__.py` files are empty and there is no re-export layer — import by full path (`app.services.foo`). Three documented exceptions: `app/models/__init__.py` (RefreshSession-only barrel), `app/utils/office_watermark.py` (`__all__`), `app/_stubs/**/__init__.py` (generated docstrings).
+- `settings = get_settings()` sits at `main.py:507`, AFTER the `lifespan` definition that uses it — correct only because lifespan runs post-import.
+- Spec tags in comments (W1–W16, N3–N10, T1–T12, Gap A/B/E, G-###, SS-10…SS-19, PZ-##, MR-A##/MR-B##, A###, CB-##, D-e2e-##, "Round NN") point at ledgers in `docs/` + `specs/` — read the entry before restructuring tagged code.
+- Mixed Chinese/English in docstrings, log lines and user-facing error details (e.g. 429 quota messages); async SQLAlchemy 2.0 throughout.
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- `settings = get_settings()` is defined in main.py AFTER `lifespan` which uses it — works only because lifespan runs post-import; do not "fix" the ordering casually.
-- `utils/crypto.py::SM4Cipher` is actually AES-256-GCM ("SM4-GCM equivalent for dev/test; production Tongsuo via system OpenSSL") — never present it as real SM4. `sm3_hash` falls back to SHA-256 when `gmssl` is missing; since PZ-04/MR-A14 that fallback is gated by `CDS_SM3_FALLBACK_ALLOWED` (fail-closed `RuntimeError` when false) plus one process-lifetime warning — the fallback is disclosed, but callers still cannot tell which hash ran.
-- Never hand-edit or delete files under `app/_stubs/` (including its `__init__.py`): they are generated from a pinned upstream sha. Regenerate via `scripts/gen-cube-stubs.sh` only.
-- Legacy `/admin/*` Jinja pages carry NO authentication: off by default, rejected at startup in production — never enable in prod.
-- Three overlapping task tables: `models/task_queue.py` (durable queue), `models/sandbox_task.py`, `models/pipeline_task.py` — confirm which one a flow uses before adding columns.
-- `app/templates` + `app/static` are dead weight for the real product; the React app in `cds-frontend/` is the admin UI.
+- Never reorder the middlewares, never move the SS-12 default-deny check back into a route/app-level dependency (it breaks WS handshakes), and never re-implement its header parser a second time (A65/A67 misroute humans vs keys).
+- Don't "fix" the `settings`-after-`lifespan` ordering in `main.py`.
+- Never hand-edit or delete anything under `app/_stubs/` (including its `__init__.py`): `tests/test_cube_upstream_check.py` hashes the tree against `_VERSION.json.stub_hash`. Regenerate via `scripts/gen-cube-stubs.sh`.
+- Legacy `/admin/*` Jinja pages carry NO authentication: off by default, rejected at startup in production — never enable in prod, and never treat `templates/` + `static/` as the product UI (the React admin lives in `cds-frontend/`).
+- Never add a router mount without a scope group, and never add a scope for the human-only groups.
+- Crypto/watermark honesty rules live in `utils/AGENTS.md` — read it before touching `app/utils`.
 
 ## COMMANDS
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000   # health: GET /health, metrics: GET /metrics
-python -m compileall -q app                        # CI gate (py3.12 image; local venv may be newer — annotations differ)
+uvicorn app.main:app --host 0.0.0.0 --port 8000   # /health and /metrics are at ROOT, not under /api/v1
+python -c "import app.main"                        # import smoke test after any app/ change
+python -m compileall -q app                        # CI gate (prod image is py3.12; local venv may be newer)
 docker compose up                                   # postgres/redis/clickhouse/minio/opa/vault + cds-api
-python -m pytest -q tests/<file>                   # asyncio_mode=auto, timeout=600
-CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" alembic upgrade head && ALEMBIC_COMPARE_TYPES=0 alembic check
+python -m pytest -q tests/<file>.py                # asyncio_mode=auto, timeout=600
+CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" .venv/bin/python -m alembic upgrade head \
+  && ALEMBIC_COMPARE_TYPES=0 .venv/bin/python -m alembic check   # the venv alembic, not PATH's (protobuf VersionError)
 python scripts/verify_schema_parity.py             # CI gate: Alembic vs create_all must match
 ```
