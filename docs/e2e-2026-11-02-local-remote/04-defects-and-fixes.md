@@ -58,7 +58,13 @@
   不违反「不改历史」）；downgrade 不缩回。023e902。
 - 验证：本地真 PG16 全新库 0000→0034 全绿；远端 0026→0034 全绿（生产复验）。
 - 回归针：`tests/test_alembic_version_id_width.py` 三条静态针。
-- 流程建议（未落地，待拍板）：CI 增加一次真 PG `alembic upgrade head`（临时容器）。
+- 流程根因（已查实，比"缺 job"更准）：`.github/workflows/ci.yml` **早就有**
+  `migration-pg` job（真 postgres:16 服务容器，`alembic upgrade head` + 带型别比对
+  的 `alembic check`）——但触发器只有 `push: [main]` 和 pull_request，功能分支
+  feat/ss-11-productization 从未开 PR，GitHub CI 从未在本分支执行过；各波次用
+  本机/远端 harness 替代，而 harness 不跑 PG 过链 ⇒ 闸在、钥匙没插。
+- 落地口径：本车 e2e（远端 deploy 内生产过链 + 本地全新 PG16 全链）已把该面纳入
+  常规证据；向 main 开 PR 让 migration-pg 首次真跑 = 用户决策，未擅自开。
 
 ## D-e2e-26【harness 缺陷】续行中注释截断 docker run（两脚本同款）
 - 现象：远端 deploy 半途 `-e: command not found`（192 起的 api docker run 在注释处
