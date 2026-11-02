@@ -113,3 +113,14 @@ admin 密码经 app 自身散列函数重置（lane 测试身份，非真实凭�
 
 结论：镜像口径（py3.12 生产镜像 + 真 PG16）下，本轮全部 D-e2e-20..26 修复在
 两条独立轨道上端到端复验通过；唯一开放硬件面仍是 KVM 活会话（口径不变）。
+
+## 加餐：py3.12 镜像内门禁层读数（权威口径闭环，本轮改动含启动面必做）
+- 形态：生产镜像（python 3.12.15）挂载当前树直跑 40 文件门禁清单（ci.yml 解析，
+  计数与 test_ci_workflow_policy 口径一致）。
+- 裸容器读数 339/1/2——唯一红 test_e2e_data_loop：`bwrap: Creating new namespace
+  failed: Operation not permitted`＝裸容器无特权的**环境形状**，非产品回归；
+  白名单**不放宽**（failed-即-skip 纪律：白名单外必须红是对的，正确处置是给对形态）。
+- compose 同等特权（cap SYS_ADMIN+NET_ADMIN、seccomp unconfined、apparmor unconfined，
+  与 D-e2e-22 修复后的 cds-api 容器完全一致）复跑：**340 通过 / 2 跳过 / 0 失败**。
+- 镜像内跑 harness 的口令（入册防失传）：挂载整树 + 上述四件套特权 + cwd=树根，
+  缺任一 L0/bwrap 面必呈假红。
