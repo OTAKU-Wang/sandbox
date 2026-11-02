@@ -50,6 +50,33 @@ _UNIQUE_GUARDS = (
 )
 
 
+def _widen_alembic_version_column() -> None:
+    """PG 的 alembic_version.version_num 是历史遗留 VARCHAR(32)——本 revision 的 ID 有 34 字符。
+
+    2026-11-02 远端全栈 e2e 实锤：`alembic upgrade head` 在真实 PG16 上跑完整链时，
+    0029→0030 的 stamp UPDATE 抛 `value too long for type character varying(32)`——
+    本 revision（及其后的 0033，同为 34 字符）是全链仅有的两个超 32 字符 ID，而
+    alembic 自动建的版本表写死 `sa.String(32)`（版本表由 alembic 自管，env.py 改不了
+    它的宽度，只能 ALTER）。此前从未暴露：本机/CI 的链跑在 SQLite（VARCHAR 不执法度），
+    远端 PG 上一次过链停在 0026（短 ID 时代）。
+
+    为什么改在本文件而不是新加 revision：stamp 发生在 upgrade() 返回之后，加宽必须
+    在第一个超长 ID 落库之前完成——0035 之类的新 revision 永远排在 0030 的 stamp 之后，
+    结构上救不了它自己。这不违反「不改历史」：PG 上本 revision 从未成功应用过（应用即
+    炸，等于从未存在），SQLite 上本改动被 dialect 守卫完全短路，已应用库语义零变化。
+    downgrade 不缩回：收窄有截断风险，加宽无害且幂等。
+    """
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    width = bind.execute(sa.text(
+        "select character_maximum_length from information_schema.columns "
+        "where table_name = 'alembic_version' and column_name = 'version_num'"
+    )).scalar()
+    if width is not None and width < 128:
+        op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
+
+
 def _assert_no_duplicates() -> None:
     """A214 fail-loud dedupe policy: existing duplicates ABORT the upgrade.
 
@@ -139,6 +166,7 @@ def _key_seed_column_type(to_text: bool) -> None:
 
 
 def upgrade() -> None:
+    _widen_alembic_version_column()
     _assert_no_duplicates()
 
     if op.get_bind().dialect.name == "postgresql":
