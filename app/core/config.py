@@ -426,6 +426,65 @@ class Settings(BaseSettings):
 
     model_config = {"env_prefix": "CDS_", "env_file": ".env"}
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        """dotenv 只放行命中模型字段的键；compose/前端注入键不得流入校验。
+
+        2026-11-02 本地全栈 e2e 实锤的双层坑：pydantic-settings 的 dotenv 源把文件里
+        全部键以「小写原名」交上来（环境变量源只按字段匹配、从不带未知键），而 v2 在
+        `model_config` 不写 `extra` 时默认 **forbid** ⇒ 照抄 `.env.example`
+        （POSTGRES_PASSWORD、vite 注入键等 compose 域键）会让 Settings 构造直接
+        ValidationError——71 个错从第一个字段起爆，`validate_security_config` 的
+        fail-closed 报错永远到不了，文档化工作流「Copy to .env for local development」
+        自断活路。修复口径：dotenv 侧异域键静默忽略（compose 域≠模型域）。
+        如实在册（本次实证，钉在回归针里）：`CDS_*` 前缀的**环境变量**拼错键名会被
+        静默忽略——这是 pyd-settings 上游语义（env 源只按字段匹配），本修复不改变它；
+        若要给安全旗标加 typo-fail-loud 需另立工作项（helm/k8s 现存注入键需先清点）。
+        回归针：tests/test_dotenv_compose_keys.py。
+        """
+        base = type(dotenv_settings)
+        names = set(settings_cls.model_fields)
+        names_lowered = {n.lower(): n for n in names}
+
+        def _call(self):
+            # 实证（pydantic-settings 2.14）：dotenv 源把文件里全部键以「小写原名」
+            # 交上来（`env_prefix` 只作用于环境变量源）——compose 域键（POSTGRES_PASSWORD、
+            # vite 注入键…）撞上 forbid，Settings 构造 71 错从第一个字段起爆，
+            # `validate_security_config` 永远到不了，文档化工作流自断活路。
+            # 字段命中的键上游会解析成模型字段名（实证：DEBUG/DATABASE_URL 大写字段名），
+            # 未命中的键保持文件原名小写——大小写形状就是权威过滤器，不猜键内容。
+            raw = base.__call__(self)
+            kept: dict = {}
+            dropped: list[str] = []
+            for key, value in raw.items():
+                if key in names:
+                    kept[key] = value
+                elif str(key).lower() in names_lowered:  # 防不同版本的键形制
+                    kept[names_lowered[str(key).lower()]] = value
+                else:
+                    dropped.append(str(key))
+            if dropped:
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "dotenv 非模型键已忽略（compose/前端注入域）: %s", sorted(dropped))
+            return kept
+
+        filtered_cls = type("ComposeAwareDotEnv", (base,), {"__call__": _call})
+        return (
+            init_settings,
+            env_settings,
+            filtered_cls(settings_cls, dotenv_filtering="nested_models"),
+            file_secret_settings,
+        )
+
     def validate_jwt_security(self) -> list[str]:
         """Validate JWT configuration for security issues.
 
