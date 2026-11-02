@@ -362,6 +362,9 @@ class GuestSecrets:
         args, seccomp_fd = build_bwrap_args(..., secrets=secrets)
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=..., stderr=...)
         secrets.deliver(proc)   # 写完即关写端；没接线时客侧 bootstrap 以 rc=97 报错退出
+        proc.stdin = None       # 必须摘除：deliver 拥有并关闭了写端。py3.12 的
+                                # communicate 会对已关 stdin 先 flush → ValueError
+                                # （2026-11-02 全栈 e2e 实锤；3.14 被 guard 掩盖）。
 
     或者自己拿 fd：`stdin=secrets.stdin_fd` + `secrets.push()`。通道为空时不要拿
     `stdin_fd`——那会把子进程的 stdin 变成一条永不 EOF 的管道。

@@ -603,6 +603,16 @@ class FirecrackerRuntime:
         )
         try:
             secrets.deliver(proc)
+            # 同 sandbox_runtime._run_guest_argv 的修复（2026-11-02 全栈 e2e）：
+            # deliver 已关写端；py3.12 的 communicate 会对已关 stdin 先 flush 而炸
+            # ValueError（sim 执行梯在 3.12 镜像上每次执行必挂），摘除 stdin 让
+            # 所有权移交显式化。本机 py3.14 该 flush 被 guard 吞掉——版本盲区再现。
+            if proc.stdin is not None:
+                try:
+                    proc.stdin.close()
+                except (ValueError, OSError):
+                    pass
+                proc.stdin = None
             try:
                 stdout, stderr = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:

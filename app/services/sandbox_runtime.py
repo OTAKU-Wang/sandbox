@@ -122,6 +122,16 @@ def _run_guest_argv(argv: list[str], secrets, *, pass_fds: tuple[int, ...] = (),
         logger.warning("A96: 带外通道投递未完成（不降级、不泄漏）: %s", exc)
     finally:
         secrets.close()
+    # 投递已关闭写端；把 stdin 从 Popen 摘除（所有权移交完成），communicate 便不再
+    # 触碰它。2026-11-02 本地全栈 e2e 实锤：镜像 py3.12 的 _communicate 对已关 stdin
+    # 先 flush → `ValueError: I/O operation on closed file.`，每次执行必炸；本机
+    # py3.14 该 flush 被 guard 吞掉，测试永远看不见——又一例版本盲区（部署态专杀）。
+    if proc.stdin is not None:
+        try:
+            proc.stdin.close()
+        except (ValueError, OSError):
+            pass
+        proc.stdin = None
     stdout, stderr = proc.communicate()
     return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 
@@ -542,6 +552,10 @@ class ProcessAdapter(RuntimeAdapter):
                 "sandbox_level": "L0",
             }
         except Exception as e:
+            # 部署形态 e2e（2026-11-02）教训：这里曾经把异常吞成 output 字符串，
+            # 容器日志零堆栈，真实根因（I/O closed）无法定位。返回形状不变（fail-closed
+            # 的 -1），但堆栈必须进日志——诊断面不是可选项。
+            logger.exception("sandbox execute failed (container=%s)", container_id)
             return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L0"}
         finally:
             _release_seccomp_fd(seccomp_fd)
@@ -1356,6 +1370,8 @@ class BwrapAdapter(RuntimeAdapter):
                 }
             return await self._execute_direct(code_file, language, effective_timeout)
         except Exception as e:
+            # 同上（2026-11-02 部署 e2e）：L3 站点此前同样吞栈；堆栈必须进日志。
+            logger.exception("L3 bwrap execute failed")
             return {"output": str(e), "exit_code": -1, "duration_ms": 0, "sandbox_level": "L3"}
         finally:
             _release_seccomp_fd(seccomp_fd)
