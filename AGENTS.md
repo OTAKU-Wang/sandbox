@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-10-16
-**Commit:** 5d5417e
+**Generated:** 2026-11-02
+**Commit:** 41ceb30
 **Branch:** feat/ss-11-productization
 
 ## OVERVIEW
@@ -10,133 +10,138 @@ CDS = Confidential Data Sandbox (密态沙箱) — confidential data-circulation
 ## STRUCTURE
 ```
 sandbox/
-├── app/                # FastAPI backend; main.py boot wiring, :8000 (`admin` on a separate app)
-├── cds-frontend/       # React 19 + Vite 8 admin console (dev :3000, proxies /api → :8000)
+├── app/                # FastAPI backend :8000; main.py 721 L boot wiring; core/ api/ services/ models/ schemas/ utils/ _stubs/ templates/ static/
+├── cds-frontend/       # React 19 + Vite admin console (dev :3000 proxies /api → :8000); 255 ts/tsx under src/ (48k LOC)
 │   └── node_modules/   # vendored deps — DO NOT EDIT
-├── cds-volume-plugin/  # NEW: Go 1.25 + C `cds-encrypted` volume plugin; unix socket ↔ cube_runtime_adapter
+├── cds-volume-plugin/  # Go 1.25 + C `cds-encrypted` volume plugin; unix socket ↔ cube_runtime_adapter
 │   └── tongsuo-build/  # second vendored Tongsuo — DO NOT EDIT
-├── deploy/             # NEW: cube-node host bring-up + e2e-remote / local deploy harnesses
+├── deploy/             # cube-node host bring-up + e2e-remote / local deploy harnesses
 ├── sdk/                # cds_sdk, standalone sync httpx REST client (/api/v1)
-├── alembic/            # migrations, single LINEAR chain 0000→0033, additive-only
-├── tests/              # 211 .py / 208 collected modules, 45.7k LOC; two-tier CI (gate + informational)
-├── k8s/                # k3s manifest deploy path (deploy.sh, NodePort 30080/30081)
+├── alembic/            # migrations, single linear additive-only chain (35 revisions, tip 0034)
+├── tests/              # flat 497 test_*.py + conftest / ~95k LOC; two-tier CI (locked 40-file gate + budgeted full suite)
+├── k8s/                # k3s manifest path (deploy.sh applies 10 of 13; NodePort 30080/30081)
 ├── helm/               # cds chart (helm/cds), production path (ns cds-system)
-├── scripts/            # verify_schema_parity.py, clickhouse-init.sql, install-k3s.sh
-├── docs/               # error-codes.md contract, mock-remediation MR-A1..A15, retention
-├── specs/              # SS-01..SS-15 design contracts, 48 files / 29.3k LOC (no ss-14 doc: SS-14 = remote-e2e round)
+├── scripts/            # verify_schema_parity, clickhouse-init.sql, install-k3s, remote-harness/ lanes
+├── docs/               # error-codes.md contract, ocr-review A### ledgers, mock-remediation, handoffs
+├── specs/              # SS-01..SS-19 design contracts, 52 files / 30.8k LOC (no ss-14, no ss-17)
 ├── contracts/          # AuditRegistry.sol (Solidity 0.8, SM3 Merkle-root anchoring)
-├── policies/           # OPA system.rego (default-deny anchor)
-├── ci/                 # known-failures.md baseline
-└── Tongsuo/            # vendored upstream Tongsuo 8.5 (OpenSSL fork, SM2/SM3/SM4, ~23k files) — DO NOT EDIT
+├── policies/           # OPA system.rego (5 LOC, default-deny anchor)
+├── ci/                 # known-failures.md + full-suite budget baseline
+└── Tongsuo/            # submodule Tongsuo 8.5 @ baa1bb2b, 27.7k files — DO NOT EDIT, never count as first-party
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Backend boot / error contract | app/main.py | 404 L, 45 `include_router`; /health, /metrics at root (not /api/v1) |
-| Security & sandbox core | app/services/ | 117 flat modules / 45.9k LOC: runtimes, ML pipelines, GM crypto+KMS, output policy |
+| Backend boot / middleware | app/main.py + app/AGENTS.md | 721 L, 47 `include_router`, ONE ASGI app (legacy /admin registers on the same app behind ADMIN_PAGES_ENABLED); 8 middlewares in load-bearing order; /health /metrics at root, not /api/v1 |
+| Config / errors / authz deps / crypto honesty | app/core/ + app/utils/ (their AGENTS.md) | config.py 748 L / 163 Settings fields / 18 prod raises; errors.py = W2; scopes.py GROUP_PREFIXES machine authz, unmapped prefix = 403; utils SM4Cipher = labelled AES-256-GCM, sm3 fallback fail-closed |
+| Security & sandbox core | app/services/ (its AGENTS.md) | flat 120 modules / 56k LOC; the 11-row domain table there is the layer's only navigation |
 | Sandbox runtime selection | app/services/ runtimes, cube_runtime_adapter | prefixes `l0- tee- fc- bwrap- k8s- l2c-`; legacy adapters only behind SANDBOX_LEGACY_ENABLED (prod REJECTS it), l2c only with CUBE_DATAPLANE_ENABLED |
-| API routers | app/api/ | 45 route modules; prefixes only in main.py |
-| AuthN surface | app/api/ | 30 use get_current_user/require_roles, 11 use get_business_user, 5 use neither (health, metrics, admin, session_stream, cube_egress) |
-| Config / errors / deps | app/core/ | config.py 571 L, ~152 Settings fields, 15 prod raises in validate_security_config |
-| SDK entry | sdk/cds_sdk/client.py | 1132 L / 114 defs (SS-12 + SS-15 surfaces); CDSClient, CDSError, CDSApiError |
-| Frontend API boundary | cds-frontend/src/services/ | 25 modules; flow.ts (1682 L) largest; `rag` module is gone |
-| Frontend complexity concentration | cds-frontend/src/pages/Sandbox/SessionDetail.tsx | 1613 LOC; 41 lazy pages in 16 domain folders |
-| Volume-plugin ↔ KMS contract | cds-volume-plugin/kms.go ↔ app/schemas/kms.py | machine contract (plugin README §KMS 契约); no Python test covers it |
-| API error contract | docs/error-codes.md | {code,message,detail,request_id}, ~55 codes; parsed by test_capability_matrix_consistency (API↔FE↔SDK↔doc lock) |
-| Agent handoff (env/lanes/pitfalls) | docs/agent-handoff-2026-10-19.md | read first on a new machine (2026-10-19: authoritative tests run LOCALLY, remote = hardware gates only); older rounds: docs/agent-handoff-2026-10-16.md; open work = specs/ss-18-prototype-alignment.md §8 |
-| Remote verification lanes | scripts/remote-harness/{sync_tree,source_lane,fe_lane}.sh | tests run on the remote harness (user rule); needs CDS_LANE_DB_URL; never drop the venv PATH export |
-| Mock/simulation registry | docs/mock-remediation-plan.md | MR-A1..A15, honest-degradation rules |
-| Freshest state + open-defect ledger | docs/cr-2026-10-15-review.md | 187 L; §5 = remote-only test rule |
-| Deploy | root compose ×4, k8s/, helm/, deploy/e2e-remote, deploy/local | seven config copies — see UNIQUE STYLES |
-| CI gates | .github/workflows/ci.yml | backend py3.11; 40-file gate list green (count machine-locked by tests/test_ci_workflow_policy.py); full suite informational |
+| API routers / AuthN split | app/api/ (its AGENTS.md) | 47 route modules / 21.2k L / 317 handlers; prefixes set only at mount; users of get_current_user 24, require_roles 22, get_business_user 13, none 5 |
+| ORM + wire contracts | app/models/ + app/schemas/ (their AGENTS.md) | 44 modules / 105 classes (RefreshSession barrel); 55 pydantic models with zero-trust edge refusals; schemas/kms.py = Go wire contract |
+| gRPC boundary | app/_stubs/ (its AGENTS.md) | cube/ hash-locked vs `_VERSION.json`; cdsvolume is the Python twin of the plugin proto — hand-authored docstrings, no hash guard |
+| SDK entry | sdk/ (its AGENTS.md) | cds_sdk/client.py 1314 L; CDSClient 103 public methods (~40 SS-15 flow ops), CDSApiError; retries 429/503 only, 410 stops retry |
+| Frontend API boundary | cds-frontend/src/services/ (its AGENTS.md) | 28 modules behind one axios client (api.ts); flow.ts 2422 L = the whole SS-15 surface |
+| Frontend pages / chrome / roles | src/pages/, src/components/, src/utils/ (their AGENTS.md) | 42 lazy pages / 48 routes / 16 domain dirs; ROLE_GROUPS (utils/roles.ts) = route-authz truth; hotspot SessionDetail.tsx 1645 L |
+| Test harness | tests/ (its AGENTS.md) | flat; conftest.py 651 L pins TESTING + 14 setdefault env vars BEFORE app.main import; one StaticPool SQLite; fake cubelet raises on any unstubbed RPC |
+| Volume plugin | cds-volume-plugin/ (its AGENTS.md) | 12 prod .go / 3.1k L + 32 _test.go; NOT in ci.yml — `make test` is its only automated door |
+| KMS wire contract | cds-volume-plugin/kms.go ↔ app/schemas/kms.py | served at app/api/kms.py:438+; tests/test_kms_volume_keys.py pins Go field names + Cipher.Name() strings |
+| API error contract | docs/error-codes.md | 58 codes; four-way lock API↔FE enums↔SDK↔doc (test_capability_matrix_consistency) |
+| Deploy config | root compose ×4, k8s/, helm/, deploy/{e2e-remote,local} (k8s/, helm/, deploy/ AGENTS.md) | seven machine-pinned copies (test_deploy_manifest_gates); node bring-up = deploy/cube-node/ (its AGENTS.md) |
+| CI gates / budget | .github/workflows/ci.yml + ci/ (.github/AGENTS.md) | 40-file gate list machine-locked — cite ci.yml, never restate; full suite = continue-on-error + check_full_suite_budget.py |
+| Migrations | alembic/ (its AGENTS.md) | ids >32 chars must sort after 0030 (PG VARCHAR(32) trap); parity script compares NAMES only — types/indexes via `alembic check` + PG16 lane |
+| Ops scripts / test lanes | scripts/ (its AGENTS.md) | scripts/remote-harness/{sync_tree,source_lane,fe_lane}.sh = hardware gates ONLY (2026-10-19 ruling); api_dryrun_smoke.py read-only, exit 1 on RED |
+| Freshest state / ledgers | docs/ (its AGENTS.md): docs/todo-plan-2026-10-30.md → docs/agent-handoff-2026-10-19.md; docs/ocr-review-2026-10-18/ (its AGENTS.md) | open work = specs/ss-18 §8 + ss-19 §10; A1..A319 defect ledger; mock registry = docs/mock-remediation-plan.md (MR-A1..A15) |
+| Design contracts | specs/ (its AGENTS.md) | 52 files SS-01..SS-19; scripts/ cite ss-10 by SECTION NUMBER — never renumber |
 
 ## CODE MAP
-No LSP index exists in this workspace; entries come from the writer digests and ref counts are grep-based, not LSP-counted.
+No LSP index exists in this workspace; entries come from the writer digests and ref counts are grep-based (distinct importer files), not LSP-counted.
 
 | Symbol | Type | Location | Refs | Role |
 |--------|------|----------|------|------|
-| app.main:app | FastAPI app | app/main.py | compose/k8s/helm entries | boot wiring; prod forbids create_all |
-| core.database / core.config | modules | app/core/ | 105 / 101 importers | DB session factory + Settings (highest fan-in in backend) |
-| audit_service.log | call | app/services/audit_service.py | 52 importers; 140 call sites in app/api | single audit funnel |
-| get_settings() | factory | app/core/config.py | backend-wide | lru_cached; tests must cache_clear |
-| SM4Cipher | class | app/utils/crypto.py | 37 importers | AES-256-GCM labeled SM4 in dev/test |
+| app.main:app | FastAPI app | app/main.py | alembic env, conftest, ~25 tests | boot wiring; prod forbids create_all; its `_`-prefixed helpers are de-facto public API pinned by boot-honesty tests |
+| Settings / get_settings() | class / lru_cached factory | app/core/config.py | 153 files | widest fan-in in backend; 5 test modules cache_clear |
+| database.get_db / CDSError | dep / exceptions | app/core/database.py, errors.py | get_db 49 app / 55 app+tests; CDSError 34 app / 62 app+tests | one async engine, request-scoped tx; W2 refusal contract (410 stops client retry, 503 Retry-After) |
+| get_current_user / require_group | FastAPI deps | app/core/deps.py, scopes.py | 30 files / 46 mount sites | whole authN surface + SS-12 machine keys; unmapped prefix = default-deny 403 |
+| audit_service.log | single funnel | app/services/audit_service.py | 68 files (54 non-test); 147+27 call sites in 33 api routers | SM-signed events → ClickHouse + PG; log_standalone survives get_db rollback |
+| sandbox_runtime | facade / registry | app/services/sandbox_runtime.py (3389 L) | 39 files | adapter registry + SceneRuntime factory; SS-13 no-degrade 400 RUNTIME_UNAVAILABLE |
+| sm3_hash / SM4Cipher | crypto | app/services/crypto_service.py, app/utils/crypto.py | sm3_hash 46 app / 72 app+tests; SM4Cipher 13 app / 22 app+tests | honesty gates; SM3 exists in 5 modules — gateway_service.py:82 is the only UNGATED SHA-256 fallback (open defect) |
 | pinned_cube_version() | fn | app/services/cube_runtime_adapter.py | cube tests | reads `app/_stubs/cube/_VERSION.json` (9b75d339 / go-sdk-v0.7.3) |
-| CDSClient / CDSError / CDSApiError | exports | sdk/cds_sdk/client.py | all SDK consumers | `__all__`; retries only 429/503 honoring Retry-After (clamped to [0,60]s, missing/absurd -> 1.0s, A173-era fix 2026-10-30) — 410 SESSION_TERMINATED is terminal and deliberately NOT retried (W2); v0.3.0 adds the SS-15 flow surface (40 ops) |
+| CDSClient / CDSApiError | exports | sdk/cds_sdk/client.py | 26 test modules import cds_sdk | `__all__`; retries only 429/503, Retry-After clamped [0,60]s; 410 SESSION_TERMINATED terminal (W2) |
+| api / flowApi / ROLE_GROUPS | FE core | cds-frontend/src/services/api.ts, flow.ts, utils/roles.ts | 69 / 40 / 12 files | single HTTP client (401 single-flight refresh); SS-15 surface; 18 route-gate groups |
+| client / db_session fixtures | pytest | tests/conftest.py | 205 / 171 files | app-under-test + the one shared SQLite connection (why everything stays on one loop) |
+| KMSClient / CryptoPosture | Go | cds-volume-plugin/kms.go, main.go | 100 files reference the plugin | HTTP DEK custody (kms.py wire twin); machine-readable GM disclosure at boot |
 | mpc_service | service | app/services/ | API | Shamir key custodianship, NOT MPC computation |
-| flowApi / flowKeys | module | cds-frontend/src/services/flow.ts | 21 pages | SS-15 flow surface, ~35 hooks |
-| k8sOpsApi | module | cds-frontend/src/services/ | pages | the one axios deviation |
 
 ## CONVENTIONS
-- Env config: pydantic BaseSettings, `env_prefix="CDS_"`, `.env`; `get_settings()` is lru_cached — tests must `cache_clear`, but prod-mode tests instead monkeypatch the cached `Settings` and `delenv` TESTING/PYTEST_CURRENT_TEST (only test_k8s_n7.py uses cache_clear).
-- API errors follow the W2 contract {code, message, detail, request_id}; `SESSION_TERMINATED`=410 must stop client retries (consumed by cds_sdk).
-- Alembic chain is linear and additive-only (0000→0033; 0019–0021 SS-15, 0022–0026 SS-18/19, 0027–0031 the OCR-review round, 0032 refresh sessions, 0033 webhook index convergence): the 0000 baseline deliberately omits columns added by 0001/0002; new columns go in new revisions; booleans use `text("false")`, not native bool defaults.
-- `tests/conftest.py` (472 L) pins 12 env vars via `os.environ.setdefault` BEFORE importing app.main; never import the app ahead of conftest.
-- KMS wire fields are a cross-language contract: `app/schemas/kms.py` and `cds-volume-plugin/kms.go` must move together (test_kms_volume_keys.py pins the Go field names).
-- Mixed Chinese/English docstrings, user-facing strings, and requirements.txt comments (国密) — keep the mix.
-- Spec tags in code (W1–W16, N3–N10, T1–T12, PZ-##, MR-A##, FG-###, Gap A/B/E, G-###) reference ledgers in docs/ and specs/.
-- Frontend lockfile is package-lock.json — npm, not bun.
+- Env config: pydantic BaseSettings, `env_prefix="CDS_"`, `.env`; `get_settings()` is lru_cached — 5 test modules call `cache_clear`, prod-posture tests instead monkeypatch the cached `Settings` and `delenv` TESTING/PYTEST_CURRENT_TEST.
+- A new `CDS_*` key must land in five places: app/core/config.py, .env.example, both root composes, helm/cds/values.yaml, tests/test_config.py.
+- API errors follow the W2 contract {code, message, detail, request_id}; `SESSION_TERMINATED`=410 must stop client retries (consumed by cds_sdk); HTTPException never appears in app/services.
+- Alembic chain is linear and additive-only; never pin the tip in docs (0034 as of 2026-11-02); ids >32 chars may only sort after 0030 (which carries the PG VARCHAR(128) ALTER); the 0000 baseline omits columns added by 0001/0002; booleans use `text("false")`.
+- `tests/conftest.py` (651 L) sets TESTING plus 14 `os.environ.setdefault` pins BEFORE importing app.main; never import the app ahead of conftest.
+- KMS wire fields are a cross-language contract: `app/schemas/kms.py` and `cds-volume-plugin/kms.go` must move together (test_kms_volume_keys.py pins Go field names + Cipher.Name() strings).
+- Cross-language byte parity: FE `contractSignPayload` ≡ `crypto_service.contract_sign_data` ≡ SDK `sign_data`, shared vectors in test_ocr_a255_xlang_parity — change all three together.
+- Mixed Chinese/English docstrings and comments (国密) — keep the mix; spec tags (W/N/T/PZ/MR-A/FG/A###/SS-##) reference ledgers in docs/ (A### = docs/ocr-review-2026-10-18/).
+- Frontend lockfile is package-lock.json — npm, never `bun install`.
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Never run the authoritative suite locally: local venv is py3.14, CI backend is py3.11, the production image is py3.12. Gate and full-suite numbers come from the REMOTE py3.12 production-derived image + real PG16 (2026-10-15 baseline 2864 passed / 24 failed / 5 skipped; gate 231/0/2).
+- Never restate "tests must run remotely": the 2026-10-19 user ruling (docs/agent-handoff-2026-10-19.md §1) makes LOCAL authoritative (local venv py3.14 + SQLite/fakeredis daily, or local py3.12 image + real PG16); the remote lanes are for hardware gates only. CI is py3.11, prod py3.12 — green CI never substitutes for a local authoritative run.
 - Never edit alembic history; never run `create_all` in production (branch in app/main.py).
 - Never present simulated paths as defects or delete them: tee_simulator, gpu_tee_simulator, firecracker sim mode, test_data_generator are intentional features, surfaced at boot (T12).
-- Never fake TEE/GPU/HSM/chain hardware (禁伪造): simulated paths must disclose via `ALLOW_SIMULATION` / `is_simulation` (项目铁律 honest degradation).
-- Never mask CI failures by raising pytest-timeout; the `ci/known-failures.md` baseline "must not grow".
+- Never fake TEE/GPU/HSM/chain hardware (禁伪造): disclose via `ALLOW_SIMULATION` / `is_simulation` / `crypto_posture` — honest-degradation 铁律, machine-enforced (boot raises + fail-closed crypto).
+- Never mask CI failures by raising pytest-timeout; `ci/known-failures.md` baseline must not grow; never add bare `|| true` — full suite uses `continue-on-error` + ci/check_full_suite_budget.py.
 - Never purge audit logs or Merkle leaves (retention 0 = forever; export-and-archive instead).
 - Never degrade isolation instead of refusing: per SS-13, an L2' request with no MicroVM (±TEE) returns 400 `RUNTIME_UNAVAILABLE` — never falls back to process/bwrap isolation.
-- Never hand-edit `app/_stubs/cube/`: tests/test_cube_upstream_check.py hashes the stub tree against `_VERSION.json.stub_hash`.
+- Never hand-edit `app/_stubs/cube/` (stub_hash gate); never regenerate `app/_stubs/cdsvolume` losing its hand-authored contract docstrings — no protoc target exists, regen is manual.
+- Never quote a hardcoded gate-file count — parse ci.yml (test_ci_workflow_policy locks 40 files, 0 test_ocr_* among them).
 - Never assume `mpc_service` does cross-party ciphertext compute — it is Shamir key custodianship only.
 
 ## UNIQUE STYLES
-- Seven deploy config copies, not five: the 4 root docker-compose variants, k8s/, helm/, plus `deploy/e2e-remote/remote_deploy.sh` (scripted `docker run` mirroring root compose 1:1) and `deploy/local/local_deploy.sh` — any infra change lands in up to 7 files.
-- Two vendored do-not-edit crypto trees: `Tongsuo/` and `cds-volume-plugin/tongsuo-build/`.
-- Only ci.yml runs on push/PR; cube-node-smoke.yml and cube-upstream-watch.yml are workflow_dispatch-only, so upstream-pin drift is human-review by design.
-- Canonical ClickHouse schema is scripts/clickhouse-init.sql (`cds_audit.audit_events` ~40 cols, MergeTree, 7-year TTL); k8s/configmaps.yaml carries a drifted 8-col copy.
-- OPA anchor: policies/system.rego (`package cds.system`, `default allow = false`); runtime policy is pushed by the app.
-- On-chain anchoring: contracts/AuditRegistry.sol (Solidity 0.8) stores SM3 Merkle roots and rejects duplicates.
+- Seven deploy config copies, machine-pinned by test_deploy_manifest_gates: the 4 root docker-compose variants, k8s/, helm/, plus `deploy/e2e-remote/remote_deploy.sh` (scripted `docker run` mirroring root compose 1:1; `deploy/local/local_deploy.sh` is its twin) — any infra change lands in up to 7 files.
+- Two vendored do-not-edit crypto trees: `Tongsuo/` (submodule) and `cds-volume-plugin/tongsuo-build/`.
+- Only ci.yml runs on push/PR; cube-node-smoke.yml and cube-upstream-watch.yml are dispatch/cron-only — tests/test_cube_node_* are the ONLY automatic gate over deploy/cube-node/.
+- tests/ is a leaf (nothing imports it) yet is the only automatic gate over cds-volume-plugin/, deploy/cube-node/, helm/k8s manifests and the FE↔API path contract.
+- CubeSandbox compute nodes never enter `cds-system`: k8s/ and helm/ must not grow a Cube workload — nodes are bare-metal bring-ups from deploy/cube-node/ (runbook 红线 2).
+- Canonical ClickHouse schema is scripts/clickhouse-init.sql (MergeTree, 7-year TTL); the k8s/configmaps.yaml copy is now parity-gated (former drift closed).
+- OPA anchor: policies/system.rego (`package cds.system`, `default allow = false`) is a static anchor ONLY — runtime policy is pushed by the app; OPA data API is unauthenticated (A284), so 8181 stays loopback-only.
+- On-chain anchoring: contracts/AuditRegistry.sol (Solidity 0.8) stores SM3 Merkle roots with an anchorer allowlist; no solc in CI — invariants are source-regex-locked (test_ocr_a195), so a Solidity refactor must keep the exact shapes.
 
 ## COMMANDS
 ```bash
-# backend (no Makefile)
-pip install -r requirements.txt && pip install -e ./sdk   # CI installs the SDK editable
+# backend (no Makefile; CI py3.11, image py3.12, local venv py3.14)
+pip install -r requirements.txt && pip install -e ./sdk
 uvicorn app.main:app                # :8000; Dockerfile.api: python:3.12-slim, 2-stage
-python -m compileall -q app tests alembic
-python scripts/verify_schema_parity.py   # alembic vs create_all parity, CI gate
+python -c "import app.main" && python -m compileall -q app tests alembic   # import smoke + CI compile gate
+python scripts/verify_schema_parity.py   # NAMES-only parity gate; type/index drift = alembic check + PG16 lane
 CDS_DATABASE_URL="sqlite+aiosqlite:///./ci.db" .venv/bin/python -m alembic upgrade head && ALEMBIC_COMPARE_TYPES=0 .venv/bin/python -m alembic check
-# 必须走 .venv 里的 alembic：PATH 上的 ~/.local/bin/alembic 用系统 python（protobuf 7.35.0），
-# 与仓内 gencode 7.35.1 冲突，会在 import app._stubs 时抛 Protobuf VersionError 假失败。
-python -m pytest                    # asyncio_mode=auto, testpaths=tests, timeout=600, 3 files mark `slow`
-                                    # NOT authoritative locally — real numbers come from the remote py3.12 image
+# 必须走 .venv 里的 alembic：PATH 上的 ~/.local/bin/alembic 用系统 python（protobuf 7.35.0），与仓内
+# gencode 7.35.1 冲突，会在 import app._stubs 时抛 Protobuf VersionError 假失败。
+python -m pytest                    # authoritative = LOCAL (2026-10-19): strip proxy vars in the test subprocess ONLY;
+                                    # parallel pytest runs need one SQLite file each; 8 files mark `slow`
 python -m pytest tests/test_capability_matrix_consistency.py tests/test_pz04_honesty_gates.py  # doc↔code gates
 
-# frontend
-cd cds-frontend && npm run dev      # :3000, proxies /api → :8000
-cd cds-frontend && npm run build    # tsc -b && vite build (all the CI frontend job runs)
-cd cds-frontend && npm run lint     # and: npm test (vitest — NOT in CI)
+# frontend — CI job runs EXACTLY: npm ci → npm test → npm run build → npm run lint (lint is a hard gate)
+cd cds-frontend && npm ci && npm test && npm run build && npm run lint   # build = tsc -b && vite build; tests sit outside the tsc graph
+cd cds-frontend && npm run dev      # :3000, proxies /api → :8000 (needs ws: true; also proxies /open)
 
-# volume plugin (Go 1.25 + C, needs Tongsuo; not wired into ci.yml)
-cd cds-volume-plugin && make local && make test
+# volume plugin (Go 1.25 + C, needs out-of-tree Tongsuo build; not wired into ci.yml)
+cd cds-volume-plugin && make local && make test   # bare `go test ./...` fails by design (GM negative paths)
 
 # infra
-docker compose up                   # postgres:16, redis:7, clickhouse 24.3, minio, opa, vault
-bash -n scripts/install-k3s.sh k8s/deploy.sh        # release-gate §4
-CDS_K3S_MODE=k3s bash scripts/install-k3s.sh && bash scripts/e2e-k8s.sh
+docker compose up                   # postgres:16, redis:7, clickhouse 24.3, minio (pinned RELEASE), opa, vault
+bash -n scripts/install-k3s.sh k8s/deploy.sh && CDS_K3S_MODE=k3s bash scripts/install-k3s.sh
 helm dependency build ./helm/cds    # required before helm template/install
 bash deploy/cube-node/preflight.sh  # then install.sh, then verify.sh --json (exit 0 = node acceptance)
 ```
 
 ## NOTES
-- Crypto honesty: SM2/SM3/SM4 (GM/T) is the design, but Tongsuo/ is vendored and NOT wired — backend SM4-GCM is actually AES-256-GCM and sm3() silently falls back to SHA-256 without gmssl (gated by CDS_SM3_FALLBACK_ALLOWED since PZ-04/MR-A14); SM3 is implemented 4× (utils/crypto, services/crypto_service, gateway_service, secure_duckdb). Frontend does SM2/SM3 client-side via sm-crypto.
-- S4 is CLOSED: firecracker seccomp retry is gated by SECCOMP_FALLBACK_ALLOWED exactly like sandbox_runtime (the two digests cite MR-A13 and MR-A6 for it — reconcile against docs/mock-remediation-plan.md).
-- Prod compose knowingly ships software-simulation switches TRUE until real-hardware acceptance; the FG gate series now runs to FG-017 (Cube node bring-up); registry = docs/mock-remediation-plan.md (MR-A1..A15).
-- Sandbox guest path contract has ONE source of truth: `GUEST_DATA_DIR=/sandbox/data` (readonly declaration), `GUEST_OUTPUT_DIR=/sandbox/output` (the only harvested dir), `GUEST_WORK_DIR=/scratch` (compat-harvested), `GUEST_EXEC_DIR=/results/.cds-exec` (never harvested) in `app/services/cube_runtime_adapter.py`. Declared volumes do not reach the guest on cold start (data is injected over the exec channel), so "readonly" means declaration + harvest exclusion, NOT hypervisor enforcement — never claim stronger. Changing a path must also re-pin the literal mount assertions in `tests/test_cube_runtime_adapter.py`.
-- Stale docs to distrust: the gate-tier file list is parsed LIVE from ci.yml (`.gate-scratch/final_lane.sh` prints `GATE_FILES`) — never quote a hardcoded count in docs; the SDK version is single-sourced from `sdk/pyproject.toml` `[project].version` (A78, 2026-10-20 — the old `__init__.py` 0.2.0 drift is closed and a test forbids a literal `__version__ = "` from returning; specs/ has no ss-14 file (SS-14 = the remote-e2e round, docs/e2e-2026-10-13-remote/); docs naming a frontend `rag` service are dead.
-- k8s/deploy.sh applies 10 of 14 manifests — kafka.yaml / debezium.yaml (CDC) are deliberately manual (deploy.sh header + k8s/README carry the apply commands; a machine gate forbids re-adding them to the apply set). MinIO is pinned `RELEASE.2025-01-20T14-49-07Z` across all six copies and the helm chart gained an optional `minio.enabled` template (default false; existing installs keep external MinIO).
-- contracts/AuditRegistry.sol 访问控制已于 2026-10-20 修复（A195）：`owner` + `authorizedAnchors` + `onlyAnchorer` 修饰符，事件事带 `anchorer`；旧函数名 `anchorRoot` 已不存在，现在的是 `anchorAudit`/`verifyAudit`/`anchoredBy`/`verifyAuditBy`/`setAuthorizedAnchor`。真链 revert 行为仍 HARDWARE-GATED（本机无 solc/web3），门禁是源码级结构断言。
-- Infra drift CLOSED 2026-10-30 (gated): postgres user single-sourced to `cds` (dev volumes: `ALTER USER cds_admin RENAME TO cds` note in postgres.yaml); `CDS_LOG_JSON` prod posture pinned "true" across compose/k8s/helm/remote_deploy (test_deploy_manifest_gates PROD_POSTURE); 8-col ClickHouse copy was already fixed 10-18. k8s/secrets.yaml is now a <REPLACE_ME> template (real values must never re-enter git — a gate reds on the old literals).
-- Committed dev artifacts: k8s/secrets.yaml is now a placeholder template (2026-10-30) but git HISTORY still contains the old DEV literals — rotate anywhere ever deployed from this branch; history rewrite = lead decision. logs/cds-egress/access.jsonl is git-ignored and was one-way masked (session_id v5) on 2026-10-30.
-- tests/test_e2e_full_lifecycle.py is permanently ignored in CI (hits a real cluster); dev/test DBs bootstrapped by create_all get `alembic stamp head`.
-- Duplication: root product-design.md + CDS-product-design.md are parallel v1.0 product-design docs; docs/implementation-tasks.md / -v2.md / merged-task-plan.md are historical trackers, not live plans; 基础版数据沙箱原型/ (+ .zip) is the external prototype baseline, superseded by specs/prototype-v3.html.
-- tests/e2e_full_test.py is never collected (name misses `test_*.py`); nothing imports test modules — tests/ is a leaf, and it is the only automated gate on cds-volume-plugin/ and deploy/cube-node/ code.
-- Janitor: real-delete mode LANDED 2026-10-30 behind a hardcoded whitelist (alert_records / session_workspace_residue / dev_debug_artifacts only); audit_logs, merkle_leaves, delivery_bundles, data_resources are refused at code level regardless of config. Still OFF in every deploy copy (`CDS_JANITOR_ENABLED="false"`, gated) until the retention.md compliance review signs off.
+- Crypto honesty: SM2/SM3/SM4 (GM/T) is the design, but Tongsuo/ is vendored and NOT wired into the backend — SM4-GCM is actually AES-256-GCM and sm3() falls back to SHA-256 (gated CDS_SM3_FALLBACK_ALLOWED since PZ-04/MR-A14). SM3 exists in 5 modules; gateway_service.py:82 is the only ungated, undisclosed fallback (open defect). The volume plugin DOES use Tongsuo: prod must set `CDS_SM4_AEAD_BACKEND=tongsuo` (default aes_fallback = disclosed degrade M-01). FE does SM2/SM3 client-side via sm-crypto.
+- Honest degradation is machine-readable everywhere: 18 boot raises in core/config, fail-closed utils/crypto, plugin `crypto_posture=` boot line (deploy gates read it, never WARNING text), migration 0034 defaults integrity_status='uncheckable' not 'ok'.
+- Sandbox guest path contract has ONE source: `GUEST_DATA_DIR` (readonly declaration) / `GUEST_OUTPUT_DIR` (only harvested) / `GUEST_WORK_DIR` (compat) / `GUEST_EXEC_DIR` (never) in `app/services/cube_runtime_adapter.py`; "readonly" = declaration + harvest exclusion, NOT hypervisor enforcement — never claim stronger; a path change re-pins literal mount assertions in tests/test_cube_runtime_adapter.py.
+- Unpinned drift risks (no test catches either): FE `src/pages/Flow/directoryContract.ts` ↔ cube_runtime_adapter GUEST_* paths; FE `ApiKeys.tsx` SCOPE_GROUPS ↔ core/scopes.py GROUP_PREFIXES.
+- Stale docs to distrust: never quote a hardcoded gate count (parse ci.yml); SDK version single-sourced from sdk/pyproject.toml (A78); specs/ has no ss-14 or ss-17 file; a frontend `rag` service is dead; `CDS-product-design.md` (v1.0) is deprecated by `product-design.md` (v3.0); root `.scratch-*`/`.gate-files-tonight.txt` are tracked junk; docs/cr-2026-10-15-review.md is two rounds stale; README claims ("zero mock code", "no frontend") are wrong.
+- k8s/deploy.sh applies 10 of 13 — kafka.yaml/debezium.yaml (CDC) deliberately manual (a machine gate forbids re-adding them); it and the other deploy scripts `|| true` every wait and signal done with a trailing sentinel token (DEPLOY_DONE / LANE_DONE / …) — a printed "Deployed" ≠ healthy. MinIO pinned `RELEASE.2025-01-20T14-49-07Z` across 7 sites, `:latest` banned.
+- Infra drift CLOSED 2026-10-30 (gated): PG user `cds`, `CDS_LOG_JSON="true"` across prod copies, k8s/secrets.yaml = `<REPLACE_ME_*>` template (a gate reds on old literals) — but git HISTORY still holds the old dev literals: rotate anywhere ever deployed from this branch; history rewrite = lead decision.
+- AuditRegistry access control fixed 2026-10-20 (A195): `anchorAudit`/`verifyAudit`/`authorizedAnchors` — old `anchorRoot` gone; real-chain revert still HARDWARE-GATED (no solc/web3 locally), gate = source-regex assertions.
+- Janitor: real-delete landed 2026-10-30 behind a hardcoded whitelist (alert_records / session_workspace_residue / dev_debug_artifacts only); audit_logs, merkle_leaves, delivery_bundles, data_resources refused at code level regardless of config; still `CDS_JANITOR_ENABLED="false"` in every deploy copy pending retention.md sign-off.
+- Duplication / dead weight: docs/implementation-tasks.md / -v2.md / merged-task-plan.md are historical trackers, not live plans; 基础版数据沙箱原型/ (+ .zip) is superseded by specs/prototype-v3.html; app/templates + app/static are the legacy /admin surface but test-pinned (not deletable); FE src/utils/cn.ts + components/Common + public/icons.svg + README are dead scaffold; cds-volume-plugin bin/, tongsuo-build/, sm4gcm/sm4_gcm* are gitignored artifacts.

@@ -1,6 +1,6 @@
 # alembic/ — schema migration chain
 
-**Score 13 — distinct domain:** 37 files / 3,008 L, 83 defs, referenced by 35 code files (CI, k8s manifests, `scripts/`, 17 test modules) and imported by none: this Python executes through the alembic CLI, so static gates are its only consumers. Additive-only, strictly linear; tip at time of writing = `0034_integrity_patrol_columns` (35 revisions / 2,870 L in `versions/`). Never quote the tip as fixed in a test — pin "single head + ancestor" (test_ocr_a186b / a170).
+**Score 13 — distinct domain:** 37 files / 3,008 L (excluding this file: 2,870 `versions/` + 113 `env.py` + 25 `script.py.mako`), 83 defs, referenced by 35 code files (CI, k8s manifests, `scripts/`, 17 test modules) and imported by none: this Python executes through the alembic CLI, so static gates are its only consumers. Additive-only, strictly linear; tip at time of writing = `0034_integrity_patrol_columns` (35 revisions / 2,870 L in `versions/`). Never quote the tip as fixed in a test — pin "single head + ancestor" (test_ocr_a186b / a170).
 
 ## STRUCTURE
 ```
@@ -10,7 +10,7 @@ alembic/             # config lives OUTSIDE: repo-root alembic.ini (script_locat
 ├── script.py.mako   # 25 L template — only 0000 still matches its annotated output shape
 └── versions/        # 35 × NNNN_topic.py, strictly linear, no __init__.py
 ```
-Size profile: baseline 789 L (30 `create_table`, 92 `create_index`), `0019_flow_orchestration` 282 L, then 0030 187 / 0028 172 / 0031 138 / 0029 109; the remaining 26 files ≤62 L each.
+Size profile: baseline 789 L (30 `create_table`, 92 `create_index`), `0019_flow_orchestration` 282 L, then 0030 187 / 0028 172 / 0031 138 / 0029 109; every one of the other 29 revisions ≤62 L (largest 0032 at 62 L).
 
 ## WHERE TO LOOK
 | Task | Location | Notes |

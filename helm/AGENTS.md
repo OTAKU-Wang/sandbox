@@ -1,4 +1,4 @@
-# helm/ — the cds chart (scored 10: 13 files / 901 LOC — single chart at `helm/cds/`, NOT `helm/cds/cds/` as some task lists claim; 27 files elsewhere reference `helm/cds`)
+# helm/ — the cds chart (scored 10: 13 tracked files / 866 LOC excluding AGENTS.md (`git ls-files helm | grep -v AGENTS.md | xargs wc -l`) — single chart at `helm/cds/`, NOT `helm/cds/cds/` as some task lists claim; 27 non-AGENTS.md files elsewhere reference `helm/cds`)
 
 Only deploy path with HPA/PDB/Ingress. `values.yaml` (309 L) is one canonical copy of the CDS_* env contract — 61 `api.env` keys; its prod-posture twin is root `docker-compose.prod.yml`.
 
@@ -21,7 +21,7 @@ helm/cds/
 | In-chart vs external infra | `values.yaml` `externalComponents` list (currently `clickhouse`, `opa`) |
 | MinIO | `templates/minio.yaml` (P6, newest template): default `minio.enabled: false`, `strategy: Recreate` (RWO singleton — a RollingUpdate surge pod hangs in ContainerCreating), image pinned, root creds deliberately NOT `optional` |
 | Ship gate for this chart | `tests/test_helm_chart.py` (externalComponents invariant + hardening) + `tests/test_deploy_manifests.py` + `tests/test_integrity_patrol.py` + release-gate `helm template cds helm/cds` |
-| Helper labels/selectors | `templates/_helpers.tpl`: `cds.fullname` (18 uses), `cds.labels` (12), `cds.api.selectorLabels` (5), `cds.name` (3), `cds.frontend.selectorLabels` (3) |
+| Helper labels/selectors | `templates/_helpers.tpl` (uses = `grep -c 'include "cds.X"'` over `helm/cds/templates`): `cds.fullname` (18), `cds.labels` (12), `cds.api.selectorLabels` (5), `cds.name` (6), `cds.frontend.selectorLabels` (3) |
 
 ## CONVENTIONS
 - `helm dependency build ./helm/cds` is REQUIRED before `helm template`/`install` (bitnami charts fetched from charts.bitnami.com, not vendored — see Chart.yaml comment).

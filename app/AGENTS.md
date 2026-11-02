@@ -1,15 +1,15 @@
 # app/
 
-**Score 16** (296 py files / 88,445 LOC in 8 subpackages; `app.main:app` referenced from 29 other files). FastAPI backend of CDS (密态沙箱) — GM/T crypto surface (SM2/SM3/SM4/TLCP), uvicorn :8000. This file = boot wiring + package-wide rules only; every subdirectory's own detail lives in its AGENTS.md.
+**Score 16** (280 py files / 297 tracked files incl. docs+assets / 88,445 py LOC across 7 python subpackages + `templates/` + `static/`; `app.main:app` imported by 20 tracked py files outside `app/`, 32 mentioning the module — 25 in `tests/` + `alembic/env.py` + 2 `scripts/` + 4 `docs/`). FastAPI backend of CDS (密态沙箱) — GM/T crypto surface (SM2/SM3/SM4/TLCP), uvicorn :8000. This file = boot wiring + package-wide rules only; every subdirectory's own detail lives in its AGENTS.md.
 
 ## STRUCTURE
 ```
 app/                        # counts measured 2026-11-02
-├── main.py      # 721 L — the ONLY wiring point: 46 router mounts, 8 middlewares, 6 background loops
+├── main.py      # 721 L — the ONLY wiring point: 47 include_router calls = 46 mounts on `app` (614-672; 40 `/api/v1`, 1 `/open/v1`, 1 `/internal/audit`, 4 prefix-less) + 1 legacy `/admin` mount at 718; 8 middlewares, 6 background loops
 ├── core/        # 15 modules / 3,111 L — Settings, engine+session, authN, W2 errors, telemetry (see core/)
 ├── api/         # 48 modules / 21,231 L — route modules; prefixes exist ONLY in main.py (see api/)
 ├── services/    # 120 modules / 56,040 L — flat, zero subpackages: runtimes, pipelines, KMS, output policy (see services/)
-├── models/      # 45 modules / 3,070 L — one entity per file, 103 classes (see models/)
+├── models/      # 45 modules / 3,070 L — one entity per file; 105 top-level classes (`^class` in models/*.py: 55 Base-mapped + 48 Enum + UserRole + EncryptedKeySeed TypeDecorator) (see models/)
 ├── schemas/     # 12 modules / 1,213 L — pydantic wire models (see schemas/)
 ├── utils/       # 4 modules / 769 L — crypto honesty gates + attribution watermarking (see utils/)
 ├── _stubs/      # 33 generated CubeSandbox gRPC files / 2,290 L — never hand-edit (see _stubs/)

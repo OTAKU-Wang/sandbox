@@ -1,4 +1,4 @@
-# specs/ — design contracts, SS-01..SS-19 + product/deployment/portal docs (scored 9: 52 tracked files — 50 `.md` (30,785 LOC) + 2 HTML mocks — flat, no subdirs; 79 files outside `specs/` cite these paths; distinct domain: the interfaces `app/`, `cds-frontend/` and `sdk/` implement. File-count 3 + reference-centrality 3 + own-pattern 1 + this file as the corpus router 2)
+# specs/ — design contracts, SS-01..SS-19 + product/deployment/portal docs (scored 9: 52 tracked files — 50 `.md` + 2 HTML mocks — flat, no subdirs; those 50 `.md` total 30,797 LOC (`git ls-files 'specs/*.md' | xargs wc -l`), 30,731 without this file; 79 files outside `specs/` cite these paths (`git grep -l 'specs/' -- . ':!specs'`); distinct domain: the interfaces `app/`, `cds-frontend/` and `sdk/` implement. File-count 3 + reference-centrality 3 + own-pattern 1 + this file as the corpus router 2)
 
 Chinese-first prose, English identifiers. These are the interfaces `app/` and `cds-frontend/` implement. Specs are claims — verify against code before trusting (several are stale).
 
@@ -10,7 +10,7 @@ Chinese-first prose, English identifiers. These are the interfaces `app/` and `c
 | SS-01 KMS/identity (SM2 certs, DEK, attestation) | `ss-01-kms-identity.md` |
 | SS-02 contract/policy (SandboxMode 6 core modes + `contract.policy_params`, OPA/Rego default-deny PDP) | `ss-02-contract-policy.md`, `policy-compiler-spec.md` |
 | SS-03 scheduler / code pre-scan (FORBIDDEN_IMPORTS) | `SS-03.md`, `ss-03-task-scheduler.md` |
-| SS-04 sandbox runtime (per-scene runtimes, L1/L2/L3, GPU-TEE, adapter contract) | `ss-04-sandbox-runtime.md` (1178), `sandbox-adapters-spec.md` (RuntimeAdapter ABC) |
+| SS-04 sandbox runtime (per-scene runtimes, L1/L2/L3, GPU-TEE, adapter contract) | `ss-04-sandbox-runtime.md` (1177), `sandbox-adapters-spec.md` (RuntimeAdapter ABC) |
 | SS-05 output gateway (6 inspection stages, forbidden mimes) | `SS-05.md`, `ss-05-output-gateway.md`, `secure-output-lifecycle.md` |
 | SS-06 audit + SS-08 interconnect (SM3 Merkle, chain anchoring) | `SS-06.md`, `ss-06-audit-ss-08-interconnect.md`, `blockchain-integration-spec.md` |
 | SS-07 AI training (DP-SGD, memorization suite, checkpoints) | `ss-07-ai-training-pipeline.md` |
@@ -62,5 +62,5 @@ Chinese-first prose, English identifiers. These are the interfaces `app/` and `c
 - `detailed-tech-spec.md` v2.0 predates the productized repo (RabbitMQ/postgres:15) vs the runbook (Celery+Redis, postgres:16); `deployment-spec.md` and it define two divergent compose stacks.
 - `phase2-iteration-plan.md` is superseded by `sandbox-productization-round3-spec.md`.
 - `prototype.html` (2044 lines) is a visual mock with fake data — never a functional surface.
-- Only 14 docs carry a ledger (执行记录/修复记录): the `SS-*`/`ss-1x`/round/portal docs do, the June design docs (`tech-spec`, `product-spec`, `ddd-…`, `data-security-spec`, …) do not — "check the ledger" is not a universal answer here.
+- Only 14 docs carry a ledger (执行记录/修复记录) — `grep -lE '执行记录|修复记录' specs/*.md` gives 15 with this file's prose, 14 without it: the `SS-*`/`ss-1x`/round/portal docs do, the June design docs (`tech-spec`, `product-spec`, `ddd-…`, `data-security-spec`, …) do not — "check the ledger" is not a universal answer here.
 - Never state the 沈阳数据中心R tenant name or a real host/IP in a spec or test fixture (`developer-portal-review-plan.md` B-5 keeps failing on it); never restore the banned external claims listed in `product-security-release-review.md` §6 ("100% KVM", "全栈国密硬件", "密钥不出硬件/数据不出域", "形式化验证", "一机密评通过").

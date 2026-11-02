@@ -1,6 +1,6 @@
 # app/utils/
 
-**Score 10 — distinct domain: crypto honesty gates + attribution watermarking** (4 modules / 769 LOC). Small but load-bearing: `sm3_hash` appears in 72 files, `app.utils.crypto` in 47, `app.core.config`-adjacent honesty state in both crypto paths, and both watermarking families feed the delivery attribution path (`api/deliveries.py`, `services/output_inspection.py`). It earns its own file because the rules here are disclosure rules, not style rules.
+**Score 10 — distinct domain: crypto honesty gates + attribution watermarking** (4 modules / 769 LOC). Small but load-bearing: `sm3_hash` appears in 46 files under `app/` (72 counting `tests/`), `from app.utils.crypto import` in 28 (45 counting `tests/`, 49 repo-wide), `app.core.config`-adjacent honesty state in both crypto paths, and both watermarking families feed the delivery attribution path (`api/deliveries.py`, `services/output_inspection.py`). It earns its own file because the rules here are disclosure rules, not style rules.
 
 ## WHERE TO LOOK
 | Task | Module | Notes |

@@ -1,11 +1,11 @@
 # app/schemas/
 
-**Score 25 — distinct domain: pydantic wire contract.** 11 modules + empty `__init__.py` = 1,213 LOC / 55 models / 48 `@field_validator`s / 13 `from_attributes` responses. 37 `from app.schemas.X` statements repo-wide; no barrel, no `__all__` — import by full path.
+**Score 25 — distinct domain: pydantic wire contract.** 11 modules + empty `__init__.py` = 1,213 LOC / 55 models / 48 `@field_validator`s / 13 `from_attributes` responses (each = `grep -c` over `app/schemas/*.py`). 38 `from app.schemas…` import statements in tracked .py (`git grep -c "from app\.schemas" -- "*.py"`; 30 of them in `app/`, 29 importer files); no barrel, no `__all__` — import by full path.
 
 ## WHERE TO LOOK
 | Task | Module | Notes |
 |------|--------|-------|
-| Session create/exec/file requests | `sandbox_session.py` (174 L, 4 models) | the most-imported module here (10 importers; then flow / contract / high_risk_operation at 5 each, user 4). `sandbox_session.py:129-130` sets `sandbox_engine = "cube_microvm"` only for `l2c` — a non-cube level must never claim the cube engine |
+| Session create/exec/file requests | `sandbox_session.py` (174 L, 4 models) | the most-imported module here (6 importer files outside `app/schemas/`, then flow / contract at 5, high_risk_operation / user at 4 — `git grep -l "from app\.schemas.<mod>" -- "*.py"`). `sandbox_session.py:129-130` sets `sandbox_engine = "cube_microvm"` only for `l2c` — a non-cube level must never claim the cube engine |
 | High-risk operation confirmation | `high_risk_operation.py` | `HighRiskOperationRequest{reason: 8–500 chars, ticket_id}` reused by 4 routers (contracts, certificates, connectors, kms) — the shared base for any endpoint that can leak or destroy data |
 | Flow / delivery config (SS-15) | `flow.py` (236 L, 17 models — the largest module here) | `DeliveryMethod = Literal["dataset","open_api","result_push"]`, `ComputeFrequency = Literal["manual","hourly","daily"]`, `WorkloadEnv = Literal["test","production"]` — Literal aliases, not enums; plus the `Notebook*/Workload*/ComputeRun*` Create/Out shapes |
 | Zero-trust refusals at the edge | `network_policy.py:23-25`, `field_exposure.py:56-58`, `compliance.py:36-40` | an empty `allowed_ports` is refused ("use `mode=deny_all` to block all egress") rather than meaning "no port filter"; `requested_fields` cannot be empty; the anchoring report carries a backend-disclosure model so it "must never be read as 已上链". These refusals belong in the schema, not the router |

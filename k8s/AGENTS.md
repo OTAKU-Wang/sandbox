@@ -1,11 +1,11 @@
-# k8s/ — raw manifests, the k3s deploy path (scored 10: 16 files / 1.7k LOC — 14 manifests ≈ 42 objects + `deploy.sh` + `README.md`; flat, ns `cds-system`; `cds-secrets` 16 keys shared with the helm chart; 30 files elsewhere reference these paths)
+# k8s/ — raw manifests, the k3s deploy path (scored 10: 16 files / 1.7k LOC — 13 `.yaml` = 12 cluster manifests ≈ 43 objects + `registries.yaml` (k3s registry-mirror config, NOT a cluster manifest) + `deploy.sh` + `README.md`; flat, ns `cds-system`; `cds-secrets` 16 keys shared with the helm chart; 30 files elsewhere reference these paths)
 
 One of the SEVEN deploy config copies (root compose ×4, `helm/`, `deploy/e2e-remote/remote_deploy.sh`, `deploy/local/local_deploy.sh`). `k8s/README.md` is the freshest prose for this path (P6 收敛 2026-10-30) — read it alongside this file.
 
 ## WHERE TO LOOK
 | File | What it is |
 |------|------------|
-| `deploy.sh` | 9-step k3s deploy (prefers `k3s kubectl`); applies exactly 10 of the 14 manifests (namespace, secrets, configmaps, postgres, redis, minio, vault, clickhouse, opa, cds-app), then exec's `scripts/vault-init.sh` into the vault pod |
+| `deploy.sh` | 9-step k3s deploy (prefers `k3s kubectl`); applies exactly 10 of the 12 cluster manifests (namespace, secrets, configmaps, postgres, redis, minio, vault, clickhouse, opa, cds-app), then exec's `scripts/vault-init.sh` into the vault pod |
 | `secrets.yaml` | Secret `cds-secrets`: 16 keys, **all `<REPLACE_ME_*>` placeholders** since P6 — replacing them (or switching to external injection) is a precondition of apply, not a follow-up |
 | `configmaps.yaml` | 2 ConfigMaps with init SQL embedded: `GRANT … ON DATABASE cds TO cds` + DDL for the 7 `cds_audit` tables (33-column `audit_events`) |
 | `cds-app.yaml` | `cds-api` + `cds-frontend` Deployments/Services, the api env ConfigMap, the `cds-migrate` Job, 7 PVCs, NodePort 30080/30081, `imagePullPolicy: Never` |
@@ -27,7 +27,7 @@ One of the SEVEN deploy config copies (root compose ×4, `helm/`, `deploy/e2e-re
 
 ## ANTI-PATTERNS
 - Never put a real credential into `secrets.yaml` — it is a placeholder template as of P6; prod injects through `secrets.existingSecret`/Vault. Never copy a `<REPLACE_ME_*>` value into another deploy copy either.
-- `deploy.sh` ends every `kubectl wait` with `|| true` (9 of them) — "=== CDS Infrastructure Deployed ===" does NOT mean success; check each resource after deploy (`deploy/e2e-remote/s1_check.sh` or `kubectl get pods -n cds-system`).
+- `deploy.sh` ends every `kubectl wait` with `|| true` (all 8, its L64-71) — "=== CDS Infrastructure Deployed ===" does NOT mean success; check each resource after deploy (`deploy/e2e-remote/s1_check.sh` or `kubectl get pods -n cds-system`).
 - Do not re-introduce the P6 drift this directory used to carry: no `cds_admin` GRANT, no 8-column `audit_events`. `scripts/init-db.sql` and `scripts/clickhouse-init.sql` (7 tables, canonical) are the sources; `configmaps.yaml` must match them.
 - Vault init is weak: `scripts/vault-init.sh` uses `-key-shares=1 -key-threshold=1` (no Shamir split) — dev-only.
 - OPA healthcheck is `/opa version` in `docker-compose.prod.yml` (passes even when the policy store is down); the k8s probe is `httpGet /health`, which is up-or-down only and equally policy-store blind.

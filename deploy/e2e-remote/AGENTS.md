@@ -24,7 +24,7 @@ Parent `deploy/AGENTS.md` owns the shared doctrine (sentinel completion, `run()`
 ## ANTI-PATTERNS
 - Adding a default credential is a red test, not a convenience: `tests/test_deploy_manifest_gates.py:257` asserts both `"CdsE2e!Admin123"` and the `os.environ.get("CDS_E2E_ADMIN_PASS", ` default pattern are absent.
 - Two concurrent `remote_deploy.sh` runs `rm -f` each other's containers over fixed ports — the `flock` is load-bearing, don't remove or bypass it.
-- `pg_validate.sh` is `set -u` **without** `-e` and hardcodes one host (`/root/cds.env`, a `cds-api*.tar.gz` it `rm -f` after `docker load`) — a one-shot, never a reusable validator.
+- `pg_validate.sh` is `set -u` **without** `-e` and hardcodes one host (`/root/cds.env`, the literal `/root/cds-api3.tar.gz` it `rm -f` after `docker load`) — a one-shot, never a reusable validator.
 - `SKIP` is non-failing only in `e2e_tds_scenarios.py`; elsewhere SKIP ≠ PASS, and a `WARN` line never substitutes for the sentinel. The final `/health` flake deliberately only WARNs so it cannot swallow `DEPLOY_DONE` — don't tighten it into a hard fail.
 - No `#` comment inside a `\` line-continuation: bash hands the comment to the command (2026-11-02 remote 实锤).
 - Don't import these from `app/` or add `__init__.py`/packaging — they stay out-of-process by design; tests reach them with `importlib`/`subprocess`. Untracked `__pycache__/` here is that residue.
