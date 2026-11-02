@@ -189,6 +189,13 @@ echo "== api =="
 # false exactly as docker-compose.prod.yml does: Vault is
 # up with transit (no software-HSM fallback), the lane offers no bwrap/firecracker
 # sandbox (legacy off → SS-13 honest 400), and gmssl ships in the image.
+#
+# EGRESS 审计写方治理（波3收口 2026-10-30，注释自 docker run 续行中迁出——反斜杠
+# 续行里的注释会把命令在 # 处截断，后续参数行变成 "command not found"，2026-11-02
+# 远端实锤）：ENABLED=true 而不设 LOG_PATH，JSONL 就落容器层默认 ./logs/cds-egress/
+# ——容器重建证据蒸发（e2e 证据面；历史 access.jsonl 入库事故正是这枚默认相对路径
+# 的产物）。默认绝对路径+挂卷，宿主 cds.env 可覆写。此键 A301 optional_empty 不适用：
+# 必须接，不接=丢证据。
 run cds-api cds-api:latest \
   -p 8000:8000 \
   -e CDS_DEBUG="${CDS_DEBUG:-false}" \
@@ -249,10 +256,6 @@ run cds-api cds-api:latest \
   -e CDS_NODE_STALE_SECONDS="300" \
   -e CDS_SHARED_VOLUME_ROOT=/data/shared-volumes \
   -e CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED="true" \
-  # EGRESS 审计写方治理（波3收口 2026-10-30）：ENABLED=true 而不设 LOG_PATH，
-  # JSONL 就落容器层默认 ./logs/cds-egress/——容器重建证据蒸发（e2e 证据面；
-  # 历史 access.jsonl 入库事故正是这枚默认相对路径的产物）。默认绝对路径+挂卷，
-  # 宿主 cds.env 可覆写。此键 A301 optional_empty 不适用：必须接，不接=丢证据。
   -e CDS_EGRESS_AUDIT_LOG_PATH="${CDS_EGRESS_AUDIT_LOG_PATH:-/data/egress-audit/access.jsonl}" \
   -e CDS_RATE_LIMIT_ENABLED="true" \
   -e CDS_RATE_LIMIT_AUTH_PER_MINUTE="10" \

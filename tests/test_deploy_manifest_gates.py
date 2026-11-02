@@ -159,6 +159,22 @@ def test_remote_deploy_migrates_before_api():
         "migration must run before cds-api starts"
 
 
+@pytest.mark.parametrize("name", ["remote_deploy.sh", "local_deploy.sh", "pg_validate.sh",
+                                  "s1_check.sh", "make_env.sh"])
+def test_no_comment_inside_line_continuation(name):
+    """反斜杠续行里不许有注释行——2026-11-02 远端实锤：`cmd \\` 之后接 `# 注释`，
+    续行在 # 处被注释吃掉，命令就地结束，后续参数行变成 `-e: command not found`。
+    `bash -n` 抓不到（语法合法，纯运行期事故），只能静态钉。注释请整体挪到命令块外。"""
+    path = (E2E / name) if name != "local_deploy.sh" else ROOT / "deploy" / "local" / name
+    lines = read(path).splitlines()
+    bad = [
+        (i + 1, line.strip()[:60])
+        for i, line in enumerate(lines[1:], start=1)
+        if lines[i - 1].rstrip().endswith("\\") and line.lstrip().startswith("#")
+    ]
+    assert not bad, f"{path.name}: 续行被注释截断（运行期才炸）: {bad}"
+
+
 def test_remote_deploy_fails_fast_on_missing_column_key(tmp_path):
     b = bash_exe()
     if not b:

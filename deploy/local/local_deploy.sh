@@ -184,6 +184,12 @@ docker run --rm --network host --env-file "$ENV_FILE" \
 # SS-13/SS-14: 本机节点无 TEE 硬件（tee=none 如实披露, bare MicroVM 路径）——
 # TEE quote 不可得, 证明门按部署策略关闭; TEE 部署保持默认 true。
 echo "== api (cube dataplane on, node grpc plaintext dev) =="
+# EGRESS 审计写方治理（波3收口 2026-10-30，注释自 docker run 续行中迁出——反斜杠
+# 续行里的注释会把命令在 # 处截断，后续参数行变成 "command not found"，2026-11-02
+# 远端实锤同款雷）：ENABLED=true 而不设 LOG_PATH，JSONL 就落容器层默认
+# ./logs/cds-egress/——容器重建证据蒸发（e2e 证据面；历史 access.jsonl 入库事故
+# 正是这枚默认相对路径的产物）。默认绝对路径+挂卷，宿主 cds.env 可覆写。
+# 此键 A301 optional_empty 不适用：必须接，不接=丢证据。
 run l-cds-api cds-api:latest \
   -e CDS_DEBUG=true \
   -e CDS_FEDERATION_ENABLED=false \
@@ -230,10 +236,6 @@ run l-cds-api cds-api:latest \
   -e CDS_MERKLE_PIPELINE_ENABLED="false" \
   -e CDS_EGRESS_AUDIT_ENABLED="true" \
   -e CDS_EGRESS_AUDIT_ENCRYPTION_ENABLED="true" \
-  # EGRESS 审计写方治理（波3收口 2026-10-30）：ENABLED=true 而不设 LOG_PATH，
-  # JSONL 就落容器层默认 ./logs/cds-egress/——容器重建证据蒸发（e2e 证据面；
-  # 历史 access.jsonl 入库事故正是这枚默认相对路径的产物）。默认绝对路径+挂卷，
-  # 宿主 cds.env 可覆写。此键 A301 optional_empty 不适用：必须接，不接=丢证据。
   -e CDS_EGRESS_AUDIT_LOG_PATH="${CDS_EGRESS_AUDIT_LOG_PATH:-/data/egress-audit/access.jsonl}" \
   -e CDS_NODE_STALE_SECONDS="300" \
   -e CDS_RATE_LIMIT_ENABLED="true" \
