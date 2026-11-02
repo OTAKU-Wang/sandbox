@@ -5,6 +5,13 @@ import uuid
 from typing import AsyncGenerator
 
 os.environ["TESTING"] = "1"
+# 测试库钉死（2026-11-02 e2e 轮实弹）：仓根存在开发者 .env（.env.example 文档化工作流）
+# 时，DATABASE_URL 会从 dotenv 渗进 Settings——SyncDbBridge 这类「按 settings 现造
+# engine」的部件会连上 .env 里的真 PG（本机 compose 开着就是活靶），测试以
+# "Future attached to a different loop" 形态随机红。套件口径本来就是进程内 SQLite
+# （engine/async_session 由下方 fixture 打桩），这里把 settings 面也钉死，开发者
+# .env 不再能污染任何用例。env 源优先级高于 dotenv，钉得动。
+os.environ.setdefault("CDS_DATABASE_URL", "sqlite+aiosqlite:///./ci_conftest.db")
 # P0 fail-closed switches (plan docs/ai-sandbox-gap-remediation-plan.md §5.1):
 # the existing test baseline runs with the relaxed values that dev uses.
 # Enforcement behaviour is covered by dedicated tests that monkeypatch the

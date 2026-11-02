@@ -124,3 +124,16 @@ admin 密码经 app 自身散列函数重置（lane 测试身份，非真实凭�
   与 D-e2e-22 修复后的 cds-api 容器完全一致）复跑：**340 通过 / 2 跳过 / 0 失败**。
 - 镜像内跑 harness 的口令（入册防失传）：挂载整树 + 上述四件套特权 + cwd=树根，
   缺任一 L0/bwrap 面必呈假红。
+
+## D-e2e-28【测试装置缺陷】开发者 .env 污染套件：SyncDbBridge 连上真库的跨环幽灵
+- 现象：本轮全量首跑 29 红（基线 26）。三条增量单跑全绿——`a042`（asyncpg
+  "attached to a different loop"）、`data_product_sandbox::list_sessions`（assert 1>=2）、
+  `ss12::window_rolls_over`（KeyError）。
+- 根因：本轮为 compose 新建了仓根 `.env`（基线读数时不存在）。dotenv 渗进 Settings 后，
+  凡「按 settings 现造 engine」的部件（SyncDbBridge 等）就按 .env 连真 PG——本机 compose
+  栈开着即连得上，跨事件循环幽灵出现；后两条为同形状的状态/时序耦合放大。这不是
+  本轮产品改动引入，是「照文档放 .env」这个真实开发形状第一次被套件吃到。
+- 修复：conftest 顶部 `CDS_DATABASE_URL` setdefault 钉到进程内 SQLite（env 源优先级
+  高于 dotenv，钉得动；engine/async_session 本就有打桩，这次把 settings 面钉齐）。
+  开发者 .env 从此不能污染任何用例。
+- 读数闭环：门禁同树 **339/3/0**（与波3零红一致）；全量复跑读数见下一节。
