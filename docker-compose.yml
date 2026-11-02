@@ -232,11 +232,16 @@ services:
     # 要拉起 loopback（RTM_NEWADDR），实测缺它时报
     # `bwrap: loopback: Failed RTM_NEWADDR` 并 exit 1。仅 dev compose：
     # prod compose / helm 不带。代价是外层容器隔离变强能力交换，不得用于生产。
+    # apparmor=unconfined 同为实证必选（2026-11-02 本地全栈 e2e）：Ubuntu 宿主的
+    # docker-default apparmor 档拦 bwrap 的 mount propagation 变更，报
+    # `bwrap: Failed to make / slave: Permission denied`——SYS_ADMIN+seccomp
+    # unconfined 都不够，A/B 实证加此一行后 bwrap 通。
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
     security_opt:
       - seccomp:unconfined
+      - apparmor=unconfined
     depends_on:
       postgres:
         condition: service_healthy

@@ -17,7 +17,9 @@ WORKDIR /app
 
 # System deps
 ARG DEBIAN_MIRROR=https://deb.debian.org
-RUN (sed -i "s|https://deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true) \
+# trixie 基础镜像的 debian.sources 用 http:// 方案；只替换 https:// 会让 DEBIAN_MIRROR
+# 静默失效（apt 照打 deb.debian.org，受限网络下构建挂死在 DNS 超时）。两个方案都换。
+RUN (sed -i -E "s|https?://deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true) \
     && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl iptables iproute2 bubblewrap \
     && rm -rf /var/lib/apt/lists/*
