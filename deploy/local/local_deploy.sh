@@ -129,6 +129,7 @@ cat > "$CH_PORTS_FILE" <<'XMLEOF'
   <tcp_port>9005</tcp_port>
 </clickhouse>
 XMLEOF
+chmod 644 "$CH_PORTS_FILE"
 run l-clickhouse clickhouse/clickhouse-server:24.3-alpine \
   -e CLICKHOUSE_DB=cds_audit -e CLICKHOUSE_USER=cds -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" \
   -v "l_cds_ch:/var/lib/clickhouse" \
@@ -178,6 +179,7 @@ if ! mkdir -p /var/lib/cds/sandbox-results 2>/dev/null; then
   echo "FATAL: cannot create /var/lib/cds/sandbox-results (need root, or pre-create it); the node cubelet bind-mounts this dir for session result volumes"; exit 1; fi
 
 docker run --rm --network host --env-file "$ENV_FILE" \
+  -e CDS_DATABASE_URL="postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@127.0.0.1:5432/cds" \
   -e ALEMBIC_DATABASE_URL="postgresql+asyncpg://cds:${POSTGRES_PASSWORD}@127.0.0.1:5432/cds" \
   cds-api:latest sh -c "python -m alembic upgrade head"
 

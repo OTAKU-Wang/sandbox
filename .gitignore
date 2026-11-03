@@ -63,6 +63,7 @@ logs/
 # 本机验证工件（证据日志/截图，不入库）
 shots/
 .gate.txt
+*evidence.json
 
 # 子代理假环境脚手架（cube-node 脚本的 mock 根），不入库
 .w5scratch/
