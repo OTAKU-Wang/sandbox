@@ -48,6 +48,11 @@ from app.models import cube_egress_dedup  # CB-06: egress audit idempotency keys
 from app.models import cube_template  # CB-05: cube template registry + node distribution
 from app.models import notebook, workload, workload_test_run, compute_run  # SS-15: dev-to-delivery flow
 from app.models import api_endpoint, webhook, webhook_delivery, delivery_bundle  # SS-15: delivery channels
+import app.models.team  # noqa: F401
+import app.models.scenario  # noqa: F401
+import app.models.modeling_project  # noqa: F401
+import app.models.billing_invoice  # noqa: F401
+import app.models.user_notification  # noqa: F401
 
 
 def _create_all_allowed(cfg, env: dict | None = None) -> bool:
