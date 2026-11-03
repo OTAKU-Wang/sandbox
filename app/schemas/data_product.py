@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, field_validator
 
@@ -127,3 +128,41 @@ class DataProductResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DataProductVersionCreate(BaseModel):
+    """POST /data-products/{id}/versions — 在现有版本链上追加下一版本。
+
+    version 为 None 时按版本链最大版本号自增；显式传入时必须大于当前最大版本
+    （端点内校验）。schema_definition 缺省则沿用当前行的 data_schema。
+    """
+    version: int | None = None
+    schema_definition: dict[str, Any] | None = None
+    changelog: str | None = None
+
+    @field_validator("version")
+    @classmethod
+    def version_positive(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("version must be a positive integer")
+        return v
+
+    @field_validator("schema_definition")
+    @classmethod
+    def schema_fields_shape(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        # 本仓 data_schema 约定形态 {"fields": [...]}（catalog / output_control 同读此形态）
+        if v is not None and "fields" in v and not isinstance(v["fields"], list):
+            raise ValueError("schema_definition.fields must be a list")
+        return v
+
+
+class DataProductRollbackRequest(BaseModel):
+    """POST /data-products/{id}/versions/rollback — 把当前版本回退到目标历史版本。"""
+    target_version: int
+
+    @field_validator("target_version")
+    @classmethod
+    def target_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("target_version must be a positive integer")
+        return v

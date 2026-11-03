@@ -34,6 +34,50 @@ export interface ProductVersionSummary {
   created_at: string;
 }
 
+// 版本管理（SS-realignment Task 8）：版本号是整数（app/models/data_product.py 的
+// version 列是 Integer，行级版本模型 parent_id + is_latest）。
+export interface CreateProductVersionRequest {
+  version?: number;
+  schema_definition?: Record<string, unknown>;
+  changelog?: string;
+}
+
+export interface CreatedProductVersion {
+  id: string;
+  version: number;
+  parent_id: string;
+  status: string;
+  change_summary: string | null;
+  data_schema: Record<string, unknown> | null;
+}
+
+export interface ProductVersionFieldChange {
+  name: string;
+  from_type: string | null;
+  to_type: string | null;
+  from_field: Record<string, unknown>;
+  to_field: Record<string, unknown>;
+}
+
+export interface ProductVersionDiff {
+  product_id: string;
+  from_version: number;
+  to_version: number;
+  added_fields: string[];
+  removed_fields: string[];
+  modified_fields: ProductVersionFieldChange[];
+  unchanged_fields: string[];
+  breaking_change: boolean;
+}
+
+export interface ProductVersionRollbackResult {
+  product_id: string;
+  current_version: number;
+  restored_product_id: string;
+  rolled_back_from: number | null;
+  already_latest: boolean;
+}
+
 export const dataProductApi = {
   list: (params?: { page?: number; page_size?: number; q?: string; product_type?: string; status?: string }): Promise<PaginatedResponse<DataProduct>> =>
     api.get('/data-products', {
@@ -78,4 +122,14 @@ export const dataProductApi = {
 
   listVersions: (id: string): Promise<{ product_id: string; versions: ProductVersionSummary[] }> =>
     api.get(`/data-products/${id}/versions`),
+
+  // 版本管理（Task 8）：追加版本草稿 / 两版本 Schema 比对 / 把当前版本回退到历史版本
+  createVersion: (id: string, data: CreateProductVersionRequest): Promise<CreatedProductVersion> =>
+    api.post(`/data-products/${id}/versions`, data),
+
+  diffVersions: (id: string, fromVersion: number, toVersion: number): Promise<ProductVersionDiff> =>
+    api.get(`/data-products/${id}/versions/diff`, { params: { from_version: fromVersion, to_version: toVersion } }),
+
+  rollbackVersion: (id: string, targetVersion: number): Promise<ProductVersionRollbackResult> =>
+    api.post(`/data-products/${id}/versions/rollback`, { target_version: targetVersion }),
 };

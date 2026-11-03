@@ -17,11 +17,18 @@ import {
   message,
   Tooltip,
   Switch,
+  Alert,
+  Drawer,
+  Modal,
+  Popconfirm,
+  Spin,
 } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  DiffOutlined,
   FileTextOutlined,
+  PlusOutlined,
   RocketOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -155,6 +162,14 @@ function buildSchemaFields(fields: unknown): SchemaFieldRow[] {
   });
 }
 
+// axios 拦截器 reject 的是后端 W2 错误体 {code,message,detail}，detail 优先。
+function actionErrorText(error: unknown, fallback: string) {
+  const data = error as { detail?: unknown; message?: unknown } | null;
+  if (typeof data?.detail === 'string' && data.detail) return data.detail;
+  if (typeof data?.message === 'string' && data.message) return data.message;
+  return fallback;
+}
+
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -272,6 +287,60 @@ export default function ProductDetail() {
       const detail = (error as { detail?: unknown } | null)?.detail;
       message.error(typeof detail === 'string' ? detail : '字段申请处理失败');
     },
+  });
+
+  // —— 版本管理（SS-realignment Task 8）：追加版本草稿 / Schema 比对 / 回退历史版本 ——
+  const versionList = versions?.versions ?? [];
+  const versionOptions = versionList.map((item) => ({
+    value: item.version,
+    label: `v${item.version}${item.is_latest ? '（最新）' : ''}`,
+  }));
+  const latestVersion = versionList.find((item) => item.is_latest)?.version ?? null;
+  const [versionModalOpen, setVersionModalOpen] = useState(false);
+  const [schemaDraftText, setSchemaDraftText] = useState('{\n  "fields": []\n}');
+  const [changelogDraft, setChangelogDraft] = useState('');
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffFrom, setDiffFrom] = useState<number | null>(null);
+  const [diffTo, setDiffTo] = useState<number | null>(null);
+
+  const createVersionMutation = useMutation({
+    mutationFn: (payload: { schema_definition?: Record<string, unknown>; changelog?: string }) =>
+      dataProductApi.createVersion(id!, payload),
+    onSuccess: (created) => {
+      message.success(`已创建版本 v${created.version}（草稿）`);
+      setVersionModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['data-product', id] });
+      queryClient.invalidateQueries({ queryKey: ['data-product-versions', id] });
+      queryClient.invalidateQueries({ queryKey: ['data-product-version-diff', id] });
+      queryClient.invalidateQueries({ queryKey: ['data-products'] });
+      // 新版本是当前行（is_latest），直接进入它的详情继续编辑与送审
+      navigate(`/data-products/${created.id}`);
+    },
+    onError: (error: unknown) => message.error(actionErrorText(error, '创建新版本失败')),
+  });
+
+  const rollbackMutation = useMutation({
+    mutationFn: (targetVersion: number) => dataProductApi.rollbackVersion(id!, targetVersion),
+    onSuccess: (result) => {
+      message.success(`已回退到版本 v${result.current_version}`);
+      queryClient.invalidateQueries({ queryKey: ['data-product', id] });
+      queryClient.invalidateQueries({ queryKey: ['data-product-versions', id] });
+      queryClient.invalidateQueries({ queryKey: ['data-product-version-diff', id] });
+      queryClient.invalidateQueries({ queryKey: ['data-products'] });
+      if (result.restored_product_id !== id) navigate(`/data-products/${result.restored_product_id}`);
+    },
+    onError: (error: unknown) => message.error(actionErrorText(error, '版本回退失败')),
+  });
+
+  const {
+    data: versionDiff,
+    isFetching: diffFetching,
+    isError: diffIsError,
+    error: diffErrorInfo,
+  } = useQuery({
+    queryKey: ['data-product-version-diff', id, diffFrom, diffTo],
+    queryFn: () => dataProductApi.diffVersions(id!, diffFrom as number, diffTo as number),
+    enabled: diffOpen && diffFrom !== null && diffTo !== null,
   });
 
   const schemaFields = buildSchemaFields(product?.data_schema?.fields);
@@ -449,7 +518,40 @@ export default function ProductDetail() {
       </Row>
 
       {(versions?.versions?.length || 0) > 0 && (
-        <Card title="版本记录" style={{ marginTop: 16 }}>
+        <Card
+          title="版本记录"
+          style={{ marginTop: 16 }}
+          extra={
+            <Space>
+              <Button
+                size="small"
+                icon={<DiffOutlined />}
+                disabled={versionList.length < 2}
+                onClick={() => {
+                  setDiffFrom(versionList.length ? versionList[0].version : null);
+                  setDiffTo(versionList.length ? versionList[versionList.length - 1].version : null);
+                  setDiffOpen(true);
+                }}
+              >
+                比对两版本
+              </Button>
+              {isOwner && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setSchemaDraftText(JSON.stringify(product.data_schema ?? { fields: [] }, null, 2));
+                    setChangelogDraft('');
+                    setVersionModalOpen(true);
+                  }}
+                >
+                  新建版本
+                </Button>
+              )}
+            </Space>
+          }
+        >
           <Table
             size="small"
             pagination={false}
@@ -461,6 +563,29 @@ export default function ProductDetail() {
               { title: '最新', dataIndex: 'is_latest', key: 'is_latest', width: 90, render: (value) => value ? <Tag color="green">是</Tag> : '-' },
               { title: '变更说明', dataIndex: 'change_summary', key: 'change_summary', render: (value) => value || '-' },
               { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (value) => new Date(value).toLocaleString() },
+              {
+                title: '操作',
+                key: 'actions',
+                width: 140,
+                render: (_, row) => (
+                  <Space size={0}>
+                    {row.id !== id && (
+                      <Button size="small" type="link" onClick={() => navigate(`/data-products/${row.id}`)}>查看</Button>
+                    )}
+                    {isOwner && !row.is_latest && (
+                      <Popconfirm
+                        title={`回退到 v${row.version}？`}
+                        description="当前版本将恢复为该版本的 Schema，历史版本全部保留。"
+                        okText="回退"
+                        cancelText="取消"
+                        onConfirm={() => rollbackMutation.mutate(row.version)}
+                      >
+                        <Button size="small" type="link" danger loading={rollbackMutation.isPending}>回退</Button>
+                      </Popconfirm>
+                    )}
+                  </Space>
+                ),
+              },
             ]}
           />
         </Card>
@@ -579,6 +704,126 @@ export default function ProductDetail() {
           </Col>
         </Row>
       )}
+
+      <Modal
+        title={`新建版本${latestVersion === null ? '' : `（当前最新 v${latestVersion}）`}`}
+        open={versionModalOpen}
+        okText="创建草稿版本"
+        cancelText="取消"
+        confirmLoading={createVersionMutation.isPending}
+        onOk={() => {
+          let schema: unknown;
+          try {
+            schema = JSON.parse(schemaDraftText);
+          } catch {
+            message.error('Schema 必须是合法 JSON');
+            return;
+          }
+          if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) {
+            message.error('Schema 必须是 JSON 对象，例如 {"fields": [...]}');
+            return;
+          }
+          createVersionMutation.mutate({
+            schema_definition: schema as Record<string, unknown>,
+            changelog: changelogDraft.trim() || undefined,
+          });
+        }}
+        onCancel={() => setVersionModalOpen(false)}
+        width={680}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Text type="secondary">
+            在当前产品上追加下一个版本（版本号自动递增）。新版本从草稿开始，需重新提交审核与发布；
+            现行版本保留在历史中，可随时回退。
+          </Text>
+          <div>
+            <Text strong>变更说明</Text>
+            <Input.TextArea
+              rows={2}
+              maxLength={512}
+              value={changelogDraft}
+              onChange={(event) => setChangelogDraft(event.target.value)}
+              placeholder="本次版本变更内容（展示在版本记录中）"
+            />
+          </div>
+          <div>
+            <Text strong>数据 Schema（JSON）</Text>
+            <Input.TextArea
+              rows={12}
+              value={schemaDraftText}
+              onChange={(event) => setSchemaDraftText(event.target.value)}
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+              placeholder='{"fields": [{"name": "col", "type": "string"}]}'
+            />
+          </div>
+        </Space>
+      </Modal>
+
+      <Drawer title="版本比对（Schema Diff）" placement="right" width={640} open={diffOpen} onClose={() => setDiffOpen(false)}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Space wrap>
+            <Select style={{ width: 170 }} placeholder="起始版本" value={diffFrom ?? undefined} onChange={(value) => setDiffFrom(value)} options={versionOptions} />
+            <Text type="secondary">→</Text>
+            <Select style={{ width: 170 }} placeholder="目标版本" value={diffTo ?? undefined} onChange={(value) => setDiffTo(value)} options={versionOptions} />
+          </Space>
+          {diffFrom === null || diffTo === null ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择要比对的两个版本" />
+          ) : diffFetching && !versionDiff ? (
+            <Spin />
+          ) : diffIsError ? (
+            <Alert type="error" showIcon message="比对失败" description={actionErrorText(diffErrorInfo, '版本比对请求失败')} />
+          ) : versionDiff ? (
+            <>
+              <Alert
+                type={versionDiff.breaking_change ? 'warning' : 'success'}
+                showIcon
+                message={versionDiff.breaking_change ? '包含破坏性变更（删除字段或字段类型变化）' : '无破坏性变更'}
+              />
+              <div>
+                <Text strong>新增字段（{versionDiff.added_fields.length}）</Text>
+                <div style={{ marginTop: 4 }}>
+                  {versionDiff.added_fields.length
+                    ? versionDiff.added_fields.map((field) => <Tag color="green" key={field}>{field}</Tag>)
+                    : <Text type="secondary">无</Text>}
+                </div>
+              </div>
+              <div>
+                <Text strong>删除字段（{versionDiff.removed_fields.length}）</Text>
+                <div style={{ marginTop: 4 }}>
+                  {versionDiff.removed_fields.length
+                    ? versionDiff.removed_fields.map((field) => <Tag color="red" key={field}>{field}</Tag>)
+                    : <Text type="secondary">无</Text>}
+                </div>
+              </div>
+              <div>
+                <Text strong>变更字段（{versionDiff.modified_fields.length}）</Text>
+                {versionDiff.modified_fields.length > 0 && (
+                  <Table
+                    size="small"
+                    pagination={false}
+                    rowKey="name"
+                    style={{ marginTop: 4 }}
+                    dataSource={versionDiff.modified_fields}
+                    columns={[
+                      { title: '字段', dataIndex: 'name', key: 'name' },
+                      { title: '原类型', dataIndex: 'from_type', key: 'from_type', width: 110, render: (value) => value ?? '-' },
+                      { title: '新类型', dataIndex: 'to_type', key: 'to_type', width: 110, render: (value) => value ?? '-' },
+                    ]}
+                  />
+                )}
+              </div>
+              <div>
+                <Text strong>未变字段（{versionDiff.unchanged_fields.length}）</Text>
+                <div style={{ marginTop: 4 }}>
+                  {versionDiff.unchanged_fields.length
+                    ? <Text type="secondary">{versionDiff.unchanged_fields.join('、')}</Text>
+                    : <Text type="secondary">无</Text>}
+                </div>
+              </div>
+            </>
+          ) : null}
+        </Space>
+      </Drawer>
     </div>
   );
 }

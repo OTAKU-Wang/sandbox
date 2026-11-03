@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from sqlalchemy import select, func, or_, and_, cast, Text
@@ -11,7 +12,13 @@ from app.models.data_product import DataProduct, DataProductStatus
 from app.models.data_resource import DataResource, ResourceStatus
 from app.models.contract import Contract, ContractStatus
 from app.models.sandbox_session import SandboxSession, SessionStatus
-from app.schemas.data_product import DataProductCreate, DataProductUpdate, DataProductResponse
+from app.schemas.data_product import (
+    DataProductCreate,
+    DataProductRollbackRequest,
+    DataProductResponse,
+    DataProductUpdate,
+    DataProductVersionCreate,
+)
 from app.services.audit_service import audit_service
 from app.services.test_data_generator import test_data_generator
 from app.services.storage_service import storage_service
@@ -727,3 +734,260 @@ async def list_versions(
 
     versions.sort(key=lambda x: x["version"])
     return {"product_id": str(product_id), "versions": versions}
+
+
+# --- 版本管理（SS-realignment Task 8）: 新版本 / Schema Diff / 回退 ---
+
+async def _load_version_family(db: AsyncSession, product: DataProduct) -> list[DataProduct]:
+    """product 所在版本链的全部行（按版本号升序）。
+
+    与 list_versions 同一遍历方向：先沿 parent_id 回溯到 root（visited 集合防环），
+    再从 root BFS 收全部子版本。create/diff/rollback 共用这一份事实源，避免三个
+    视图各自计算版本链。
+    """
+    root = product
+    visited: set[uuid.UUID] = {root.id}
+    while root.parent_id and root.parent_id not in visited:
+        visited.add(root.parent_id)
+        prev = (await db.execute(select(DataProduct).where(DataProduct.id == root.parent_id))).scalar_one_or_none()
+        if prev is None:
+            break
+        root = prev
+
+    rows: dict[uuid.UUID, DataProduct] = {root.id: root}
+    to_visit = [root.id]
+    while to_visit:
+        vid = to_visit.pop(0)
+        children = (await db.execute(select(DataProduct).where(DataProduct.parent_id == vid))).scalars().all()
+        for child in children:
+            if child.id not in rows:
+                rows[child.id] = child
+                to_visit.append(child.id)
+    return sorted(rows.values(), key=lambda p: p.version)
+
+
+def _schema_field_map(schema: dict[str, Any] | list[Any] | None) -> dict[str, dict[str, Any]]:
+    """把 data_schema 归一为 {字段名: 字段定义}。
+
+    本仓约定形态是 ``{"fields": [{name, type, ...}]}``（create_data_product 继承
+    resource.schema_fields、test_data_generator 读同一形态）；兼容顶层 list 与纯
+    字符串列名（视为无类型信息）。重名列以首次出现为准。
+    """
+    raw: list[Any] = []
+    if isinstance(schema, list):
+        raw = schema
+    elif isinstance(schema, dict):
+        fields = schema.get("fields")
+        if isinstance(fields, list):
+            raw = fields
+    out: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(raw):
+        if isinstance(item, str):
+            out.setdefault(item, {"name": item})
+        elif isinstance(item, dict):
+            name = str(item.get("name") or item.get("field") or f"field_{index}")
+            out.setdefault(name, item)
+    return out
+
+
+@router.post("/{product_id}/versions", status_code=status.HTTP_201_CREATED)
+async def create_product_version(
+    product_id: uuid.UUID,
+    body: DataProductVersionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """在当前行的版本链上创建下一个版本（行级版本模型，Task 8）。
+
+    与 new-version 的差异：body 携带 schema 与变更说明，版本号默认在版本链
+    最大值上自增（也可显式指定，必须大于当前最大版本）；is_latest 先清全族再置位，
+    保证版本链恒只有一个最新版本。新版本一律从草稿开始，需重新 submit/approve/
+    publish 才能发布（与 new-version 同规则）。
+    """
+    result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Data product not found")
+    if product.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not the owner of this product")
+
+    family = await _load_version_family(db, product)
+    max_version = max(row.version for row in family)
+    if body.version is not None and body.version <= max_version:
+        raise HTTPException(
+            status_code=400,
+            detail=f"New version number must be greater than the current max version {max_version}",
+        )
+
+    for row in family:
+        row.is_latest = False
+
+    new_product = DataProduct(
+        provider_id=product.provider_id,
+        resource_id=product.resource_id,
+        name=product.name,
+        description=product.description,
+        product_type=product.product_type,
+        industry=product.industry,
+        data_schema=body.schema_definition if body.schema_definition is not None else product.data_schema,
+        row_count=product.row_count,
+        encrypted_storage_path=product.encrypted_storage_path,
+        encryption_key_id=product.encryption_key_id,
+        sm4_checksum=product.sm4_checksum,
+        security_level=product.security_level,
+        allowed_operations=product.allowed_operations,
+        output_constraints=product.output_constraints,
+        version=body.version if body.version is not None else max_version + 1,
+        parent_id=product.id,
+        change_summary=body.changelog,
+        is_latest=True,
+        status=DataProductStatus.DRAFT.value,
+    )
+    db.add(new_product)
+    await db.flush()
+    await db.refresh(new_product)
+
+    await audit_service.log(
+        db, action="data_product.create_version", resource_type="data_product",
+        user_id=current_user.id, resource_id=str(new_product.id),
+        detail={
+            "parent_id": str(product.id),
+            "family_root_id": str(family[0].id),
+            "version": new_product.version,
+            "schema_updated": body.schema_definition is not None,
+        },
+    )
+    # SS-14 D-e2e-14 同族: 显式 commit 后再响应 —— is_latest 翻转与新行必须在
+    # 下一个请求（新 session）里可见，与 submit 处同一理由。
+    await db.commit()
+
+    return {
+        "id": str(new_product.id),
+        "version": new_product.version,
+        "parent_id": str(product.id),
+        "status": new_product.status,
+        "change_summary": new_product.change_summary,
+        "data_schema": new_product.data_schema,
+    }
+
+
+@router.post("/{product_id}/versions/rollback")
+async def rollback_product_version(
+    product_id: uuid.UUID,
+    body: DataProductRollbackRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """把当前版本回退到指定历史版本（Task 8）。
+
+    行级版本模型下回退不改写历史行、不新增行，只把 is_latest 翻回目标版本行，
+    此后「当前产品」（is_latest 行）的当前版本号与 Schema 即恢复为目标版本；
+    回退到已最新版本是幂等成功。
+    """
+    result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Data product not found")
+    if product.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not the owner of this product")
+
+    family = await _load_version_family(db, product)
+    by_version: dict[int, DataProduct] = {}
+    for row in family:
+        by_version.setdefault(row.version, row)
+    target = by_version.get(body.target_version)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Version {body.target_version} does not exist")
+
+    latest = next((row for row in reversed(family) if row.is_latest), None)
+    if latest is not None and latest.id == target.id:
+        return {
+            "product_id": str(product_id),
+            "current_version": target.version,
+            "restored_product_id": str(target.id),
+            "rolled_back_from": latest.version,
+            "already_latest": True,
+        }
+
+    for row in family:
+        row.is_latest = row.id == target.id
+    await db.flush()
+
+    await audit_service.log(
+        db, action="data_product.rollback", resource_type="data_product",
+        user_id=current_user.id, resource_id=str(product_id),
+        detail={
+            "family_root_id": str(family[0].id),
+            "from_version": latest.version if latest else None,
+            "to_version": target.version,
+            "restored_product_id": str(target.id),
+        },
+    )
+    # SS-14 D-e2e-14 同族: 显式 commit 后再响应（见 submit 处注释）。
+    await db.commit()
+
+    return {
+        "product_id": str(product_id),
+        "current_version": target.version,
+        "restored_product_id": str(target.id),
+        "rolled_back_from": latest.version if latest else None,
+        "already_latest": False,
+    }
+
+
+@router.get("/{product_id}/versions/diff")
+async def diff_product_versions(
+    product_id: uuid.UUID,
+    from_version: int = Query(..., ge=1),
+    to_version: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """比对两个版本的 schema 字段差异（Task 8）。
+
+    added/removed 是字段名清单，modified 逐项携带两版完整字段定义与类型；
+    两侧都只读版本链内的既有行，不改任何数据。
+    """
+    result = await db.execute(select(DataProduct).where(DataProduct.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Data product not found")
+    if not _can_view_product(product, current_user):
+        raise HTTPException(status_code=404, detail="Data product not found")
+
+    by_version: dict[int, DataProduct] = {}
+    for row in await _load_version_family(db, product):
+        by_version.setdefault(row.version, row)
+    from_row = by_version.get(from_version)
+    to_row = by_version.get(to_version)
+    if from_row is None or to_row is None:
+        missing = from_version if from_row is None else to_version
+        raise HTTPException(status_code=404, detail=f"Version {missing} does not exist")
+
+    from_fields = _schema_field_map(from_row.data_schema)
+    to_fields = _schema_field_map(to_row.data_schema)
+    common = sorted(from_fields.keys() & to_fields.keys())
+    modified_fields = [
+        {
+            "name": name,
+            "from_type": from_fields[name].get("type"),
+            "to_type": to_fields[name].get("type"),
+            "from_field": from_fields[name],
+            "to_field": to_fields[name],
+        }
+        for name in common
+        if from_fields[name] != to_fields[name]
+    ]
+    removed_fields = sorted(from_fields.keys() - to_fields.keys())
+    return {
+        "product_id": str(product_id),
+        "from_version": from_version,
+        "to_version": to_version,
+        "added_fields": sorted(to_fields.keys() - from_fields.keys()),
+        "removed_fields": removed_fields,
+        "modified_fields": modified_fields,
+        "unchanged_fields": [name for name in common if from_fields[name] == to_fields[name]],
+        # 删字段或改类型会破坏下游字段规则/查询列，判为破坏性变更
+        "breaking_change": bool(removed_fields)
+        or any(item["from_type"] != item["to_type"] for item in modified_fields),
+    }
