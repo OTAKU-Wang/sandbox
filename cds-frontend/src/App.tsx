@@ -56,6 +56,7 @@ const MpcPage = lazy(() => import('./pages/MPC'));
 const DataPipeline = lazy(() => import('./pages/DataPipeline'));
 const SystemStatus = lazy(() => import('./pages/SystemStatus'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
+const TeamManagement = lazy(() => import('./pages/Identity/TeamManagement'));
 const ApiKeys = lazy(() => import('./pages/ApiKeys'));
 
 const PageSpinner = () => <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
@@ -135,6 +136,7 @@ export default function App() {
                 <Route path="mpc" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><WorkspaceRoute workspace="admin"><MpcPage /></WorkspaceRoute></RoleRoute>} />
                 <Route path="system-status" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><WorkspaceRoute workspace="admin"><SystemStatus /></WorkspaceRoute></RoleRoute>} />
                 <Route path="users" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><WorkspaceRoute workspace="admin"><UserManagement /></WorkspaceRoute></RoleRoute>} />
+                <Route path="teams" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><WorkspaceRoute workspace="admin"><TeamManagement /></WorkspaceRoute></RoleRoute>} />
                 <Route path="api-keys" element={<RoleRoute allowedRoles={[UserRole.ADMIN]}><WorkspaceRoute workspace="admin"><ApiKeys /></WorkspaceRoute></RoleRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Route>

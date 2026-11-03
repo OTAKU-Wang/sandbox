@@ -6,10 +6,13 @@
 没有跨团队的 SQL 级联查询需求（需要时再拆，勿提前建第四张关联表）。
 """
 from enum import Enum
-from uuid import uuid4
+from datetime import datetime
+from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Index, Integer, String, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, DateTime, Index, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
@@ -32,17 +35,19 @@ class Team(Base):
         Index("ix_teams_status", "status"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    name = Column(String(128), nullable=False)
-    org_id = Column(String(128), nullable=True)
-    description = Column(String(512), nullable=True)
-    status = Column(String(32), nullable=False, default="active")
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    org_id: Mapped[str | None] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     # 团队级资源配额（核 / GB），由 quota_manager 在调度侧消费
-    cpu_quota_cores = Column(Integer, nullable=False, default=16)
-    memory_quota_gb = Column(Integer, nullable=False, default=64)
-    storage_quota_gb = Column(Integer, nullable=False, default=500)
-    members = Column(_JSONB, nullable=False, default=list)
-    role_permissions = Column(_JSONB, nullable=False, default=dict)
-    created_by = Column(UUID(as_uuid=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    cpu_quota_cores: Mapped[int] = mapped_column(Integer, nullable=False, default=16)
+    memory_quota_gb: Mapped[int] = mapped_column(Integer, nullable=False, default=64)
+    storage_quota_gb: Mapped[int] = mapped_column(Integer, nullable=False, default=500)
+    members: Mapped[list[dict[str, object]]] = mapped_column(_JSONB, nullable=False, default=list)
+    role_permissions: Mapped[dict[str, list[str]]] = mapped_column(_JSONB, nullable=False, default=dict)
+    created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -38,6 +38,7 @@ from app.api import cube_templates  # SS-10 CB-05: template pipeline (image → 
 from app.api import agent  # N10: sandbox-internal agent execution
 from app.api import cube_egress  # CB-06: node egress audit ingestion (/internal/audit)
 from app.api import api_keys  # SS-12: platform API key lifecycle (human-only)
+from app.api import teams  # 2026-11-03 sandbox realignment Task 4: 团队管理与团队级配额隔离
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model, rag_generative_model  # Ensure tables are created
 from app.models import api_key as api_key_models  # SS-12: api_keys table
 from app.models import session_operation  # W11: async operation records
@@ -619,6 +620,9 @@ register_exception_handlers(app)
 app.include_router(health.router, tags=["health"], dependencies=[Depends(require_group("audit"))])
 app.include_router(metrics.router, tags=["metrics"], dependencies=[Depends(require_group("audit"))])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"], dependencies=[Depends(require_human)])
+# 团队面挂在 users 之前（`/api/v1/users/teams` 是 `/api/v1/users` 的子前缀）：两者同属
+# human-only 组，先挂具体前缀可避免将来 users 添 `/{user_id}` 类路由时遮蔽团队面。
+app.include_router(teams.router, prefix="/api/v1/users/teams", tags=["teams"], dependencies=[Depends(require_human)])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"], dependencies=[Depends(require_human)])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"], dependencies=[Depends(require_human)])
 app.include_router(data_products.router, prefix="/api/v1/data-products", tags=["data-products"], dependencies=[Depends(require_group("data"))])

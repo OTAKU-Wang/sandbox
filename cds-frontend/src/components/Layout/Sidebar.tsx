@@ -26,6 +26,7 @@ import {
   CodeOutlined,
   SafetyCertificateOutlined,
   QuestionCircleOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { MenuProps } from 'antd';
@@ -195,7 +196,9 @@ function buildAdminMenu(role?: RoleLike): Items {
   // 老书签不 404，后端路由不卸（tests/test_frontend_api_contract.py 对账口径不变）。
 
   if (normalizedRole === UserRole.ADMIN) {
+    // 管理台系统设置区：用户 / 团队 / API 密钥同一入口组（2026-11-03 沙箱系统边界收敛 Task 4 加入团队管理）。
     items.push({ key: '/users', icon: <TeamOutlined />, label: '用户管理' });
+    items.push({ key: '/teams', icon: <ApartmentOutlined />, label: '团队管理' });
     items.push({ key: '/api-keys', icon: <ApiOutlined />, label: 'API 密钥' });
   }
 

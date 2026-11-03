@@ -99,6 +99,7 @@ export const ROUTE_CRUMBS: RouteCrumb[] = [
   { prefix: '/mpc', title: 'MPC 密钥共享', style: 'slash', segs: ['身份管理', 'MPC 密钥共享'] },
   { prefix: '/system-status', title: '系统状态', style: 'slash', segs: ['监控中心', '系统状态'] },
   { prefix: '/users', title: '用户管理', style: 'slash', segs: ['用户管理'] },
+  { prefix: '/teams', title: '团队管理', style: 'slash', segs: ['团队管理'] },
   { prefix: '/api-keys', title: 'API 密钥', style: 'slash', segs: ['API 密钥'] },
   // 登录/注册在 MainLayout 之外渲染（App.tsx 里它们是 ProtectedRoute 的兄弟节点），没有面包屑带；
   // 仍登记在此，是为了让「App.tsx 每条路由都有归属」这条契约是全量的，不留兜底例外。
