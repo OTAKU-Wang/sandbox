@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 _JWT_DEFAULT_KEY = "change-me-in-production"
 _JWT_MIN_KEY_LENGTH = 32  # bytes — RFC 7518 Section 3.2 recommends ≥ 256 bits for HS256
-# A121 (half): cross-language DEK width. `cds-volume-plugin/cipher.go` fixes
-# `dekLen = 16` at compile time; CDS_CUBE_DEK_LENGTH is runtime-configurable, so
+# A121 (half): cross-language DEK width. `cds-volume-plugin/internal/vol/cipher.go` fixes
+# `DekLen = 16` at compile time; CDS_CUBE_DEK_LENGTH is runtime-configurable, so
 # validate_security_config compares the two. Pinned by
 # tests/test_ocr_a121_cube_dek_length_gate.py (drift there reddens that test).
 _CUBE_PLUGIN_DEK_LEN = 16
@@ -685,8 +685,8 @@ class Settings(BaseSettings):
             if self.CUBE_DEK_LENGTH != _CUBE_PLUGIN_DEK_LEN:
                 raise ValueError(
                     f"CDS_CUBE_DEK_LENGTH={self.CUBE_DEK_LENGTH} disagrees with the node "
-                    f"volume plugin's compiled DEK width (cds-volume-plugin/cipher.go "
-                    f"dekLen={_CUBE_PLUGIN_DEK_LEN}): the encrypted-volume path would get "
+                    f"volume plugin's compiled DEK width (cds-volume-plugin/internal/vol/cipher.go "
+                    f"DekLen={_CUBE_PLUGIN_DEK_LEN}): the encrypted-volume path would get "
                     "a key of a different width than its SM4-GCM leg accepts. Keep both "
                     "sides at the same width."
                 )

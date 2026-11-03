@@ -245,10 +245,13 @@ def plugin_env(kms: MockKMS, tmp: Path, backend: str = "tongsuo", helper: Path |
 # ── (b) 磁盘布局与生命周期（CLI 表面，无 gRPC）────────────────────────────
 
 def test_plugin_selftest(plugin_bin, helper_path):
+    # A175 后的配置门与子命令无关：未设 KMS token 直接 fail-closed rc=2，
+    # 即使 selftest/parse-annotation 根本不会碰 KMS。同步补上哑 token。
     r = run_bin(plugin_bin, "selftest", env={
         "CDS_SM4_AEAD_BACKEND": "tongsuo",
         "CDS_VOLUME_PLUGIN_SM4_HELPER": str(helper_path),
         "CDS_VOLUME_PLUGIN_VOLUME_ROOT": "/tmp/cds-vp-selftest",
+        "CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN": "test-token",
     })
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
@@ -394,7 +397,8 @@ def test_parse_annotation_cds_entry(plugin_bin):
          "private_data": json.dumps({"session_dek_ref": "vol-dek-ref-1"})},
         {"name": "results", "driver": "local", "private_data": ""},
     ])
-    r = run_bin(plugin_bin, "parse-annotation", annotation)
+    r = run_bin(plugin_bin, "parse-annotation", annotation,
+                env={"CDS_VOLUME_PLUGIN_KMS_SERVICE_TOKEN": "test-token"})  # A175 配置门同 selftest
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
     assert len(out) == 2

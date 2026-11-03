@@ -1,5 +1,5 @@
 """KMS volume-key wire schemas — the EXACT JSON shapes exchanged with the Go
-volume plugin (cds-volume-plugin/kms.go). Field names are machine-consumed wire
+volume plugin (cds-volume-plugin/internal/vol/kms.go). Field names are machine-consumed wire
 values; do NOT rename without updating the Go client in lockstep.
 
 Go contract (SS-10 CB-03 step 2/4; see cds-volume-plugin/README.md "KMS 契约"):

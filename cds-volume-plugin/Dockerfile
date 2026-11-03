@@ -46,6 +46,7 @@ WORKDIR /src
 COPY cds-volume-plugin/go.mod cds-volume-plugin/go.sum ./
 RUN go mod download
 COPY cds-volume-plugin/*.go ./
+COPY cds-volume-plugin/internal/ ./internal/
 COPY cds-volume-plugin/gen/ ./gen/
 COPY cds-volume-plugin/proto/ ./proto/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/cds-volume-plugin .

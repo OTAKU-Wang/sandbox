@@ -1,7 +1,7 @@
 """A121 半边（父会话路由 poolA2）— CUBE_DEK_LENGTH 与节点卷插件编译期 dekLen 缺启动期相等断言。
 
 `app/core/config.py:356 CUBE_DEK_LENGTH`（运行时可配，注入沙箱 env 的 CDS_DEK 长度）与
-`cds-volume-plugin/cipher.go:26 dekLen = 16`（Go 侧编译期常量，加密卷实际用的 DEK 宽度）
+`cds-volume-plugin/internal/vol/cipher.go:26 DekLen = 16`（Go 侧编译期常量，加密卷实际用的 DEK 宽度；2026-11-03 internal 包重构后的路径与导出名）
 之间没有任何启动期一致性检查：运维把 `CDS_CUBE_DEK_LENGTH` 配成 32，控制面会签发 32 字节
 DEK、按 SM4 语义放行，而节点插件的 SM4-GCM 腿在 `len(key) != dekLen` 处静默失配。
 本文件锁两侧口径：Go 常量按源码解析（漂移时先红本测试），dataplane 打开且宽度不等时
@@ -15,13 +15,13 @@ import pytest
 from app.core.config import get_settings
 
 REPO = Path(__file__).resolve().parents[1]
-CIPHER_GO = REPO / "cds-volume-plugin" / "cipher.go"
+CIPHER_GO = REPO / "cds-volume-plugin" / "internal" / "vol" / "cipher.go"
 
 
 def _go_dek_len() -> int:
     src = CIPHER_GO.read_text(encoding="utf-8")
-    m = re.search(r"^\s*dekLen\s*=\s*(\d+)\s*$", src, re.M)
-    assert m, "cds-volume-plugin/cipher.go 里的 dekLen 常量不见了——跨语言口径需重新对齐"
+    m = re.search(r"^\s*DekLen\s*=\s*(\d+)\s*$", src, re.M)
+    assert m, "cds-volume-plugin/internal/vol/cipher.go 里的 DekLen 常量不见了——跨语言口径需重新对齐"
     return int(m.group(1))
 
 

@@ -1,5 +1,5 @@
 """Control-plane KMS volume-key endpoints (SS-10 CB-03 / CB-01) — the REST
-surface consumed by the Go volume plugin (cds-volume-plugin/kms.go).
+surface consumed by the Go volume plugin (cds-volume-plugin/internal/vol/kms.go).
 
 Wire contract (field names hardcoded from the Go client, machine-consumed):
   Register:   POST   /api/v1/kms/volume-keys                   {volume_id, name, dek_hex, cipher} -> {key_id}
@@ -111,7 +111,7 @@ async def test_register_rejects_wrong_dek_length(client, service_token):
     assert r.status_code == 400, r.text
 
 
-# Exact Cipher.Name() strings from cds-volume-plugin/cipher.go — the plugin owns
+# Exact Cipher.Name() strings from cds-volume-plugin/internal/vol/cipher.go — the plugin owns
 # the cipher choice, the control plane only records what it was told.
 PLUGIN_SM4_NAME = "sm4-gcm(tongsuo)"
 PLUGIN_AES_FALLBACK_NAME = "aes-128-gcm(fallback,non-GM)"
