@@ -5,11 +5,17 @@ Python: AST walk checking imports, builtins, and save paths.
 SQL: sqlparse statement type validation per sandbox mode.
 """
 import ast
+import io
+import json
+import pickletools
 import posixpath
 import re
+import struct
+import zipfile
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -801,3 +807,120 @@ class CodeScanner:
 
 
 code_scanner = CodeScanner()
+
+
+# ---- 模型工件安全扫描（2026-11-03 realignment Task 9）----
+# 诚实边界：pickle 可携带任意类/可调用引用，无法做语义级判定；本扫描器做 opcode 级
+# GLOBAL 引用审计——非白名单的 GLOBAL/STACK_GLOBAL 一律视为 pickle-RCE gadget
+# （b"cos\nsystem\n(S'id'\ntR." 即 os.system 的经典形态），fail-closed 宁可误拒。
+# 已知精度边界：STACK_GLOBAL 的模块/名取「栈上最近两条字符串」，未做完整虚拟栈建模；
+# 白名单前缀（numpy./torch.）内部的 __reduce__ 链不在本扫描覆盖面——它们只能构造
+# 目标类已有属性路径，相比 os.system 的直接 RCE 是量级差异，发布前仍需真机隔离复验。
+_PICKLE_GLOBAL_SAFE_PREFIXES = ("numpy.", "torch.", "scipy.", "sklearn.", "pandas.core.", "numexpr.")
+_PICKLE_GLOBAL_SAFE = {
+    ("collections", "OrderedDict"), ("collections", "defaultdict"), ("collections", "Counter"),
+    ("datetime", "datetime"), ("datetime", "date"), ("datetime", "time"), ("datetime", "timedelta"),
+    ("decimal", "Decimal"), ("fractions", "Fraction"), ("uuid", "UUID"),
+    ("builtins", "complex"), ("builtins", "set"), ("builtins", "frozenset"),
+    ("builtins", "slice"), ("builtins", "bytearray"), ("re", "Pattern"),
+}
+
+
+def _pickle_global_allowed(mod: str, qual: str) -> bool:
+    if (mod, qual) in _PICKLE_GLOBAL_SAFE:
+        return True
+    if mod in ("builtins", "__builtin__"):
+        return qual in {"complex", "set", "frozenset", "slice", "bytearray", "range"}
+    return any(mod == p.rstrip(".") or mod.startswith(p) for p in _PICKLE_GLOBAL_SAFE_PREFIXES)
+
+
+def _split_global_arg(arg: Any) -> tuple[str, str] | None:
+    # GLOBAL 携带 2-tuple；STACK_GLOBAL 的 arg 是 "<module> <name>" 合成串
+    if isinstance(arg, tuple) and len(arg) == 2:
+        return str(arg[0]), str(arg[1])
+    if isinstance(arg, str) and " " in arg:
+        mod, _, qual = arg.partition(" ")
+        return mod, qual
+    return None
+
+
+def _scan_pickle_globals(blob: bytes, where: str) -> tuple[list[str], int]:
+    """返回 (violations, 白名单内 global 计数)；流本身不可解析也算违规。"""
+    violations: list[str] = []
+    safe_globals = 0
+    genops: Any = pickletools.genops  # 类型坨内 genops 被标为 None，运行时是生成器
+    # STACK_GLOBAL 的模块/类名来自栈上紧邻的两条字符串（先 mod 后 name）
+    stack_str: list[str] = []
+    try:
+        for op, arg, _pos in genops(io.BytesIO(blob)):
+            if op.name in ("GLOBAL", "STACK_GLOBAL"):
+                if op.name == "STACK_GLOBAL":
+                    pair = (stack_str[-2], stack_str[-1]) if len(stack_str) >= 2 else None
+                else:
+                    pair = _split_global_arg(arg)
+                if pair is None:
+                    violations.append(f"{where}pickle {op.name} 参数无法解析（fail-closed 拒绝）")
+                    continue
+                mod, qual = pair
+                if _pickle_global_allowed(mod, qual):
+                    safe_globals += 1
+                else:
+                    violations.append(
+                        f"{where}pickle {op.name} {mod}.{qual} — 非白名单全局引用（pickle 反序列化 RCE 经典 gadget）"
+                    )
+            elif op.name in ("UNICODE", "BINUNICODE", "SHORT_BINUNICODE") and isinstance(arg, str):
+                stack_str.append(arg)
+                stack_str = stack_str[-4:]
+    except Exception as exc:
+        return [f"{where}pickle 流不可解析（fail-closed 拒绝）: {exc}"], safe_globals
+    return violations, safe_globals
+
+
+def scan_model_artifact_bytes(data: bytes, filename: str = "model") -> dict[str, Any]:
+    """模型工件静态扫描：safetensors 头校验 / zip 容器内 pickle 成员审计 / 裸 pickle 审计。
+
+    返回 ``{passed, violations, format, size_bytes, filename, notes?}``；
+    不执行工件内容，不反序列化对象。
+    """
+    base: dict[str, Any] = {"filename": filename, "size_bytes": len(data)}
+    notes: list[str] = []
+    lowered = (filename or "").lower()
+
+    if lowered.endswith(".safetensors"):
+        header: Any = None
+        try:
+            if len(data) >= 8:
+                (hlen,) = struct.unpack("<Q", data[:8])
+                if 0 < hlen <= len(data) - 8:
+                    header = json.loads(data[8 : 8 + hlen])
+            if header is None:
+                header = json.loads(data)
+        except Exception:
+            header = None
+        if not isinstance(header, dict):
+            return {**base, "passed": False, "format": "safetensors", "violations": ["safetensors JSON 头缺失或不可解析"]}
+        notes.append("safetensors 仅校验张量元数据头；该容器形态本身不含可执行 pickle")
+        return {**base, "passed": True, "format": "safetensors", "violations": [], "notes": notes}
+
+    if data[:4] == b"PK\x03\x04":
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                members = [n for n in zf.namelist() if n.endswith((".pkl", ".pickle")) or n.endswith("data.pkl")]
+                violations: list[str] = []
+                for name in members:
+                    v, _ = _scan_pickle_globals(zf.read(name), where=f"{name}: ")
+                    violations.extend(v)
+        except zipfile.BadZipFile:
+            return {**base, "passed": False, "format": "zip", "violations": ["zip 容器不可读（fail-closed 拒绝）"]}
+        fmt = "torch-zip" if any("data.pkl" in m or m.startswith("archive") for m in members) else "zip"
+        if not members:
+            notes.append("zip 容器无 pickle 成员；仅张量/元数据")
+        return {**base, "passed": not violations, "format": fmt, "violations": violations, "notes": notes}
+
+    if not data:
+        return {**base, "passed": False, "format": "unknown", "violations": ["空工件"]}
+
+    violations, safe_globals = _scan_pickle_globals(data, where="")
+    if violations:
+        return {**base, "passed": False, "format": "pickle", "violations": violations}
+    return {**base, "passed": True, "format": "pickle", "violations": []}

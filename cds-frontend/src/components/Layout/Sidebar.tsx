@@ -120,6 +120,7 @@ function buildAdminMenu(role?: RoleLike): Items {
         { key: '/deliveries', label: 'OpenAPI导出' },
         { key: '/deliveries/dataset', label: '数据集打包' },
         { key: '/deliveries/push', label: '结果推送' },
+        { key: '/deliveries/invoices', label: '计量对账' },
       ],
     });
   }
@@ -242,6 +243,7 @@ function buildDeveloperMenu(role?: RoleLike): Items {
         { key: '/deliveries', label: 'OpenAPI导出' },
         { key: '/deliveries/dataset', label: '数据集打包' },
         { key: '/deliveries/push', label: '结果推送' },
+        { key: '/deliveries/invoices', label: '计量对账' },
       ],
     });
   }

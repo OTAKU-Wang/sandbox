@@ -1,3 +1,4 @@
+import base64
 import uuid
 from typing import Any
 
@@ -14,9 +15,10 @@ from app.models.notebook import Notebook
 from app.models.user import User
 from app.models.workload import Workload, WorkloadStatus
 from app.models.workload_test_run import WorkloadTestRun
-from app.schemas.flow import WorkloadCreate, WorkloadOut, WorkloadTestRequest
+from app.schemas.flow import ArtifactScanRequest, WorkloadCreate, WorkloadOut, WorkloadTestRequest
 from app.services import workflow_service as wf
 from app.services.audit_service import audit_service
+from app.services.code_scanner import scan_model_artifact_bytes
 
 router = APIRouter()
 
@@ -110,6 +112,125 @@ async def list_workloads(
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
     res = await db.execute(stmt.order_by(Workload.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
     return {"items": [WorkloadOut.model_validate(w) for w in res.scalars().all()], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/metrics-compare")
+async def metrics_compare(
+    workload_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """多版本评估指标对比（Task 9）：沿 parent_id lineage 逐版本取最近一次测试 run。
+
+    指标的家是 ``WorkloadTestRun.report["metrics"]``（代码实测，计划草案未定义存储位）；
+    只比较 ``{str: number}`` 型指标，非数值键不参与。无 metrics 的历史 run 如实返回
+    ``metrics: null``（不参与 common_metrics，也不被当作 0）。
+    路由必须声明在 ``/{workload_id}`` 之前：否则 ``metrics-compare`` 会被 UUID
+    路径参数先匹配吃成 422。
+    """
+    wl = await _load_workload(db, workload_id, current_user)
+
+    root = wl
+    guard = 0
+    while root.parent_id is not None and guard < 64:
+        pres = await db.execute(select(Workload).where(Workload.id == root.parent_id))
+        parent = pres.scalar_one_or_none()
+        if parent is None:
+            break
+        root = parent
+        guard += 1
+
+    members: dict[uuid.UUID, Workload] = {root.id: root}
+    frontier = [root]
+    while frontier:
+        cur = frontier.pop()
+        cres = await db.execute(select(Workload).where(Workload.parent_id == cur.id))
+        for child in cres.scalars().all():
+            if child.id not in members:
+                members[child.id] = child
+                frontier.append(child)
+
+    items: list[dict[str, Any]] = []
+    common: set[str] | None = None
+    prev_metrics: dict[str, float] | None = None
+    for member in sorted(members.values(), key=lambda w: (w.version, w.created_at or 0)):
+        rres = await db.execute(
+            select(WorkloadTestRun)
+            .where(WorkloadTestRun.workload_id == member.id)
+            .order_by(WorkloadTestRun.created_at.desc(), WorkloadTestRun.id.desc())
+            .limit(1)
+        )
+        run = rres.scalar_one_or_none()
+        raw = (run.report or {}).get("metrics") if run else None
+        metrics: dict[str, float] | None = None
+        if isinstance(raw, dict):
+            metrics = {
+                k: float(v)
+                for k, v in raw.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+        if metrics is not None:
+            common = set(metrics) if common is None else (common & set(metrics))
+        delta: dict[str, float] | None = None
+        if metrics is not None and prev_metrics is not None:
+            delta = {k: round(metrics[k] - prev_metrics[k], 10) for k in metrics if k in prev_metrics}
+        if metrics is not None:
+            prev_metrics = metrics
+        items.append(
+            {
+                "workload_id": str(member.id),
+                "name": member.name,
+                "version": member.version,
+                "status": member.status,
+                "is_latest": member.is_latest,
+                "test_run_id": str(run.id) if run else None,
+                "passed": run.passed if run else None,
+                "metrics": metrics,
+                "delta_vs_previous": delta,
+                "created_at": member.created_at,
+            }
+        )
+    return {
+        "lineage_root": str(root.id),
+        "common_metrics": sorted(common or []),
+        "items": items,
+    }
+
+
+@router.post("/{workload_id}/artifact-scan")
+async def scan_workload_artifact(
+    workload_id: uuid.UUID,
+    body: ArtifactScanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """发布前模型工件扫描（Task 9）：opcode 级审计，不执行内容、不落盘。
+
+    判定不改变工作负载状态机——扫描是留痕型建议动作（passed=false 不阻断 draft，
+    但审计必落库，发布门禁如将来要消费此结论需另开闸，不隐式耦合）。
+    """
+    workload = await _load_workload(db, workload_id, current_user)
+    try:
+        blob = base64.b64decode(body.content_b64.encode("ascii"), validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="content_b64 不是合法 base64")
+    # 32 MiB 上限：扫描器全量驻内存，入口不控就会被单个大文件拖垮请求 worker
+    if len(blob) > 32 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="工件超过 32 MiB 扫描上限")
+    result = scan_model_artifact_bytes(blob, filename=body.filename)
+    await audit_service.log(
+        db, action="workload.artifact_scan", resource_type="workload",
+        user_id=current_user.id, resource_id=str(workload.id),
+        detail={
+            "filename": body.filename,
+            "format": result["format"],
+            "size_bytes": result["size_bytes"],
+            "passed": result["passed"],
+            "violation_count": len(result["violations"]),
+            "violations": result["violations"][:20],
+        },
+    )
+    return result
 
 
 @router.get("/{workload_id}", response_model=WorkloadOut)

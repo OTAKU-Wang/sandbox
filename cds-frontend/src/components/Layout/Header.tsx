@@ -1,6 +1,8 @@
 import { Layout, Dropdown, Space, Typography } from 'antd';
 import type { MenuProps } from 'antd';
-import { UserOutlined, LogoutOutlined, SwapOutlined, DownOutlined } from '@ant-design/icons';
+import { UserOutlined, LogoutOutlined, SwapOutlined, DownOutlined, BellOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { useNavigate } from 'react-router-dom';
 import { normalizeUserRole, ROLE_LABELS } from '../../utils/roles';
@@ -12,6 +14,8 @@ import {
   resolveWorkspace,
   type Workspace,
 } from '../../utils/workspace';
+import { NOTIFICATIONS_QUERY_KEY, useNotificationSummary } from '../../services/notificationApi';
+import NotificationDrawer from './NotificationDrawer';
 
 const { Text } = Typography;
 
@@ -25,6 +29,11 @@ export default function AppHeader() {
   const workspace = resolveWorkspace(role, storedWorkspace);
   // 部署方示例机构名不写死：组织名为空时回落用户名，两者都缺时按「用户」口径。
   const greetingName = resolveGreetingName(user) || '用户';
+  const [notifOpen, setNotifOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const summary = useNotificationSummary();
+  const unread = summary.data?.unread_count ?? 0;
+  const todoCount = summary.data?.todo_count ?? 0;
 
   const handleLogout = () => {
     logout();
@@ -33,6 +42,16 @@ export default function AppHeader() {
 
   // 顶栏腾出来的能力收进用户下拉：切工作台（只对能切的角色出现）+ 只读角色显示 + 退出登录。
   const menuItems: NonNullable<MenuProps['items']> = [];
+  // 顶栏原型钉死「无图标按钮/徒章」（Header.test），通知中心入口收进下拉，徒章计数进菜单文案。
+  menuItems.push({
+    key: 'notifications',
+    icon: <BellOutlined />,
+    label: `通知中心${unread + todoCount > 0 ? `（${unread} 未读 / ${todoCount} 待办）` : ''}`,
+    onClick: () => {
+      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      setNotifOpen(true);
+    },
+  });
   if (canAccessAdminWorkspace(role)) {
     const target: Workspace = workspace === 'admin' ? 'developer' : 'admin';
     menuItems.push({
@@ -54,6 +73,7 @@ export default function AppHeader() {
 
   return (
     <Layout.Header className="cds-header">
+      <NotificationDrawer open={notifOpen} onClose={() => setNotifOpen(false)} />
       <div className="cds-brand">
         {/* 品牌块从 Sider 移到顶栏（原型 A-1：白字单行品牌，无英文副标题）。
             mark 真值 strict-1-home.md §8-1：19×20 的白色**描边**盾形（顶部圆、两侧下行、底部收尖）+

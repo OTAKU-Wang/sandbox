@@ -37,6 +37,7 @@ const FlowDevTaskCreate = lazy(() => import('./pages/Flow/DevTaskCreatePage'));
 const FlowTaskDetail = lazy(() => import('./pages/Flow/TaskDetail'));
 const FlowQuota = lazy(() => import('./pages/Flow/Quota'));
 const FlowScenarios = lazy(() => import('./pages/Flow/ScenarioCenter'));
+const BillingCenter = lazy(() => import('./pages/Flow/BillingCenter'));
 const FlowProjects = lazy(() => import('./pages/Flow/ProjectCenter'));
 const AuditLog = lazy(() => import('./pages/Audit/AuditLog'));
 const InspectionPipeline = lazy(() => import('./pages/OutputControl/InspectionPipeline'));
@@ -111,6 +112,7 @@ export default function App() {
                 <Route path="deliveries" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><DeliveryCenter /></WorkspaceRoute></RoleRoute>} />
                 <Route path="deliveries/dataset" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><DeliveryCenter /></WorkspaceRoute></RoleRoute>} />
                 <Route path="deliveries/push" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><DeliveryCenter /></WorkspaceRoute></RoleRoute>} />
+                <Route path="deliveries/invoices" element={<RoleRoute allowedRoles={ROLE_GROUPS.contractReaders}><WorkspaceRoute workspace="developer"><BillingCenter /></WorkspaceRoute></RoleRoute>} />
                 {/* 旧开发者首页 /home：SS-18 把开发者首页提到 index 路由（原型 A-1 的「首页」），
                     旧链接与旧收藏一律 replace 到 '/'，由 WorkspaceHome 按工台分派。 */}
                 <Route path="home" element={<Navigate to="/" replace />} />

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 from app.core.database import engine, Base
 from app.core.security import setup_security
 from app.core.redis import get_redis, close_redis, redact_url
-from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
+from app.api import auth, data_products, data_resources, sandbox_sessions, contracts, billing, notifications, health, dev_sandbox, audit, monitoring, output_control, catalog, compliance, data_pipeline, certificates, mpc, sandbox_db, kms, sandbox_tasks, training, federation, field_exposure, connectors, gateway, users, rag
 from app.api import integrity as integrity_api  # P2-5 (D-e2e-18): MinIO 一致性巡检面
 from app.api import notebooks as notebooks_api, workloads as workloads_api, compute as compute_api, deliveries as deliveries_api, open_api as open_api_router, flow_runtime as flow_runtime_api, quota as quota_api  # SS-15 / SS-17
 from app.api import session_stream  # W10: WebSocket exec stream
@@ -631,9 +631,11 @@ app.include_router(data_products.router, prefix="/api/v1/data-products", tags=["
 app.include_router(data_resources.router, prefix="/api/v1/data-resources", tags=["data-resources"], dependencies=[Depends(require_group("data"))])
 app.include_router(sandbox_sessions.router, prefix="/api/v1/sandbox-sessions", tags=["sandbox-sessions"], dependencies=[Depends(require_group("sessions"))])
 app.include_router(contracts.router, prefix="/api/v1/contracts", tags=["contracts"], dependencies=[Depends(require_group("contracts"))])
+app.include_router(billing.router, prefix="/api/v1/deliveries", tags=["billing"], dependencies=[Depends(require_group("gateway"))])
 app.include_router(dev_sandbox.router, prefix="/api/v1/dev-sandbox", tags=["dev-sandbox"], dependencies=[Depends(require_group("sessions"))])
 app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"], dependencies=[Depends(require_group("audit"))])
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"], dependencies=[Depends(require_group("audit"))])
+app.include_router(notifications.router, prefix="/api/v1/monitoring/notifications", tags=["notifications"], dependencies=[Depends(require_group("audit"))])
 app.include_router(output_control.router, prefix="/api/v1/output-control", tags=["output-control"], dependencies=[Depends(require_group("output"))])
 app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"], dependencies=[Depends(require_group("data"))])
 app.include_router(compliance.router, prefix="/api/v1/compliance", tags=["compliance"], dependencies=[Depends(require_group("audit"))])

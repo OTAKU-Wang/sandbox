@@ -77,6 +77,15 @@ class WorkloadTestRequest(BaseModel):
     timeout_seconds: int = Field(900, ge=60, le=3600)
 
 
+class ArtifactScanRequest(BaseModel):
+    """模型工件扫描入参（Task 9）：字节经 base64 随 JSON 上传，上限在路由层控制。
+
+    刻意不把工件落盘：扫描器只做 opcode 级审计不执行内容，存储归属仍是对象存储。
+    """
+    filename: str = Field(min_length=1, max_length=255)
+    content_b64: str
+
+
 class ComputeRunCreate(BaseModel):
     contract_id: uuid.UUID
     # 不指定则使用该合约当前 is_latest 的已发布生产版本；指定则必须是本合约的 published 生产版本。

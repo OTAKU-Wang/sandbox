@@ -61,6 +61,7 @@ export const ROUTE_CRUMBS: RouteCrumb[] = [
   // 兄弟路由（数据集打包/结果推送）段名静态，必须排在 /deliveries 前（find + 前缀命中的顺序契约）。
   { prefix: '/deliveries/dataset', title: '数据集打包', style: 'slash', segs: ['我的结果集', '数据集打包'] },
   { prefix: '/deliveries/push', title: '结果推送', style: 'slash', segs: ['我的结果集', '结果推送'] },
+  { prefix: '/deliveries/invoices', title: '计量对账', style: 'slash', segs: ['我的结果集', '计量对账'] },
   { prefix: '/deliveries', title: '我的结果集', style: 'slash', segs: ['我的结果集'] },
   // 首页的 y89–101 是黑色页面标题「首页」，不是面包屑（A-1 逐区逐字第 1 条）。
   { prefix: '/home', title: HOME, style: 'slash', segs: [HOME] },
