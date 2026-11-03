@@ -40,6 +40,7 @@ from app.api import cube_egress  # CB-06: node egress audit ingestion (/internal
 from app.api import api_keys  # SS-12: platform API key lifecycle (human-only)
 from app.api import teams  # 2026-11-03 sandbox realignment Task 4: 团队管理与团队级配额隔离
 from app.api import scenarios as scenarios_api  # 2026-11-03 sandbox realignment Task 5: 业务场景中心
+from app.api import projects as projects_api  # 2026-11-03 sandbox realignment Task 6: 建模项目与 DAG 编排
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model, rag_generative_model  # Ensure tables are created
 from app.models import api_key as api_key_models  # SS-12: api_keys table
 from app.models import session_operation  # W11: async operation records
@@ -658,6 +659,13 @@ app.include_router(workloads_api.router, prefix="/api/v1/workloads", tags=["work
 app.include_router(
     scenarios_api.router,
     prefix="/api/v1/flow/scenarios",
+    tags=["flow"],
+    dependencies=[Depends(require_group("sessions"))],
+)
+# Task 6 建模项目面同样先于通用 flow 前缀挂载（理由与上一条相同）。
+app.include_router(
+    projects_api.router,
+    prefix="/api/v1/flow/projects",
     tags=["flow"],
     dependencies=[Depends(require_group("sessions"))],
 )

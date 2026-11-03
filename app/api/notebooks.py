@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.errors import CDSError
 from app.core.deps import get_business_user
 from app.models.contract import Contract, WorkloadEnv
-from app.models.notebook import Notebook, NotebookStatus
+from app.models.notebook import Notebook, NotebookStatus, kernel_for_language
 from app.models.sandbox_session import SandboxSession
 from app.models.user import User
 from app.schemas.flow import CellExecuteRequest, NotebookCreate, NotebookOut, NotebookUpdate
@@ -321,7 +321,9 @@ async def create_notebook(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_business_user),
 ):
-    doc = _as_document(body.content) if body.content else nb.make_notebook(body.title, language=body.language)
+    doc = _as_document(body.content) if body.content else nb.make_notebook(
+        body.title, kernel=kernel_for_language(body.language), language=body.language
+    )
     contract = None
     if body.contract_id is not None:
         cres = await db.execute(select(Contract).where(Contract.id == body.contract_id))
@@ -337,6 +339,7 @@ async def create_notebook(
         title=body.title,
         description=body.description,
         path=body.path,
+        kernel=kernel_for_language(body.language),
         language=body.language,
         content=doc,
         content_hash=nb.notebook_hash(doc),

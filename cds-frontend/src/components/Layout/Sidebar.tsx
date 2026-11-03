@@ -97,6 +97,7 @@ function buildAdminMenu(role?: RoleLike): Items {
     ...(hasAnyRole(normalizedRole, ROLE_GROUPS.flowDevUsers)
       ? [
           { key: '/flow/scenarios', icon: <AppstoreOutlined />, label: '场景中心' },
+          { key: '/flow/projects', icon: <ApartmentOutlined />, label: '建模项目' },
           { key: '/flow/tasks', icon: <ProjectOutlined />, label: '任务列表' },
           { key: '/notebooks', icon: <BookOutlined />, label: '在线调试' },
           { key: '/workloads', icon: <ThunderboltOutlined />, label: '负载与发布' },
@@ -220,6 +221,7 @@ function buildDeveloperMenu(role?: RoleLike): Items {
   const devChildren: Items = hasAnyRole(normalizedRole, ROLE_GROUPS.flowDevUsers)
     ? [
         { key: '/flow/scenarios', label: '场景中心' },
+        { key: '/flow/projects', label: '建模项目' },
         { key: '/flow/tasks', label: '任务列表' },
         { key: '/notebooks', label: '在线调试' },
         { key: '/workloads', label: '负载与发布' },

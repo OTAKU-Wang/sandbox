@@ -23,6 +23,22 @@ class NotebookStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+# 多语言开发面登记（2026-11-03 sandbox realignment Task 6）：这是「可登记 + 可静态扇描」
+# 的语言集合的唯一事实来源 —— projects 面的 preferred_language / DAG 节点 language 直接取它。
+SUPPORTED_LANGUAGES: tuple[str, ...] = ("python", "sql", "r", "pyspark")
+
+# kernelspec 名只写文档**需要一个什么内核**，不拿它暗示沙箱里一定装了这个解释器：
+# python3 / pyspark / sql 皆由沙箱内 python3 承载（sql 走平台 SQL runner，pyspark 是
+# python3 上的 Spark 客户端库），r 的内核惯例名是 ir。R 运行时目前不在沙箱镜像里，
+# 所以 r 文档能登记、能扇描，执行时会如实失败在 kernel 层（不伪造一个能跑的样子）。
+# 未知语言回落 python3，与本列历史默认一致。
+_KERNEL_BY_LANGUAGE = {"python": "python3", "sql": "python3", "r": "ir", "pyspark": "python3"}
+
+
+def kernel_for_language(language: str | None) -> str:
+    return _KERNEL_BY_LANGUAGE.get((language or "").strip().lower(), "python3")
+
+
 class TaskDebugMethod(str, Enum):
     """开发任务调试方法（SS-18 §8 P0-①，创建时单选）。
 

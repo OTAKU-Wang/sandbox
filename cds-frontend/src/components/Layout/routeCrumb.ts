@@ -90,6 +90,8 @@ export const ROUTE_CRUMBS: RouteCrumb[] = [
   { prefix: '/flow/guide', title: '开发指引', style: 'slash', segs: ['开发指引'] },
   // 场景中心在左栏是「我的开发」的子项，面包屑段名逐字取菜单文案。
   { prefix: '/flow/scenarios', title: '场景中心', style: 'slash', segs: [HOME, DEV, '场景中心'] },
+  // Task 6 建模项目：与场景中心同层，段名逐字取左栏菜单文案。
+  { prefix: '/flow/projects', title: '建模项目', style: 'slash', segs: [HOME, DEV, '建模项目'] },
   { prefix: '/flow/quota', title: '环境配额', style: 'slash', segs: ['环境配额'] },
   { prefix: '/ops/deployments', title: '部署', style: 'slash', segs: ['K8s 运营', '部署'] },
   { prefix: '/ops/network-policies', title: '网络策略', style: 'slash', segs: ['K8s 运营', '网络策略'] },

@@ -29,6 +29,8 @@ export const DEVELOPER_MENU_KEYS: string[] = [
   '/flow/tasks',
   // Task 5 场景中心：开发者工台「我的开发」的首项，不加进白名单会被 filterMenuByWorkspace 剔掉。
   '/flow/scenarios',
+  // Task 6 建模项目：与场景中心同组，缺失则开发工台下整个条目被过滤掉。
+  '/flow/projects',
   '/flow/guide',
   '/flow/quota',
   '/audit',

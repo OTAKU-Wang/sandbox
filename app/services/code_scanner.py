@@ -96,6 +96,9 @@ ALLOWED_IMPORTS = {
     "pyarrow", "pyarrow.parquet",
     # DuckDB
     "duckdb",
+    # 多语言（Task 6）：PySpark 脚本的宿主解释器就是 python3，白名单描述的是沙箱镜像里
+    # 真实可用的库而不是声明的语言标签，所以这里收 pyspark，不给 pyspark 单开一份白名单。
+    "pyspark", "findspark",
 }
 
 # Dangerous builtins (call → FATAL)
@@ -131,6 +134,7 @@ FILE_CAPABILITY_MODULES = {
 EXTERNAL_SOURCE_MODULES = {
     "duckdb": "connect/ATTACH/read_csv（任意路径与远端对象）",
     "sqlalchemy": "create_engine（沙箱网络可达的任意 DB URL）",
+    "pyspark": "SparkSession.builder / read.* 连接 Spark 集群与集群侧任意路径数据源",
 }
 
 # 可静态解析到模块根的调用点（比 import 披露更精确的一条）。
@@ -234,8 +238,91 @@ def _mask_sql_literals(sql: str) -> str:
     return "".join(out)
 
 
+# ── R rules (多语言 Task 6) ────────────────────────────────────
+# 沙箱镜像里没有 R 解析器，Python 通道那套 AST 走不了，所以 R 走「掩掉字符串/注释
+# 后的调用名正则」。与 Python 通道的差距必须写清楚：判定粒度是「出现了这个调用」，
+# 不做数据流分析；方向取保守（宁可误拦 `base::system()` 等价写法）。
+# 放行 r 这个**标识**不等于放松扫描：下面的 FATAL 集覆盖 R 的 RCE 三兄弟、装包、
+# 外联下载与删文件原语，任何档位都判死，与 Python 通道的 os.system 同口径。
+R_FATAL_CALLS = {
+    "system": "调用宿主 shell 执行命令（RCE 通道）",
+    "system2": "调用宿主 shell 执行命令（RCE 通道）",
+    "shell": "调用宿主 shell 执行命令（RCE 通道）",
+    "pskill": "终止外部进程",
+    "install.packages": "从外部源安装包 = 引入未经审查的代码",
+    "update.packages": "更新已装包 = 引入未经审查的代码",
+    "download.file": "从外部地址下载（外联 / 远程代码引入通道）",
+    "curl_download": "从外部地址下载（外联 / 远程代码引入通道）",
+    "url": "打开 URL 连接（外联通道）",
+    "socketConnection": "打开套接字连接（外联通道）",
+    "unlink": "删除文件",
+    "file.remove": "删除文件",
+}
+
+# 与 A98 同口径的能力披露：合法建模代码天天在用，判死会误伤，所以 WARNING 上报。
+R_CAPABILITY_CALLS = {
+    "read.csv": "FILE_IO_CAPABILITY",
+    "read.csv2": "FILE_IO_CAPABILITY",
+    "read.table": "FILE_IO_CAPABILITY",
+    "read_csv": "FILE_IO_CAPABILITY",
+    "read_delim": "FILE_IO_CAPABILITY",
+    "read_parquet": "FILE_IO_CAPABILITY",
+    "readrds": "FILE_IO_CAPABILITY",
+    "write.csv": "FILE_IO_CAPABILITY",
+    "write.csv2": "FILE_IO_CAPABILITY",
+    "write.table": "FILE_IO_CAPABILITY",
+    "write_csv": "FILE_IO_CAPABILITY",
+    "write_parquet": "FILE_IO_CAPABILITY",
+    "saverds": "FILE_IO_CAPABILITY",
+    "source": "R_SOURCE_CAPABILITY",
+    "sys.source": "R_SOURCE_CAPABILITY",
+}
+
+R_CAPABILITY_MESSAGES = {
+    "FILE_IO_CAPABILITY": "沙箱内文件读写能力（扫描器是纵深防御，边界在 hypervisor 挂载集与采集面）",
+    "R_SOURCE_CAPABILITY": "加载并执行另一个 R 文件（代码引入能力，限于沙箱内路径）",
+}
+
+
+def _mask_r_literals(code: str) -> str:
+    """Blank R string literals and `#` comments to equal-length spaces (offset-preserving).
+
+    偏移必须与原文一致，否则报出来的行号会漂；掩的是 R 的两种引号与 `''` / `""` 转义。
+    """
+    out: list[str] = []
+    i, n = 0, len(code)
+    while i < n:
+        char = code[i]
+        if char in ("'", '"'):
+            j = i + 1
+            while j < n:
+                if code[j] == "\\":
+                    j += 2
+                    continue
+                if code[j] == char:
+                    if j + 1 < n and code[j + 1] == char:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            out.append(" " * (min(j, n - 1) - i + 1))
+            i = j + 1
+        elif char == "#":
+            j = code.find("\n", i)
+            j = n if j == -1 else j
+            out.append(" " * (j - i))
+            i = j
+        else:
+            out.append(char)
+            i += 1
+    return "".join(out)
+
+
 class CodeScanner:
     """AST-based static code analyzer for sandbox submissions."""
+
+    # R 的调用名（含 `pkg::fun` 的 fun 段与 `base::system` 这种带命名空间前缀的写法）。
+    _R_CALL_RE = re.compile(r"(?<![\w.$])([A-Za-z._][A-Za-z._0-9]*)\s*\(")
 
     def scan(self, code: str, language: str, sandbox_mode: str) -> ScanResult:
         try:
@@ -243,10 +330,13 @@ class CodeScanner:
         except ValueError:
             return ScanResult.FAIL(f"Unknown sandbox mode: {sandbox_mode}")
 
-        if language == "python":
+        # pyspark 走 Python 通道：PySpark 程序就是 Python 程序，解析器与规则集同一套。
+        if language in ("python", "python3", "pyspark"):
             return self._scan_python(code, mode)
         elif language == "sql":
             return self._scan_sql(code, mode)
+        elif language == "r":
+            return self._scan_r(code)
         else:
             return ScanResult.FAIL(f"Unsupported language: {language}")
 
@@ -373,6 +463,42 @@ class CodeScanner:
         if fatal:
             return ScanResult(passed=False, issues=issues)
         return ScanResult(passed=True, issues=[i for i in issues if i.severity != ScanSeverity.FATAL])
+
+    def _scan_r(self, code: str) -> ScanResult:
+        masked = _mask_r_literals(code)
+        issues: list[ScanIssue] = []
+        reported: set[str] = set()
+
+        for match in self._R_CALL_RE.finditer(masked):
+            name = match.group(1).lower()
+            if name in reported:
+                continue
+            line = masked.count("\n", 0, match.start()) + 1
+            fatal = R_FATAL_CALLS.get(name)
+            if fatal:
+                reported.add(name)
+                issues.append(ScanIssue(
+                    ScanSeverity.FATAL, "R_FORBIDDEN_CALL",
+                    f"R call '{name}()': {fatal}", line,
+                ))
+                continue
+            code_name = R_CAPABILITY_CALLS.get(name)
+            if code_name:
+                reported.add(name)
+                issues.append(ScanIssue(
+                    ScanSeverity.WARNING, code_name,
+                    f"R call '{name}()': {R_CAPABILITY_MESSAGES[code_name]}", line,
+                ))
+
+        capability = [i for i in issues if i.severity == ScanSeverity.WARNING]
+        if capability:
+            logger.warning(
+                "R whitelist capability disclosure (pattern-based scan, NOT an R AST): codes=%s",
+                sorted({i.code for i in capability}),
+            )
+        if any(i.severity == ScanSeverity.FATAL for i in issues):
+            return ScanResult(passed=False, issues=issues)
+        return ScanResult(passed=True, issues=issues)
 
     def _scan_sql(self, sql: str, mode: SandboxMode) -> ScanResult:
         """SQL validation using regex-based statement detection (no sqlparse dependency)."""
