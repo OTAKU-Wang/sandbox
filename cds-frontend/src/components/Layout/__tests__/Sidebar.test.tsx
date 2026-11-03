@@ -253,3 +253,22 @@ describe('管理员工台菜单不受原型 4+2 影响', () => {
     expect(screen.queryByText('开发者工作台')).not.toBeInTheDocument();
   });
 });
+
+describe('沙箱系统边界收敛（剔除非沙箱越界菜单）', () => {
+  it('管理员工台不再展示跨空间联邦、联合训练、连接器管理、数据管线与顶层MPC菜单', () => {
+    useWorkspaceStore.setState({ workspace: 'admin' });
+    useAuthStore.setState({
+      user: { id: 'admin-1', username: 'admin', email: 'a@test.com', role: 'admin', organization: null },
+    });
+    renderWithProviders(<Sidebar />);
+    expect(screen.queryByText('跨空间联邦')).not.toBeInTheDocument();
+    expect(screen.queryByText('联合训练')).not.toBeInTheDocument();
+    expect(screen.queryByText('连接器管理')).not.toBeInTheDocument();
+    expect(screen.queryByText('数据管线')).not.toBeInTheDocument();
+    expect(screen.queryByText('MPC 密钥管理')).not.toBeInTheDocument();
+    // 上面「联合训练」「MPC 密钥管理」两条是计划里的口径名，菜单里的实文案是
+    // 「训练管理」「MPC 密钥共享」；只钉口径名会退化成永真断言，所以按实文案各钉一条。
+    expect(screen.queryByText('训练管理')).not.toBeInTheDocument();
+    expect(screen.queryByText('MPC 密钥共享')).not.toBeInTheDocument();
+  });
+});

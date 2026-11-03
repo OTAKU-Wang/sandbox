@@ -10,12 +10,9 @@ import {
   MonitorOutlined,
   ShopOutlined,
   FolderOutlined,
-  GlobalOutlined,
-  ExperimentOutlined,
   ApiOutlined,
   KeyOutlined,
   ClusterOutlined,
-  NodeIndexOutlined,
   TeamOutlined,
   PartitionOutlined,
   ProjectOutlined,
@@ -41,8 +38,9 @@ import { UserRole } from '../../types/enums';
 type Items = NonNullable<MenuProps['items']>;
 
 /**
- * 管理员工台菜单（原型之外，口径保持不动）：SS-18 只删掉「开发者工作台」这一项——
- * 它指向的 /home 现在重定向回 '/'，在管理员工台 '/' 就是同一张运营概览，留着等于自己指自己。
+ * 管理员工台菜单（原型之外）：SS-18 删掉「开发者工作台」这一项——它指向的 /home 现在重定向回 '/'，
+ * 在管理员工台 '/' 就是同一张运营概览，留着等于自己指自己。2026-11-03 沙箱系统边界收敛再摘掉
+ * 四项非沙箱越界入口（数据管线 / 跨空间联邦 / 训练管理 / 连接器管理）与 MPC 子项，见下面的收敛注释。
  */
 function buildAdminMenu(role?: RoleLike): Items {
   const normalizedRole = normalizeUserRole(role);
@@ -67,8 +65,6 @@ function buildAdminMenu(role?: RoleLike): Items {
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.catalogReaders)) {
     items.push({ key: '/catalog', icon: <ShopOutlined />, label: '数据目录' });
   }
-
-  items.push({ key: '/data-pipeline', icon: <NodeIndexOutlined />, label: '数据管线' });
 
   if (hasAnyRole(normalizedRole, ROLE_GROUPS.contractReaders)) {
     items.push({
@@ -187,22 +183,16 @@ function buildAdminMenu(role?: RoleLike): Items {
       children: [
         { key: '/identity/keys', label: '密钥管理' },
         { key: '/certificates', label: '证书管理' },
-        { key: '/mpc', label: 'MPC 密钥共享' },
+        // /mpc 路由保留可达（Shamir 分片托管仍是密钥管理的底层能力），但不再占导航位：
+        // 它不是隐私计算入口，挂进菜单等于对外宣称本系统做 MPC 密态计算（实际不做）。
       ],
     });
   }
 
-  if (hasAnyRole(normalizedRole, ROLE_GROUPS.connectorManagers)) {
-    items.push({ key: '/connectors', icon: <ApiOutlined />, label: '连接器管理' });
-  }
-
-  if (hasAnyRole(normalizedRole, ROLE_GROUPS.federationUsers)) {
-    items.push({ key: '/federation', icon: <GlobalOutlined />, label: '跨空间联邦' });
-  }
-
-  if (hasAnyRole(normalizedRole, ROLE_GROUPS.trainingUsers)) {
-    items.push({ key: '/training', icon: <ExperimentOutlined />, label: '训练管理' });
-  }
+  // 2026-11-03 沙箱系统边界收敛：连接器管理、跨空间联邦、训练管理（联合训练）、数据管线
+  // 属于跨空间协同与本地路径处理，落在密态沙箱的交付边界之外，一级导航整体摘除。
+  // 遵「退役不删路由」：App.tsx 的路由与角色门、services/* 契约、routeCrumb 面包屑原样保留，
+  // 老书签不 404，后端路由不卸（tests/test_frontend_api_contract.py 对账口径不变）。
 
   if (normalizedRole === UserRole.ADMIN) {
     items.push({ key: '/users', icon: <TeamOutlined />, label: '用户管理' });
