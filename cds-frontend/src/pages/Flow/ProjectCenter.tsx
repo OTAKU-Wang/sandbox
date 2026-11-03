@@ -460,7 +460,7 @@ function DagBoard({ project }: { project: ProjectDetail }) {
             {grouped.map(([depth, row]) => (
               <div key={depth}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {depth < 0 ? '存在环路，层级无法确定' : `第 ${depth + 1} 层`}
+                  {depth < 0 ? '存在循环依赖，执行层级未定' : `第 ${depth + 1} 层`}
                 </Text>
                 <Space direction="vertical" size={6} style={{ width: '100%', marginTop: 4 }}>
                   {row.map((node) => (
@@ -533,7 +533,7 @@ function DagBoard({ project }: { project: ProjectDetail }) {
           )
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            尚未校验：保存后点击「一键拓扑校验」，后端以 Kahn 算法判定无环并回执行顺序。
+            尚未校验：保存后点击「一键拓扑校验」，系统将自动检测依赖关系、排查环路冲突并生成执行顺序。
           </Text>
         )}
       </Space>
@@ -734,7 +734,7 @@ export default function ProjectCenter() {
               建模项目
             </Title>
             <Text type="secondary">
-              协同空间与任务编排：项目聚合 Notebook / 负载，画布在此编排并经后端拓扑校验后方可提交审核。
+              多方协同建模与计算流水线编排：统一管理 Notebook 开发环境与计算工作负载，支持可视化依赖编排与前置拓扑校验。
             </Text>
           </div>
           <Space>

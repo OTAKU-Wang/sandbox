@@ -53,11 +53,11 @@ export default function AutoProfileModal({ result, resourceName, onClose }: Prop
       render: (_, row) => (row.pii_type ? (
         <Tag color="volcano">{piiLabel(row.pii_type)}</Tag>
       ) : (
-        <Text type="secondary">无敏感证据</Text>
+        <Text type="secondary">未检出敏感特征</Text>
       )),
     },
     {
-      title: '证据',
+      title: '识别依据',
       key: 'evidence',
       width: 190,
       render: (_, row) => (row.pii_type ? (
@@ -118,12 +118,12 @@ export default function AutoProfileModal({ result, resourceName, onClose }: Prop
             description={
               <Space direction="vertical" size={2}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  共探查 {result.scanned_rows} 行 × {result.columns.length} 列，其中 {piiColumns} 列命中敏感证据；
-                  识别引擎 {result.engine}，每列最多取样 {result.columns_sampled_per_field} 个值。
+                  已探查 {result.scanned_rows} 行 × {result.columns.length} 列，其中 {piiColumns} 列检出敏感特征；
+                  识别引擎：{result.engine}，每列取样：{result.columns_sampled_per_field} 个值。
                 </Text>
                 {result.truncated && (
                   <Text type="warning" style={{ fontSize: 12 }}>
-                    数据超过 500 行，本次只探查了前 {result.scanned_rows} 行，后面的行未参与判定。
+                    当前样本规模较大，系统已基于前 {result.scanned_rows} 行数据完成特征推断与分级。
                   </Text>
                 )}
                 <Text type="secondary" style={{ fontSize: 12 }}>

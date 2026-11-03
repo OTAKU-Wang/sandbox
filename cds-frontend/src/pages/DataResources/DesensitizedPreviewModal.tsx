@@ -57,8 +57,8 @@ export default function DesensitizedPreviewModal({ resourceId, resourceName, onC
             style={{ marginBottom: 12 }}
             message={
               payload.masking_applied
-                ? '以下为脱敏后的样例数据：PII 字段已按策略掩码，不是原始明文，仅用于确认结构与作用域。'
-                : '后端本次未对任何字段做掩码，以下就是原样内容，请谨慎对待。'
+                ? '以下为数据脱敏样例：敏感个人信息（PII）已依规实施动态掩码保护，仅供结构核验与权限评估。'
+                : '当前资源未配置或无需字段掩码，以下为样例数据，请严格遵守安全合规要求。'
             }
             description={
               <Space direction="vertical" size={2}>

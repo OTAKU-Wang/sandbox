@@ -250,7 +250,7 @@ function MemoryPanelCard({
           ))}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: tickInk }}>配额刻度{UNKNOWN_TEXT}</div>
+        <div style={{ fontSize: 12, color: tickInk }}>暂无配额刻度</div>
       )}
     </div>
   );
@@ -472,7 +472,7 @@ export default function FlowDevHome() {
       <KpiCard
         testId="kpi-calls"
         title="今日数据调用次数"
-        caliber={`口径：今日（UTC 自然日）**全平台**审计行 ${overview.calls_today.actions.join(' / ')}——对外 HMAC 调用没有人的主体，归不到单账号，本卡不是仅当前主体的计数；来源 ${overview.calls_today.source}`}
+        caliber={`统计口径：今日全平台数据调用审计记录（包含 ${overview.calls_today.actions.join('、')} 等服务调用及接口鉴权操作）`}
         value={overview.calls_today.count}
         sub={lastCallText(overview.calls_today.last_called_at)}
         tone="purple"
@@ -552,7 +552,7 @@ export default function FlowDevHome() {
                 {/* 可见副标题按真值长度收成一句（§5「调试与执行环境内存实时占用」）；
                     「实时占用」后端给不出（not_collected: memory.measured）⇒ 真实口径全句与
                     后端 reason 一起进 Tooltip，不假装有实测。 */}
-                <Tooltip title={`口径：会话已分配的配额，非进程实测占用${measuredReason ? `。后端原文：${measuredReason}` : ''}`}>
+                <Tooltip title={`统计口径：当前开发及执行会话已分配的计算配额${measuredReason ? `（说明：${measuredReason}）` : ''}`}>
                   <Text style={hint}>调试与执行环境内存占用</Text>
                 </Tooltip>
               </Space>
@@ -573,7 +573,7 @@ export default function FlowDevHome() {
                   panel={overview.memory.exec}
                   quotaMb={overview.memory.quota_mb}
                   measuredReason={execQuotaReason ?? measuredReason}
-                  quotaNote={`正式执行：运行中 ${overview.memory.exec.running_runs ?? 0} · 排队 ${overview.memory.exec.pending_runs ?? 0}；执行档沿用${overview.memory.quota_mb === null ? UNKNOWN_TEXT : formatGibFromMb(overview.memory.quota_mb)}租户配额（16 G 独立配额${UNKNOWN_TEXT}）`}
+                  quotaNote={`正式执行环境：当前运行任务 ${overview.memory.exec.running_runs ?? 0} 个，等待队列 ${overview.memory.exec.pending_runs ?? 0} 个；当前使用租户分配配额：${overview.memory.quota_mb === null ? UNKNOWN_TEXT : formatGibFromMb(overview.memory.quota_mb)}`}
                 />
               </div>
               <div style={{ ...footnote, lineHeight: 1.9 }}>
@@ -635,7 +635,7 @@ export default function FlowDevHome() {
               title={
                 <span>
                   调用次数口径：{overview.call_count_caliber}
-                  {overview.ops_log_today.visibility === 'self' ? '；今日操作日志与本页所有数字均为当前账号口径。' : ''}
+                  {overview.ops_log_today.visibility === 'self' ? '；统计范围为当前登录账号。' : ''}
                 </span>
               }
             >

@@ -101,13 +101,13 @@ function OutcomeCell({ outcome }: { outcome?: 'success' | 'failure' }) {
   if (outcome === 'failure') {
     return <Text className="cds-audit-outcome is-failure"><CloseCircleFilled />失败</Text>;
   }
-  return <MissingField reason="后端按动作名派生操作结果（audit.py::audit_outcome）；本次返回未带该字段" />;
+  return <MissingField reason="未匹配到明确的操作结果判定状态" />;
 }
 
 /** 4-2 的操作人：原型形如「张伟（沈阳数据中心R / 模型工程师）」，只拼库里真有的段。 */
 function OperatorText({ record }: { record: AuditRecordDetail }) {
   if (!record.username) {
-    return <MissingField reason="该动作无登录用户上下文（系统自动锚定、节点上报等），库里 user_id 为空" />;
+    return <MissingField reason="系统级自治操作（如自动锚定、节点上报），无特定用户上下文" />;
   }
   const roleLabel = record.role ? (ROLE_LABELS[record.role as keyof typeof ROLE_LABELS] ?? record.role) : null;
   const parts = [record.organization || null, roleLabel].filter((part): part is string => !!part);
@@ -243,14 +243,14 @@ export default function AuditLog() {
       key: 'username',
       width: 170,
       render: (value: string | null, record) =>
-        value || <MissingField reason={record.user_id ? '用户已被删除，库里只剩 user_id' : '该动作无登录用户上下文'} />,
+        value || <MissingField reason={record.user_id ? '关联用户已注销' : '系统级自治操作，无特定用户上下文'} />,
     },
     {
       title: '来源 IP',
       dataIndex: 'ip_address',
       key: 'ip_address',
       width: 180,
-      render: (value: string | null) => value || <MissingField reason="写入侧未带 ip_address，后端不反推来源" />,
+      render: (value: string | null) => value || <MissingField reason="系统内部调用或服务调用，未记录外部客户端 IP" />,
     },
     { title: '操作结果', dataIndex: 'outcome', key: 'outcome', width: 160, render: (value) => <OutcomeCell outcome={value} /> },
     {
@@ -497,11 +497,11 @@ export default function AuditLog() {
             <div className="cds-audit-section">基础信息</div>
             <Descriptions className="cds-audit-basics" layout="vertical" column={2} colon={false}>
               <Descriptions.Item label="操作时间">
-                {auditTimeText(detail.created_at) ?? <MissingField reason="库里没有 created_at" />}
+                {auditTimeText(detail.created_at) ?? <MissingField reason="记录创建时间缺失" />}
               </Descriptions.Item>
               <Descriptions.Item label="操作人"><OperatorText record={detail} /></Descriptions.Item>
               <Descriptions.Item label="来源 IP">
-                {detail.ip_address || <MissingField reason="写入侧未带 ip_address，后端不反推来源" />}
+                {detail.ip_address || <MissingField reason="系统内部调用或服务调用，未记录外部客户端 IP" />}
               </Descriptions.Item>
               <Descriptions.Item label="操作结果"><OutcomeCell outcome={detail.outcome} /></Descriptions.Item>
               <Descriptions.Item label="操作对象" span={2}>
@@ -531,7 +531,7 @@ export default function AuditLog() {
                     size="small"
                     items={[{
                       key: 'raw',
-                      label: '展开查看 detail 原文（后端下发的 JSON，未做改写）',
+                      label: '展开查看事件原始载荷详情（JSON 格式）',
                       children: (
                         <pre style={{ fontSize: 12, maxHeight: 180, overflow: 'auto', margin: 0 }}>
                           {JSON.stringify(detail.detail, null, 2)}
@@ -544,7 +544,7 @@ export default function AuditLog() {
             </div>
             {optionalMissing.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-                本条审计未随附：{optionalMissing.join(' / ')}（audit_logs 无对应列，后端不下发即不显示）
+                本条审计未随附：{optionalMissing.join(' / ')}（无对应扩展数据）
               </Text>
             )}
 

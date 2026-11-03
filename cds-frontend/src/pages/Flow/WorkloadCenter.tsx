@@ -28,7 +28,7 @@ function CheckList({ checks }: { checks: WorkloadTestCheck[] }) {
   if (!checks.length) {
     return (
       <Text type="secondary" style={{ fontSize: 12 }}>
-        后端未返回任何检查项
+        暂无检查项详情
       </Text>
     );
   }
@@ -63,7 +63,7 @@ function CheckList({ checks }: { checks: WorkloadTestCheck[] }) {
         {
           title: '说明',
           dataIndex: 'detail',
-          render: (detail: string | null) => detail || <Text type="secondary">后端未返回说明</Text>,
+          render: (detail: string | null) => detail || <Text type="secondary">暂无详细说明</Text>,
         },
       ]}
     />
@@ -81,10 +81,10 @@ function TestRunDetail({ run, workloadName }: { run: WorkloadTestRun; workloadNa
         showIcon
         message={
           verdict === 'pass'
-            ? `测试通过：${workloadName} 可发布到生产`
+            ? `测试通过：${workloadName} 可发布到生产环境`
             : verdict === 'fail'
               ? `测试未通过：${workloadName} 暂不可发布`
-              : `测试状态未确定（后端 status=${run.status}），以后端结果为准`
+              : `测试状态确认中（当前状态：${run.status}），请稍后刷新查看`
         }
         description={
           <Space size={8} wrap>
@@ -215,7 +215,7 @@ function CreateWorkloadModal({ open, onClose, onCreated }: { open: boolean; onCl
             options={(contracts ?? []).map((contract) => ({ label: `${contract.title}（${contract.contract_no}）`, value: contract.id }))}
           />
         </Form.Item>
-        <Form.Item name="notebook_id" label="来源 Notebook" tooltip="后端据此计算入口指纹 entrypoint_hash，测试通过后内容再改动会判定为哈希不一致">
+        <Form.Item name="notebook_id" label="来源 Notebook" tooltip="系统据此生成入口代码指纹校验（entrypoint_hash），若代码改动需重新通过准入测试">
           <Select
             allowClear
             showSearch
@@ -279,7 +279,7 @@ export default function WorkloadCenter() {
         const info = parseFlowError(err);
         const text =
           info.httpStatus === 412 || info.code
-            ? `${publishGateReason(info.code)}${info.detail ? `（后端说明：${info.detail}）` : ''}`
+            ? `${publishGateReason(info.code)}${info.detail ? `（详细说明：${info.detail}）` : ''}`
             : describeFlowError(err, '发布失败');
         setGateError({ workloadId: workload.id, text });
         message.error(text);

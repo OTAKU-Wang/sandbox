@@ -587,7 +587,7 @@ export default function ScenarioCenter() {
   const emptyText: Record<ScenarioView, string> = {
     development: '暂无可承接的场景',
     delivery: '该交付场景下暂无场景',
-    mine: '还没有承接过场景，去「数据开发场景」挑一个',
+    mine: '暂无承接记录，可前往「数据开发场景」浏览并承接',
   };
 
   return (
@@ -597,7 +597,7 @@ export default function ScenarioCenter() {
           <Title level={4} style={{ margin: 0 }}>
             场景中心
           </Title>
-          <Text type="secondary">数据开发场景与数据交付场景的发布、筛选与一键承接</Text>
+          <Text type="secondary">数据开发场景与数据交付场景的发布、筛选与协同承接</Text>
         </Space>
       }
       extra={

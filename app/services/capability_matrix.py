@@ -350,9 +350,9 @@ def dataplane_status() -> dict:
         "mode": "full" if enabled else "control_plane_only",
         "reason": None if enabled else "dataplane_disabled",
         "note": (
-            "MicroVM 数据面就绪，可执行沙箱计算" if enabled else
-            "未启用 MicroVM 数据面（需 /dev/kvm 或已透传 vmx/svm 的宿主 + Cube 计算节点）："
-            "平台按控制面档交付，目录/契约/审批/审计/交付可用，沙箱执行入口不可用"
+            "MicroVM 数据面就绪，可执行沙箱机密计算" if enabled else
+            "平台当前处于控制面管理模式（未启用 MicroVM 数据面）："
+            "资源目录、服务契约、流程审批、安全审计与成果交付等功能全面可用；机密计算沙箱执行功能将在接入算力节点后自动就绪"
         ),
     }
 

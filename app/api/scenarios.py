@@ -360,6 +360,7 @@ async def create_scenario(
         actor_type="user",
         actor_id=str(user.id),
     )
+    await db.commit()
     return ScenarioResponse.model_validate(_scenario_payload(scenario, None))
 
 
@@ -534,6 +535,7 @@ async def accept_scenario(
         actor_type="user",
         actor_id=str(user.id),
     )
+    await db.commit()
     return ScenarioAcceptResponse(
         scenario=ScenarioResponse.model_validate(_scenario_payload(scenario, project)),
         project=ProjectBrief.model_validate(_project_payload(project)),

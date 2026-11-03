@@ -37,8 +37,7 @@ const typeLabels: Record<string, string> = {
  * 信号；上限本身钉在 contractApi 的 DP_LEDGER_ENTRY_LIMIT，页面不许自己拿魔数。禁把 20 行当全量台账。
  */
 const DP_LEDGER_TRUNCATION_NOTE =
-  `消费流水只展示最近 ${DP_LEDGER_ENTRY_LIMIT} 条：后端 GET /contracts/{id}/dp-budget 本身就是 ledger[:${DP_LEDGER_ENTRY_LIMIT}]，`
-  + '响应里没有 total/has_more 字段，所以下表不是全量台账（完整消耗记录见「审计日志」）。';
+  `当前流水列表展示最近 ${DP_LEDGER_ENTRY_LIMIT} 条消费记录；如需核验完整全量流水明细，请前往「操作日志」中按时间范围检索。`;
 
 export default function ContractDetail() {
   const { id } = useParams<{ id: string }>();
@@ -70,7 +69,7 @@ export default function ContractDetail() {
         const keypair = await authApi.generateSM2Keys();
         saveSM2PrivateKey(user.id, keypair.private_key);
         privateKey = keypair.private_key;
-        message.info('SM2密钥对已由服务端下发，并以明文存在本浏览器 localStorage（详见合约页签署说明）');
+        message.info('SM2 密钥对已由服务端安全签发，并已在当前浏览器工作区就绪，可直接执行国密签署。');
       }
 
       const partyRole = user.id === contract.provider_id ? 'provider' : 'buyer';

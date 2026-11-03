@@ -48,7 +48,7 @@ const FLOW_STEPS: FlowStep[] = [
     title: '数据产品',
     who: '数据提供方 → 平台审核',
     summary:
-      '状态机是硬的：draft →(submit) reviewing →(approve，仅管理员) approved →(publish) published。跳过一步就是 400。',
+      '产品生命周期受状态机严格管控：草稿 (draft) → 提交审核 (reviewing) → 平台审批 (approved，管理员权限) → 正式发布 (published)。发布后自动编目并对买方可见。',
     endpoints: [
       { method: 'POST', path: '/api/v1/data-products', note: '建产品（须关联 resource_id）' },
       { method: 'POST', path: '/api/v1/data-products/{id}/test-data/sample', note: '测试数据：抽样' },
@@ -63,7 +63,7 @@ const FLOW_STEPS: FlowStep[] = [
     title: '合约签署',
     who: '提供方 + 买方，平台见证',
     summary:
-      '合约决定一切下游边界：允许的沙箱级别与模式、交付方式、自动计算频率、沙箱资源规格、DP 预算与最大输出行数。',
+      '服务契约定义数据流通的合法边界：包括约定的沙箱安全级别、成果交付方式、自动计算频率、资源配额规格、差分隐私（DP）预算及出域行数上限。',
     endpoints: [
       { method: 'POST', path: '/api/v1/contracts', note: '建草稿（含 delivery_methods / sandbox_resource_spec）' },
       { method: 'POST', path: '/api/v1/contracts/{id}/flow-config', note: '交付方式 + 自动计算 + 资源规格' },
@@ -78,18 +78,18 @@ const FLOW_STEPS: FlowStep[] = [
     title: '开发任务 / Notebook 测试沙箱',
     who: '买方开发者',
     summary:
-      '先在能力探测上确认数据面可用，再开 Notebook 与测试沙箱写代码。数据面不可用时后端 fail-closed，不降级到进程隔离。',
+      '在安全探针检测算力节点状态就绪后，启动交互式 Notebook 与测试沙箱开展建模；若节点未就绪，系统严格执行安全拒绝（fail-closed），杜绝降级运行。',
     endpoints: [
       { method: 'GET', path: '/api/v1/flow/runtime-status', note: '执行前预检：available / message' },
       { method: 'POST', path: '/api/v1/notebooks', note: '建开发任务（绑定合约 + 数据产品）' },
       { method: 'POST', path: '/api/v1/notebooks/{id}/dev-session', note: '起测试沙箱（返回 sandbox_level=l2c）' },
       { method: 'POST', path: '/api/v1/notebooks/{id}/cells/execute', note: '执行单元格（≤256KB 入 / ≤1MB 出）' },
-      { method: 'POST', path: '/api/v1/notebooks/{id}/run', note: '整本跑（600s 上限）' },
+      { method: 'POST', path: '/api/v1/notebooks/{id}/run', note: '全量顺序执行（上限 600 秒）' },
       { method: 'GET', path: '/api/v1/notebooks/{id}/jupyter', note: 'Jupyter 代理地址（未配置则 url=null）' },
       { method: 'POST', path: '/api/v1/dev-sandbox/sessions', note: '轻量替代：模板化开发沙箱' },
     ],
     pitfalls: [
-      'available=false 时执行入口一律 400 RUNTIME_UNAVAILABLE——这是 fail-closed，不是故障',
+      '算力节点未就绪时，执行接口返回 400 RUNTIME_UNAVAILABLE，严格保障数据安全，杜绝静默降级',
       '代码先过静态扫描（FATAL → 422），出沙箱再过出口审查，两侧都写审计',
     ],
   },
@@ -97,7 +97,7 @@ const FLOW_STEPS: FlowStep[] = [
     title: '固化发布',
     who: '买方开发者',
     summary:
-      'Notebook 里的验证结果不能直接当生产用：必须把入口代码固化成工作负载，并在测试沙箱跑一次留证，发布门禁比较的是哈希。',
+      '建模验证通过后，须将入口核心逻辑固化为工作负载版本，并完成前置集成测试与代码哈希核验，符合发布门禁后方可发布至生产环境。',
     endpoints: [
       { method: 'POST', path: '/api/v1/workloads', note: '固化入口代码 entrypoint' },
       { method: 'POST', path: '/api/v1/workloads/{id}/test', note: '测试沙箱执行，产 test-run' },
