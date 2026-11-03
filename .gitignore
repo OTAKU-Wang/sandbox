@@ -70,3 +70,11 @@ shots/
 
 # 门证据扫描的本地输出目录（已提交证据在 docs/ocr-review-2026-10-18/）
 .gate-scratch/
+
+# 死代码清理后的杂物拦截（2026-11）
+.scratch-*
+.gate-files-*
+.lane-*-scratch/
+.lane-c-scratch/
+root@*
+conftest_local.py/

@@ -73,7 +73,7 @@ services:
 
   # ─── 策略引擎 ───
   # A284: OPA 的数据 API 不带任何认证——碰得到 8181 就等于能 `PUT /v1/policies`
-  # 写一份 `default allow = true`，而 policy_evaluator 拿到真值就 ALLOW。
+  # 写一份 `default allow = true`，而授权链（policy_compiler/OPA）拿到真值就 ALLOW。
   # 宿主侧只绑回环（运维本机 curl），PDP 客户端仍走 bridge（CDS_OPA_URL=http://opa:8181）；
   # 策略源只读挂载，opa 容器里的进程改不动仓里的 rego。
   opa:

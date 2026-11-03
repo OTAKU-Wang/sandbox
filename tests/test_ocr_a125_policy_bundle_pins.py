@@ -6,15 +6,17 @@
   B2  列注释必须活在 SQLAlchemy 表对象上（不只源码文本）。
   B3  boot 披露可测（force 重放），文案含 A125 + 无密钥/unkeyed 语义。
   B4  ①号缺陷 LATENT 坐标：模型层无查询 helper（models 约定 declarative-only），
-      docstring 必须记 revoked_at 防线落点（读侧过滤=app/services/policy_evaluator.py
-      的 A73 过滤；撤销写入=app/services/contract_service.py）+ fallback PDP
+      docstring 必须记 revoked_at 防线落点（原读侧过滤 app/services/policy_evaluator.py
+      的 A73 过滤已于 2026-11 随死代码删除，坐标以删除记录保留；撤销写入=
+      app/services/contract_service.py）+ fallback PDP
       接线要求（读 field_acl/allowed_ops/sandbox_modes 者必须把完整性校验纳入校验面）。
 可达性复核（lead 明令：死人有复活迹象就先红报 lead）：
   R1  app/services/policy_evaluator.py 仍零生产导入（secure_duckdb 引的
       policy_evaluator 是 policy_compiler 的同名单例，不同人）。
   R2  模型行写入方在 app/ 不存在（白名单：contract_service 撤销标记读 +
       policy_evaluator 死读侧）；新 importer = 复活迹象 → 红。
-  R3  防线落点仍活：policy_evaluator 源码仍含 revoked_at 过滤（A73）。
+  R3  死锚点保持缺席（文件重建 = 复活 → 红）；模型 docstring 仍如实记录
+      删除；撤销写入防线（contract_service 的 revoked_at）仍活。
 """
 import logging
 from pathlib import Path
@@ -105,7 +107,8 @@ class TestRReachability:
         allowed = {
             "app/models/policy_bundle.py",
             "app/services/contract_service.py",  # 撤销标记（revoked_at 写入方）
-            "app/services/policy_evaluator.py",  # 死读侧（A73 锚点）
+            # 原死读侧 app/services/policy_evaluator.py 已于 2026-11 删除：
+            # 不再列入白名单，重建并引用本模型 = 复活迹象 → 红。
         }
         import re
         pat = re.compile(r"from\s+app\.models\.policy_bundle\s+import|models\.policy_bundle\b")
@@ -123,10 +126,24 @@ class TestRReachability:
         )
 
     def test_r3_revoked_filter_defense_still_at_anchor(self):
-        src = EVALUATOR_PATH.read_text(encoding="utf-8")
-        assert "revoked_at.is_(None)" in src, "A73 撤销过滤已从锚点消失——防线落点失效"
-        # 过期侧锚点 = 合约 valid_until（合约生命周期，非 bundle 列）
-        assert "valid_until" in src, "A73 合约过期检查已从锚点消失——防线落点失效"
+        # 2026-11 死代码清理把死读侧 app/services/policy_evaluator.py（含 A73
+        # revoked_at/valid_until 过滤，零生产导入）整体删除；LATENT 前提从
+        # “死码里有过期防线”变为“读侧不存在”。钉的语义随之改为：
+        # ① 死锚点文件必须保持缺席（重建 = 复活迹象 → 红）；
+        assert not EVALUATOR_PATH.exists(), (
+            "app/services/policy_evaluator.py 被重建——死读侧复活，A125/A73 前提变化，先报 lead"
+        )
+        # ② 模型 docstring 仍如实记录删除与坐标（披露不得静默消失）；
+        model_src = MODEL_PATH.read_text(encoding="utf-8")
+        assert "app/services/policy_evaluator.py" in model_src, (
+            "LATENT 坐标删除记录从模型 docstring 消失——披露必须如实"
+        )
+        assert "已于 2026-11 删除" in model_src, "删除事实必须写在模型 docstring 里"
+        # ③ 撤销写入防线仍活：contract_service 仍在 TERMINATED 时逐包写 revoked_at。
+        contract_src = (APP_DIR / "services" / "contract_service.py").read_text(encoding="utf-8")
+        assert "revoked_at" in contract_src, (
+            "A73 撤销写入已从 contract_service 消失——①防线唯一活侧落点失效"
+        )
 
 
 def test_a125_tag_registered_for_grep_ledger():

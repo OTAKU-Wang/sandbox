@@ -69,7 +69,7 @@ services:
     image: openpolicyagent/opa:0.68.0
     ports:
       # A284: OPA 数据面 API 不带任何认证——能碰到 8181 的人 `PUT /v1/policies/...`
-      # 写一份 `default allow = true` 就能把授权引擎清空（policy_evaluator 认 OPA 的
+      # 写一份 `default allow = true` 就能把授权引擎清空（policy_compiler/OPA 认 OPA 的
       # truthy 结果为 ALLOW）。所以宿主只发布到回环；cds-api 走 bridge 网络上的
       # http://opa:8181，本来就不依赖宿主端口。与 docker-compose.prod.yml 同一口径。
       - "127.0.0.1:8181:8181"

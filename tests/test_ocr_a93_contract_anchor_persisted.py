@@ -23,7 +23,6 @@ from app.models.blockchain_anchor import BlockchainAnchor
 from app.models.contract import Contract, ContractStatus, ContractType
 from app.models.data_product import DataProduct, DataProductStatus
 from app.models.user import User
-from app.services import blockchain_service as bs_module
 from app.services import contract_service as cs_module
 from app.services.blockchain_adapter import (
     AnchorResult,
@@ -143,21 +142,6 @@ async def test_contract_anchor_verifies_from_a_fresh_adapter(db_session, make_us
         "a restarted adapter must reject a payload that does not match the anchor"
     )
     assert await fresh.verify(str(row.id), bytes.fromhex(record.data_hash)) is False
-
-
-@pytest.mark.asyncio
-async def test_local_inprocess_anchor_store_is_no_longer_used(db_session, make_user, monkeypatch):
-    _bind_adapter_to_test_db(monkeypatch)
-    contract = await _signing_ready_contract(db_session, make_user)
-    before = dict(bs_module.blockchain_service._local_anchors)
-
-    await _sign_both_parties(db_session, contract)
-    await db_session.flush()
-
-    assert contract.blockchain_tx_hash
-    assert bs_module.blockchain_service._local_anchors == before, (
-        "contract still anchored into the process-local dict that cannot survive a restart"
-    )
 
 
 @pytest.mark.asyncio

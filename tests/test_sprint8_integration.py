@@ -15,16 +15,6 @@ import pytest
 class TestTaskPipelineIntegration:
     """Test that scheduler, queue, and worker form a coherent pipeline."""
 
-    def test_scheduler_queue_worker_exist_as_singletons(self):
-        from app.services.task_scheduler import task_scheduler
-        from app.services.task_queue import TaskQueue
-        from app.services.task_worker import task_worker
-        assert task_scheduler is not None
-        assert task_worker is not None
-        # TaskQueue is not a singleton but instantiable
-        q = TaskQueue()
-        assert q is not None
-
     @pytest.mark.asyncio
     async def test_scheduler_submits_to_queue(self):
         """Scheduler should be able to submit tasks to the queue."""

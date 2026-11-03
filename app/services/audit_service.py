@@ -139,7 +139,7 @@ class AuditService:
         # Sanitised (reversibly) rather than rejected, deliberately:
         # resource_id legitimately carries node-supplied text on the cube-egress
         # path (map_egress_record writes str(policy["matched_rule"])), and
-        # callers such as db_access_proxy wrap this funnel in try/except — a
+        # callers wrap this funnel in try/except — a
         # raise would drop the audit row instead of protecting it. The mutation
         # is disclosed on the row and in the log, never silent (same rule as
         # detail["_sm2_sign_error"] below).

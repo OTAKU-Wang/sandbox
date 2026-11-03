@@ -13,9 +13,6 @@ from app.services.column_encryption import (
 from app.services.rls_engine import (
     RLSEngine, RLSPolicy, RLSContext, PolicyType, SensitivityLevel,
 )
-from app.services.db_access_proxy import (
-    DBAccessProxy, ProxyAction, ColumnEncryptionRule,
-)
 
 
 # ── CDC Agent Tests ──────────────────────────────────────────────
@@ -325,74 +322,3 @@ def test_rls_validate_policy():
     )
     errors = engine.validate_policy(bad_policy)
     assert len(errors) > 0
-
-
-# ── DB Access Proxy Tests ────────────────────────────────────────
-
-
-def test_proxy_blocked_pattern():
-    """DBAccessProxy blocks dangerous SQL patterns."""
-    proxy = DBAccessProxy()
-    proxy.add_blocked_pattern(r"DROP\s+TABLE")
-    proxy.add_blocked_pattern(r"TRUNCATE")
-
-    context = RLSContext()
-
-    result = proxy.evaluate_sql("DROP TABLE users", context)
-    assert result.action == ProxyAction.DENY
-
-    result = proxy.evaluate_sql("TRUNCATE audit_logs", context)
-    assert result.action == ProxyAction.DENY
-
-    result = proxy.evaluate_sql("SELECT * FROM users", context)
-    assert result.action != ProxyAction.DENY
-
-
-def test_proxy_rls_injection():
-    """DBAccessProxy injects RLS WHERE clauses."""
-    proxy = DBAccessProxy()
-    engine = RLSEngine()
-    engine.add_policy(RLSPolicy(
-        policy_id="region",
-        name="Region",
-        policy_type=PolicyType.REGION,
-        conditions={"allowed_regions": ["CN"], "region_column": "region"},
-    ))
-    # Monkey-patch the rls_engine singleton
-    import app.services.db_access_proxy as proxy_module
-    original_engine = proxy_module.rls_engine
-    proxy_module.rls_engine = engine
-
-    try:
-        context = RLSContext(user_region="CN")
-        result = proxy.evaluate_sql("SELECT * FROM data_products", context)
-        assert result.action == ProxyAction.REWRITE
-        assert "region = 'CN'" in result.rewritten_sql
-        assert "rls" in result.applied_policies
-    finally:
-        proxy_module.rls_engine = original_engine
-
-
-def test_proxy_encryption_rules():
-    """DBAccessProxy manages encryption rules."""
-    proxy = DBAccessProxy()
-    proxy.register_encryption_rule("users", "email", EncryptionMode.DETERMINISTIC)
-    proxy.register_encryption_rule("users", "phone", EncryptionMode.RANDOMIZED)
-
-    rules = proxy.get_encryption_rules()
-    assert len(rules) == 2
-    assert rules[0]["table"] == "users"
-    assert rules[0]["mode"] == "sm4-siv"
-
-
-def test_proxy_metrics():
-    """DBAccessProxy tracks query metrics."""
-    proxy = DBAccessProxy()
-    context = RLSContext()
-
-    proxy.evaluate_sql("SELECT 1", context)
-    proxy.evaluate_sql("SELECT 2", context)
-
-    metrics = proxy.get_metrics()
-    assert metrics["total_queries"] == 2
-    assert metrics["denied_queries"] == 0

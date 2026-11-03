@@ -9,7 +9,9 @@ Policies are evaluated and converted to SQL WHERE clauses for injection
 into database queries.
 
 A133 twin-subsystem convergence conclusion (2026-10-30, wave 2 — 可达性先行，
-证据在基线工作树上重跑，不抄台账):
+证据在基线工作树上重跑，不抄台账)。（2026-11-03 死代码清理：下述
+``db_access_proxy`` / ``pg_rls_manager`` 死半区及各自专属测试已删除，本模块为
+该家族仅存实现。）
 - 可达性：本模块是 RLS 双子系统中唯一有测试侧用户的一半。app/ 内唯一导入方
   是 ``db_access_proxy.py:17``，而 ``db_access_proxy`` 自身在 app/ 内零导入方
   （只有 ``tests/test_db_access_proxy.py`` / ``tests/test_sprint4_services.py``

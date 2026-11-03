@@ -2,7 +2,6 @@
 
 钉住三层语义：
 1) 成果闸 ``OutputGateway.process`` 提交 0 行 → 诚实失败并置 ``empty_output``，不产出可交付载荷；
-2) 独立统计量 ``KAnonymityChecker`` 在无行时保留数学上的真空为真，但必须报 ``evaluated=False``；
 3) 检查流水 ``OutputInspector`` 把「阶段启用却无从检查」列进 ``not_evaluated``，并随报告带出。
 
 判据原文见 specs/ss-18-prototype-alignment.md §8 P0′：空/全空白输入必须诚实失败或显式
@@ -13,7 +12,6 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
-from app.services.k_anonymity import KAnonymityChecker
 from app.services.output_gateway import OutputPolicy, output_gateway
 from app.services.output_inspection import OutputInspector, SandboxMode
 from app.services.output_security import inspection_to_report
@@ -48,28 +46,6 @@ def test_gateway_still_releases_nonempty_rows() -> None:
     assert result.empty_output is False
     assert result.row_count == 2
     assert "not_evaluated" in result.security_report
-
-
-def test_k_anonymity_vacuum_is_flagged_as_not_evaluated() -> None:
-    result = KAnonymityChecker(min_k=5).check([], ["age"])
-    assert result.passed is True  # 数学上的真空为真，保留
-    assert result.evaluated is False  # 但不可当放行凭据
-    assert result.reason
-    assert result.total_rows == 0
-
-
-def test_k_anonymity_csv_vacuum_is_flagged_as_not_evaluated() -> None:
-    checker = KAnonymityChecker(min_k=5)
-    assert checker.check_csv("", ["age"]).evaluated is False
-    assert checker.check_csv("age,zip\n", ["age"]).evaluated is False
-
-
-def test_k_anonymity_with_rows_is_evaluated() -> None:
-    rows = [{"age": 30 + i, "zip": "100"} for i in range(6)]
-    result = KAnonymityChecker(min_k=5).check(rows, ["age"])
-    assert result.evaluated is True
-    assert result.reason == ""
-    assert result.passed is False  # 每组只有 1 人，低于 k=5
 
 
 def test_inspection_lists_structured_stages_it_could_not_evaluate() -> None:

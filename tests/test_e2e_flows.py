@@ -990,43 +990,6 @@ def test_e2e_alert_engine_consecutive_denies():
 # Scenario 16: Encrypted DB (Sprint 4)
 # ──────────────────────────────────────────────
 
-def test_e2e_encrypted_db_load_and_query():
-    """Encrypted DuckDB loads table and executes queries."""
-    from app.services.encrypted_db import EncryptedDatabase
-
-    db = EncryptedDatabase()
-    db.load_table("users", ["name", "age"], [["Alice", "25"], ["Bob", "70"], ["Charlie", "35"]])
-    assert "users" in db.list_tables()
-
-    result = db.query("SELECT * FROM users")
-    assert len(result.rows) >= 1
-
-
-def test_e2e_encrypted_db_masked_view():
-    """Encrypted DB masked view hides sensitive fields."""
-    from app.services.encrypted_db import EncryptedDatabase
-    from app.services.field_mask import MaskRule, MaskMode
-
-    db = EncryptedDatabase()
-    db.load_table("customers", ["name", "ssn"], [["张三", "110101199001011234"]])
-
-    # Create masked view
-    db.create_masked_view("customers_safe", "customers", [
-        MaskRule(field_name="name", mode=MaskMode.HASH),
-        MaskRule(field_name="ssn", mode=MaskMode.REDACT),
-    ])
-
-    result = db.query("SELECT * FROM customers_safe")
-    assert len(result.rows) == 1
-    row = dict(zip(result.columns, result.rows[0]))
-    assert row["name"] != "张三"  # Hashed
-    assert row["ssn"] == "[REDACTED]"  # Redacted
-
-
-# ──────────────────────────────────────────────
-# Scenario 17: Blockchain Adapter (Sprint 4)
-# ──────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_e2e_blockchain_adapter_pg_append_only():
     """PG append-only adapter stores and retrieves Merkle roots."""

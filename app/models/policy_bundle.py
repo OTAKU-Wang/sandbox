@@ -28,9 +28,11 @@ class PolicyBundle(Base):
 
     LATENT 坐标（A125①：revoked_at 过滤不在模型层——models/ 约定
     declarative-only，无查询 helper，防线落点如下）：
-      - 读侧 Serving 过滤：app/services/policy_evaluator.py
-        （PolicyBundle.revoked_at.is_(None) + 合约 valid_until 过期，A73；
-        该模块当前零生产导入，可达性由 tests/test_ocr_a125_policy_bundle_pins.py 机器盯防）
+      - 读侧 Serving 过滤：当前无生产读侧——原 A73 过滤
+        （PolicyBundle.revoked_at.is_(None) + 合约 valid_until 过期）位于
+        app/services/policy_evaluator.py，该模块零生产导入（死读侧），已于 2026-11 删除（死代码清理）；
+        policy_compiler.py 的 PolicyBundle 是同名
+        内存类，与本表无关。复活迹象由 tests/test_ocr_a125_policy_bundle_pins.py 机器盯防。
       - 撤销写入：app/services/contract_service.py（合约 TERMINATED 时
         逐包写 revoked_at 并同步移出 OPA）
       - 本模块行写入方：app/ 中当前不存在（表由部署侧填充）——任何新

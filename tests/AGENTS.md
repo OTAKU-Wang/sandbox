@@ -35,7 +35,7 @@
 ## ANTI-PATTERNS (THIS PROJECT)
 - DO NOT "fix" simulation fallbacks they exercise — `tee_simulator`, `gpu_tee_simulator`, firecracker simulation mode, KMS software quotes, training proxy mode are design; `test_training_fail_closed` asserts a simulated result never masquerades as real.
 - `test_p0_security_gaps` greps app source text (SCMP_ACT_KILL, bloom_filter, whitelist tokens) — brittle by design; it breaks on refactors of `audit_service`, `secure_duckdb`, `firecracker_runtime`, `sandbox_security`.
-- Live-URL E2E (`e2e_full_test.py`, `test_e2e_full_lifecycle.py`) hits a hardcoded deployed base URL with `time.sleep` 429 backoff and hardcoded creds — manual-only, excluded from CI; don't add files in this style.
+- Live-URL E2E (`test_e2e_full_lifecycle.py`) hits a hardcoded deployed base URL with `time.sleep` 429 backoff and hardcoded creds — manual-only, excluded from CI; don't add files in this style.
 - `test_sm2_crypto.py` is misnamed: it tests SM4/SM3 (`SM4Cipher`/`sm3_hash`), no SM2.
 - The session-scoped `event_loop` fixture was DELETED (A192x) and `test_a192x_harness_discipline.py` fails if it is resurrected or if either loop-scope ini key disappears; unfiltered `asyncio.all_tasks()` gathers outside a `_task_generation` consumer are likewise banned. `test_p05_code_scanning` still calls `asyncio.get_event_loop().run_until_complete` — known legacy, do not propagate.
 - Duplicated helpers are local on purpose: `_mk_session`, `_run_runner`, `_mk_contract`, fake redis builders are re-declared per file; no shared util module exists.

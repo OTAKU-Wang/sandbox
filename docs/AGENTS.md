@@ -26,7 +26,7 @@
 | OCR wave 1 (A1..A319: ledger, fix queue, gate evidence) | `ocr-review-2026-10-18/` (380 files) — own AGENTS.md; `ocr-review-2026-10-20/` + `-20-partial/` are **empty** rounds (`findings=0`, json `[]`) |
 
 ## ARCHAEOLOGY — never plan from these
-`spec-implementation-analysis.md` (920), `implementation-tasks.md` (874), `implementation-tasks-v2.md` (756), `merged-task-plan.md` (194), `task-status-comparison.md` (117), `industry-comparison-analysis.md` (85): June-2026 snapshots (~55% / ~70% implemented) that re-tally the same P0/P1/P2 universe at different dates, with named owners and strikethrough status. The forward plan is `specs/ss-11-cds-productization.md`.
+June-2026 snapshot trackers (`spec-implementation-analysis.md`, `implementation-tasks*.md`, `merged-task-plan.md`, `task-status-comparison.md`, `industry-comparison-analysis.md`) were deleted in the 2026-11 dead-code sweep. The forward plan is `specs/ss-11-cds-productization.md`.
 
 ## CONVENTIONS
 - Header blockquote metadata per doc (日期 / 基线 / 性质 / 范围, plus 前序 / 编号 for plans). Plan template: 基线复核 → P0/P1/P2 tasks with file:line anchors → 横切面 (开关矩阵 / Alembic 清单 / 测试计划 / 发布顺序 / 风险表) → 执行边界声明 → appended `Round NN 执行记录`.
@@ -40,7 +40,7 @@
 - `error-codes.md` is a test input: changing the 级别能力 table or the code list can break `test_capability_matrix_consistency.py`. `SESSION_TERMINATED` (410) must stay non-retryable — `cds_sdk` stops retrying on it.
 - Do not delete honest simulated paths. mock-remediation classes them: S1 synthetic-data features stay, S2 honest fallbacks stay but need a real prod backend, S3 hardware-gated simulation is allowed; only S4 (fake implementations, idle gates, orphans) is a defect to fix.
 - `mock-remediation-plan.md` MR-A1 step 2 (`tongsuo enc -sm4-gcm` CLI) is 作废 — superseded by SS-10 CB-03's libtongsuo C helper; don't re-plan it.
-- Never put a remote host address or any password in repo markdown; those values live in `/root/cds.env` / `/tmp/cds-local.env`. The rule is currently **broken** in tracked files (`defect-ledger-2026-10-16-portal-e2e.md:8`, `agent-handoff-2026-10-16.md:21,24-25`, `ai-sandbox-gap-remediation-plan.md:395,419`, `e2e/01-deploy.md:10`, and the root file literally named `root@100.112.5.253`) — copy the 10-13 archive's masking style (`100.112.5.x`), don't add to the leak.
+- Never put a remote host address or any password in repo markdown; those values live in `/root/cds.env` / `/tmp/cds-local.env`. The rule is currently **broken** in tracked files (`defect-ledger-2026-10-16-portal-e2e.md:8`, `ai-sandbox-gap-remediation-plan.md:395,419`, `e2e/01-deploy.md:10` — the root file literally named `root@100.112.5.x` (full address withheld, masking style below) and `agent-handoff-2026-10-16.md` were deleted 2026-11, but the values remain in git history) — copy the 10-13 archive's masking style (`100.112.5.x`), don't add to the leak.
 - `docs/e2e/01-deploy.md` (42) is a shorter near-duplicate of `e2e-2026-10-13-remote/01-deployment.md` (57) — read the archive copy.
 - `docs/` is copied into the runtime image (`Dockerfile.api` ships it beside `app/` + `alembic/`) and 50 files outside `docs/` read it: don't treat md edits as comment-only changes.
 - Where these documents disagree with the root `AGENTS.md`, they are usually the fresher side (alembic head is `0034` not `0033`, 52-row code table not ~55, `retention.md`/`error-codes.md` grew, defect S4 closed) — but every line count in any doc rots within days: measure before quoting.

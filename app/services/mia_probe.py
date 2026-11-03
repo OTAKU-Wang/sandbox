@@ -284,8 +284,8 @@ class MIAProbe:
 
         # A159b: an n-gram is matched once, however many references contain it.
         # Counting per reference let R copies of the same reference report R x the
-        # overlap (ratio > 1.0 for a plain verbatim copy), and memorization_check
-        # turns that ratio straight into matched_ngrams.
+        # overlap (ratio > 1.0 for a plain verbatim copy); the former memorization_check
+        # twin turned that ratio straight into matched_ngrams (removed 2026-11).
         matched: set[tuple[str, ...]] = set()
         matched_snippets: list[str] = []
         seen_snippets: set[str] = set()
