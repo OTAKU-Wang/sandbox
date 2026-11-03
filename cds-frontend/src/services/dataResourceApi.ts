@@ -47,6 +47,54 @@ export interface DeleteResourceResult {
   key_destroyed: boolean;
 }
 
+/** Task 7 自动探查的单列结果。 */
+export interface AutoProfileColumn {
+  field: string;
+  pii_type: string | null;
+  severity: string | null;
+  /** 命中来自哪一层：regex 是确定性证据、ner/lac/transformers 不是。 */
+  layer: string | null;
+  confidence: number | null;
+  /** 1=公开 … 4=机密；null = 本列无敏感证据。 */
+  classification_level: number | null;
+  /** 该列分级是否进入出域管控（level ≥ 3）。 */
+  enforced: boolean;
+  evidence_rows: number;
+  samples_checked: number;
+  note: string | null;
+  pii_types: Array<{
+    pii_type: string; severity: string; layer: string; level: number; count: number; confidence: number;
+  }>;
+}
+
+export interface AutoProfileResult {
+  resource_id: string;
+  format: string;
+  /** pii_ner 实际跑的引擎（环境缺 LAC 时会如实降到 rule）。 */
+  engine: string;
+  scanned_rows: number;
+  scanned_bytes: number;
+  truncated: boolean;
+  columns_sampled_per_field: number;
+  sensitivity_level: 'high' | 'medium' | 'low';
+  classification_level: number | null;
+  columns: AutoProfileColumn[];
+  field_classifications: Record<string, number>;
+  enforcement_preview: { mask_fields: string[]; deny_out_fields: string[] };
+  persisted: boolean;
+}
+
+/**
+ * Task 7：一键自动分类分级探查。识别全部复用后端既有的 app/services/pii_ner（前 500 行的
+ * 取样值逐列送检），前端不参与任何识别判定。
+ *
+ * 结论会写回资源实体的 field_classifications —— 那同时是出域管控的输入（level≥3 强制
+ * 掩码、≥4 禁止出域），所以响应带了 enforcement_preview，UI 必须把它说出来。
+ */
+export function autoProfileResource(id: string): Promise<AutoProfileResult> {
+  return api.post(`/data-resources/${id}/auto-profile`);
+}
+
 export const dataResourceApi = {
   list: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<DataResource>> =>
     // A310：分页交给后端做。`paginated=true` 才回 {items,total,page,page_size} 信封，
@@ -81,4 +129,6 @@ export const dataResourceApi = {
 
   desensitize: (id: string): Promise<DesensitizeResult> =>
     api.post(`/data-resources/${id}/desensitize`),
+
+  autoProfile: autoProfileResource,
 };

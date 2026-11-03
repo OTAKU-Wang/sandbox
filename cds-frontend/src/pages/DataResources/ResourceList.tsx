@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Table, Button, Space, Tag, Typography, message, Popconfirm, Upload, Modal, Form, Input, Drawer, Descriptions } from 'antd';
-import { PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { dataResourceApi } from '../../services/dataResourceApi';
-import type { DataResource } from '../../services/dataResourceApi';
+import { dataResourceApi, autoProfileResource } from '../../services/dataResourceApi';
+import type { AutoProfileResult, DataResource } from '../../services/dataResourceApi';
 import type { ColumnsType } from 'antd/es/table';
 import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
+import { getErrorMessage } from '../../components/Feedback/errorMessage';
 import DesensitizedPreviewModal from './DesensitizedPreviewModal';
+import AutoProfileModal from './AutoProfileModal';
 
 const { Title } = Typography;
 
@@ -22,6 +24,9 @@ export default function ResourceList() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<DataResource | null>(null);
+  const [profileTarget, setProfileTarget] = useState<DataResource | null>(null);
+  const [profilingId, setProfilingId] = useState<string | null>(null);
+  const [profileResult, setProfileResult] = useState<AutoProfileResult | null>(null);
   const [form] = Form.useForm();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -69,6 +74,22 @@ export default function ResourceList() {
     onError: () => message.error('上传失败'),
   });
 
+  const profileMutation = useMutation({
+    mutationFn: (resourceId: string) => autoProfileResource(resourceId),
+    onSuccess: (result) => {
+      // profileTarget 留着给弹窗标题用，它随弹窗一起关；按钮转圈另有 profilingId。
+      setProfileResult(result);
+      setProfilingId(null);
+      queryClient.invalidateQueries({ queryKey: ['data-resources'] });
+      queryClient.invalidateQueries({ queryKey: ['data-resource', result.resource_id] });
+    },
+    // 不支持的格式 / 无数据行都是后端的 400，它已经把原因说清楚了，直接透传而不是换成「探查失败」。
+    onError: (error) => {
+      setProfilingId(null);
+      message.error(getErrorMessage(error));
+    },
+  });
+
   const columns: ColumnsType<DataResource> = [
     { title: '名称', dataIndex: 'name', key: 'name', width: 200 },
     { title: '类型', dataIndex: 'format', key: 'format', width: 100,
@@ -82,13 +103,25 @@ export default function ResourceList() {
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180,
       render: (t: string) => new Date(t).toLocaleString('zh-CN') },
     {
-      title: '操作', key: 'action', width: 230,
+      title: '操作', key: 'action', width: 320,
       render: (_, record) => (
         <Space>
           <Button size="small" icon={<EyeOutlined />} onClick={() => setSelectedResourceId(record.id)}>
             查看
           </Button>
           <Button size="small" onClick={() => setPreviewTarget(record)}>脱敏预览</Button>
+          <Button
+            size="small"
+            icon={<SafetyCertificateOutlined />}
+            loading={profilingId === record.id}
+            onClick={() => {
+              setProfileTarget(record);
+              setProfilingId(record.id);
+              profileMutation.mutate(record.id);
+            }}
+          >
+            智能探查
+          </Button>
           <Popconfirm title="确认删除？" onConfirm={() => deleteMutation.mutate(record.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -186,6 +219,14 @@ export default function ResourceList() {
         resourceId={previewTarget?.id ?? null}
         resourceName={previewTarget?.name}
         onClose={() => setPreviewTarget(null)}
+      />
+      <AutoProfileModal
+        result={profileResult}
+        resourceName={profileTarget?.name}
+        onClose={() => {
+          setProfileResult(null);
+          setProfileTarget(null);
+        }}
       />
     </div>
   );

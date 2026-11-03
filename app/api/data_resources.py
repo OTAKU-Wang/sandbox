@@ -1,6 +1,9 @@
 """Data Resource API — upload, encrypt, and manage data sources."""
+import csv
 import io
+import json
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
@@ -166,6 +169,146 @@ def _is_phone_like(val: str) -> bool:
         return False
     digits = "".join(c for c in val if c.isdigit())
     return len(digits) == 11 and digits.startswith("1")
+
+
+_AUTO_PROFILE_MAX_LINES = 500
+_AUTO_PROFILE_SAMPLES_PER_FIELD = 20
+_AUTO_PROFILE_FORMATS = ("csv", "json")
+
+
+def _pii_severity_levels() -> dict[str, int]:
+    """Map pii_ner severity onto field_classifications levels (1=public … 4=secret).
+
+    序直接取 pii_ner.Severity 的声明序（critical…low），不另立第二张表：
+    critical→4（禁止出域）、high→3（强制掩码）、medium→2、low→1，与
+    DataResource.field_classifications 既有口径一致。
+    """
+    from app.services.pii_ner import Severity
+
+    order = list(Severity)
+    return {sev.value: len(order) - i for i, sev in enumerate(order)}
+
+
+def _auto_profile_rows(raw: bytes, fmt: str) -> tuple[list[str], list[dict[str, Any]], bool]:
+    """取前 _AUTO_PROFILE_MAX_LINES 行 → (列名, 行, 是否截断)。
+
+    解析不出列结构就抛 ValueError，由端点转 400 —— 而不是给一个猜出来的敏感等级。
+    """
+    text = raw.decode("utf-8-sig", errors="ignore")
+    if fmt == ResourceFormat.JSON.value:
+        try:
+            parsed = json.loads(text)
+        except ValueError as e:
+            raise ValueError(f"JSON 解析失败（{type(e).__name__}）") from e
+        records = parsed if isinstance(parsed, list) else [parsed]
+        objects = [rec for rec in records if isinstance(rec, dict)]
+        if not objects:
+            raise ValueError("JSON 里没有对象记录可探查")
+        columns = list(dict.fromkeys(str(key) for rec in objects for key in rec))
+        return columns, objects[:_AUTO_PROFILE_MAX_LINES], len(objects) > _AUTO_PROFILE_MAX_LINES
+
+    reader = csv.DictReader(io.StringIO(text))
+    columns = [col for col in (reader.fieldnames or []) if col]
+    if not columns:
+        raise ValueError("CSV 缺少表头行，无法按列探查")
+    rows: list[dict[str, Any]] = []
+    truncated = False
+    for index, row in enumerate(reader):
+        if index >= _AUTO_PROFILE_MAX_LINES:
+            truncated = True
+            break
+        rows.append(row)
+    if not rows:
+        # DictReader 把第一行当成表头，因此“只有一行”无法区分是无表头还是空数据；
+        # 两种情况都是 0 个取样值，不能给出一个像样子的敏感等级。
+        raise ValueError("CSV 没有可探查的数据行（只有表头行或空文件）")
+    return columns, rows, truncated
+
+
+def _profile_field(
+    field: str, samples: list[str], service: Any, levels: dict[str, int]
+) -> dict[str, Any]:
+    """一列的探查结果：取样值逐个交给既有 pii_ner，聚合出主导命中。"""
+    tally: dict[str, dict[str, Any]] = {}
+    evidence_rows = 0
+    for value in samples:
+        hit = False
+        for match in service.detect(value).matches:
+            hit = True
+            level = levels.get(match.severity.value, 0)
+            entry = tally.get(match.pii_type.value)
+            if entry is None:
+                entry = {
+                    "pii_type": match.pii_type.value, "severity": match.severity.value,
+                    "layer": match.layer, "level": level, "count": 0,
+                    "confidence": match.confidence,
+                }
+                tally[match.pii_type.value] = entry
+            entry["count"] += 1
+            entry["confidence"] = max(entry["confidence"], match.confidence)
+            if level > entry["level"]:
+                entry.update({"severity": match.severity.value, "layer": match.layer, "level": level})
+        if hit:
+            evidence_rows += 1
+
+    if not tally:
+        return {
+            "field": field, "pii_type": None, "severity": None, "layer": None,
+            "confidence": None, "classification_level": None, "enforced": False,
+            "pii_types": [], "evidence_rows": 0, "samples_checked": len(samples), "note": None,
+        }
+
+    detected = sorted(tally.values(), key=lambda item: (-item["level"], -item["count"]))
+    dominant = detected[0]
+    level = dominant["level"]
+    note = None
+    if dominant["layer"] != "regex" and level > 2:
+        # A194 P2/P3：规则 NER 层把任意日期串认成出生日期、任意地址串认成地址，误报钉在账上。
+        # 非确定性证据因此最高只到 internal（2）：只提示，不参与 mask / deny 判定。
+        note = f"命中来自 {dominant['layer']} 层（非确定性证据），仅作提示，不参与出域管控"
+        level = 2
+    return {
+        "field": field, "pii_type": dominant["pii_type"], "severity": dominant["severity"],
+        "layer": dominant["layer"], "confidence": round(dominant["confidence"], 3),
+        "classification_level": level, "enforced": level >= 3, "pii_types": detected,
+        "evidence_rows": evidence_rows, "samples_checked": len(samples), "note": note,
+    }
+
+
+def _field_pii_metadata(profiled: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sensitivity": "pii" if profiled["pii_type"] else "unknown",
+        "pii_type": profiled["pii_type"],
+        "pii_severity": profiled["severity"],
+        "pii_layer": profiled["layer"],
+        "classification_level": profiled["classification_level"],
+        "pii_enforced": profiled["enforced"],
+    }
+
+
+def _merge_profile_into_schema(
+    existing: list[Any] | None, columns: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """把探查结论并进 schema_fields，返回全新对象。
+
+    schema_fields 是普通 JSON 列：原地改完再赋回同一个对象不会被标脏，写入会静默
+    丢失，所以 list 与每条 dict 都重建。
+    """
+    profiled = {col["field"]: col for col in columns}
+    merged: list[dict[str, Any]] = [dict(entry) for entry in (existing or []) if isinstance(entry, dict)]
+    for entry in merged:
+        match = profiled.get(str(entry.get("name", "")))
+        if match is not None:
+            entry.update(_field_pii_metadata(match))
+    known = {str(entry.get("name", "")) for entry in merged}
+    for column in columns:
+        if column["field"] in known:
+            continue
+        merged.append({
+            "name": column["field"], "type": "string", "mask_pattern": "none",
+            **_field_pii_metadata(column),
+        })
+    return merged
 
 
 @router.post("/upload", response_model=DataResourceResponse)
@@ -483,3 +626,116 @@ async def generate_mock_data(
 ):
     """Deprecated compatibility alias for synthetic test data generation."""
     return _generate_synthetic_data_from_schema(schema, row_count, "mock")
+
+
+@router.post("/{resource_id}/auto-profile")
+async def auto_profile_resource(
+    resource_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_business_user),
+):
+    """自动分类分级探查：取样前 500 行，逐列交给既有 pii_ner 识别，回填字段级分级与推荐等级。
+
+    识别能力全部复用 app/services/pii_ner（本仓唯一的 PII 表），这里不维护第二份正则。
+    落库的 level 就是出域管控的输入：policy_compiler.field_rules_from_classifications
+    把 level≥3 编成强制掩码、≥4 编成禁止出域（output_policy 与 sandbox_db 查询期都读它），
+    所以响应同时给出管控预览，让数据商看见这次探查会改变什么。
+    """
+    from app.services.pii_ner import pii_ner_service
+    from app.services.policy_compiler import policy_compiler
+
+    result = await db.execute(select(DataResource).where(DataResource.id == resource_id))
+    resource = result.scalar_one_or_none()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if resource.provider_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not resource.storage_path:
+        raise HTTPException(status_code=400, detail="Resource has no stored data")
+    if resource.format not in _AUTO_PROFILE_FORMATS:
+        supported = "、".join(_AUTO_PROFILE_FORMATS)
+        raise HTTPException(
+            status_code=400,
+            detail=f"暂不支持对 {resource.format} 资源做字段级自动探查（当前支持 {supported}）",
+        )
+
+    try:
+        data = storage_service.download(resource.storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read data: {e}")
+
+    try:
+        column_names, rows, truncated = _auto_profile_rows(data, resource.format)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"自动探查失败：{e}")
+
+    levels = _pii_severity_levels()
+    engine = pii_ner_service.detect("").ner_engine
+    columns: list[dict[str, Any]] = []
+    for name in column_names:
+        samples: list[str] = []
+        for row in rows:
+            if len(samples) >= _AUTO_PROFILE_SAMPLES_PER_FIELD:
+                break
+            value = row.get(name)
+            if value is None or isinstance(value, (dict, list, bool)):
+                continue
+            text_value = (value if isinstance(value, str) else str(value)).strip()
+            if text_value and text_value not in samples:
+                samples.append(text_value)
+        columns.append(_profile_field(name, samples, pii_ner_service, levels))
+
+    classifications = {
+        col["field"]: col["classification_level"] for col in columns if col["classification_level"]
+    }
+    max_level = max(classifications.values(), default=0)
+    if max_level >= 3:
+        sensitivity_level = "high"
+    elif max_level == 2:
+        sensitivity_level = "medium"
+    else:
+        sensitivity_level = "low"
+
+    resource_id_str = str(resource.id)
+    resource_format = resource.format
+    # 两个列都整对象重建（JSON 列原地改不会被标脏）。
+    resource.field_classifications = classifications
+    resource.schema_fields = _merge_profile_into_schema(resource.schema_fields, columns)
+    await db.flush()
+
+    enforcement = policy_compiler.field_rules_from_classifications(classifications)
+    await audit_service.log(
+        db,
+        action="data_resource.auto_profile",
+        resource_type="data_resource",
+        user_id=current_user.id,
+        resource_id=resource_id_str,
+        detail={
+            "sensitivity_level": sensitivity_level,
+            "classification_level": max_level or None,
+            "pii_columns": sum(1 for col in columns if col["pii_type"]),
+            "scanned_rows": len(rows),
+            "truncated": truncated,
+            "engine": engine,
+            "mask_fields": enforcement["mask_fields"],
+            "deny_out_fields": enforcement["deny_out_fields"],
+        },
+    )
+    # 同 upload 的 D-e2e-14：前端探查完立刻重拉列表，未 commit 的分类结果读不到。
+    await db.commit()
+
+    return {
+        "resource_id": resource_id_str,
+        "format": resource_format,
+        "engine": engine,
+        "scanned_rows": len(rows),
+        "scanned_bytes": len(data),
+        "truncated": truncated,
+        "columns_sampled_per_field": _AUTO_PROFILE_SAMPLES_PER_FIELD,
+        "sensitivity_level": sensitivity_level,
+        "classification_level": max_level or None,
+        "columns": columns,
+        "field_classifications": classifications,
+        "enforcement_preview": enforcement,
+        "persisted": True,
+    }
