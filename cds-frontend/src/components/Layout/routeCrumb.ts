@@ -88,6 +88,8 @@ export const ROUTE_CRUMBS: RouteCrumb[] = [
   // ↓ 2026-10-18 补齐：App.tsx 早已注册、表里却没有的路由（旧口径下全部落「运营概览」兜底）。
   // 段名一律逐字取 Sidebar.tsx 的左栏菜单文案，不在这里新造导航词。
   { prefix: '/flow/guide', title: '开发指引', style: 'slash', segs: ['开发指引'] },
+  // 场景中心在左栏是「我的开发」的子项，面包屑段名逐字取菜单文案。
+  { prefix: '/flow/scenarios', title: '场景中心', style: 'slash', segs: [HOME, DEV, '场景中心'] },
   { prefix: '/flow/quota', title: '环境配额', style: 'slash', segs: ['环境配额'] },
   { prefix: '/ops/deployments', title: '部署', style: 'slash', segs: ['K8s 运营', '部署'] },
   { prefix: '/ops/network-policies', title: '网络策略', style: 'slash', segs: ['K8s 运营', '网络策略'] },

@@ -39,6 +39,7 @@ from app.api import agent  # N10: sandbox-internal agent execution
 from app.api import cube_egress  # CB-06: node egress audit ingestion (/internal/audit)
 from app.api import api_keys  # SS-12: platform API key lifecycle (human-only)
 from app.api import teams  # 2026-11-03 sandbox realignment Task 4: 团队管理与团队级配额隔离
+from app.api import scenarios as scenarios_api  # 2026-11-03 sandbox realignment Task 5: 业务场景中心
 from app.models import pipeline_task, training_job, field_exposure as field_exposure_models, connector as connector_models, merkle_leaf, certificate, sandbox_node, policy_bundle, dp_budget, network_policy, app_credential, federation_trust, blockchain_anchor, alert, mpc_key, trained_model, rag_generative_model  # Ensure tables are created
 from app.models import api_key as api_key_models  # SS-12: api_keys table
 from app.models import session_operation  # W11: async operation records
@@ -652,6 +653,14 @@ app.include_router(network_policy_api.router, prefix="/api/v1/network-policies",
 app.include_router(gateway.router, prefix="/api/v1/gateway", tags=["gateway"], dependencies=[Depends(require_group("gateway"))])
 app.include_router(notebooks_api.router, prefix="/api/v1/notebooks", tags=["notebooks"], dependencies=[Depends(require_group("sessions"))])
 app.include_router(workloads_api.router, prefix="/api/v1/workloads", tags=["workloads"], dependencies=[Depends(require_group("sessions"))])
+# Task 5 场景中心必须先挂：flow_runtime 的面（/runtime-status、/dashboard/home）路径更深，
+# 而 `/api/v1/flow` 这一通用前缀先挂会让深路径永久不可达（仓内既有口径：先挂更具体的前缀）。
+app.include_router(
+    scenarios_api.router,
+    prefix="/api/v1/flow/scenarios",
+    tags=["flow"],
+    dependencies=[Depends(require_group("sessions"))],
+)
 app.include_router(flow_runtime_api.router, prefix="/api/v1/flow", tags=["flow"], dependencies=[Depends(require_group("sessions"))])
 # SS-17: 配额用量只读面——挂在 deliveries 前缀（gateway 组已在 SS-12 前缀映射内；
 # 未映射前缀会被 resolve_group 判为未映射而对 API Key 默认拒绝）。

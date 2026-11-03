@@ -189,7 +189,7 @@ describe('开发者工作台菜单 = 原型 4+2（1、首页-平台总览.png）
     const devRows = Array.from(
       document.querySelectorAll('.ant-menu-submenu-open li .ant-menu-title-content'),
     ).map((node) => node.textContent);
-    expect(devRows).toEqual(['任务列表', '在线调试', '负载与发布']);
+    expect(devRows).toEqual(['场景中心', '任务列表', '在线调试', '负载与发布']);
   });
 
   it('运营方在开发者工台展开「安全管理」恰好是操作日志 + 合规披露', async () => {

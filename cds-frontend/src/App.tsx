@@ -36,6 +36,7 @@ const FlowDevTasks = lazy(() => import('./pages/Flow/DevTasks'));
 const FlowDevTaskCreate = lazy(() => import('./pages/Flow/DevTaskCreatePage'));
 const FlowTaskDetail = lazy(() => import('./pages/Flow/TaskDetail'));
 const FlowQuota = lazy(() => import('./pages/Flow/Quota'));
+const FlowScenarios = lazy(() => import('./pages/Flow/ScenarioCenter'));
 const AuditLog = lazy(() => import('./pages/Audit/AuditLog'));
 const InspectionPipeline = lazy(() => import('./pages/OutputControl/InspectionPipeline'));
 const MonitoringDashboard = lazy(() => import('./pages/Monitoring'));
@@ -116,6 +117,7 @@ export default function App() {
         <Route path="flow/tasks/new" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowDevTaskCreate /></WorkspaceRoute></RoleRoute>} />
         <Route path="flow/tasks/:taskId" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowTaskDetail /></WorkspaceRoute></RoleRoute>} />
                 <Route path="flow/guide" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowGuide /></WorkspaceRoute></RoleRoute>} />
+                <Route path="flow/scenarios" element={<RoleRoute allowedRoles={ROLE_GROUPS.flowDevUsers}><WorkspaceRoute workspace="developer"><FlowScenarios /></WorkspaceRoute></RoleRoute>} />
                 <Route path="flow/quota" element={<RoleRoute allowedRoles={ROLE_GROUPS.sandboxReaders}><WorkspaceRoute workspace="developer"><FlowQuota /></WorkspaceRoute></RoleRoute>} />
                 <Route path="audit" element={<RoleRoute allowedRoles={ROLE_GROUPS.auditReaders}><WorkspaceRoute workspace="developer"><AuditLog /></WorkspaceRoute></RoleRoute>} />
                 <Route path="output-control" element={<RoleRoute allowedRoles={ROLE_GROUPS.outputControlReaders}><WorkspaceRoute workspace="admin"><InspectionPipeline /></WorkspaceRoute></RoleRoute>} />

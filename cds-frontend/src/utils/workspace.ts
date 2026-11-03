@@ -27,6 +27,8 @@ export const DEVELOPER_MENU_KEYS: string[] = [
   '/deliveries/dataset',
   '/deliveries/push',
   '/flow/tasks',
+  // Task 5 场景中心：开发者工台「我的开发」的首项，不加进白名单会被 filterMenuByWorkspace 剔掉。
+  '/flow/scenarios',
   '/flow/guide',
   '/flow/quota',
   '/audit',
