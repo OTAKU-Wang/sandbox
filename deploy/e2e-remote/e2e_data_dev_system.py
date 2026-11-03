@@ -5,13 +5,15 @@
 1. 平台启动与管理员登录 (Admin Auth)
 2. 团队空间管理与资源配额隔离 (Team Management & Quotas)
 3. 数据资源入库与自动分类分级探查 (Data Resource Upload & Auto Profile)
-4. 数据产品多版本管理与 Schema Diff 比对 (Product Versions & Diff)
+4. 数据产品多版本管理、Schema Diff 比对与生命周期发布 (Product Versions, Diff & Lifecycle)
 5. 业务场景中心与承接为建模项目 (Scenario Center -> Modeling Project)
 6. 建模项目多语言协同空间与 DAG 拓扑校验 (Modeling Project & DAG Kahn Sort)
 7. 模型反序列化安全扫描与评估指标对齐 (Model Security Scan & Metrics)
-8. 计量计费账单生成与对账单 CSV 导出 (Billing Invoice & CSV Export)
-9. 全局通知中心消息流转与已读状态 (Notification Center & Read Flow)
-10. 全生命周期不可篡改审计追踪 (Audit Trail Verification)
+8. 服务合约双方国密 SM2 数字签名、计量计费账单生成与对账单 CSV 导出 (SM2 Contract Signing, Invoices & Export)
+9. 算力节点诚实拒绝拦截断言 (Compute Node Honest Fail-Closed Rejection Assertion)
+10. 出域审批流程与敏感数据 DLP/DP 防护 (Output Review & Control Flow)
+11. 全局通知中心消息流转与待办闭环 (Notification Center & Todo Flow)
+12. 全生命周期不可篡改审计追踪 (Audit Trail Verification)
 
 Usage:
     python deploy/e2e-remote/e2e_data_dev_system.py [BASE_URL] [--out REPORT.json]
@@ -20,6 +22,7 @@ import argparse
 import base64
 import json
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -123,7 +126,6 @@ def main():
     prov_user_id = prov_res.json()["user"]["id"]
 
     # Admin upgrades provider role directly in DB (mirroring fixture make_user)
-    import subprocess
     subprocess.run([
         "docker", "exec", "l-postgres", "psql", "-U", "cds", "-d", "cds", "-c",
         f"UPDATE users SET role = 'data_provider' WHERE id = '{prov_user_id}';"
@@ -209,7 +211,7 @@ def main():
          f"pii_cols={list(classifications.keys())}, mask_preview={enforcement.get('mask_fields')}")
 
     # ─────────────────────────────────────────────────────────────
-    # Step 4: Data Product Versioning & Schema Diff Comparison
+    # Step 4: Data Product Versioning, Schema Diff & Lifecycle Publish
     # ─────────────────────────────────────────────────────────────
     v1_schema = {
         "fields": [
@@ -221,6 +223,7 @@ def main():
     prod_res = client.post("/api/v1/data-products", json={
         "name": f"企业信贷特征集_{suffix}",
         "product_type": "structured",
+        "resource_id": str(resource_id),
         "data_schema": v1_schema,
     }, headers=prov_headers)
     if prod_res.status_code not in (200, 201):
@@ -263,6 +266,21 @@ def main():
         step("4.4 product.rollback", "PASS", 200, "Successfully rolled back to version 1")
     else:
         step("4.4 product.rollback", "FAIL", rb_res.status_code, excerpt=rb_res.text)
+
+    # 4.5 Product Lifecycle: Submit for Review
+    sub_prod = client.post(f"/api/v1/data-products/{product_id}/submit", headers=prov_headers)
+    step("4.5 product.submit_review", "PASS" if sub_prod.status_code == 200 else "FAIL", sub_prod.status_code,
+         f"status={sub_prod.json().get('status') if sub_prod.status_code == 200 else ''}")
+
+    # 4.6 Product Lifecycle: Admin Approval
+    app_prod = client.post(f"/api/v1/data-products/{product_id}/approve", headers=admin_headers)
+    step("4.6 product.admin_approve", "PASS" if app_prod.status_code == 200 else "FAIL", app_prod.status_code,
+         f"status={app_prod.json().get('status') if app_prod.status_code == 200 else ''}")
+
+    # 4.7 Product Lifecycle: Provider Publish
+    pub_prod = client.post(f"/api/v1/data-products/{product_id}/publish", headers=prov_headers)
+    step("4.7 product.publish", "PASS" if pub_prod.status_code == 200 and pub_prod.json().get("status") == "published" else "FAIL",
+         pub_prod.status_code, f"status={pub_prod.json().get('status') if pub_prod.status_code == 200 else ''}")
 
     # ─────────────────────────────────────────────────────────────
     # Step 5: Scenario Center & Project Acceptance
@@ -388,9 +406,9 @@ def main():
         step("7.3 model.scan_safetensors_passed", "FAIL", scan_good.status_code, excerpt=scan_good.text)
 
     # ─────────────────────────────────────────────────────────────
-    # Step 8: Metering Invoices Generation & CSV Export
+    # Step 8: Two-Party GM/T SM2 Contract Signing & Invoicing
     # ─────────────────────────────────────────────────────────────
-    # Create test contract for invoicing
+    # Create test contract for data modeling
     contract_res = client.post("/api/v1/contracts", json={
         "title": f"数据开发应用服务合约_{suffix}",
         "buyer_id": buyer_user_id,
@@ -401,9 +419,54 @@ def main():
     if contract_res.status_code not in (200, 201):
         step("8.1 contract.create", "FAIL", contract_res.status_code, excerpt=contract_res.text)
         return finish(args.out)
-    contract_id = contract_res.json()["id"]
-    step("8.1 contract.create", "PASS", contract_res.status_code, f"contract_id={contract_id}")
+    contract_data = contract_res.json()
+    contract_id = contract_data["id"]
+    contract_no = contract_data["contract_no"]
+    step("8.1 contract.create", "PASS", contract_res.status_code, f"contract_id={contract_id}, no={contract_no}")
 
+    # 8.2 Provider GM/T SM2 Keygen & Contract Sign
+    prov_key_res = client.post("/api/v1/auth/generate-sm2-keys", headers=prov_headers)
+    if prov_key_res.status_code != 200:
+        step("8.2 contract.provider_sm2_sign", "FAIL", prov_key_res.status_code, excerpt=prov_key_res.text)
+        return finish(args.out)
+    prov_sm2 = prov_key_res.json()
+    t_prov = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload_prov = f"CDS-SIGN|{contract_id}|{contract_no}|provider|{t_prov}"
+    prov_sig_res = client.post("/api/v1/auth/sign-data", json={"data": payload_prov, "private_key": prov_sm2["private_key"]}, headers=prov_headers)
+    if prov_sig_res.status_code != 200:
+        step("8.2 contract.provider_sm2_sign", "FAIL", prov_sig_res.status_code, excerpt=prov_sig_res.text)
+        return finish(args.out)
+    prov_signature = prov_sig_res.json()["signature"]
+
+    sign_prov_res = client.post(f"/api/v1/contracts/{contract_id}/sign", json={"signature": prov_signature, "timestamp": t_prov}, headers=prov_headers)
+    if sign_prov_res.status_code == 200 and sign_prov_res.json().get("status") == "negotiating":
+        step("8.2 contract.provider_sm2_sign", "PASS", 200, f"status=negotiating, provider_signed_at={sign_prov_res.json().get('provider_signed_at')}")
+    else:
+        step("8.2 contract.provider_sm2_sign", "FAIL", sign_prov_res.status_code, excerpt=sign_prov_res.text)
+        return finish(args.out)
+
+    # 8.3 Buyer GM/T SM2 Keygen & Contract Sign (transitions contract to ACTIVE)
+    buyer_key_res = client.post("/api/v1/auth/generate-sm2-keys", headers=buyer_headers)
+    if buyer_key_res.status_code != 200:
+        step("8.3 contract.buyer_sm2_sign", "FAIL", buyer_key_res.status_code, excerpt=buyer_key_res.text)
+        return finish(args.out)
+    buyer_sm2 = buyer_key_res.json()
+    t_buyer = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload_buyer = f"CDS-SIGN|{contract_id}|{contract_no}|buyer|{t_buyer}"
+    buyer_sig_res = client.post("/api/v1/auth/sign-data", json={"data": payload_buyer, "private_key": buyer_sm2["private_key"]}, headers=buyer_headers)
+    if buyer_sig_res.status_code != 200:
+        step("8.3 contract.buyer_sm2_sign", "FAIL", buyer_sig_res.status_code, excerpt=buyer_sig_res.text)
+        return finish(args.out)
+    buyer_signature = buyer_sig_res.json()["signature"]
+
+    sign_buyer_res = client.post(f"/api/v1/contracts/{contract_id}/sign", json={"signature": buyer_signature, "timestamp": t_buyer}, headers=buyer_headers)
+    if sign_buyer_res.status_code == 200 and sign_buyer_res.json().get("status") == "active":
+        step("8.3 contract.buyer_sm2_sign", "PASS", 200, f"status=active, buyer_signed_at={sign_buyer_res.json().get('buyer_signed_at')}")
+    else:
+        step("8.3 contract.buyer_sm2_sign", "FAIL", sign_buyer_res.status_code, excerpt=sign_buyer_res.text)
+        return finish(args.out)
+
+    # 8.4 Invoicing based on Active Contract
     period_now = time.strftime("%Y-%m")
     inv_gen = client.post("/api/v1/deliveries/invoices/generate", json={
         "contract_id": contract_id,
@@ -412,52 +475,159 @@ def main():
 
     if inv_gen.status_code in (200, 201):
         invoice_id = inv_gen.json()["id"]
-        step("8.2 invoice.generate", "PASS", inv_gen.status_code, f"invoice_id={invoice_id}, period={period_now}")
+        step("8.4 invoice.generate", "PASS", inv_gen.status_code, f"invoice_id={invoice_id}, period={period_now}")
 
         # Export CSV
         csv_export = client.get(f"/api/v1/deliveries/invoices/{invoice_id}/export", headers=prov_headers)
         if csv_export.status_code == 200 and "text/csv" in csv_export.headers.get("content-type", ""):
-            step("8.3 invoice.csv_export", "PASS", 200, f"csv_bytes={len(csv_export.content)}")
+            step("8.5 invoice.csv_export", "PASS", 200, f"csv_bytes={len(csv_export.content)}")
         else:
-            step("8.3 invoice.csv_export", "FAIL", csv_export.status_code, excerpt=csv_export.text)
+            step("8.5 invoice.csv_export", "FAIL", csv_export.status_code, excerpt=csv_export.text)
     else:
-        step("8.2 invoice.generate", "FAIL", inv_gen.status_code, excerpt=inv_gen.text)
+        step("8.4 invoice.generate", "FAIL", inv_gen.status_code, excerpt=inv_gen.text)
 
     # ─────────────────────────────────────────────────────────────
-    # Step 9: User Notification Center & Read State Flow
+    # Step 9: Compute Node Honest Fail-Closed Rejection Assertion
+    # ─────────────────────────────────────────────────────────────
+    # SS-13 / Anti-Pattern rule: Never fake TEE/GPU hardware; Never degrade isolation silently.
+    # An l2c MicroVM session request on host without physical TEE hardware MUST return 400 RUNTIME_UNAVAILABLE.
+    tee_session_res = client.post("/api/v1/sandbox-sessions", json={
+        "data_product_id": product_id,
+        "contract_id": contract_id,
+        "sandbox_level": "l2c",
+        "tee_policy": "tee_required",
+        "sandbox_mode": "structured_query",
+    }, headers=buyer_headers)
+
+    if tee_session_res.status_code == 400:
+        err_json = tee_session_res.json()
+        code = err_json.get("code")
+        msg = err_json.get("message", "")
+        if code == "RUNTIME_UNAVAILABLE" and "MicroVM 沙箱数据面未启用或未就绪" in msg:
+            step("9.1 node.honest_rejection_l2c", "PASS", 400, f"Honest fail-closed: code={code}, reason={err_json.get('detail', {}).get('reason')}")
+        else:
+            step("9.1 node.honest_rejection_l2c", "FAIL", 400, f"Unexpected 400 payload: {err_json}")
+    else:
+        step("9.1 node.honest_rejection_l2c", "FAIL", tee_session_res.status_code, f"Expected 400 RUNTIME_UNAVAILABLE, got {tee_session_res.status_code}", excerpt=tee_session_res.text)
+
+    # ─────────────────────────────────────────────────────────────
+    # Step 10: Output Review & Control Flow
+    # ─────────────────────────────────────────────────────────────
+    # 10.1 Output DLP Inspection, Masking & Watermarking (T5 Inspection)
+    raw_output_text = "信贷评估结果：借款主体张三，身份证110101199003072341，手机号13800138000，核准授信额度85000元。"
+    adhoc_session_label = f"review_session_{suffix}"
+    inspect_res = client.post("/api/v1/output-control/inspect", json={
+        "session_id": adhoc_session_label,
+        "output": raw_output_text,
+    }, headers=buyer_headers)
+    if inspect_res.status_code == 200:
+        insp_data = inspect_res.json()
+        findings = insp_data.get("findings", [])
+        redacted = insp_data.get("redacted_output", "")
+        has_watermark = bool(insp_data.get("watermark"))
+        has_sig = bool(insp_data.get("signature"))
+        has_pii_mask = "[REDACTED:" in redacted
+        if len(findings) > 0 and has_pii_mask and has_watermark and has_sig:
+            step("10.1 output.dlp_inspect_and_mask", "PASS", 200, f"findings={len(findings)}, masked_pii=True, watermark={has_watermark}, signature={has_sig}")
+        else:
+            step("10.1 output.dlp_inspect_and_mask", "FAIL", 200, f"Incomplete inspection response: {insp_data}")
+    else:
+        step("10.1 output.dlp_inspect_and_mask", "FAIL", inspect_res.status_code, excerpt=inspect_res.text)
+
+    # 10.2 Anti-Reconstruction Inference Attack Detection
+    recon_res = client.post("/api/v1/output-control/reconstruction-check", json={
+        "output_rows": [{"id": 1, "name": "张三", "score": 720}, {"id": 2, "name": "李四", "score": 680}],
+        "source_rows": [{"id": 1, "name": "张三", "score": 720}, {"id": 2, "name": "李四", "score": 680}, {"id": 3, "name": "王五", "score": 650}],
+        "threshold": 0.05,
+    }, headers=buyer_headers)
+    if recon_res.status_code == 200 and recon_res.json().get("passed") is False:
+        step("10.2 output.reconstruction_attack_blocked", "PASS", 200, f"match_rate={recon_res.json().get('match_rate')}, threshold=0.05, blocked=True")
+    else:
+        step("10.2 output.reconstruction_attack_blocked", "FAIL", recon_res.status_code, excerpt=recon_res.text)
+
+    # 10.3 Task Output Review Lifecycle & Admin Approval Flow
+    review_session_id = str(uuid.uuid4())
+    review_task_id = f"task_review_{suffix}"
+    review_task_uuid = str(uuid.uuid4())
+    sql_task_review = f"""
+    INSERT INTO sandbox_sessions (id, user_id, data_product_id, status, sandbox_level, sandbox_mode, timeout_seconds, extended_seconds, auto_resume, created_at, updated_at)
+    VALUES ('{review_session_id}', '{buyer_user_id}', '{product_id}', 'running', 'L0', 'interactive', 3600, 0, false, NOW(), NOW());
+
+    INSERT INTO sandbox_tasks (id, session_id, user_id, task_id, task_type, status, purpose, output_rows, timeout_seconds, created_at, updated_at)
+    VALUES ('{review_task_uuid}', '{review_session_id}', '{buyer_user_id}', '{review_task_id}', 'query', 'output_review', '信贷特征模型分析结论出域审核申请', 0, 3600, NOW(), NOW());
+    """
+    subprocess.run(["docker", "exec", "l-postgres", "psql", "-U", "cds", "-d", "cds", "-c", sql_task_review], check=True, capture_output=True)
+
+    # Verify task appears in Admin's Notifications Todo list
+    admin_notifs = client.get("/api/v1/monitoring/notifications", headers=admin_headers)
+    todo_tasks = [item for item in (admin_notifs.json().get("items") or []) if item.get("extra_meta", {}).get("task_id") == review_task_id]
+    if len(todo_tasks) > 0:
+        step("10.3 output.review_todo_generated", "PASS", 200, f"todo_title='{todo_tasks[0]['title']}', category=todo")
+    else:
+        step("10.3 output.review_todo_generated", "FAIL", admin_notifs.status_code, "Review task not found in admin todo list")
+
+    # Admin approves output review and marks task completed
+    complete_res = client.post(
+        f"/api/v1/sandbox-tasks/{review_task_id}/complete?session_id={review_session_id}&output_rows=60",
+        json={
+            "output_security": {
+                "inspection_report": {
+                    "passed": True,
+                    "reviewer": "admin",
+                    "review_notes": "出域内容已完成敏感信息脱敏与差分隐私噪声添加，准予出域",
+                }
+            }
+        },
+        headers=admin_headers
+    )
+    if complete_res.status_code == 200 and complete_res.json().get("status") == "completed":
+        step("10.4 output.admin_approve_completion", "PASS", 200, f"task_id={review_task_id}, status=completed")
+    else:
+        step("10.4 output.admin_approve_completion", "FAIL", complete_res.status_code, excerpt=complete_res.text)
+
+    # Verify todo is automatically cleared after approval
+    admin_notifs_after = client.get("/api/v1/monitoring/notifications", headers=admin_headers)
+    todo_tasks_after = [item for item in (admin_notifs_after.json().get("items") or []) if item.get("extra_meta", {}).get("task_id") == review_task_id]
+    if len(todo_tasks_after) == 0:
+        step("10.5 output.todo_cleared_after_approval", "PASS", 200, "Todo automatically resolved from queue")
+    else:
+        step("10.5 output.todo_cleared_after_approval", "FAIL", 200, "Todo still remains after completion")
+
+    # ─────────────────────────────────────────────────────────────
+    # Step 11: User Notification Center & Read State Flow
     # ─────────────────────────────────────────────────────────────
     # Send a notification to buyer
     notif_res = client.post("/api/v1/monitoring/notifications", json={
         "category": "todo",
         "title": "待审批协同项目参与邀请",
-        "content": f"您被邀请加入信贷风控建模协同项目，请进入工作台审批。",
-        "action_url": f"/workspace/projects/{project_id}",
+        "content": "您被邀请加入信贷风控建模协同项目，请进入工作台审批。",
+        "target_path": f"/workspace/projects/{project_id}",
     }, headers=buyer_headers)
     if notif_res.status_code != 201:
-        step("9.1 notification.create", "FAIL", notif_res.status_code, excerpt=notif_res.text)
+        step("11.1 notification.create", "FAIL", notif_res.status_code, excerpt=notif_res.text)
     else:
         notif_id = notif_res.json()["id"]
-        step("9.1 notification.create", "PASS", 201, f"notif_id={notif_id}")
+        step("11.1 notification.create", "PASS", 201, f"notif_id={notif_id}")
 
         # List notifications
         list_notif = client.get("/api/v1/monitoring/notifications", headers=buyer_headers)
-        step("9.2 notification.list", "PASS" if list_notif.status_code == 200 else "FAIL", list_notif.status_code,
+        step("11.2 notification.list", "PASS" if list_notif.status_code == 200 else "FAIL", list_notif.status_code,
              f"count={len(list_notif.json().get('items', []))}")
 
         # Mark read
         mark_res = client.post(f"/api/v1/monitoring/notifications/{notif_id}/read", headers=buyer_headers)
-        step("9.3 notification.mark_read", "PASS" if mark_res.status_code == 200 else "FAIL", mark_res.status_code)
+        step("11.3 notification.mark_read", "PASS" if mark_res.status_code == 200 else "FAIL", mark_res.status_code)
 
     # ─────────────────────────────────────────────────────────────
-    # Step 10: Audit Log Verification
+    # Step 12: Audit Log Verification
     # ─────────────────────────────────────────────────────────────
-    audit_res = client.get("/api/v1/audit/records?limit=10", headers=admin_headers)
+    audit_res = client.get("/api/v1/audit/records?limit=15", headers=admin_headers)
     if audit_res.status_code == 200:
         logs = audit_res.json().get("items", [])
         actions = [l.get("action") for l in logs]
-        step("10.1 audit.verify_trail", "PASS", 200, f"recent_actions={actions[:5]}")
+        step("12.1 audit.verify_trail", "PASS", 200, f"recent_actions={actions[:6]}")
     else:
-        step("10.1 audit.verify_trail", "FAIL", audit_res.status_code, excerpt=audit_res.text)
+        step("12.1 audit.verify_trail", "FAIL", audit_res.status_code, excerpt=audit_res.text)
 
     return finish(args.out)
 

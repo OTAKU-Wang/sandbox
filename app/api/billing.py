@@ -129,9 +129,12 @@ async def _aggregate(db: AsyncSession, contract: Contract, billing_period: str) 
             )
         ).scalar_one() or 0
 
+    storage_bytes = float(storage_bytes or 0)
+    egress_bytes = float(egress or 0)
+
     prices = dict(DEFAULT_UNIT_PRICES)
     storage_gb_days = round((storage_bytes / _GB) * days_span, 6)
-    egress_gb = (egress or 0) / _GB
+    egress_gb = egress_bytes / _GB
     api_amount = round(int(calls or 0) / 1000 * prices["api_call_per_1k"], 6)
     cpu_amount = round(cpu_hours * prices["cpu_hour"], 6)
     storage_amount = round(storage_gb_days * prices["storage_gb_day"], 6)
