@@ -8,6 +8,7 @@ All data is encrypted at rest using envelope encryption:
 
 Format: [key_id_len:4][key_id][nonce:12][tag:16][ciphertext]
 """
+import asyncio
 import hashlib
 import io
 import logging
@@ -21,6 +22,9 @@ from app.utils.crypto import SM4Cipher, sm3_hash
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# D4: fire-and-forget 持久化任务的强引用集（asyncio 只持弱引用，不挂回调会被 GC）
+_PERSIST_TASKS: set[asyncio.Task[None]] = set()
 
 # Envelope encryption magic bytes
 _ENVELOPE_VERSION = 1
@@ -134,6 +138,39 @@ class StorageService:
             local_path.write_bytes(envelope)
             path = str(local_path)
 
+        # D4（2026-11-05）：wrapped DEK 必须离开进程才算存活。对象已落盘，这里
+        # 把 blob 写进 data_encryption_keys（KMS 的 generate_data_key 会拒绝未持
+        # 久化 blob 的对象上传，fail-closed 在写之前）。无事件循环的同步入口降级
+        # 为显式告警：旧行为是静默丢钥，这里至少把它写进日志。
+        wrapped = kms.export_wrapped(key_id)
+        if wrapped is None:
+            raise ValueError(
+                f"KMS 未返回 {key_id} 的 wrapped blob，拒绝写入不可恢复的对象：{object_name}"
+            )
+        if not kms.is_persisted(key_id):
+            async def _persist_now() -> None:
+                try:
+                    await kms.persist_dek_row(key_id, wrapped)
+                    kms.mark_persisted(key_id)
+                except Exception as exc:
+                    # 不吞：失败 = 该对象重启后不可解密，必须留可寻址的日志行。
+                    # 不重试：DEK 还在内存，下一次同 key_id 上传会再触发（upsert 幂等）。
+                    logger.error(
+                        "[storage] DEK %s 持久化失败（对象 %s 重启后将不可解密）：%s",
+                        key_id, object_name, exc,
+                    )
+
+            try:
+                task = asyncio.get_running_loop().create_task(_persist_now())
+                _PERSIST_TASKS.add(task)
+                task.add_done_callback(_PERSIST_TASKS.discard)
+            except RuntimeError:
+                logger.warning(
+                    "[storage] 无运行中的事件循环，DEK %s 的 wrapped blob 未落库 —— "
+                    "对象 %s 重启后将不可解密（同步入口遗留面，A161 口径）",
+                    key_id, object_name,
+                )
+
         return {"path": path, "checksum": checksum, "size": size, "key_id": key_id, "encrypted": True}
 
     def upload_plaintext(self, data: bytes, object_name: str, content_type: str = "application/octet-stream") -> dict:
@@ -184,7 +221,10 @@ class StorageService:
             dek = kms.get_key(key_id)
             if dek is None:
                 raise ValueError(
-                    f"密钥 {key_id} 在 KMS 中不存在，数据无法解密（可能是密钥为内存态且已重启）：{object_name}"
+                    f"密钥 {key_id} 不在本进程 KMS 内存中，对象 {object_name} 无法解密。"
+                    "2026-11-05 前的历史对象（DEK 未落库）永久不可读；此后的对象需配置 "
+                    "CDS_KMS_MASTER_KEY_FILE（挂载卷路径）后重启自动恢复，"
+                    "未配置时主密钥仅存本进程内存，重启即失（A94/T12 honest degradation）"
                 )
             try:
                 return SM4Cipher(dek).decrypt_gcm(ciphertext, nonce, tag)

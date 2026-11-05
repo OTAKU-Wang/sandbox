@@ -528,6 +528,17 @@ class KMSService:
         """
         if not key_id or not wrapped:
             return False
+        # boot restore 常是重启后第一个碰 KEK 的动作（main.py lifespan 在首次密钥
+        # 操作之前调 restore_wrapped_keys）。不先认领 KEK，软件 HSM 的 _keys 是空的，
+        # unwrap 报「KEK not found」→ 明明可恢复的信封被计入 unrecoverable（A139
+        # 计数只应统计真不可恢复的）。_ensure_kek 是双检锁，幂等；认领失败按
+        # fail-closed 计入 unrecoverable，不谎报恢复。
+        try:
+            self._ensure_kek()
+        except Exception:
+            self._unrecoverable_imports += 1
+            logger.warning("[KMS] KEK unavailable — cannot import wrapped key %s", key_id)
+            return False
         if self.unwrap_wrapped(bytes(wrapped)) is None:
             self._unrecoverable_imports += 1
             logger.warning(
@@ -574,6 +585,60 @@ class KMSService:
     def unrecoverable_import_count(self) -> int:
         """Blobs rejected at load time because this KEK cannot unwrap them (OCR-A139)."""
         return self._unrecoverable_imports
+
+    def recoverable_by_current_kek(self, wrapped: bytes) -> bool:
+        """Whether a wrapped blob is still recoverable by the *effective* KEK.
+
+        D4 (2026-11-05): with the durable-file software backend the live adapter
+        may hold no derived KEK yet (fresh process, no prior key op), so a bare
+        ``unwrap_dek`` raises "KEK not found" even though the durable master
+        file still derives the exact same KEK. Probing a fresh construction of
+        the same backend answers the real question — "could a new process decrypt
+        this?" — without mutating live state (软件后端的 generate_kek 是从主密钥
+        文件的确定性派生，探实例碰不到存量 KEK）。Vault/HSM 适配器的 unwrap 失败
+        就是终局：服务端绝不本地造 KEK 去碰 key material（A140 认领纪律）。
+        """
+        from app.services.hsm_adapter import SoftwareHSMAdapter
+
+        adapter = self._hsm
+        try:
+            if adapter.unwrap_dek(_KEK_ID, bytes(wrapped)) is not None:
+                return True
+        except Exception:
+            pass
+        if isinstance(adapter, SoftwareHSMAdapter) and adapter.master_key_persistent:
+            try:
+                probe = SoftwareHSMAdapter(master_key_file=adapter.master_key_file)
+                probe.generate_kek(_KEK_ID)
+                return probe.unwrap_dek(_KEK_ID, bytes(wrapped)) is not None
+            except Exception:
+                return False
+        return False
+    async def persist_dek_row(self, key_id: str, wrapped: bytes) -> bool:
+        """Write the wrapped DEK blob to ``data_encryption_keys`` (D4 持久化面).
+
+        Idempotent upsert against the ``key_id`` unique index — safe to re-run
+        after a failed attempt, and never stores plaintext. Returns True when a
+        row was inserted or refreshed with an equivalent blob.
+        """
+        from sqlalchemy import select
+
+        from app.core.database import async_session
+        from app.models.kms import KeyMetadata, KeyStatus
+        from app.services.kms_recovery import upsert_wrapped_payload
+
+        blob = bytes(wrapped)
+        async with async_session() as db:
+            existing = (
+                await db.execute(select(KeyMetadata).where(KeyMetadata.key_id == key_id))
+            ).scalar_one_or_none()
+            if existing is not None:
+                if existing.wrapped_payload == blob:
+                    return False
+                logger.warning("[KMS] re-persisting wrapped payload for key %s", key_id)
+            await upsert_wrapped_payload(db, key_id, blob)
+            await db.commit()
+        return True
 
     async def cleanup_expired_distributions(self, db) -> int:
         """Revoke expired key distributions (TTL enforcement).

@@ -510,21 +510,22 @@ def test_dev_twins_keep_the_relaxed_posture_pinned():
 # 「不许把生产姿态偷偷翻成持久化」（那是显式运维决策，不是部署面的默认）。
 # ---------------------------------------------------------------------------
 
-def test_kms_master_key_file_env_wired_with_default_unset():
-    # dev/prod compose：透传形 `${VAR:-}` = 默认空串 = Settings 默认 = 旧行为
+def test_kms_master_key_file_env_wired_with_default_enabled():
+    # D4（2026-11-05）：DEK 已落库（data_encryption_keys.wrapped_payload），主密钥
+    # 默认必须持久，否则「钥在库、密在盘、主密钥在内存」= 重启全量密文陪葬。
+    # 旧姿态「默认空=旧行为」由本门改钉为「默认启用=指到挂载卷路径」；显式置空
+    # 仍可退回。helm 保持 opt-in 是为了存量安装 helm diff 零漂移（另钉）。
+    wired = '${CDS_KMS_MASTER_KEY_FILE:-/var/lib/cds-kms/kms-master.key}'
     for f in (ROOT / "docker-compose.yml", ROOT / "docker-compose.prod.yml"):
-        text = read(f)
-        assert 'CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-}"' in text, f
-    # k8s：ConfigMap 显式空串（唯一改点，启用=改这一行）
-    app = read(K8S / "cds-app.yaml")
-    assert 'CDS_KMS_MASTER_KEY_FILE: ""' in app
-    # remote_deploy：宿主透传，默认空
-    assert '-e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-}" \\' in read(E2E / "remote_deploy.sh")
-    # local_deploy（第七拷贝，P6 漂移纪律，lead 代收 2026-10-30）：同款透传默认空
-    assert '-e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-}" \\' in read(LOCAL / "local_deploy.sh")
-    # helm：values 默认空 + 模板条件渲染（空 = 不出现 = 渲染与旧逐字节一致）
+        assert wired in read(f), f
+    # k8s：ConfigMap 直接指卷内路径（PVC 已由下一条门钉住存在）
+    assert 'CDS_KMS_MASTER_KEY_FILE: "/var/lib/cds-kms/kms-master.key"' in read(K8S / "cds-app.yaml")
+    # remote_deploy / local_deploy：同款默认，宿主显式置空可退回
+    for f in (E2E / "remote_deploy.sh", LOCAL / "local_deploy.sh"):
+        assert '-e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-/var/lib/cds-kms/kms-master.key}" \\' in read(f), f
+    # helm：values 默认仍空（存量安装零漂移）+ 模板条件渲染（非空才出现）
     vals = yaml.safe_load(read(HELM / "values.yaml"))
-    assert vals["kms"]["masterKeyFile"] == "", "helm 默认必须是不设值（旧行为）"
+    assert vals["kms"]["masterKeyFile"] == "", "helm 默认不设值是为存量安装零漂移，启用属运维显式动作"
     cm = read(HELM / "templates" / "configmap.yaml")
     assert "{{- if .Values.kms.masterKeyFile }}" in cm
     assert 'CDS_KMS_MASTER_KEY_FILE: {{ .Values.kms.masterKeyFile | quote }}' in cm

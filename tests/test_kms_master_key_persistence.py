@@ -43,6 +43,17 @@ def _prod_shape(monkeypatch, **over):
     # suite 环境把 legacy 沙箱档位 pin 成 true（conftest SS-10/13 集）——prod 形
     # 必须一并收紧，否则先撞 SS-13 单路径门，测不到本门。
     monkeypatch.setattr(settings, "SANDBOX_LEGACY_ENABLED", False)
+    # 同款理由（2026-11-05）：conftest pin CUBE_DATAPLANE_ENABLED=true，而本机
+    # .env 的 dev 明文数据面（CUBE_NODE_GRPC_TLS=false）会被 Settings 捡进来——
+    # prod 形不收紧就先撞 Cube TLS 门，测不到 KMS 主密钥门。CI 上 Settings
+    # 默认 true 所以历史绿；这里 pin 的是形态，不是本机偶然值。
+    monkeypatch.setattr(settings, "CUBE_NODE_GRPC_TLS", True)
+    # TLS=true 后下一道门要 mTLS 材料；conftest 本就 pin 同一测试 CA 路径
+    # （:59），本机 shell 漏入的空 CDS_CUBE_NODE_TLS_CA 会盖掉 setdefault——
+    # prod 形按 suite 口径补齐，与上面同族。
+    monkeypatch.setattr(settings, "CUBE_NODE_TLS_CA", "/etc/cds/cube-node/test-node-ca.pem")
+    # 再下一道门：DATAPLANE=true 要模板分发签名 key（conftest:60 同款 pin）。
+    monkeypatch.setattr(settings, "CUBE_TEMPLATE_SIGNING_KEY", "test-signing-key")
     for k, v in over.items():
         monkeypatch.setattr(settings, k, v)
     monkeypatch.delenv("TESTING", raising=False)

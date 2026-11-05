@@ -294,6 +294,9 @@ secrets:
 # P2-3：KMS 主密钥文件持久化。"" = 完全不出图（渲染与改动前逐字节一致=旧行为，
 # 内存态主密钥）。启用 = 填 /var/lib/cds-kms/ 下的路径；卷复用 sandbox-workspace
 # 的 RWX 共享 subPath（不新增 PVC），多副本读同一枚主密钥。
+# D4（2026-11-05）口径：DEK 现已落库（data_encryption_keys.wrapped_payload），
+# 主密钥一旦丢失，全部已上传对象的信封永久不可解密——生产安装应显式设值；
+# 默认仍 "" 是为了存量安装 `helm diff` 零漂移，不拿安全默认值偷偷改线上行为。
 kms:
   masterKeyFile: ""
 

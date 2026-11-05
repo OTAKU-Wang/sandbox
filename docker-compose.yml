@@ -196,10 +196,11 @@ services:
       CDS_RETENTION_JANITOR_ENABLED: "true"
       # P2-5（D-e2e-18）：MinIO 一致性巡检主闸，默认关（与生产副本同姿态）
       CDS_INTEGRITY_PATROL_ENABLED: "false"
-      # P2-3：KMS 主密钥文件持久化（lane-b 语义）。"" = 旧行为（内存态主密钥，
-      # api 重启即丢、既有信封不可解密——现状口径，不是回归）。启用 = 指向
-      # /var/lib/cds-kms 下的路径（卷已在下方挂好）；非空时路径校验由启动门把关。
-      CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-}"
+      # P2-3 / D4（2026-11-05）：KMS 主密钥文件持久化（lane-b 语义）。默认启用：
+      # 卷 cds-kms-master 已挂在 /var/lib/cds-kms，不接线就是「卷在证据蒸发」。
+      # 显式置 "" 可退回旧行为（内存态主密钥，api 重启即丢、既有信封不可解密）；
+      # 非空路径由 validate_security_config 启动门把关（卷没挂上则拒启）。
+      CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-/var/lib/cds-kms/kms-master.key}"
       CDS_RETENTION_JANITOR_DRY_RUN: "true"
       # Round 45+ (spec N2): experimental Merkle batch pipeline, off by default
       CDS_MERKLE_PIPELINE_ENABLED: "false"

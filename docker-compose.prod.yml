@@ -170,10 +170,11 @@ services:
       # P2-5（D-e2e-18）：MinIO 一致性巡检主闸，生产默认关；双门=此闸×interval>0，
       # 手动触发面不受此闸约束（app/services/integrity_patrol.py）。
       CDS_INTEGRITY_PATROL_ENABLED: "false"
-      # P2-3：KMS 主密钥文件持久化（lane-b 语义）。"" = 旧行为（内存态主密钥，
-      # api 重启即丢、既有信封不可解密——现状口径，不是回归）。启用 = 指向
-      # /var/lib/cds-kms 下的路径（卷已在下方挂好）；非空时路径校验由启动门把关。
-      CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-}"
+      # P2-3 / D4（2026-11-05）：KMS 主密钥文件持久化（lane-b 语义）。默认启用：
+      # 卷 cds-kms-master 已挂在 /var/lib/cds-kms，不接线就是「卷在证据蒸发」；
+      # 生产更要紧：DEK 落库（data_encryption_keys）而主密钥丢 = 全量密文陪葬。
+      # 显式置 "" 可退回旧行为；非空路径由 validate_security_config 拒启把关。
+      CDS_KMS_MASTER_KEY_FILE: "${CDS_KMS_MASTER_KEY_FILE:-/var/lib/cds-kms/kms-master.key}"
       CDS_AUDIT_LOG_RETENTION_DAYS: "0"
       CDS_MERKLE_LEAF_RETENTION_DAYS: "0"
       CDS_ALERT_RETENTION_DAYS: "180"

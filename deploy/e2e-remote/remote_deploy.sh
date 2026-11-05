@@ -272,7 +272,7 @@ run cds-api cds-api:latest \
   -e CDS_JANITOR_ENABLED="false" \
   -e CDS_RETENTION_JANITOR_ENABLED="true" \
   -e CDS_INTEGRITY_PATROL_ENABLED="false" \
-  -e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-}" \
+  -e CDS_KMS_MASTER_KEY_FILE="${CDS_KMS_MASTER_KEY_FILE:-/var/lib/cds-kms/kms-master.key}" \
   -e CDS_RETENTION_JANITOR_DRY_RUN="true" \
   -e CDS_MERKLE_PIPELINE_ENABLED="false" \
   -e CDS_EGRESS_AUDIT_ENABLED="true" \
