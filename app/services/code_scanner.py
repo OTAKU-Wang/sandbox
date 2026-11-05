@@ -105,6 +105,11 @@ ALLOWED_IMPORTS = {
     # 多语言（Task 6）：PySpark 脚本的宿主解释器就是 python3，白名单描述的是沙箱镜像里
     # 真实可用的库而不是声明的语言标签，所以这里收 pyspark，不给 pyspark 单开一份白名单。
     "pyspark", "findspark",
+    # 服务开发族（product_dev 主场景：在沙箱里开发一个 API 服务并自测）：
+    # 监听仅 guest 内回环，对外发布仍走平台交付面（OpenAPI 端点/结果推送），
+    # 真边界在 hypervisor 挂载集 + 网络策略，白名单仍是纵深防御（A98 口径）。
+    "fastapi", "uvicorn", "starlette", "pydantic",
+    "time", "threading", "socket", "socketserver", "urllib",
 }
 
 # Dangerous builtins (call → FATAL)
@@ -141,6 +146,7 @@ EXTERNAL_SOURCE_MODULES = {
     "duckdb": "connect/ATTACH/read_csv（任意路径与远端对象）",
     "sqlalchemy": "create_engine（沙箱网络可达的任意 DB URL）",
     "pyspark": "SparkSession.builder / read.* 连接 Spark 集群与集群侧任意路径数据源",
+    "urllib": "urlopen/request（沙箱网络策略可达的任意 URL）",
 }
 
 # 可静态解析到模块根的调用点（比 import 披露更精确的一条）。
