@@ -3,6 +3,7 @@ import { Table, Button, Space, Tag, Typography, message, Popconfirm, Upload, Mod
 import { PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { dataResourceApi, autoProfileResource } from '../../services/dataResourceApi';
+import { pickUploadFile } from '../../services/uploadFile';
 import type { AutoProfileResult, DataResource } from '../../services/dataResourceApi';
 import type { ColumnsType } from 'antd/es/table';
 import { QueryErrorAlert } from '../../components/Feedback/QueryFeedback';
@@ -160,16 +161,38 @@ export default function ResourceList() {
         onOk={() => form.submit()}
         confirmLoading={uploadMutation.isPending}
       >
-        <Form form={form} layout="vertical" onFinish={uploadMutation.mutate}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(values: { name: string; description?: string; file: unknown }) => {
+            // Upload 挂在 Form.Item 下，字段值是 fileList（不是 File）：直接 append
+            // 会把整个列表字符串化成 "[object Object]"，后端解不出 file 部件 → 422。
+            const file = pickUploadFile(values.file);
+            if (!file) {
+              message.error('请选择文件');
+              return;
+            }
+            uploadMutation.mutate({ name: values.name, description: values.description, file });
+          }}
+        >
           <Form.Item name="name" label="资源名称" rules={[{ required: true }]}>
             <Input placeholder="输入资源名称" />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="资源描述（可选）" />
           </Form.Item>
-          <Form.Item name="file" label="文件" rules={[{ required: true, message: '请选择文件' }]}>
+          <Form.Item
+            name="file"
+            label="文件"
+            // 不加 valuePropName/getValueFromEvent 时，Upload 的 onChange 会把整个
+            // change 事件塞进表单字段（antd 已知坑）：这里归一成 fileList 数组，
+            // 提交侧再取 originFileObj。
+            valuePropName="fileList"
+            getValueFromEvent={(event) => (Array.isArray(event) ? event : event?.fileList)}
+            rules={[{ required: true, message: '请选择文件' }]}
+          >
             <Upload.Dragger
-              beforeUpload={(file) => { form.setFieldsValue({ file }); return false; }}
+              beforeUpload={() => false}
               maxCount={1}
               accept=".csv,.json,.parquet,.xlsx"
             >
