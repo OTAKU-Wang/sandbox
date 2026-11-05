@@ -38,6 +38,50 @@ logger = logging.getLogger(__name__)
 
 _CONTAINER_PREFIX = "l2c-"
 _ENVD_PORT = 49983  # §2.7 day-1: in-sandbox envd HTTP streaming endpoint
+
+
+class SandboxRootfsGoneError(RuntimeError):
+    """D5c (2026-11-05): execute() 轮询期间节点插件报 NOT_FOUND ——
+    rootfs 卷目录已被回收（会话终止 / VM 销毁），marker 永远读不到。
+    由 _read_sandbox_file_poll 抛出，execute() 转成诚实的 exit_code -1 结果，
+    不再让 gRPC 异常冒泡成 500。"""
+
+
+# D5c: structured_query 的 SQL 曾在适配器 else 分支里被原样拼进 sh 命令行 ——
+# SQL 不是 shell 语法，外层 sh -c 整串 parse 失败，mkdir/marker 都不执行，
+# /execute 只能空转到超时（现场：bb508e57 会话 SQL 245s 后叠终止回收 → 500）。
+# 改为 VM 内 stdlib sqlite3 runner（guest 镜像无 duckdb）：数据源 = 注入的
+# CSV（与 inject_session_data 同路径），表名 data，数字外观的列转 float，
+# 结果按 TSV 打印；多语句被 sqlite3 标准库直接拒绝（天然单语句）。
+_SQL_RUNNER_SRC = '''import base64, csv, sqlite3, sys
+sql = base64.b64decode("{sql_b64}").decode()
+path = "{data_path}"
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return x
+with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+    rows = list(csv.reader(fh))
+if not rows:
+    sys.exit("session-data is empty")
+hdr = rows[0]
+cols = ", ".join(\'"\' + h.replace(\'"\', \'""\') + \'"\' for h in hdr)
+con = sqlite3.connect(":memory:")
+con.execute("CREATE TABLE data (%s)" % cols)
+ins = "INSERT INTO data VALUES (%s)" % ", ".join("?" * len(hdr))
+norm = []
+for row in rows[1:]:
+    row = (row + [""] * len(hdr))[: len(hdr)]
+    norm.append([_num(c) for c in row])
+con.executemany(ins, norm)
+cur = con.execute(sql)
+names = [d[0] for d in cur.description] if cur.description else []
+if names:
+    print("\\t".join(names))
+    for row in cur.fetchall():
+        print("\\t".join("" if v is None else str(v) for v in row))
+'''
 _VOLUME_PLUGIN_DRIVER = "cds-encrypted"
 
 # SS-18 (2026-10-16) 沙箱目录契约 —— 唯一执行路径 (l2c / CubeSandbox) 的 VM 内路径口径,
@@ -598,6 +642,26 @@ class CubeRuntimeAdapter(RuntimeAdapter):
         )
         return resp.exists, resp.data
 
+    async def _read_sandbox_file_poll(self, cubebox_id: str, vm_path: str) -> tuple[bool, bytes]:
+        """execute() 轮询专用的 to_thread 包装（D5c, 2026-11-05）。
+
+        NOT_FOUND = rootfs 卷目录已被回收（会话终止 / VM 销毁）→ 转
+        SandboxRootfsGoneError 由 execute() 诚实披露；其余 gRPC 码原样上抛
+        （与改动前一致的 fail-loud 语义）。
+        """
+        import grpc
+
+        try:
+            return await asyncio.to_thread(self._read_sandbox_file, cubebox_id, "", vm_path)
+        except grpc.RpcError as exc:
+            code_fn = getattr(exc, "code", None)
+            if callable(code_fn) and code_fn() == grpc.StatusCode.NOT_FOUND:
+                details_fn = getattr(exc, "details", None)
+                raise SandboxRootfsGoneError(
+                    details_fn() if callable(details_fn) else str(exc)
+                ) from None
+            raise
+
     async def inject_session_data(self, container_id: str, data: bytes, max_attempts: int = 3) -> None:
         """Inject the session product data into the live sandbox VM (async).
 
@@ -894,8 +958,20 @@ class CubeRuntimeAdapter(RuntimeAdapter):
         if language in ("python", "python3"):
             b64 = base64.b64encode(code.encode("utf-8")).decode("ascii")
             inner = f"python3 -c \"import base64;exec(base64.b64decode('{b64}').decode())\""
+        elif language in ("sql", "sqlite"):
+            # D5c: SQL 必须有自己的 in-VM runner；把裸 SQL 交给 sh 会让整条
+            # 包装链 parse 失败（marker 永不落盘 → 轮询挂死）。
+            sql_b64 = base64.b64encode(code.encode("utf-8")).decode("ascii")
+            runner = _SQL_RUNNER_SRC.format(sql_b64=sql_b64, data_path=f"{GUEST_DATA_DIR}/session-data")
+            r_b64 = base64.b64encode(runner.encode("utf-8")).decode("ascii")
+            inner = f"python3 -c \"import base64;exec(base64.b64decode('{r_b64}').decode())\""
         else:
-            inner = code
+            # D5c: 非 python 的原始命令同样先 base64 落盘成脚本文件再执行 ——
+            # 直接拼进外层 sh 时, 用户命令里的语法错误会让外层整串 parse 失败,
+            # 连 mkdir/marker 都不执行, 轮询侧只能等到超时。落盘后语法错误发生在
+            # `sh <file>` 一层, rc/marker 照常写盘, 诚实报非零退出而非挂死。
+            b64 = base64.b64encode(code.encode("utf-8")).decode("ascii")
+            inner = f"printf %s {b64} | base64 -d > {out_path}.src && sh {out_path}.src"
         cmd = (f"mkdir -p {GUEST_EXEC_DIR} && {inner} > {out_path} 2>&1; "
                f"rc=$?; echo $rc > {code_path}; "
                f"echo $(wc -c < {out_path}) >> {code_path}; "
@@ -942,9 +1018,21 @@ class CubeRuntimeAdapter(RuntimeAdapter):
         out_size = 0
         output = ""
         while loop.time() < deadline:
-            exists, code_bytes = await asyncio.to_thread(
-                self._read_sandbox_file, sandbox_id, "", vm_code_rel
-            )
+            try:
+                exists, code_bytes = await self._read_sandbox_file_poll(sandbox_id, vm_code_rel)
+            except SandboxRootfsGoneError as gone:
+                # D5c: 执行途中 rootfs 被回收（会话终止/VM 销毁）——诚实披露，
+                # 不再把 gRPC NOT_FOUND 冒泡成 500。
+                logger.warning(
+                    "[cube-dataplane] sandbox %s rootfs vanished during execute: %s", sandbox_id, gone
+                )
+                return {
+                    "output": "",
+                    "exit_code": -1,
+                    "duration_ms": int((datetime.now() - started).total_seconds() * 1000),
+                    "sandbox_level": "l2c",
+                    "error": f"sandbox disappeared during execution (terminated or destroyed): {gone}",
+                }
             if exists:
                 lines = code_bytes.decode("ascii", "replace").splitlines()
                 if len(lines) >= 3 and lines[2].strip() == "DONE":
@@ -957,9 +1045,20 @@ class CubeRuntimeAdapter(RuntimeAdapter):
             await asyncio.sleep(0.5)
         if exit_code is not None and out_size > 0:
             for _ in range(5):
-                _, out_bytes = await asyncio.to_thread(
-                    self._read_sandbox_file, sandbox_id, "", vm_out_rel
-                )
+                try:
+                    _, out_bytes = await self._read_sandbox_file_poll(sandbox_id, vm_out_rel)
+                except SandboxRootfsGoneError as gone:
+                    logger.warning(
+                        "[cube-dataplane] sandbox %s rootfs vanished while copying output: %s",
+                        sandbox_id, gone,
+                    )
+                    return {
+                        "output": "",
+                        "exit_code": exit_code,
+                        "duration_ms": int((datetime.now() - started).total_seconds() * 1000),
+                        "sandbox_level": "l2c",
+                        "error": f"sandbox disappeared while copying output: {gone}",
+                    }
                 if len(out_bytes) >= out_size:
                     output = out_bytes[:out_size].decode("utf-8", "replace")
                     break

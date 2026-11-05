@@ -511,3 +511,25 @@ export function productTypeLabel(value: string | null | undefined): string {
   if (!key) return NO_SOURCE_TEXT;
   return PRODUCT_TYPE_LABELS[key] ?? key;
 }
+
+// D5b（2026-11-05 现场）: 合约只勾「查询」也能建开发任务，直到运行期调试会话
+// 才被 400 SANDBOX_MODE_NOT_PERMITTED 拒绝。词表与后端唯一来源
+// app/schemas/sandbox_session.py 的 SANDBOX_MODE_ALIASES['product_dev'] 对齐。
+const PRODUCT_DEV_MODE_ALIASES: ReadonlySet<string> = new Set([
+  'product_dev', 'develop', 'development', 'dev', 'product_develop',
+]);
+
+/**
+ * 开发任务向导的合约模式前置提示：null = 无需提示（已批准开发模式，或后端
+ * 未下发该字段——未知不误报）；字符串 = 页内警告文案。警告而非拦截：建任务
+ * 本身合法，用户可能正要回头去合约 flow 配置里补模式。
+ */
+export function contractDevModeAdvisory(
+  contract: { allowed_sandbox_modes?: string[] | null } | null | undefined,
+): string | null {
+  const modes = contract?.allowed_sandbox_modes;
+  if (!Array.isArray(modes)) return null;
+  if (modes.some((mode) => PRODUCT_DEV_MODE_ALIASES.has(String(mode).trim().toLowerCase()))) return null;
+  const shown = modes.length ? modes.join('、') : '一个都没勾';
+  return `该合约批准的沙箱模式为「${shown}」，不含「产品开发/调试」：在线调试启动时会被拒绝。请先在合约 flow 配置补开 product_dev 模式，或改选其它合约。`;
+}

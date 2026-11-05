@@ -37,6 +37,7 @@ const CONTRACT: ContractOption = {
   status: 'active',
   purpose: '零售客单价建模',
   delivery_methods: ['dataset'],
+  allowed_sandbox_modes: null,
   sandbox_resource_spec: { memory_mb: 16384 },
   product_ids: ['p-9'],
 };

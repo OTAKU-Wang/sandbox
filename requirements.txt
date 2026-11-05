@@ -14,6 +14,11 @@ alembic>=1.13.0
 # === 缓存 & Session ===
 redis>=5.0.0
 
+# === 审计热存 ClickHouse（D6 2026-11-05：gateway_service/sandbox_audit 运行时导入
+# clickhouse_driver，但仓内从未声明 → api 镜像内沙箱审计事件整段丢弃（仅余 WARNING），
+# 审计不可追。此前未声明 = 部署镜像缺依赖的根因 ===
+clickhouse-driver>=0.2.9
+
 # === 国密算法 ===
 gmssl>=3.2.2
 cryptography>=42.0.0  # AESGCM/AES-CTR 运行时导入：column_encryption（P0-3 随机化列加密）、deterministic_sm4、gpu_tee_runtime、agent_service（此前未声明 → 部署镜像内这些路径直接 ImportError）

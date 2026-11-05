@@ -289,4 +289,27 @@ describe('新增开发任务整页（图 2-2）', { timeout: 20_000 }, () => {
     expect(await screen.findByText('客单价合约（CT-0001）')).toBeInTheDocument();
     expect(await screen.findByText('授权零售表（PSI 可用）')).toBeInTheDocument();
   });
+
+  // D5b（2026-11-05 现场）：只勾「查询」的合约建了开发任务，直到运行期调试才被
+  // 400 SANDBOX_MODE_NOT_PERMITTED 拒 — 向导现在选完合约当场就警告。
+  it('合约不含开发模式 → 选完合约当场警告，不拦建任务', async () => {
+    get.mockImplementation((url: string) => {
+      if (url === '/contracts') {
+        return Promise.resolve(page([{ ...CONTRACT, allowed_sandbox_modes: ['query'] }]));
+      }
+      if (url === '/data-products') return Promise.resolve(page([GRANTED, NODE_ONLY]));
+      return Promise.resolve(undefined);
+    });
+    renderWithProviders(<DevTaskCreatePage />, { route: '/flow/tasks/new?contract_id=c-1' });
+    const advisory = await screen.findByTestId('contract-mode-advisory');
+    expect(advisory.textContent).toContain('query');
+    expect(advisory.textContent).toContain('在线调试启动时会被拒绝');
+    expect(screen.getByRole('button', { name: /^完\s*成$/ })).toBeEnabled();
+  });
+
+  it('后端未下发 allowed_sandbox_modes → 未知不误报', async () => {
+    renderCreate();
+    await fillBasics();
+    expect(screen.queryByTestId('contract-mode-advisory')).not.toBeInTheDocument();
+  });
 });

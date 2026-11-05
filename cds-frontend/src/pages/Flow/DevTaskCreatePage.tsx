@@ -21,6 +21,7 @@ import {
 } from '../../services/flow';
 import type { DevTaskFieldIssue, DevTaskFormValues } from '../../services/flow';
 import DevTaskDataPicker from './DevTaskDataPicker';
+import { contractDevModeAdvisory } from './devTasksModel';
 import { useContractOptions } from './useContractOptions';
 import './devTaskCreate.css';
 
@@ -108,6 +109,7 @@ export default function DevTaskCreatePage() {
     () => usableContracts.find((choice) => choice.id === contractId) ?? null,
     [contractId, usableContracts],
   );
+  const modeAdvisory = useMemo(() => contractDevModeAdvisory(selectedContract), [selectedContract]);
   const approvedMemoryText = useMemo(() => {
     if (!contractId) return '尚未选择合约';
     const spec = selectedContract?.sandbox_resource_spec;
@@ -254,6 +256,15 @@ export default function DevTaskCreatePage() {
               </Form.Item>
             </div>
           </div>
+          {modeAdvisory && (
+            <Alert
+              type="warning"
+              showIcon
+              data-testid="contract-mode-advisory"
+              message="合约模式与在线调试不匹配"
+              description={modeAdvisory}
+            />
+          )}
         </Card>
 
         <Card

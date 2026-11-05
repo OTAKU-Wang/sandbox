@@ -115,7 +115,7 @@ data:
     ENGINE = MergeTree()
     PARTITION BY toYYYYMM(timestamp)
     ORDER BY (timestamp, user_id, action, resource_type)
-    TTL timestamp + INTERVAL 7 YEAR
+    TTL toDateTime(timestamp) + INTERVAL 7 YEAR
     SETTINGS ttl_only_drop_parts = 1;   -- 审计事件保留 7 年（分区级过期，不清审计日志/Merkle 叶）
 
     -- Policy decisions table for OPA/RLS audit
@@ -144,7 +144,7 @@ data:
     ORDER BY (timestamp, user_id, contract_id)
     -- 数据最小化：决策遥测是高容量辅助流，非 7 年审计记录本体，有界窗口 1 年；
     -- 不影响主审计表的 7 年保留
-    TTL timestamp + INTERVAL 1 YEAR
+    TTL toDateTime(timestamp) + INTERVAL 1 YEAR
     SETTINGS ttl_only_drop_parts = 1;
 
     -- CDC change events table
@@ -166,7 +166,7 @@ data:
     PARTITION BY toYYYYMM(timestamp)
     ORDER BY (timestamp, source_table, operation)
     -- CDC 是传输中继遥测，非审计记录本体：有界窗口 90 天
-    TTL timestamp + INTERVAL 90 DAY
+    TTL toDateTime(timestamp) + INTERVAL 90 DAY
     SETTINGS ttl_only_drop_parts = 1;
 
     -- Data product version audit
@@ -186,7 +186,7 @@ data:
     PARTITION BY toYYYYMM(timestamp)
     ORDER BY (timestamp, data_product_id, version)
     -- 版本变更审计属审计链本体：与主表同 7 年保留，分区级过期
-    TTL timestamp + INTERVAL 7 YEAR
+    TTL toDateTime(timestamp) + INTERVAL 7 YEAR
     SETTINGS ttl_only_drop_parts = 1;
 
     -- Certificate lifecycle audit
@@ -209,7 +209,7 @@ data:
     PARTITION BY toYYYYMM(timestamp)
     ORDER BY (timestamp, cert_id, action)
     -- 证书生命周期属审计链本体：与主表同 7 年保留，分区级过期
-    TTL timestamp + INTERVAL 7 YEAR
+    TTL toDateTime(timestamp) + INTERVAL 7 YEAR
     SETTINGS ttl_only_drop_parts = 1;
 
     -- 合约网关计量（A164）：gateway_service._write_metering 写、/api/v1/gateway 计量接口读。
@@ -234,7 +234,7 @@ data:
     PARTITION BY toYYYYMM(timestamp)
     ORDER BY (timestamp, contract_id, app_id, product_id, operation)
     -- 计量是计费/限额依据：保留 3 年（与运行面注册表一致），分区级过期
-    TTL timestamp + INTERVAL 3 YEAR
+    TTL toDateTime(timestamp) + INTERVAL 3 YEAR
     SETTINGS ttl_only_drop_parts = 1;
 
     -- 沙箱内活动审计（A164）：sandbox_audit 采集器写、会话详情接口读。
@@ -264,5 +264,5 @@ data:
     PARTITION BY toYYYYMM(timestamp)
     ORDER BY (timestamp, session_id, category, event_type)
     -- 沙箱活动流：保留 3 年（与运行面注册表一致），分区级过期
-    TTL timestamp + INTERVAL 3 YEAR
+    TTL toDateTime(timestamp) + INTERVAL 3 YEAR
     SETTINGS ttl_only_drop_parts = 1;

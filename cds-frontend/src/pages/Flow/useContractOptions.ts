@@ -10,6 +10,8 @@ export interface ContractOption {
   status: string;
   /** null = 列表未下发该字段（未知），数组 = 已下发（可为空表示未配置）。 */
   delivery_methods: DeliveryMethod[] | null;
+  /** D5b 前置校验用：null = 未下发（不报警），数组 = 合约批准的沙箱模式。 */
+  allowed_sandbox_modes: string[] | null;
   /** 合约已批准的沙箱规格；memory_mb 是开发任务内存的硬上限（后端 _memory_ceiling 同源）。 */
   sandbox_resource_spec: Record<string, unknown> | null;
   /** null = 列表未下发该字段；数组 = 已下发（空数组表示该合约确实没绑数据产品）。 */
@@ -27,6 +29,7 @@ export function toContractOption(contract: Contract): ContractOption {
     contract_no: contract.contract_no,
     status: contract.status,
     delivery_methods: Array.isArray(withFlow.delivery_methods) ? withFlow.delivery_methods : null,
+    allowed_sandbox_modes: Array.isArray(contract.allowed_sandbox_modes) ? contract.allowed_sandbox_modes : null,
     sandbox_resource_spec:
       contract.sandbox_resource_spec && typeof contract.sandbox_resource_spec === 'object' ? contract.sandbox_resource_spec : null,
     product_ids: Array.isArray(contract.product_ids) ? contract.product_ids : null,
