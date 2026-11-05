@@ -899,7 +899,10 @@ class CubeRuntimeAdapter(RuntimeAdapter):
         cmd = (f"mkdir -p {GUEST_EXEC_DIR} && {inner} > {out_path} 2>&1; "
                f"rc=$?; echo $rc > {code_path}; "
                f"echo $(wc -c < {out_path}) >> {code_path}; "
-               f"echo DONE >> {code_path}")
+               f"echo DONE >> {code_path}; sync")
+        # 2026-11-05 分离拓扑实证: guest 对 rootfs 的写入是延迟回写（观测到 ~18s
+        # 才落到宿主镜像文件）, 有界轮询追不上 → /exec 全部超时 exit -1。尾追
+        # `sync` 强制 guest 刷页后读回延迟降为 ~1s（裸 exec+ReadSandboxFile 实测）。
         request = cubebox_pb2.ExecCubeSandboxRequest(
             sandbox_id=sandbox_id,
             # 上游 Exec 同时强制 sandbox_id + container_id（exec.go:65 实证）;

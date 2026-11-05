@@ -51,6 +51,19 @@ CUBE_EGRESS_CA="${CDS_CUBE_EGRESS_CA:-}"
 CUBE_MASTER="${CDS_CUBE_MASTER_ADDR:-}"
 CUBE_PINNED="${CDS_CUBE_PINNED_RUNTIME_VERSION:-}"
 CUBE_IMAGE="${CDS_CUBE_SANDBOX_IMAGE:-cds/cube-sandbox:latest}"
+# 分离拓扑（控制面在部署机、cube 节点在别处）：节点卷插件的 unix socket 经 ssh 反向隧道
+# 落在本机同路径。挂目录（不是挂 socket 文件）让隧道重连后的新 socket inode 对容器可见；
+# socket 不存在时不挂且不传 env（-e VAR="" 会被 pydantic 当已配置，A89 同族坑），
+# 数据面 PushData/harvest 将 fail-closed —— WARN 行显式披露这一降级。
+CUBE_PLUGIN_SOCK="${CDS_CUBE_VOLUME_PLUGIN_SOCKET:-}"
+CUBE_SOCK_ARGS=()
+if [ -n "$CUBE_PLUGIN_SOCK" ]; then
+  if [ -S "$CUBE_PLUGIN_SOCK" ]; then
+    CUBE_SOCK_ARGS=(-v "$(dirname "$CUBE_PLUGIN_SOCK"):$(dirname "$CUBE_PLUGIN_SOCK")" -e CDS_CUBE_VOLUME_PLUGIN_SOCKET="$CUBE_PLUGIN_SOCK")
+  else
+    echo "WARN: CDS_CUBE_VOLUME_PLUGIN_SOCKET=$CUBE_PLUGIN_SOCK not present on this host — node data-plane sessions will fail closed (check the ssh tunnel)."
+  fi
+fi
 CUBE_CLEANUP_INTERVAL="${CDS_SESSION_CLEANUP_INTERVAL_SECONDS:-300}"
 
 NET=cds-net
@@ -273,7 +286,8 @@ run cds-api cds-api:latest \
   -v "$(vol sandbox-workspace-l0):/tmp/cds-sandbox-l0" \
   -v "$(vol cds-storage):/tmp/cds-storage" \
   -v "$(vol cds-kms-master):/var/lib/cds-kms" \
-  -v "$(vol cds-egress-audit):/data/egress-audit"
+  -v "$(vol cds-egress-audit):/data/egress-audit" \
+  "${CUBE_SOCK_ARGS[@]+"${CUBE_SOCK_ARGS[@]}"}"
 
 echo "== waiting for api /health =="
 i=0
