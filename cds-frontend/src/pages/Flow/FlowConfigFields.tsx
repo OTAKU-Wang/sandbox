@@ -17,6 +17,7 @@ import {
   COMPUTE_TZ_OPTIONS,
   DELIVERY_METHOD_OPTIONS,
   FLOW_RESOURCE_LIMITS,
+  SANDBOX_MODE_OPTIONS,
   ComputeFrequency,
 } from '../../services/flow';
 import type { SandboxResourceSpec } from '../../services/flow';
@@ -54,6 +55,21 @@ export default function FlowConfigFields({ currentSpec }: { currentSpec?: Sandbo
             ))}
           </Space>
         </Checkbox.Group>
+      </Form.Item>
+
+      <Divider style={{ margin: '8px 0 16px' }} />
+
+      <Form.Item
+        name="allowed_sandbox_modes"
+        label="允许沙箱模式（可改）"
+        tooltip="与创建合约时同一词表：在线调试需勾「产品开发/在线调试」。清空不会移除已签合约的既有授权，保持原值不变。"
+      >
+        <Select
+          mode="multiple"
+          allowClear
+          placeholder="保持当前模式不变（清空=不修改）"
+          options={SANDBOX_MODE_OPTIONS}
+        />
       </Form.Item>
 
       <Divider style={{ margin: '8px 0 16px' }} />

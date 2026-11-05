@@ -339,6 +339,9 @@ async def configure_contract_flow(
     contract.compute_hour = body.compute_hour
     contract.compute_tz = body.compute_tz
     contract.sandbox_resource_spec = body.sandbox_resource_spec.model_dump(exclude_none=True) if body.sandbox_resource_spec else None
+    if body.allowed_sandbox_modes:
+        # G2：只有显式非空列表才改；null/空列表都保持原值（清空≠吊销，吊销走合约终止）。
+        contract.allowed_sandbox_modes = list(body.allowed_sandbox_modes)
     contract.next_compute_at = compute_next_run(
         auto_compute=contract.auto_compute,
         frequency=contract.compute_frequency,
@@ -353,6 +356,7 @@ async def configure_contract_flow(
             "delivery_methods": contract.delivery_methods,
             "auto_compute": contract.auto_compute,
             "compute_frequency": contract.compute_frequency,
+            "allowed_sandbox_modes": contract.allowed_sandbox_modes,
             "next_compute_at": contract.next_compute_at.isoformat() if contract.next_compute_at else None,
         },
     )

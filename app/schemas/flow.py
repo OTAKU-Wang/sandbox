@@ -30,6 +30,24 @@ class FlowConfigRequest(BaseModel):
     compute_hour: int = Field(2, ge=0, le=23)
     compute_tz: str = "Asia/Shanghai"
     sandbox_resource_spec: ResourceSpec | None = None
+    # G2：null=本次不修改沙箱模式；空列表也按不修改处理（清空≠吊销授权，吊销走合约终止）
+    allowed_sandbox_modes: list[str] | None = None
+
+    @field_validator("allowed_sandbox_modes")
+    @classmethod
+    def modes_must_be_known(cls, v: list[str] | None) -> list[str] | None:
+        """与 ContractCreate.modes_must_be_known 同一词表：写错模式在这里 422，不等建会话时 500。"""
+        if not v:
+            return v
+        from app.schemas.sandbox_session import canonical_sandbox_mode
+
+        unknown = [m for m in v if canonical_sandbox_mode(m) is None]
+        if unknown:
+            raise ValueError(
+                f"无法识别的沙箱模式: {', '.join(map(str, unknown))}；"
+                "可用 query/train/develop/application/read/modeling/compute 或执行档名"
+            )
+        return v
 
 
 class NotebookCreate(BaseModel):

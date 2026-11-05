@@ -27,6 +27,7 @@ import {
 import type { ContractWithFlow, DeliveryMethod, FlowConfigFormValues, FlowConfigIssue } from '../../services/flow';
 import FlowConfigFields from './FlowConfigFields';
 import { formatResourceSpec } from './flowResource';
+import { SANDBOX_MODE_OPTIONS } from '../../services/flow';
 
 const { Text } = Typography;
 
@@ -153,6 +154,15 @@ export default function FlowConfigCard({ contract }: { contract: ContractWithFlo
         />
       )}
       <Descriptions size="small" column={3}>
+        <Descriptions.Item label="允许沙箱模式" span={3}>
+          {(contract.allowed_sandbox_modes ?? []).length
+            ? (contract.allowed_sandbox_modes as string[]).map((mode) => (
+                <Tag key={mode} color="geekblue">
+                  {SANDBOX_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode}
+                </Tag>
+              ))
+            : <Text type="secondary">未配置（默认仅查询）</Text>}
+        </Descriptions.Item>
         <Descriptions.Item label="交付方式" span={2}>
           {methods.length
             ? methods.map((method: DeliveryMethod) => (

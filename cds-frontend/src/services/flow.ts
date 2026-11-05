@@ -25,6 +25,16 @@ export const DELIVERY_METHOD_OPTIONS: { label: string; value: DeliveryMethod; hi
   { label: '结果推送', value: DeliveryMethod.ResultPush, hint: '计算完成后 Webhook 主动推送' },
 ];
 
+// 与后端 app/schemas/sandbox_session.py SANDBOX_MODE_ALIASES 的业务词表对齐（G2）。
+export const SANDBOX_MODE_OPTIONS: { label: string; value: string }[] = [
+  { label: 'SQL 查询', value: 'query' },
+  { label: '建模分析', value: 'analyze' },
+  { label: '建模训练', value: 'train' },
+  { label: '产品开发/在线调试', value: 'develop' },
+  { label: '应用调用', value: 'application' },
+  { label: '联合联邦', value: 'federated' },
+];
+
 export const ComputeFrequency = {
   Manual: 'manual',
   Hourly: 'hourly',
@@ -184,6 +194,8 @@ export interface FlowConfigPayload {
   compute_hour: number;
   compute_tz: string;
   sandbox_resource_spec: SandboxResourceSpec;
+  // G2：null=本次不改（旧后端不认识该字段时也不致误清空）；数组=显式覆盖
+  allowed_sandbox_modes?: string[] | null;
 }
 
 /** flow-config 返回 ContractResponse 并附带下列字段；未下发的字段以缺省处理（如实显示"未配置"）。 */
@@ -1258,10 +1270,11 @@ export interface FlowConfigFormValues {
   gpu_count?: number | null;
   timeout_seconds?: number | null;
   image_template?: string | null;
+  allowed_sandbox_modes?: string[] | null;
 }
 
 export interface FlowConfigIssue {
-  field: 'delivery_methods' | 'compute_frequency' | 'compute_minute' | 'compute_hour' | 'compute_tz' | FlowResourceField;
+  field: 'delivery_methods' | 'compute_frequency' | 'compute_minute' | 'compute_hour' | 'compute_tz' | 'allowed_sandbox_modes' | FlowResourceField;
   message: string;
 }
 
@@ -1311,6 +1324,10 @@ export function validateFlowConfig(values: FlowConfigFormValues): FlowConfigIssu
     issues.push({ field: 'compute_tz', message: '请选择计算时区' });
   }
 
+  if (Array.isArray(values.allowed_sandbox_modes) && values.allowed_sandbox_modes.length === 0) {
+    issues.push({ field: 'allowed_sandbox_modes', message: '清空不会吊销已有授权：保持原模式或至少选择一项' });
+  }
+
   const minute = values.compute_minute;
   const needMinute = auto && (frequency === ComputeFrequency.Hourly || frequency === ComputeFrequency.Daily);
   if (minute != null) {
@@ -1353,7 +1370,7 @@ export function buildFlowConfigPayload(values: FlowConfigFormValues): FlowConfig
   const imageTemplate = asString(values.image_template).trim();
   if (imageTemplate) spec.image_template = imageTemplate;
 
-  return {
+  const payload: FlowConfigPayload = {
     delivery_methods: values.delivery_methods ?? [],
     auto_compute: auto,
     compute_frequency: frequency,
@@ -1362,6 +1379,9 @@ export function buildFlowConfigPayload(values: FlowConfigFormValues): FlowConfig
     compute_tz: asString(values.compute_tz).trim() || DEFAULT_COMPUTE_TZ,
     sandbox_resource_spec: spec,
   };
+  const modes = Array.isArray(values.allowed_sandbox_modes) ? values.allowed_sandbox_modes : null;
+  if (modes !== null) payload.allowed_sandbox_modes = modes;
+  return payload;
 }
 
 /** 合约上已存的 flow 配置 → 表单初值（未配置字段回落到默认值并如实标注）。 */
@@ -1369,6 +1389,7 @@ export function flowConfigToFormValues(contract: ContractWithFlow | undefined | 
   const spec = contract?.sandbox_resource_spec ?? {};
   return {
     delivery_methods: contract?.delivery_methods ?? [],
+    allowed_sandbox_modes: Array.isArray(contract?.allowed_sandbox_modes) ? (contract?.allowed_sandbox_modes as string[]) : null,
     auto_compute: contract?.auto_compute === true,
     compute_frequency: contract?.compute_frequency ?? ComputeFrequency.Manual,
     compute_minute: typeof contract?.compute_minute === 'number' ? contract.compute_minute : 0,
