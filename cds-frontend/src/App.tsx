@@ -49,10 +49,6 @@ const TrainingDashboard = lazy(() => import('./pages/Training/TrainingDashboard'
 const Connectors = lazy(() => import('./pages/Connectors'));
 const KeyManagement = lazy(() => import('./pages/Identity/KeyManagement'));
 const Certificates = lazy(() => import('./pages/Identity/Certificates'));
-const K8sDeployments = lazy(() => import('./pages/K8sOps/Deployments'));
-const K8sNetworkPolicies = lazy(() => import('./pages/K8sOps/NetworkPolicies'));
-const K8sPvcs = lazy(() => import('./pages/K8sOps/Pvcs'));
-const K8sLogs = lazy(() => import('./pages/K8sOps/Logs'));
 const CapabilityMatrix = lazy(() => import('./pages/CapabilityMatrix'));
 const ComplianceDisclosure = lazy(() => import('./pages/ComplianceDisclosure'));
 const MpcPage = lazy(() => import('./pages/MPC'));
@@ -132,10 +128,6 @@ export default function App() {
                 <Route path="connectors" element={<RoleRoute allowedRoles={ROLE_GROUPS.connectorManagers}><WorkspaceRoute workspace="admin"><Connectors /></WorkspaceRoute></RoleRoute>} />
                 <Route path="identity/keys" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><WorkspaceRoute workspace="admin"><KeyManagement /></WorkspaceRoute></RoleRoute>} />
                 <Route path="certificates" element={<RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}><WorkspaceRoute workspace="admin"><Certificates /></WorkspaceRoute></RoleRoute>} />
-                <Route path="ops/deployments" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sDeployments /></WorkspaceRoute></RoleRoute>} />
-                <Route path="ops/network-policies" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sNetworkPolicies /></WorkspaceRoute></RoleRoute>} />
-                <Route path="ops/pvcs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sPvcs /></WorkspaceRoute></RoleRoute>} />
-                <Route path="ops/logs" element={<RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}><WorkspaceRoute workspace="admin"><K8sLogs /></WorkspaceRoute></RoleRoute>} />
                 <Route path="capability-matrix" element={<RoleRoute allowedRoles={ADMIN_WORKSPACE_ROLES}><WorkspaceRoute workspace="admin"><CapabilityMatrix /></WorkspaceRoute></RoleRoute>} />
                 <Route path="data-pipeline" element={<DataPipeline />} />
                 <Route path="compliance-disclosure" element={<RoleRoute allowedRoles={ROLE_GROUPS.monitoringReaders}><WorkspaceRoute workspace="developer"><ComplianceDisclosure /></WorkspaceRoute></RoleRoute>} />

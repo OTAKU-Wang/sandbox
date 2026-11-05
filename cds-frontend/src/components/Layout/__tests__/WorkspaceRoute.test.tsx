@@ -22,17 +22,17 @@ function renderAdminOwnedRoute() {
   return renderWithProviders(
     <Routes>
       <Route
-        path="/ops/deployments"
+        path="/identity/keys"
         element={
-          <RoleRoute allowedRoles={ROLE_GROUPS.k8sOpsReaders}>
+          <RoleRoute allowedRoles={ROLE_GROUPS.identityManagers}>
             <WorkspaceRoute workspace="admin">
-              <div>部署列表</div>
+              <div>密钥列表</div>
             </WorkspaceRoute>
           </RoleRoute>
         }
       />
     </Routes>,
-    { route: '/ops/deployments' },
+    { route: '/identity/keys' },
   );
 }
 
@@ -79,18 +79,18 @@ describe('WorkspaceRoute 工作台路由门（D-16）', () => {
     useWorkspaceStore.setState({ workspace: null });
   });
 
-  it('运营方切到开发者工作台后手输 /ops/deployments 拿到无权访问态', () => {
+  it('运营方切到开发者工作台后手输 /identity/keys 拿到无权访问态', () => {
     useAuthStore.setState({ user: operatorUser });
     useWorkspaceStore.setState({ workspace: 'developer' });
     renderAdminOwnedRoute();
     expect(screen.getByText(FORBIDDEN)).toBeInTheDocument();
-    expect(screen.queryByText('部署列表')).not.toBeInTheDocument();
+    expect(screen.queryByText('密钥列表')).not.toBeInTheDocument();
   });
 
-  it('运营方在管理员工台正常打开 /ops/deployments', () => {
+  it('运营方在管理员工台正常打开 /identity/keys', () => {
     useAuthStore.setState({ user: operatorUser });
     renderAdminOwnedRoute();
-    expect(screen.getByText('部署列表')).toBeInTheDocument();
+    expect(screen.getByText('密钥列表')).toBeInTheDocument();
     expect(screen.queryByText(FORBIDDEN)).not.toBeInTheDocument();
   });
 

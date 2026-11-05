@@ -15,10 +15,9 @@ Request flow: page (`useQuery`/`useMutation`) → domain module → shared `api`
 | `timeouts.ts` (19 L) | A311: `UPLOAD_TIMEOUT_MS = 300_000` — deliberately NOT in `api.ts` because every service test mocks that module whole, which would make the pinned value `undefined` |
 | `jupyterContents.ts` (166 L) | Jupyter Contents API (PUT + GET one-then-404-POST); `JUPYTER_FILE_POLICY` holds the 3 backend validation literals (dir `notebooks`, ext `.ipynb`, ≤5 MiB, `app/api/notebook_proxy.py:27-29`) |
 | `identityApi.ts` | two objects: `kmsApi` + `certificateApi`; `normalizeKmsKey`/`normalizeCertificate` absorb backend renames |
-| `k8sOpsApi.ts` | DEVIATION: standalone functions (listDeployments, listOpsNetworkPolicies, listOpsPvcs, getOpsLogs) + `cluster_available` flag on every response — backend degrades honestly (empty items, never fabricated live state) |
 | `metaApi.ts` | `CAPABILITY_LABELS`/`capabilityLabel`/`levelSelectOptions` — the single source for sandbox-level labels (PZ-13 capability matrix) |
 | rest | apiKeys (SS-12), audit, auth, catalog, compliance, compute, connector, contract (DPBudgetStatus), dataPipeline, dataProduct, dataResource, federation (TrustRelationship/TrustScore), fieldExposure, monitoring (Alert), mpc, outputControl (InspectionResult/DPNoiseResult/OutputGatewayResult), quota, training (TrainingJob/DPConfig), users |
-| `__tests__/` | 16 files: `api.test.ts` (interceptor/refresh), `flow.test.ts` (521 L: request contract, form validation, payload↔form round-trip, notebook parse, W2 envelope, list normalization, OpenAPI display), `pathSegment.a273.test.ts` + `pathSegments.a246.test.ts`, `apiPathNormalize.a273.test.ts`, `uploadBoundary.test.ts`, `k8sOpsApi.test.ts`; shared setup in `src/test/` |
+| `__tests__/` | 15 files: `api.test.ts` (interceptor/refresh), `flow.test.ts` (521 L: request contract, form validation, payload↔form round-trip, notebook parse, W2 envelope, list normalization, OpenAPI display), `pathSegment.a273.test.ts` + `pathSegments.a246.test.ts`, `apiPathNormalize.a273.test.ts`, `uploadBoundary.test.ts`; shared setup in `src/test/` |
 
 ## CONVENTIONS
 - Import the shared `api` from `./api` — every call rides the auth/refresh interceptors.

@@ -6,7 +6,7 @@ import { canAccessAdminWorkspace, resolveWorkspace, type Workspace } from '../..
 
 // D-16（docs/defect-ledger-2026-10-16-portal-e2e.md）：双模式工作台过去只裁菜单不裁路由。
 // 角色路由门（RoleRoute）本来就在，所以这不是越权洞；真实缺口是「已具备管理态角色、但人已经
-// 切到开发者工作台」的账号手输 /ops/deployments 仍进得去，与原型「开发者只看 4+2」的口径不一致。
+// 切到开发者工作台」的账号手输 /identity/keys 仍进得去，与原型「开发者只看 4+2」的口径不一致。
 // 这一层按 resolveWorkspace(role, stored) 判定，让路由与 filterMenuByWorkspace 的菜单口径一致。
 //
 // 层级：RoleRoute 在外、WorkspaceRoute 在内 —— 角色不达标仍是原来的回首页语义，只有角色够格

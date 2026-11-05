@@ -90,7 +90,6 @@ _GROUP_SNAPSHOT = {
     "/api/v1/cube-templates/t": "infra",
     "/api/v1/kms/x": "infra",
     "/api/v1/connectors/c": "infra",
-    "/api/v1/ops/x": "infra",
     "/api/v1/certificates/c": "certs",
     "/api/v1/federation/spaces": "federation",
     "/api/v1/gateway/x": "gateway",

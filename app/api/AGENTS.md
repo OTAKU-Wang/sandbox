@@ -1,6 +1,6 @@
 # app/api/
 
-**Score 34 — distinct domain: HTTP route layer.** 47 route modules + empty `__init__.py` = 21,231 LOC / 317 route handlers, flat (no subpackages). Each module's only export is `router = APIRouter()`; `app/main.py` (721 L) issues all 47 `include_router` calls at :614-672.
+**Score 34 — distinct domain: HTTP route layer.** 46 route modules + empty `__init__.py` = 21,231 LOC / 317 route handlers, flat (no subpackages). Each module's only export is `router = APIRouter()`; `app/main.py` issues all `include_router` calls.
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
@@ -11,7 +11,6 @@
 | WS exec stream | `session_stream.py` | absolute path, no prefix; `issue_ws_ticket` (19 refs, called from `auth.py`) mints 30 s single-use jti tickets because WS handshakes cannot carry HTTPBearer; close codes 4401/4409/4408; `exit` frames never carry output; every line passes T5 DLP |
 | Training (SFT + watermark + secure checkpoint) | `training.py` (1034 L, 8 routes) | the HTTP surface must go through `_load_api_checkpoint` (A77: confine to `CDS_TRAINING_OUTPUT_DIR`, symlinks resolved); key-seed bounds checked BEFORE any disk/DB write (A167) |
 | Jupyter gateway | `jupyter_proxy.py` | the ONLY module with no prefix **and** no mount-time `require_group` (auth = one-time ticket → signed 8 h cookie, iframes cannot carry `Authorization`); `/api/jupyter/*` absolute incl. WS; tiered ACL `_OPEN_EXACT`/`_OPEN_PREFIX`/`_DENY_PREFIX` — a new upstream endpoint is open until added to the deny/prefix lists |
-| K8s status | `k8s_ops.py` | read-only, honest: no cluster → last-known view, never a fabricated list |
 | Synthetic data | `data_products.py`, `data_resources.py` | old `test-data/mock` / `generate-mock` endpoints are `deprecated=True` aliases of the new generator |
 | Audit trail + Merkle anchoring | `audit.py` | `/anchor` SM3-hashes records (`id|action|resource_type|resource_id|created_at`) → Merkle root via `blockchain_adapter` (PG append-only / FISCO BCOS / AntChain), stamps `blockchain_tx_hash`; every anchor/verify response carries `_backend_disclosure` (T8: `is_consortium_chain`) so the PG log is never mistaken for on-chain |
 | Unstructured pipeline (OCR/ASR/video/dicom) | `data_pipeline.py` | `pipe-` tasks are written to the `pipeline_task` table AND executed inline in the request via in-memory `pipeline` — not the durable `task_queue`; uploads land in `/tmp/cds-uploads/<user_id>/` (created at import); `/process-path` accepts arbitrary local filesystem paths, ADMIN/OPERATOR only |

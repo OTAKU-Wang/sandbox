@@ -12,7 +12,6 @@ import {
   FolderOutlined,
   ApiOutlined,
   KeyOutlined,
-  ClusterOutlined,
   TeamOutlined,
   PartitionOutlined,
   ProjectOutlined,
@@ -162,20 +161,6 @@ function buildAdminMenu(role?: RoleLike): Items {
       children: [
         { key: '/monitoring', label: '监控大盘' },
         { key: '/system-status', label: '系统状态' },
-      ],
-    });
-  }
-
-  if (hasAnyRole(normalizedRole, ROLE_GROUPS.k8sOpsReaders)) {
-    items.push({
-      key: 'k8s-ops',
-      icon: <ClusterOutlined />,
-      label: 'K8s 运营',
-      children: [
-        { key: '/ops/deployments', label: '部署' },
-        { key: '/ops/network-policies', label: '网络策略' },
-        { key: '/ops/pvcs', label: '存储卷' },
-        { key: '/ops/logs', label: '日志' },
       ],
     });
   }

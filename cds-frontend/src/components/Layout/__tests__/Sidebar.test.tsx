@@ -61,22 +61,6 @@ describe('Sidebar', () => {
     expect(screen.getByText('安全管理')).toBeInTheDocument();
   });
 
-  it('shows K8s 运营 group for operator role', () => {
-    useAuthStore.setState({
-      user: { id: 'u1', username: 'op', email: 'op@test.com', role: 'operator', organization: null },
-    });
-    renderWithProviders(<Sidebar />);
-    expect(screen.getByText('K8s 运营')).toBeInTheDocument();
-  });
-
-  it('hides K8s 运营 group for buyer role', () => {
-    useAuthStore.setState({
-      user: { id: 'u1', username: 'buyer', email: 'b@test.com', role: 'buyer', organization: null },
-    });
-    renderWithProviders(<Sidebar />);
-    expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
-  });
-
   it('shows API 密钥 menu for admin role', () => {
     useAuthStore.setState({
       user: { id: 'u1', username: 'admin', email: 'a@test.com', role: 'admin', organization: null },
@@ -105,7 +89,6 @@ describe('双模式工作台菜单过滤', () => {
   it('运营方默认落在管理员工台，管理态分组可见', () => {
     useAuthStore.setState({ user: operatorUser });
     renderWithProviders(<Sidebar />);
-    expect(screen.getByText('K8s 运营')).toBeInTheDocument();
     expect(screen.getByText('监控中心')).toBeInTheDocument();
     expect(screen.getByText('沙箱管理')).toBeInTheDocument();
   });
@@ -114,7 +97,6 @@ describe('双模式工作台菜单过滤', () => {
     useAuthStore.setState({ user: operatorUser });
     useWorkspaceStore.setState({ workspace: 'developer' });
     renderWithProviders(<Sidebar />);
-    expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
     expect(screen.queryByText('监控中心')).not.toBeInTheDocument();
     expect(screen.queryByText('身份管理')).not.toBeInTheDocument();
     // SS-18: 开发者工作台按原型 IA —— 沙箱会话列表已不是开发者口径, 开发闭环分组上位
@@ -134,7 +116,6 @@ describe('双模式工作台菜单过滤', () => {
     });
     useWorkspaceStore.setState({ workspace: 'admin' });
     renderWithProviders(<Sidebar />);
-    expect(screen.queryByText('K8s 运营')).not.toBeInTheDocument();
     expect(screen.getByText('首页')).toBeInTheDocument();
     expect(screen.queryByText('沙箱管理')).not.toBeInTheDocument();
   });
@@ -240,7 +221,6 @@ describe('管理员工台菜单不受原型 4+2 影响', () => {
     });
     renderWithProviders(<Sidebar />);
     expect(screen.getByText('沙箱管理')).toBeInTheDocument();
-    expect(screen.getByText('K8s 运营')).toBeInTheDocument();
     expect(screen.getByText('监控中心')).toBeInTheDocument();
     expect(screen.getByText('输出管控')).toBeInTheDocument();
     expect(screen.getByText('环境配额')).toBeInTheDocument();

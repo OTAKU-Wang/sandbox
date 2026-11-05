@@ -110,7 +110,7 @@ describe('document.title 由布局按面包屑设置', () => {
   });
 
   it('纯函数侧：documentTitleFor 与 getRouteCrumb 同源', () => {
-    expect(documentTitleFor('/ops/logs')).toBe('日志 · 密态沙箱系统 CDS');
+    expect(documentTitleFor('/api-keys')).toBe('API 密钥 · 密态沙箱系统 CDS');
     expect(documentTitleFor('/flow/tasks/new')).toBe('新增开发任务 · 密态沙箱系统 CDS');
     expect(documentTitleFor('/')).toBe('首页 · 密态沙箱系统 CDS');
   });

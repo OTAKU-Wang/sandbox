@@ -33,10 +33,10 @@ sandbox/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Backend boot / error contract | app/main.py | 404 L, 45 `include_router`; /health, /metrics at root (not /api/v1) |
+| Backend boot / error contract | app/main.py | 404 L, 44 `include_router`; /health, /metrics at root (not /api/v1) |
 | Security & sandbox core | app/services/ | 97 flat modules / 48.8k LOC: runtimes, ML pipelines, GM crypto+KMS, output policy |
 | Sandbox runtime selection | app/services/ runtimes, cube_runtime_adapter | prefixes `l0- tee- fc- bwrap- k8s- l2c-`; legacy adapters only behind SANDBOX_LEGACY_ENABLED (prod REJECTS it), l2c only with CUBE_DATAPLANE_ENABLED |
-| API routers | app/api/ | 45 route modules; prefixes only in main.py |
+| API routers | app/api/ | 44 route modules; prefixes only in main.py |
 | AuthN surface | app/api/ | 30 use get_current_user/require_roles, 11 use get_business_user, 5 use neither (health, metrics, admin, session_stream, cube_egress) |
 | Config / errors / deps | app/core/ | config.py 571 L, ~152 Settings fields, 15 prod raises in validate_security_config |
 | SDK entry | sdk/cds_sdk/client.py | 1132 L / 114 defs (SS-12 + SS-15 surfaces); CDSClient, CDSError, CDSApiError |
@@ -65,7 +65,7 @@ No LSP index exists in this workspace; entries come from the writer digests and 
 | CDSClient / CDSError / CDSApiError | exports | sdk/cds_sdk/client.py | all SDK consumers | `__all__`; retries only 429/503 honoring Retry-After (clamped to [0,60]s, missing/absurd -> 1.0s, A173-era fix 2026-10-30) — 410 SESSION_TERMINATED is terminal and deliberately NOT retried (W2); v0.3.0 adds the SS-15 flow surface (40 ops) |
 | mpc_service | service | app/services/ | API | Shamir key custodianship, NOT MPC computation |
 | flowApi / flowKeys | module | cds-frontend/src/services/flow.ts | 21 pages | SS-15 flow surface, ~35 hooks |
-| k8sOpsApi | module | cds-frontend/src/services/ | pages | the one axios deviation |
+| k8sOpsApi | module | cds-frontend/src/services/ | — | removed 2026-11-05 (K8s 运营 feature retired; pages/menu/router deleted) |
 
 ## CONVENTIONS
 - Env config: pydantic BaseSettings, `env_prefix="CDS_"`, `.env`; `get_settings()` is lru_cached — tests must `cache_clear`, but prod-mode tests instead monkeypatch the cached `Settings` and `delenv` TESTING/PYTEST_CURRENT_TEST (only test_k8s_n7.py uses cache_clear).

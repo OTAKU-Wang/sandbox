@@ -27,11 +27,10 @@ Every page is a default export wired through `React.lazy` in `App.tsx` (42 lazy 
 | `/training` | `Training/TrainingDashboard.tsx` (209) | trainingUsers (no workspace gate) |
 | `/connectors` | `Connectors/index.tsx` (441) | connectorManagers · admin |
 | `/identity/keys`, `/certificates` | `Identity/{KeyManagement,Certificates}.tsx` (251/316) | identityManagers · admin |
-| `/ops/{deployments,network-policies,pvcs,logs}` | `K8sOps/{Deployments,NetworkPolicies,Pvcs,Logs}.tsx` (113/122/102/91) | k8sOpsReaders · admin |
 | `/mpc` | `MPC.tsx` (312) | monitoringReaders · admin — Shamir custodianship UI, NOT MPC compute |
 | `/capability-matrix` `/compliance-disclosure` `/system-status` | `CapabilityMatrix/ComplianceDisclosure/SystemStatus.tsx` (122/188/193) | monitoringReaders · admin |
 | `/data-pipeline` | `DataPipeline.tsx` (175) | dataResourceManagers (no workspace gate) |
-| `/users` `/api-keys` | `UserManagement.tsx` (152), `ApiKeys.tsx` (687, SS-12 key lifecycle) | identityManagers / k8sOpsReaders · admin |
+| `/users` `/api-keys` | `UserManagement.tsx` (152), `ApiKeys.tsx` (687, SS-12 key lifecycle) | identityManagers · admin |
 
 ## CONVENTIONS
 - Data via react-query `useQuery`/`useMutation` on `services/*`; feedback UI via `components/Feedback/QueryFeedback` (getErrorMessage, QueryErrorAlert, CenteredLoading, EmptyState, tableEmpty — 45 non-test importers).
@@ -44,7 +43,6 @@ Every page is a default export wired through `React.lazy` in `App.tsx` (42 lazy 
 ## ANTI-PATTERNS
 - `SessionDetail.tsx` is 1645 lines with 6 `useState` + 11 `useQuery` + 13 `useMutation` — it is already the mutation hub; extract to a `Sandbox/` sibling before adding more (that is how `sessionWorkbench.ts` / `SessionStatusStrip` / `ProofBundleDrawer` came to be). The old "~18 useState" warning is stale: state was extracted, mutations were not.
 - Cross-**folder** page imports exist at exactly 2 sites, both Contracts→Flow (`ContractDetail.tsx:17` → FlowConfigCard, `ContractCreate.tsx:12` → FlowConfigFields). They are tolerated reuse of a Flow-owned card, not a pattern: new shared UI belongs in `components/`, new shared pure logic in the domain folder's own module.
-- K8sOps pages must render `cluster_available`: an empty list means no reachable cluster, not "nothing deployed".
 - Flow status copy maps backend values only and passes unknown values through unmodified; the publish gate authority is the backend (412 + error code) — frontend `evaluatePublishGate` copy only pre-disables the button, never invents an explanation (禁伪造铁律, `display.ts`; unknown values render the `UNKNOWN_TEXT` '未记录' sentinel, never a placeholder that looks like data).
 - Never draw a sandbox-level selector or label from `SandboxLevel` alone: L2' is the only offered level (`LEGACY_SANDBOX_LEVELS` exists solely to render historical rows), and a request without a MicroVM must surface 400 `RUNTIME_UNAVAILABLE`, never a downgrade.
 - `directoryContract.ts` hard-codes the guest paths `/data/input` and `/data/output` mirroring `app/services/cube_runtime_adapter.py` `GUEST_DATA_DIR`/`GUEST_OUTPUT_DIR`; Guide and ContractDataBoard render from this one constant, so a backend path change is a two-file change with no test catching it.

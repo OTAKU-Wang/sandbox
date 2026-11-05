@@ -32,7 +32,6 @@ from app.api import network_policy as network_policy_api
 from app.api import admin
 from app.api import metrics
 from app.api import inference  # N5: inference service sandbox
-from app.api import k8s_ops  # N8: K8s runtime operations (read-only)
 from app.api import meta  # PZ-13: capability matrix authority source
 from app.api import cube_templates  # SS-10 CB-05: template pipeline (image → artifact → distribution)
 from app.api import agent  # N10: sandbox-internal agent execution
@@ -681,7 +680,6 @@ app.include_router(open_api_router.router, prefix="/open/v1", tags=["open-api"],
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["rag"], dependencies=[Depends(require_group("pipeline"))])
 app.include_router(inference.router, prefix="/api/v1/inference", tags=["inference"], dependencies=[Depends(require_group("pipeline"))])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"], dependencies=[Depends(require_group("agent"))])
-app.include_router(k8s_ops.router, prefix="/api/v1/ops", tags=["ops"], dependencies=[Depends(require_group("infra"))])
 app.include_router(meta.router, prefix="/api/v1/meta", tags=["meta"], dependencies=[Depends(require_group("meta"))])  # PZ-13
 
 # W10: WebSocket exec stream (mounted without prefix — paths are absolute;

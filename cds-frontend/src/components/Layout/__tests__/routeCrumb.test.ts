@@ -2,7 +2,7 @@
  * 路由注册表 ↔ App.tsx 的一致性（数据级用例，锁本轮修掉的真缺陷）。
  *
  * 缺陷：`ROUTE_CRUMBS` 只覆盖了一部分路由，兜底条目写成 `{ prefix: '', title: '运营概览' }`，
- * 于是**每一条未映射的路径**（/ops/*、/users、/mpc、/system-status …）的面包屑与标题
+ * 于是**每一条未映射的路径**（/users、/mpc、/system-status …）的面包屑与标题
  * 都冒充成「运营概览 / 仪表盘」。这里不写死条目数，而是当场解析 App.tsx 的路由表做差分：
  * 语料大小用 console.log 打出来，改路由不用改本文件。
  *
@@ -112,10 +112,6 @@ describe('routeCrumb 表 ↔ App.tsx 路由表差分', () => {
     const want: Record<string, string[]> = {
       '/flow/guide': ['开发指引'],
       '/flow/quota': ['环境配额'],
-      '/ops/deployments': ['K8s 运营', '部署'],
-      '/ops/network-policies': ['K8s 运营', '网络策略'],
-      '/ops/pvcs': ['K8s 运营', '存储卷'],
-      '/ops/logs': ['K8s 运营', '日志'],
       '/capability-matrix': ['沙箱管理', '能力矩阵'],
       '/data-pipeline': ['数据管线'],
       '/compliance-disclosure': ['安全管理', '合规披露'],

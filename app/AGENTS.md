@@ -5,9 +5,9 @@
 ## STRUCTURE
 ```
 app/                        # counts measured 2026-11-02
-├── main.py      # 721 L — the ONLY wiring point: 46 router mounts, 8 middlewares, 6 background loops
+├── main.py      # 721 L — the ONLY wiring point: 45 router mounts, 8 middlewares, 6 background loops
 ├── core/        # 15 modules / 3,111 L — Settings, engine+session, authN, W2 errors, telemetry (see core/)
-├── api/         # 48 modules / 21,231 L — route modules; prefixes exist ONLY in main.py (see api/)
+├── api/         # 47 modules / 21,0k L — route modules; prefixes exist ONLY in main.py (see api/)
 ├── services/    # 120 modules / 56,040 L — flat, zero subpackages: runtimes, pipelines, KMS, output policy (see services/)
 ├── models/      # 45 modules / 3,070 L — one entity per file, 103 classes (see models/)
 ├── schemas/     # 12 modules / 1,213 L — pydantic wire models (see schemas/)

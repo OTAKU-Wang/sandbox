@@ -17,7 +17,7 @@
  *   不再写「数据流通」（原型里没有这个词）。
  *
  * 覆盖口径（2026-10-18 本轮修）：这张表必须覆盖 `App.tsx` 里每一条可访问路由。
- * 旧实现漏了 15 条（`/ops/*`、`/users`、`/api-keys`、`/mpc`、`/system-status`、
+ * 旧实现漏了 15 条（`/users`、`/api-keys`、`/mpc`、`/system-status`、
  * `/capability-matrix`、`/data-pipeline`、`/compliance-disclosure`、`/flow/guide`、
  * `/flow/quota`、`/login`、`/register`），而兜底条目写的是
  * `{ prefix: '', title: '运营概览', segs: ['仪表盘'] }`：空前缀在 `startsWith` 下等于命中全站，
@@ -94,10 +94,6 @@ export const ROUTE_CRUMBS: RouteCrumb[] = [
   // Task 6 建模项目：与场景中心同层，段名逐字取左栏菜单文案。
   { prefix: '/flow/projects', title: '建模项目', style: 'slash', segs: [HOME, DEV, '建模项目'] },
   { prefix: '/flow/quota', title: '环境配额', style: 'slash', segs: ['环境配额'] },
-  { prefix: '/ops/deployments', title: '部署', style: 'slash', segs: ['K8s 运营', '部署'] },
-  { prefix: '/ops/network-policies', title: '网络策略', style: 'slash', segs: ['K8s 运营', '网络策略'] },
-  { prefix: '/ops/pvcs', title: '存储卷', style: 'slash', segs: ['K8s 运营', '存储卷'] },
-  { prefix: '/ops/logs', title: '日志', style: 'slash', segs: ['K8s 运营', '日志'] },
   { prefix: '/capability-matrix', title: '能力矩阵', style: 'slash', segs: ['沙箱管理', '能力矩阵'] },
   { prefix: '/data-pipeline', title: '数据管线', style: 'slash', segs: ['数据管线'] },
   { prefix: '/compliance-disclosure', title: '合规披露', style: 'slash', segs: ['安全管理', '合规披露'] },

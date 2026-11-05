@@ -159,7 +159,6 @@ class TestScopeMatrix:
         ("/api/v1/sandbox-sessions/abc/audit", "sessions"),
         ("/api/v1/sandbox-nodes", "infra"),
         ("/api/v1/sandbox-db/tables", "pipeline"),
-        ("/api/v1/ops/nodes", "infra"),
         ("/metrics", "audit"),
         ("/health", "audit"),
         ("/api/v1/contracts", "contracts"),

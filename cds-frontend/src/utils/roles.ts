@@ -42,7 +42,6 @@ export const ROLE_GROUPS = {
   outputControlReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],
   auditReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],
   monitoringReaders: [UserRole.OPERATOR, UserRole.REGULATOR, UserRole.ADMIN],
-  k8sOpsReaders: [UserRole.OPERATOR, UserRole.ADMIN],
   identityManagers: [UserRole.OPERATOR, UserRole.ADMIN],
   connectorManagers: [UserRole.OPERATOR, UserRole.ADMIN],
   federationUsers: [UserRole.BUYER, UserRole.OPERATOR, UserRole.ADMIN],

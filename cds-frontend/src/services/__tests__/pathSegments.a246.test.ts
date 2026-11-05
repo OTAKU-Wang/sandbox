@@ -2,7 +2,7 @@
  * A246（补录同机制的 7 处手拼 URL）：id 直接插进路径段/查询串时，
  * 含 `/`、`?`、`&`、`..` 的 id 可以改写实际命中的路径或注入额外查询参数。
  * 台账 ocr-verified-findings.md §A246：同机制共 8 处，本 spec 锁服务层其余各点
- * （mpcApi :47/:53/:58、fieldExposureApi :40/:46/:55/:58/:61、k8sOpsApi :106、
+ * （mpcApi :47/:53/:58、fieldExposureApi :40/:46/:55/:58/:61、
  * outputControlApi :50/:53）；`/open/v1/${slug}` 两处已由 services/flow.ts 的
  * `openApiCallPathForSlug`（encodeURIComponent）收口。
  * 口径：路径段一律 encodeURIComponent（与 openApiCallPathForSlug 同一编码口径）；
@@ -21,7 +21,6 @@ vi.mock('../api', () => ({
 import api from '../api';
 import { mpcApi } from '../mpcApi';
 import { fieldExposureApi } from '../fieldExposureApi';
-import { getOpsLogs } from '../k8sOpsApi';
 import { outputControlApi } from '../outputControlApi';
 
 const get = vi.mocked(api.get);
@@ -118,20 +117,6 @@ describe('A246 fieldExposureApi：product_id / request_id 编码', () => {
     expect(get).toHaveBeenCalledWith(
       '/field-exposure/products/..%2F..%2Fadmin%2Fsecrets/approved-fields',
     );
-  });
-});
-
-describe('A246 k8sOpsApi.getOpsLogs：session_id 编码', () => {
-  it('`..`/`/` 被编码，tail 仍走 params', async () => {
-    await getOpsLogs(ESCAPE, 50);
-    expect(get).toHaveBeenCalledWith('/ops/logs/..%2F..%2Fadmin%2Fsecrets', {
-      params: { tail: 50 },
-    });
-  });
-
-  it('正常 session_id 编码前后不变', async () => {
-    await getOpsLogs('sess-7', 200);
-    expect(get).toHaveBeenCalledWith('/ops/logs/sess-7', { params: { tail: 200 } });
   });
 });
 
