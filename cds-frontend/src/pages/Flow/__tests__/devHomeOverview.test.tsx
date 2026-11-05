@@ -107,7 +107,7 @@ describe('首页逐区块照图', () => {
     expect(within(card).getAllByText('已结束')).toHaveLength(1);
   });
 
-  it('内存卡说真话：分子是已分配的 3.8 G，分母是 8 G 配额，不出现「实测」，16 G 档标未记录', async () => {
+  it('内存卡说真话：分子是已分配的 3.8 G，分母是 8 G 配额，不出现「实测」，运行/排队数收进配额 Tooltip', async () => {
     renderWithProviders(<FlowDevHome />);
     const card = await waitFor(() => cardByTitle('沙箱内存使用'));
     expect(within(card).queryByText(/实时占用/)).toBeNull();
@@ -123,16 +123,19 @@ describe('首页逐区块照图', () => {
 
     const exec = screen.getByTestId('memory-exec');
     expect(within(exec).getByText('待执行')).toBeInTheDocument();
-    // 真值 §5 的执行段只有 标题/徽标/大数字/配额/空条/刻度：「运行中·排队」与「16 G 独立配额未记录」
-    // 都不再占版面，但一字不丢 —— 全文在配额数字的 Tooltip 里。
+    // 真值 §5 的执行段只有 标题/徽标/大数字/配额/空条/刻度：「运行中·排队」与执行档独立配额说明
+    // 都不再占版面，信息一字不丢 —— 全文在配额数字的 Tooltip 里（07102e7 人话轮句式，数字口径不变）。
     fireEvent.mouseOver(within(exec).getByText(/\/ 8 G 配额/));
-    await waitFor(() => expect(screen.getByText(/运行中 0 · 排队 2/)).toBeInTheDocument());
-    expect(screen.getByText(/16 G 独立配额未记录/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/当前运行任务 0/)).toBeInTheDocument());
+    expect(screen.getByText(/等待队列 2/)).toBeInTheDocument();
+    expect(screen.getByText(/当前使用租户分配配额：8 G/)).toBeInTheDocument();
 
-    // 可见副标题收成与真值同长的一句，完整口径与后端 reason 在 Tooltip 里
+    // 可见副标题收成与真值同长的一句，完整口径与后端 reason 在 Tooltip 里（07102e7 人话轮句式）
     expect(within(card).getByText('调试与执行环境内存占用')).toBeInTheDocument();
     fireEvent.mouseOver(within(card).getByText('调试与执行环境内存占用'));
-    await waitFor(() => expect(screen.getByText(/非进程实测占用/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(/已分配的计算配额（说明：后端无 cgroup\/psutil 来源，分子为已分配/)).toBeInTheDocument(),
+    );
 
     expect(within(card).getByText('调试内存随调试会话占用，退出调试环境后自动释放')).toBeInTheDocument();
     expect(within(card).getByText('执行内存在任务正式执行时占用，执行完成后自动释放')).toBeInTheDocument();
@@ -173,7 +176,7 @@ describe('首页逐区块照图', () => {
     fireEvent.mouseOver(within(card).getByText('最新结果集'));
     await waitFor(() =>
       expect(
-        screen.getByText('调用次数口径：该合约下 OpenAPI 接口的累计调用次数；今日操作日志与本页所有数字均为当前账号口径。'),
+        screen.getByText('调用次数口径：该合约下 OpenAPI 接口的累计调用次数；统计范围为当前登录账号。'),
       ).toBeInTheDocument(),
     );
   });
@@ -186,7 +189,7 @@ describe('首页逐区块照图', () => {
     renderWithProviders(<FlowDevHome />);
     await waitFor(() => expect(screen.getByTestId('memory-debug')).toBeInTheDocument());
     expect(screen.getAllByText(/未记录 配额/)).toHaveLength(2);
-    expect(screen.getAllByText('配额刻度未记录')).toHaveLength(2);
+    expect(screen.getAllByText('暂无配额刻度')).toHaveLength(2);
   });
 
   it('接口失败时整页走错误态并给重试，不渲染半成品', async () => {
